@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt / clippy / test / doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test
+
+      - name: doc
+        run: cargo doc --no-deps
+
+  # Enable when backend-krilla lands:
+  # backend:
+  #   name: test with krilla
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: dtolnay/rust-toolchain@master
+  #       with:
+  #         toolchain: "1.92"
+  #     - uses: Swatinem/rust-cache@v2
+  #     - run: cargo test --features backend-krilla

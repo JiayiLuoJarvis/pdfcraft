@@ -1,0 +1,38 @@
+[package]
+name = "quire"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.92"
+description = "PDF document layout library: flow content, then draw positioned pages via krilla"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["pdf", "layout", "typography", "document"]
+categories = ["graphics", "text-processing"]
+publish = false
+
+# Dependencies are added in the PR that first needs them.
+# Planned pins (do not add until that layer lands):
+#   krilla = { version = "=0.8.2", optional = true, default-features = false, features = ["raster-images"] }
+#   skrifa = { version = "=0.47.0" }
+#   unicode-segmentation = { version = "=1.13.3" }
+# Then: backend-krilla = ["dep:krilla"] and default = ["backend-krilla"].
+
+[features]
+default = []
+# Empty until krilla is introduced; keeps `cfg(feature = "backend-krilla")` valid.
+backend-krilla = []
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

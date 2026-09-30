@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+Cargo.lock
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local scratch
+*.pdf
+!tests/fixtures/**/*.pdf
