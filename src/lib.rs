@@ -18,6 +18,12 @@ pub mod canvas;
 pub mod document;
 pub mod fonts;
 
+pub use canvas::{
+    pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, ImageId,
+    LinkTarget, RecordedPage, RecordingCanvas, PT_ABS_TOLERANCE,
+};
+pub use fonts::FontId;
+
 pub mod text;
 
 pub mod layout;
