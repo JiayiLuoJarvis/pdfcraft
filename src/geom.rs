@@ -1,13 +1,7 @@
 //! Geometry and paint values for layout and canvas.
 //!
 //! Coordinates use the PDF point (1/72 inch). The origin is the top-left
-//! corner, x increases to the right, and y increases downward. Conversion
-//! to krilla types stays in `backend`.
-//!
-//! Lengths do not implement arithmetic. Sums of finite `f32` values can
-//! overflow to infinity, and `Add` cannot return `Result`. Read
-//! [`Length::as_pt`], calculate, then build a new length with a factory or
-//! `try_pt` / `try_mm`.
+//! corner, x increases to the right, and y increases downward.
 
 use std::cmp::Ordering;
 use std::marker::PhantomData;
@@ -41,7 +35,6 @@ impl<C> PartialEq for Length<C> {
     }
 }
 
-// `f32` is not `Eq` because of NaN. Length rejects NaN at construction.
 impl<C> Eq for Length<C> {}
 
 impl<C> PartialOrd for Length<C> {
@@ -51,9 +44,11 @@ impl<C> PartialOrd for Length<C> {
 }
 
 impl<C> Length<C> {
-    // Callers pass a finite point value that already satisfies `C`.
-    // Const items such as `A4` cannot return `Result`.
-    const fn new_pt(pt: f32) -> Self {
+    /// Builds a length from a point value that already satisfies `C`.
+    ///
+    /// Only for compile-time constants such as [`A4`]. Runtime values must
+    /// go through a brand factory.
+    const fn from_trusted_pt(pt: f32) -> Self {
         Self {
             pt,
             brand: PhantomData,
@@ -95,18 +90,18 @@ fn pt_from_mm(mm: f32) -> Result<f32> {
 impl Finite {
     /// Accepts a finite point value.
     pub fn pt(value: f32) -> Result<Length<Self>> {
-        Ok(Length::new_pt(finite_pt(value)?))
+        Ok(Length::from_trusted_pt(finite_pt(value)?))
     }
 
     /// Accepts a finite millimeter value and stores the point equivalent.
     pub fn mm(value: f32) -> Result<Length<Self>> {
-        Ok(Length::new_pt(pt_from_mm(value)?))
+        Ok(Length::from_trusted_pt(pt_from_mm(value)?))
     }
 }
 
 impl NonNegative {
     /// Zero length.
-    pub const ZERO: Length<Self> = Length::new_pt(0.0);
+    pub const ZERO: Length<Self> = Length::from_trusted_pt(0.0);
 
     /// Accepts a finite point value greater than or equal to zero.
     pub fn pt(value: f32) -> Result<Length<Self>> {
@@ -114,7 +109,7 @@ impl NonNegative {
         if value < 0.0 {
             return Err(Error::NegativeLength { value });
         }
-        Ok(Length::new_pt(value))
+        Ok(Length::from_trusted_pt(value))
     }
 
     /// Accepts a finite millimeter value greater than or equal to zero.
@@ -127,7 +122,7 @@ impl NonNegative {
         if pt < 0.0 {
             return Err(Error::NegativeLength { value: pt });
         }
-        Ok(Length::new_pt(pt))
+        Ok(Length::from_trusted_pt(pt))
     }
 }
 
@@ -138,7 +133,7 @@ impl Positive {
         if value <= 0.0 {
             return Err(Error::NonPositiveLength { value });
         }
-        Ok(Length::new_pt(value))
+        Ok(Length::from_trusted_pt(value))
     }
 
     /// Accepts a finite millimeter value strictly greater than zero.
@@ -151,25 +146,25 @@ impl Positive {
         if pt <= 0.0 {
             return Err(Error::NonPositiveLength { value: pt });
         }
-        Ok(Length::new_pt(pt))
+        Ok(Length::from_trusted_pt(pt))
     }
 }
 
 impl From<Length<Positive>> for Length<NonNegative> {
     fn from(value: Length<Positive>) -> Self {
-        Self::new_pt(value.pt)
+        Self::from_trusted_pt(value.pt)
     }
 }
 
 impl From<Length<Positive>> for Length<Finite> {
     fn from(value: Length<Positive>) -> Self {
-        Self::new_pt(value.pt)
+        Self::from_trusted_pt(value.pt)
     }
 }
 
 impl From<Length<NonNegative>> for Length<Finite> {
     fn from(value: Length<NonNegative>) -> Self {
-        Self::new_pt(value.pt)
+        Self::from_trusted_pt(value.pt)
     }
 }
 
@@ -183,7 +178,7 @@ pub struct Point {
 
 impl Point {
     /// The origin, `(0, 0)`.
-    pub const ZERO: Self = Self::new(Length::new_pt(0.0), Length::new_pt(0.0));
+    pub const ZERO: Self = Self::new(Length::from_trusted_pt(0.0), Length::from_trusted_pt(0.0));
 
     /// Builds a point from lengths that are already finite.
     pub const fn new(x: Length<Finite>, y: Length<Finite>) -> Self {
@@ -222,8 +217,8 @@ pub struct Size {
 impl Size {
     const fn from_trusted_pt(width: f32, height: f32) -> Self {
         Self {
-            width: Length::new_pt(width),
-            height: Length::new_pt(height),
+            width: Length::from_trusted_pt(width),
+            height: Length::from_trusted_pt(height),
         }
     }
 
@@ -298,26 +293,11 @@ impl Rect {
     pub const fn size(self) -> Size {
         self.size
     }
-
-    /// `(x, y, width, height)` in points for canvas and the backend.
-    #[allow(
-        dead_code,
-        reason = "canvas and the krilla adapter read this tuple in a later slice"
-    )]
-    #[must_use]
-    pub(crate) const fn pt_xywh(self) -> (f32, f32, f32, f32) {
-        (
-            self.origin.x.as_pt(),
-            self.origin.y.as_pt(),
-            self.size.width.as_pt(),
-            self.size.height.as_pt(),
-        )
-    }
 }
 
 /// Four page margins. Each side is finite and at least zero.
 ///
-/// [`Default`] is four zeros. There is no implicit one-inch margin.
+/// [`Default`] is four zeros.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub struct Margins {
@@ -367,21 +347,6 @@ impl Margins {
     pub const fn left(self) -> Length<NonNegative> {
         self.left
     }
-
-    /// `(top, right, bottom, left)` in points for canvas and the backend.
-    #[allow(
-        dead_code,
-        reason = "canvas and the krilla adapter read this tuple in a later slice"
-    )]
-    #[must_use]
-    pub(crate) const fn pt_trbl(self) -> (f32, f32, f32, f32) {
-        (
-            self.top.as_pt(),
-            self.right.as_pt(),
-            self.bottom.as_pt(),
-            self.left.as_pt(),
-        )
-    }
 }
 
 impl Default for Margins {
@@ -418,7 +383,7 @@ impl Color {
     }
 }
 
-/// A solid fill. This slice has no gradients.
+/// A solid fill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub struct Paint {
@@ -438,8 +403,6 @@ impl Paint {
 }
 
 /// A stroke whose width is strictly positive.
-///
-/// A hairline is a positive width. Omitting the stroke is the way to draw nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub struct Stroke {
@@ -470,10 +433,6 @@ pub enum PathVerb {
 }
 
 /// A non-empty path. The first verb is [`PathVerb::MoveTo`].
-///
-/// There is no public constructor from a raw verb list. [`Path::begin`] is
-/// the only way to start one, so an empty path or a path that starts with
-/// [`PathVerb::LineTo`] cannot be built.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct Path {
@@ -481,11 +440,6 @@ pub struct Path {
 }
 
 /// Consuming builder returned by [`Path::begin`].
-///
-/// `Close` finishes the path. Another subpath has to be started with
-/// [`PathBuilder::move_to`] before [`PathBuilder::finish`] or
-/// [`PathBuilder::close`]. A `Close` therefore only terminates the last
-/// subpath.
 #[derive(Debug)]
 #[must_use]
 pub struct PathBuilder {
@@ -520,9 +474,6 @@ impl PathBuilder {
     }
 
     /// Starts another open subpath.
-    ///
-    /// A later [`Self::close`] still appends one `Close` at the end, so only
-    /// the last subpath is closed.
     pub fn move_to(mut self, point: Point) -> Self {
         self.verbs.push(PathVerb::MoveTo(point));
         self
@@ -638,7 +589,6 @@ mod tests {
         assert_eq!(margins.right(), NonNegative::ZERO);
         assert_eq!(margins.bottom(), NonNegative::ZERO);
         assert_eq!(margins.left(), NonNegative::ZERO);
-        assert_eq!(margins.pt_trbl(), (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]
@@ -695,11 +645,10 @@ mod tests {
     #[test]
     fn rect_reports_origin_and_extent_in_points() {
         let rect = Rect::try_pt(1.0, 2.0, 3.0, 4.0).unwrap();
-        let (origin_x, origin_y, width, height) = rect.pt_xywh();
-        assert_eq!(origin_x.to_bits(), 1.0f32.to_bits());
-        assert_eq!(origin_y.to_bits(), 2.0f32.to_bits());
-        assert_eq!(width.to_bits(), 3.0f32.to_bits());
-        assert_eq!(height.to_bits(), 4.0f32.to_bits());
+        assert_eq!(rect.origin().x().as_pt().to_bits(), 1.0f32.to_bits());
+        assert_eq!(rect.origin().y().as_pt().to_bits(), 2.0f32.to_bits());
+        assert_eq!(rect.size().width().as_pt().to_bits(), 3.0f32.to_bits());
+        assert_eq!(rect.size().height().as_pt().to_bits(), 4.0f32.to_bits());
     }
 
     #[test]

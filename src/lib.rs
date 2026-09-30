@@ -1,7 +1,6 @@
 //! Quire: PDF document layout on top of a sealed krilla backend.
 //!
 //! Public surface grows only after items in `docs/提案书.md` are confirmed.
-//! Geometry types and construction errors are exported from the crate root.
 
 #![forbid(unsafe_code)]
 

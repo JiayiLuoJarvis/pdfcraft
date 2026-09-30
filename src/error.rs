@@ -1,6 +1,4 @@
 //! Failures from constructing lengths and geometry.
-//!
-//! Font, image, backend, and layout failures are separate and are not variants here.
 
 use std::fmt;
 
