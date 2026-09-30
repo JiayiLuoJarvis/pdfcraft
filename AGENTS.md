@@ -10,7 +10,9 @@
 
 冲突时：提案书 > 本文件 > 设计稿未确认部分。
 
-提案书仍在「逐条确认」时：**不要提前写公共 API / DSL 接口 / 元素类型枚举**。目录和模块占位可以有；对外签名等对应条目定完再写。
+提案书 §1–§9 主线已确认（见提案书文末总表）。实现按层推进；预置边距枚举、分隔线最终方法名等小糖可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+
+仍须遵守：未确认功能不「顺便」做；最小 diff；`publish = false` 直到限额与信件夹具通过。
 
 ## 这是什么库
 
@@ -129,8 +131,8 @@ cargo doc --no-deps
 ## Agent 工作方式
 
 1. **先读**提案书里与当前任务相关的已确认条；再读设计稿里仍有效的技术核实（krilla/skrifa API 事实）。
-2. **§2 未关闭时**：只讨论范围、改文档、或搭与接口无关的底座（geom/error/limits/canvas 骨架等按设计 PR 计划）。不要提交 `document` 上的段落/表/栏 builder 签名。
-3. 实现时按层推进：geom/error → canvas →（backend）→ fonts/measure → line break → flow/paginate → table/decorate → DSL 接线。
+2. **主线已确认后**：按层实现；DSL / 元素签名以提案书为准。预置与搁置项见提案书总表，不提前做。
+3. 实现时按层推进：geom/error（含长度类型）→ canvas →（backend）→ fonts/measure → line break → flow/paginate → table/decorate → DSL 接线。
 4. 排版测试优先断言 `RecordingCanvas` 记录；`to_pdf` 冒烟只断言 `%PDF` 之类，不断言压缩内容流细节（内容流数字实验仅属于 backend 适配器测试）。
 5. 对话过长、上下文明显膨胀时，建议用户开新对话，并指向本文件与提案书。
 6. 改代码前读周边文件；提交前跑「门禁」一节命令；不擅自 `git commit` / push，除非用户明确要求。
@@ -140,7 +142,7 @@ cargo doc --no-deps
 - 第二 PDF 后端；生产代码依赖 pdf-writer / lopdf / printpdf。
 - 完整 UAX #14、bidi、阿文/印度系 shaping、竖排、kerning、连字。
 - 向调用方暴露 `Flowable` trait。
-- 在提案书取舍前实现 TOC / QR / SVG / 加密 / 标签 PDF / 单元格合并等设计稿 Non-Goals 或 §2 未选中项。
+- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。
 - 用 JSON/serde 当主接口（设计稿旧表述已作废；serde 若将来做，也只是可选，不是主路径）。
 - 并行开页或并行画页。
 - 删除 `publish = false`，除非限额 PR 与信件夹具已通过。
