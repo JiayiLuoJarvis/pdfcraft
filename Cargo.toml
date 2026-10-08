@@ -10,19 +10,16 @@ keywords = ["pdf", "layout", "typography", "document"]
 categories = ["graphics", "text-processing"]
 publish = false
 
-# Dependencies are added in the PR that first needs them.
-# Planned pins (do not add until that layer lands):
-#   krilla = { version = "=0.8.2", optional = true, default-features = false, features = ["raster-images"] }
+# Planned later pins (do not add until that layer lands):
 #   skrifa = { version = "=0.47.0" }
 #   unicode-segmentation = { version = "=1.13.3" }
-# Then: backend-krilla = ["dep:krilla"] and default = ["backend-krilla"].
 
 [features]
-default = []
-# Empty until krilla is introduced; keeps `cfg(feature = "backend-krilla")` valid.
-backend-krilla = []
+default = ["backend-krilla"]
+backend-krilla = ["dep:krilla"]
 
 [dependencies]
+krilla = { version = "=0.8.2", optional = true, default-features = false, features = ["raster-images"] }
 
 [dev-dependencies]
 

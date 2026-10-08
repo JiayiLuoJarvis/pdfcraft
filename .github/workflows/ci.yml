@@ -27,23 +27,20 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
 
-      - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: clippy (no default features)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
 
-      - name: test
-        run: cargo test
+      - name: clippy (backend-krilla)
+        run: cargo clippy --all-targets --features backend-krilla -- -D warnings
 
-      - name: doc
-        run: cargo doc --no-deps
+      - name: test (no default features)
+        run: cargo test --no-default-features
 
-  # Enable when backend-krilla lands:
-  # backend:
-  #   name: test with krilla
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: dtolnay/rust-toolchain@master
-  #       with:
-  #         toolchain: "1.92"
-  #     - uses: Swatinem/rust-cache@v2
-  #     - run: cargo test --features backend-krilla
+      - name: test (backend-krilla)
+        run: cargo test --features backend-krilla
+
+      - name: doc (no default features)
+        run: cargo doc --no-deps --no-default-features
+
+      - name: doc (backend-krilla)
+        run: cargo doc --no-deps --features backend-krilla
