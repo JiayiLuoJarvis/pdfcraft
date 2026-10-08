@@ -1,6 +1,8 @@
-//! Failures from constructing lengths, geometry, canvas ops, and the PDF backend.
+//! Failures from constructing lengths, geometry, canvas ops, fonts, and the PDF backend.
 
 use std::fmt;
+
+use crate::fonts::FontId;
 
 /// A construction or drawing failure.
 ///
@@ -42,6 +44,32 @@ pub enum Error {
     },
     /// Geometry that brands allow but the backend cannot draw.
     InvalidGeometry,
+    /// Font bytes could not be parsed or are unusable.
+    Font {
+        /// Collection index passed to the parser.
+        index: u32,
+        /// Parser or loader display text.
+        message: String,
+    },
+    /// `scalar` has no glyph in `font`. The document is not produced.
+    MissingGlyph {
+        /// Font that was queried.
+        font: FontId,
+        /// Unmapped Unicode scalar.
+        scalar: char,
+    },
+    /// `id` is not registered in the store this canvas uses.
+    UnknownFont {
+        /// Raw identifier that was not found.
+        id: u32,
+    },
+    /// skrifa and krilla read different units per em from the same bytes.
+    FontMetricsMismatch {
+        /// Units per em from skrifa.
+        skrifa_upem: f32,
+        /// Units per em from krilla.
+        krilla_upem: f32,
+    },
     /// The PDF backend failed. The string is that failure's display text.
     Backend(String),
 }
@@ -60,6 +88,23 @@ impl fmt::Display for Error {
                 write!(f, "{operation} is not supported yet")
             }
             Self::InvalidGeometry => f.write_str("geometry is invalid"),
+            Self::Font { index, message } => write!(f, "font index {index}: {message}"),
+            Self::MissingGlyph { font, scalar } => {
+                write!(
+                    f,
+                    "font {} has no glyph for U+{:04X}",
+                    font.as_u32(),
+                    u32::from(*scalar)
+                )
+            }
+            Self::UnknownFont { id } => write!(f, "font {id} is not registered"),
+            Self::FontMetricsMismatch {
+                skrifa_upem,
+                krilla_upem,
+            } => write!(
+                f,
+                "font units per em differ: skrifa {skrifa_upem}, krilla {krilla_upem}"
+            ),
             Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
         }
     }

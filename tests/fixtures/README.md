@@ -1,4 +1,11 @@
 # Test fixtures
 
-Place OFL (or otherwise redistributable) fonts and small sample assets here.
-Integration tests should load fixtures by path from `tests/`, not from `src/`.
+`quire-measure.ttf` is an OFL subset of Adobe Source Han Serif ExtraLight.
+It covers printable ASCII, digits, U+2022, and 第 / 页 / 共.
+Family name is QuireMeasure so it does not use Adobe's reserved name Source.
+See `LICENSE-OFL.txt`.
+
+Rebuild with `.audit/fonts-skrifa/subset-fixture.sh` plus a local rename step.
+Do not vendor a full CJK font.
+
+Integration tests load fixtures by path from `tests/`, not from `src/`.

@@ -8,17 +8,24 @@
 //! - `Surface::finish` is drop; unbalanced `push` / `pop` panics.
 //! - `SerializeSettings { ..Default::default() }` leaves `enable_tagging: true`.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use krilla::action::LinkAction;
 use krilla::annotation::{LinkAnnotation, Target};
 use krilla::metadata::Metadata;
 use krilla::page::PageSettings;
 use krilla::surface::Surface;
-use krilla::{Document, SerializeSettings};
+use krilla::text::{Font, GlyphId, KrillaGlyph};
+use krilla::{Data, Document, SerializeSettings};
 
-use crate::backend::convert::{to_fill, to_krilla_path, to_krilla_rect, to_stroke};
+use crate::backend::convert::{
+    to_fill, to_krilla_path, to_krilla_point, to_krilla_rect, to_stroke,
+};
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
 use crate::canvas::DocumentInfo;
 use crate::error::{Error, Result};
+use crate::geom::Paint;
 
 /// Renders closed page plans into PDF bytes.
 pub(super) fn render(
@@ -93,8 +100,9 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
     {
         // Call surface() exactly once. A second call clears the page.
         let mut surface = page.surface();
+        let mut fonts = HashMap::new();
         for mark in &page_plan.marks {
-            draw_mark(&mut surface, mark)?;
+            draw_mark(&mut surface, mark, &mut fonts)?;
         }
         surface.finish();
     }
@@ -106,7 +114,11 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
     Ok(())
 }
 
-fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
+fn draw_mark(
+    surface: &mut Surface<'_>,
+    mark: &Mark,
+    fonts: &mut HashMap<(usize, u32), Font>,
+) -> Result<()> {
     match mark {
         Mark::Fill { path, paint } => {
             surface.set_fill(Some(to_fill(*paint)?));
@@ -122,8 +134,74 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             surface.set_stroke(Some(to_stroke(*paint, *stroke)?));
             surface.draw_path(&to_krilla_path(path)?);
         }
+        Mark::Glyphs {
+            font_bytes,
+            font_index,
+            skrifa_units_per_em,
+            font_size,
+            color,
+            origin,
+            glyphs,
+            text,
+        } => {
+            let font = krilla_font(fonts, font_bytes, *font_index, *skrifa_units_per_em)?;
+            let krilla_glyphs: Vec<KrillaGlyph> = glyphs
+                .iter()
+                .map(|glyph| {
+                    KrillaGlyph::new(
+                        GlyphId::new(glyph.glyph_id),
+                        glyph.advance_norm,
+                        0.0,
+                        0.0,
+                        0.0,
+                        glyph.byte_range.clone(),
+                        None,
+                    )
+                })
+                .collect();
+            surface.set_fill(Some(to_fill(Paint::solid(*color))?));
+            surface.set_stroke(None);
+            surface.draw_glyphs(
+                to_krilla_point(*origin),
+                &krilla_glyphs,
+                font,
+                text,
+                font_size.as_pt(),
+                false,
+            );
+        }
     }
     Ok(())
+}
+
+fn krilla_font(
+    fonts: &mut HashMap<(usize, u32), Font>,
+    bytes: &Arc<Vec<u8>>,
+    index: u32,
+    skrifa_units_per_em: f32,
+) -> Result<Font> {
+    let key = (Arc::as_ptr(bytes) as usize, index);
+    if let Some(font) = fonts.get(&key) {
+        return Ok(font.clone());
+    }
+    let font = Font::new(Data::from(Arc::clone(bytes)), index).ok_or(Error::Font {
+        index,
+        message: "krilla Font::new returned None".to_owned(),
+    })?;
+    check_upem(skrifa_units_per_em, font.units_per_em())?;
+    fonts.insert(key, font.clone());
+    Ok(font)
+}
+
+fn check_upem(skrifa_upem: f32, krilla_upem: f32) -> Result<()> {
+    if (skrifa_upem - krilla_upem).abs() >= 0.01 {
+        Err(Error::FontMetricsMismatch {
+            skrifa_upem,
+            krilla_upem,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
@@ -141,8 +219,20 @@ mod tests {
     use super::*;
     use crate::backend::KrillaCanvas;
     use crate::canvas::{Canvas, GlyphPlacement, GlyphRun, ImageId, LinkTarget};
-    use crate::fonts::FontId;
+    use crate::fonts::{fixture_bytes, FontId, FontSource, FontStore};
     use crate::geom::{Color, Paint, Path, Point, Positive, Rect, Size, Stroke, A4, LETTER};
+    use crate::text::measure::measure_text;
+
+    fn fixture_fonts() -> Arc<FontStore> {
+        let mut store = FontStore::new();
+        let _id = store
+            .register(FontSource {
+                bytes: fixture_bytes(),
+                index: 0,
+            })
+            .unwrap();
+        Arc::new(store)
+    }
 
     fn black() -> Paint {
         Paint::solid(Color::rgb(0, 0, 0))
@@ -281,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_glyph_run_poisons_finish() {
+    fn unknown_font_poisons_finish() {
         let mut canvas = KrillaCanvas::new();
         canvas.start_page(A4).unwrap();
         let run = GlyphRun {
@@ -297,14 +387,105 @@ mod tests {
             text: "a".to_owned(),
         };
         let err = canvas.draw_glyph_run(&run).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::UnsupportedCanvasOperation {
-                operation: "draw_glyph_run"
-            }
-        ));
+        assert!(matches!(err, Error::UnknownFont { id: 0 }));
         assert!(canvas.finish_page().is_err());
         assert!(canvas.finish().is_err());
+    }
+
+    #[test]
+    fn measured_glyphs_emit_pdf() {
+        let fonts = fixture_fonts();
+        let mut store = FontStore::new();
+        let id = store
+            .register(FontSource {
+                bytes: fixture_bytes(),
+                index: 0,
+            })
+            .unwrap();
+        let measured = measure_text(&mut store, id, "A").unwrap();
+        let run = GlyphRun {
+            font: id,
+            font_size: Positive::pt(12.0).unwrap(),
+            color: Color::rgb(0, 0, 0),
+            origin: Point::try_pt(72.0, 100.0).unwrap(),
+            glyphs: measured
+                .glyphs
+                .iter()
+                .map(|glyph| GlyphPlacement {
+                    glyph_id: glyph.glyph_id,
+                    advance_norm: glyph.advance_norm,
+                    byte_range: glyph.byte_range.clone(),
+                })
+                .collect(),
+            text: measured.text,
+        };
+        let mut canvas = KrillaCanvas::new_with_fonts(fonts);
+        canvas.start_page(A4).unwrap();
+        canvas.draw_glyph_run(&run).unwrap();
+        canvas.finish_page().unwrap();
+        let bytes = canvas.finish().unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    #[test]
+    fn mismatched_advance_writes_observed_tj_adjustment() {
+        let fonts = fixture_fonts();
+        let mut store = FontStore::new();
+        let id = store
+            .register(FontSource {
+                bytes: fixture_bytes(),
+                index: 0,
+            })
+            .unwrap();
+        let measured = measure_text(&mut store, id, "AA").unwrap();
+        let first = &measured.glyphs[0];
+        let second = &measured.glyphs[1];
+        let run = GlyphRun {
+            font: id,
+            font_size: Positive::pt(12.0).unwrap(),
+            color: Color::rgb(0, 0, 0),
+            origin: Point::try_pt(72.0, 100.0).unwrap(),
+            glyphs: vec![
+                GlyphPlacement {
+                    glyph_id: first.glyph_id,
+                    advance_norm: first.advance_norm + 0.25,
+                    byte_range: first.byte_range.clone(),
+                },
+                GlyphPlacement {
+                    glyph_id: second.glyph_id,
+                    advance_norm: second.advance_norm,
+                    byte_range: second.byte_range.clone(),
+                },
+            ],
+            text: "AA".to_owned(),
+        };
+        let mut canvas = KrillaCanvas::new_observable_with_fonts(fonts);
+        canvas
+            .start_page(Size::try_pt(200.0, 200.0).unwrap())
+            .unwrap();
+        canvas.draw_glyph_run(&run).unwrap();
+        canvas.finish_page().unwrap();
+        let bytes = canvas.finish().unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        // krilla flushes the hmtx delta before the next glyph. 0.25 * 1000 PDF
+        // units, not advance_norm. Do not search for the letters Tj.
+        assert!(
+            text.contains("-250"),
+            "expected TJ adjustment -250 in stream, got {text}"
+        );
+    }
+
+    #[test]
+    fn upem_delta_of_one_hundredth_is_mismatch() {
+        let err = check_upem(1000.0, 1000.01).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::FontMetricsMismatch {
+                skrifa_upem,
+                krilla_upem
+            } if (skrifa_upem - 1000.0).abs() < f32::EPSILON && (krilla_upem - 1000.01).abs() < f32::EPSILON
+        ));
+        assert!(check_upem(1000.0, 1000.0).is_ok());
     }
 
     #[test]

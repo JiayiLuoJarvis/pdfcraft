@@ -3,10 +3,13 @@
 //! This module does not import krilla. [`emit`](super::emit) is the only place
 //! that constructs `Document`, `Page`, and `Surface`.
 
+use std::sync::Arc;
+
 use crate::backend::emit;
-use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphRun, LinkTarget};
+use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget};
 use crate::error::{Error, Result};
-use crate::geom::{Paint, Path, Rect, Size, Stroke};
+use crate::fonts::FontStore;
+use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 
 /// Serialize profile. Converted to krilla settings only inside `emit`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +70,16 @@ pub(super) enum Mark {
         /// Stroke width.
         stroke: Stroke,
     },
+    Glyphs {
+        font_bytes: Arc<Vec<u8>>,
+        font_index: u32,
+        skrifa_units_per_em: f32,
+        font_size: Length<Positive>,
+        color: Color,
+        origin: Point,
+        glyphs: Box<[GlyphPlacement]>,
+        text: Box<str>,
+    },
 }
 
 /// Link recorded while a surface would still be borrowed.
@@ -79,6 +92,7 @@ pub(super) struct QueuedLink {
 /// Private krilla-backed canvas. Holds no live krilla document.
 #[derive(Debug)]
 pub(crate) struct KrillaCanvas {
+    fonts: Arc<FontStore>,
     info: Option<DocumentInfo>,
     closed_pages: Vec<PagePlan>,
     open_page: Option<OpenPage>,
@@ -87,27 +101,35 @@ pub(crate) struct KrillaCanvas {
 }
 
 impl KrillaCanvas {
-    /// Production serialize settings (compressed, not pretty).
-    pub(crate) fn new() -> Self {
+    fn with_fonts_and_serialization(fonts: Arc<FontStore>, serialization: Serialization) -> Self {
         Self {
+            fonts,
             info: None,
             closed_pages: Vec::new(),
             open_page: None,
             failure: None,
-            serialization: Serialization::production(),
+            serialization,
         }
+    }
+
+    /// Production serialize settings (compressed, not pretty).
+    pub(crate) fn new() -> Self {
+        Self::with_fonts_and_serialization(Arc::new(FontStore::new()), Serialization::production())
+    }
+
+    pub(crate) fn new_with_fonts(fonts: Arc<FontStore>) -> Self {
+        Self::with_fonts_and_serialization(fonts, Serialization::production())
     }
 
     /// Observable serialize settings for content-stream experiments.
     #[cfg(test)]
     pub(crate) fn new_observable_for_test() -> Self {
-        Self {
-            info: None,
-            closed_pages: Vec::new(),
-            open_page: None,
-            failure: None,
-            serialization: Serialization::observable(),
-        }
+        Self::with_fonts_and_serialization(Arc::new(FontStore::new()), Serialization::observable())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_observable_with_fonts(fonts: Arc<FontStore>) -> Self {
+        Self::with_fonts_and_serialization(fonts, Serialization::observable())
     }
 
     /// Consumes the plan and writes PDF bytes.
@@ -215,11 +237,24 @@ impl Canvas for KrillaCanvas {
         })
     }
 
-    fn draw_glyph_run(&mut self, _run: &GlyphRun) -> Result<()> {
+    fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<()> {
         self.open_page_mut("draw_glyph_run")?;
-        self.fail(Error::UnsupportedCanvasOperation {
-            operation: "draw_glyph_run",
-        })
+        let resolved = match self.fonts.resolve(run.font) {
+            Ok(resolved) => resolved,
+            Err(error) => return self.fail(error),
+        };
+        let page = self.open_page_mut("draw_glyph_run")?;
+        page.marks.push(Mark::Glyphs {
+            font_bytes: resolved.bytes,
+            font_index: resolved.index,
+            skrifa_units_per_em: resolved.skrifa_units_per_em,
+            font_size: run.font_size,
+            color: run.color,
+            origin: run.origin,
+            glyphs: run.glyphs.clone().into_boxed_slice(),
+            text: run.text.clone().into_boxed_str(),
+        });
+        Ok(())
     }
 
     fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<()> {
