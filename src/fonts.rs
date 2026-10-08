@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 
 /// Opaque font identifier stored on a [`crate::canvas::GlyphRun`].
 ///
-/// Registered ids are 0-based indexes into the crate-internal font store.
+/// A store numbers faces from 0 in registration order. The first face is 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct FontId(pub(crate) u32);
@@ -53,7 +53,6 @@ pub(crate) struct FontFace {
     pub(crate) advances: HashMap<u32, f32>,
 }
 
-#[cfg(feature = "backend-krilla")]
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedFont {
     pub(crate) bytes: Arc<Vec<u8>>,
@@ -71,6 +70,9 @@ impl FontStore {
         Self::default()
     }
 
+    /// Parses `source` and appends the face.
+    ///
+    /// The returned id is the face's index in this store. The first face is 0.
     pub(crate) fn register(&mut self, source: FontSource) -> Result<FontId> {
         if source.bytes.is_empty() {
             return Err(Error::Font {
@@ -136,7 +138,6 @@ impl FontStore {
             .ok_or(Error::UnknownFont { id: id.as_u32() })
     }
 
-    #[cfg(feature = "backend-krilla")]
     pub(crate) fn resolve(&self, id: FontId) -> Result<ResolvedFont> {
         let face = self.face(id)?;
         Ok(ResolvedFont {
@@ -199,6 +200,18 @@ mod tests {
         let metrics = store.metrics(id).unwrap();
         assert!(metrics.descent < 0.0);
         assert!(metrics.units_per_em > 0.0);
+    }
+
+    #[test]
+    fn oversize_bytes_are_font_error() {
+        let mut store = FontStore::new();
+        let err = store
+            .register(FontSource {
+                bytes: Arc::new(vec![0; MAX_FONT_BYTES + 1]),
+                index: 3,
+            })
+            .unwrap_err();
+        assert!(matches!(err, Error::Font { index: 3, .. }));
     }
 
     #[test]

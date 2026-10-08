@@ -11,6 +11,7 @@ use skrifa::{FontRef, MetadataProvider};
 
 use crate::error::{Error, Result};
 use crate::fonts::{FaceMetrics, FontId, FontStore};
+use crate::geom::{Length, Positive};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MeasuredGlyph {
@@ -26,7 +27,6 @@ pub(crate) struct MeasuredText {
     pub(crate) text: String,
     pub(crate) glyphs: Vec<MeasuredGlyph>,
     pub(crate) advance_norm: f32,
-    pub(crate) units_per_em: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -94,15 +94,19 @@ pub(crate) fn measure_text(
         text: text.to_owned(),
         glyphs,
         advance_norm: total_norm,
-        units_per_em,
     })
 }
 
-pub(crate) fn line_metrics(face: &FaceMetrics, font_size: f32, factor: f32) -> Result<LineMetrics> {
+pub(crate) fn line_metrics(
+    face: &FaceMetrics,
+    font_size: Length<Positive>,
+    factor: f32,
+) -> Result<LineMetrics> {
     if !factor.is_finite() || factor <= 0.0 {
         return Err(Error::InvalidGeometry);
     }
-    let scale = font_size / face.units_per_em;
+    let size = font_size.as_pt();
+    let scale = size / face.units_per_em;
     let ascent = face.ascent * scale;
     let descent = face.descent * scale;
     let leading = face.leading * scale;
@@ -111,7 +115,7 @@ pub(crate) fn line_metrics(face: &FaceMetrics, font_size: f32, factor: f32) -> R
         ascent,
         descent,
         leading,
-        line_height: natural.max(font_size * factor),
+        line_height: natural.max(size * factor),
         baseline: ascent,
     })
 }
@@ -120,6 +124,7 @@ pub(crate) fn line_metrics(face: &FaceMetrics, font_size: f32, factor: f32) -> R
 mod tests {
     use super::*;
     use crate::fonts::{fixture_bytes, FontSource, FontStore};
+    use crate::geom::Positive;
 
     fn loaded() -> (FontStore, FontId) {
         let mut fonts = FontStore::new();
@@ -160,7 +165,15 @@ mod tests {
             measured.glyphs[1].advance_font_units.to_bits(),
             1000.0f32.to_bits()
         );
-        assert_eq!(measured.units_per_em.to_bits(), 1000.0f32.to_bits());
+        assert_eq!(
+            measured.glyphs[0].advance_norm.to_bits(),
+            0.707f32.to_bits()
+        );
+        assert_eq!(measured.glyphs[1].advance_norm.to_bits(), 1.0f32.to_bits());
+        assert_eq!(
+            fonts.metrics(id).unwrap().units_per_em.to_bits(),
+            1000.0f32.to_bits()
+        );
     }
 
     #[test]
@@ -168,7 +181,7 @@ mod tests {
         let (fonts, id) = loaded();
         let face = fonts.metrics(id).unwrap();
         assert!(face.descent < 0.0);
-        let line = line_metrics(face, 12.0, 1.2).unwrap();
+        let line = line_metrics(face, Positive::pt(12.0).unwrap(), 1.2).unwrap();
         assert!(line.descent < 0.0);
         assert!(line.line_height > 0.0);
         assert_eq!(line.baseline.to_bits(), line.ascent.to_bits());
@@ -182,8 +195,13 @@ mod tests {
             descent: -200.0,
             leading: 0.0,
         };
+        let size = Positive::pt(12.0).unwrap();
         assert!(matches!(
-            line_metrics(&face, 12.0, 0.0),
+            line_metrics(&face, size, 0.0),
+            Err(Error::InvalidGeometry)
+        ));
+        assert!(matches!(
+            line_metrics(&face, size, f32::NAN),
             Err(Error::InvalidGeometry)
         ));
     }

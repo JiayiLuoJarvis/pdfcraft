@@ -92,7 +92,7 @@ pub(super) struct QueuedLink {
 /// Private krilla-backed canvas. Holds no live krilla document.
 #[derive(Debug)]
 pub(crate) struct KrillaCanvas {
-    fonts: Arc<FontStore>,
+    font_store: Arc<FontStore>,
     info: Option<DocumentInfo>,
     closed_pages: Vec<PagePlan>,
     open_page: Option<OpenPage>,
@@ -101,9 +101,12 @@ pub(crate) struct KrillaCanvas {
 }
 
 impl KrillaCanvas {
-    fn with_fonts_and_serialization(fonts: Arc<FontStore>, serialization: Serialization) -> Self {
+    fn with_fonts_and_serialization(
+        font_store: Arc<FontStore>,
+        serialization: Serialization,
+    ) -> Self {
         Self {
-            fonts,
+            font_store,
             info: None,
             closed_pages: Vec::new(),
             open_page: None,
@@ -134,16 +137,26 @@ impl KrillaCanvas {
 
     /// Consumes the plan and writes PDF bytes.
     pub(crate) fn finish(self) -> Result<Vec<u8>> {
-        if let Some(error) = self.failure {
+        let Self {
+            font_store,
+            info,
+            closed_pages,
+            open_page,
+            failure,
+            serialization,
+        } = self;
+        // Glyph marks already own their bytes. Emission does not look up fonts.
+        drop(font_store);
+        if let Some(error) = failure {
             return Err(error);
         }
-        if self.open_page.is_some() {
+        if open_page.is_some() {
             return Err(Error::InvalidCanvasState {
                 operation: "finish",
                 state: "a page is still open",
             });
         }
-        emit::render(self.info.as_ref(), &self.closed_pages, self.serialization)
+        emit::render(info.as_ref(), &closed_pages, serialization)
     }
 
     fn fail<T>(&mut self, error: Error) -> Result<T> {
@@ -239,7 +252,7 @@ impl Canvas for KrillaCanvas {
 
     fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<()> {
         self.open_page_mut("draw_glyph_run")?;
-        let resolved = match self.fonts.resolve(run.font) {
+        let resolved = match self.font_store.resolve(run.font) {
             Ok(resolved) => resolved,
             Err(error) => return self.fail(error),
         };

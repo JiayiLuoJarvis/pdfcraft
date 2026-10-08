@@ -8,7 +8,6 @@
 //! - `Surface::finish` is drop; unbalanced `push` / `pop` panics.
 //! - `SerializeSettings { ..Default::default() }` leaves `enable_tagging: true`.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use krilla::action::LinkAction;
@@ -100,9 +99,8 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
     {
         // Call surface() exactly once. A second call clears the page.
         let mut surface = page.surface();
-        let mut fonts = HashMap::new();
         for mark in &page_plan.marks {
-            draw_mark(&mut surface, mark, &mut fonts)?;
+            draw_mark(&mut surface, mark)?;
         }
         surface.finish();
     }
@@ -114,11 +112,7 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
     Ok(())
 }
 
-fn draw_mark(
-    surface: &mut Surface<'_>,
-    mark: &Mark,
-    fonts: &mut HashMap<(usize, u32), Font>,
-) -> Result<()> {
+fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
     match mark {
         Mark::Fill { path, paint } => {
             surface.set_fill(Some(to_fill(*paint)?));
@@ -144,8 +138,13 @@ fn draw_mark(
             glyphs,
             text,
         } => {
-            let font = krilla_font(fonts, font_bytes, *font_index, *skrifa_units_per_em)?;
-            let krilla_glyphs: Vec<KrillaGlyph> = glyphs
+            let font =
+                Font::new(Data::from(Arc::clone(font_bytes)), *font_index).ok_or(Error::Font {
+                    index: *font_index,
+                    message: "krilla Font::new returned None".to_owned(),
+                })?;
+            check_upem(*skrifa_units_per_em, font.units_per_em())?;
+            let drawn: Vec<KrillaGlyph> = glyphs
                 .iter()
                 .map(|glyph| {
                     KrillaGlyph::new(
@@ -163,7 +162,7 @@ fn draw_mark(
             surface.set_stroke(None);
             surface.draw_glyphs(
                 to_krilla_point(*origin),
-                &krilla_glyphs,
+                &drawn,
                 font,
                 text,
                 font_size.as_pt(),
@@ -172,25 +171,6 @@ fn draw_mark(
         }
     }
     Ok(())
-}
-
-fn krilla_font(
-    fonts: &mut HashMap<(usize, u32), Font>,
-    bytes: &Arc<Vec<u8>>,
-    index: u32,
-    skrifa_units_per_em: f32,
-) -> Result<Font> {
-    let key = (Arc::as_ptr(bytes) as usize, index);
-    if let Some(font) = fonts.get(&key) {
-        return Ok(font.clone());
-    }
-    let font = Font::new(Data::from(Arc::clone(bytes)), index).ok_or(Error::Font {
-        index,
-        message: "krilla Font::new returned None".to_owned(),
-    })?;
-    check_upem(skrifa_units_per_em, font.units_per_em())?;
-    fonts.insert(key, font.clone());
-    Ok(font)
 }
 
 fn check_upem(skrifa_upem: f32, krilla_upem: f32) -> Result<()> {
@@ -222,17 +202,6 @@ mod tests {
     use crate::fonts::{fixture_bytes, FontId, FontSource, FontStore};
     use crate::geom::{Color, Paint, Path, Point, Positive, Rect, Size, Stroke, A4, LETTER};
     use crate::text::measure::measure_text;
-
-    fn fixture_fonts() -> Arc<FontStore> {
-        let mut store = FontStore::new();
-        let _id = store
-            .register(FontSource {
-                bytes: fixture_bytes(),
-                index: 0,
-            })
-            .unwrap();
-        Arc::new(store)
-    }
 
     fn black() -> Paint {
         Paint::solid(Color::rgb(0, 0, 0))
@@ -394,7 +363,6 @@ mod tests {
 
     #[test]
     fn measured_glyphs_emit_pdf() {
-        let fonts = fixture_fonts();
         let mut store = FontStore::new();
         let id = store
             .register(FontSource {
@@ -403,6 +371,7 @@ mod tests {
             })
             .unwrap();
         let measured = measure_text(&mut store, id, "A").unwrap();
+        let fonts = Arc::new(store);
         let run = GlyphRun {
             font: id,
             font_size: Positive::pt(12.0).unwrap(),
@@ -429,7 +398,6 @@ mod tests {
 
     #[test]
     fn mismatched_advance_writes_observed_tj_adjustment() {
-        let fonts = fixture_fonts();
         let mut store = FontStore::new();
         let id = store
             .register(FontSource {
@@ -438,6 +406,7 @@ mod tests {
             })
             .unwrap();
         let measured = measure_text(&mut store, id, "AA").unwrap();
+        let fonts = Arc::new(store);
         let first = &measured.glyphs[0];
         let second = &measured.glyphs[1];
         let run = GlyphRun {
@@ -467,12 +436,30 @@ mod tests {
         canvas.finish_page().unwrap();
         let bytes = canvas.finish().unwrap();
         let text = String::from_utf8_lossy(&bytes);
-        // krilla flushes the hmtx delta before the next glyph. 0.25 * 1000 PDF
-        // units, not advance_norm. Do not search for the letters Tj.
-        assert!(
-            text.contains("-250"),
-            "expected TJ adjustment -250 in stream, got {text}"
-        );
+        // The number is the 1000-unit hmtx delta, not advance_norm.
+        // krilla writes it before the next glyph, so the run has two glyphs.
+        let adjustment = tj_adjustment(&text);
+        assert_eq!(adjustment.to_bits(), (-250.0f32).to_bits(), "{text}");
+    }
+
+    fn tj_adjustment(pdf: &str) -> f32 {
+        let mut rest = pdf;
+        while let Some(at) = rest.find("TJ") {
+            let before = &rest[..at];
+            let Some(open) = before.rfind('[') else {
+                rest = &rest[at + 2..];
+                continue;
+            };
+            let body = &before[open + 1..];
+            for token in body.split_whitespace() {
+                let token = token.trim_end_matches(']');
+                if let Ok(number) = token.parse::<f32>() {
+                    return number;
+                }
+            }
+            rest = &rest[at + 2..];
+        }
+        panic!("no TJ adjustment number in stream:\n{pdf}");
     }
 
     #[test]
