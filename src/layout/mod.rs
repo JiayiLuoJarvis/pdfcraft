@@ -6,4 +6,5 @@ pub mod flow;
 pub mod lower;
 pub mod paginate;
 pub mod paragraph;
+pub mod style;
 pub mod table;

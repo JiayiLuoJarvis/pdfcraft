@@ -77,6 +77,8 @@ pub enum Error {
         /// Available width that was exceeded.
         avail: f32,
     },
+    /// A node that cannot split is taller than the full body frame.
+    UnsplittableTallerThanFrame,
     /// The PDF backend failed. The string is that failure's display text.
     Backend(String),
 }
@@ -116,6 +118,9 @@ impl fmt::Display for Error {
                 f,
                 "unbreakable content width {width} exceeds available width {avail}"
             ),
+            Self::UnsplittableTallerThanFrame => {
+                f.write_str("unsplittable content is taller than the body frame")
+            }
             Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
         }
     }
