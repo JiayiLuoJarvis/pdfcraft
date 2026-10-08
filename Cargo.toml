@@ -10,9 +10,6 @@ keywords = ["pdf", "layout", "typography", "document"]
 categories = ["graphics", "text-processing"]
 publish = false
 
-# Planned later pins (do not add until that layer lands):
-#   unicode-segmentation = { version = "=1.13.3" }
-
 [features]
 default = ["backend-krilla"]
 backend-krilla = ["dep:krilla"]
@@ -20,6 +17,7 @@ backend-krilla = ["dep:krilla"]
 [dependencies]
 krilla = { version = "=0.8.2", optional = true, default-features = false, features = ["raster-images"] }
 skrifa = { version = "=0.47.0" }
+unicode-segmentation = { version = "=1.13.3" }
 
 [dev-dependencies]
 

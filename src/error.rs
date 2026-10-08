@@ -70,6 +70,13 @@ pub enum Error {
         /// Units per em from krilla.
         krilla_upem: f32,
     },
+    /// An unbreakable cluster run is wider than the available frame width.
+    UnbreakableWiderThanFrame {
+        /// Width from the current line start through the overflowing cluster.
+        width: f32,
+        /// Available width that was exceeded.
+        avail: f32,
+    },
     /// The PDF backend failed. The string is that failure's display text.
     Backend(String),
 }
@@ -104,6 +111,10 @@ impl fmt::Display for Error {
             } => write!(
                 f,
                 "font units per em differ: skrifa {skrifa_upem}, krilla {krilla_upem}"
+            ),
+            Self::UnbreakableWiderThanFrame { width, avail } => write!(
+                f,
+                "unbreakable content width {width} exceeds available width {avail}"
             ),
             Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
         }
