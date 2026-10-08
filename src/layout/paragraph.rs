@@ -6,7 +6,7 @@ use crate::canvas::{GlyphPlacement, GlyphRun};
 use crate::error::{Error, Result};
 use crate::fonts::FontStore;
 use crate::geom::Point;
-use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, Split};
+use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
 use crate::text::cluster::ClusteredText;
 use crate::text::line_break::break_lines;
@@ -18,12 +18,34 @@ pub(crate) struct LineBox {
     pub(crate) run: GlyphRun,
 }
 
+/// Unwrapped text. Wraps at the width of the first frame it is split against.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TextNode {
+    text: String,
+    style: Style,
+}
+
+impl TextNode {
+    pub(crate) fn new(text: impl Into<String>, style: Style) -> Self {
+        Self {
+            text: text.into(),
+            style,
+        }
+    }
+
+    /// Every outcome hands back a laid-out `Paragraph`, so a page move never wraps twice.
+    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
+        ParagraphNode::layout(ctx.fonts, &self.text, &self.style, avail.width)?.split(avail)
+    }
+}
+
 /// Remaining lines of a paragraph.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ParagraphNode {
     pub(crate) lines: Vec<LineBox>,
     pub(crate) line_height: f32,
     pub(crate) spacing_after: f32,
+    width: f32,
 }
 
 impl ParagraphNode {
@@ -65,10 +87,15 @@ impl ParagraphNode {
             lines,
             line_height,
             spacing_after: style.paragraph_spacing.as_pt(),
+            width,
         })
     }
 
+    /// Lines were wrapped at `self.width`; a narrower frame would overflow silently.
     pub(crate) fn split(self, avail: Frame) -> Result<Split> {
+        if self.width > avail.width {
+            return Err(Error::InvalidGeometry);
+        }
         if self.lines.is_empty() {
             return Ok(Split::Fit {
                 height: 0.0,
@@ -101,6 +128,7 @@ impl ParagraphNode {
             lines: tail_lines,
             line_height: self.line_height,
             spacing_after: self.spacing_after,
+            width: self.width,
         };
         Ok(Split::Partial {
             head_height: height,
@@ -108,6 +136,37 @@ impl ParagraphNode {
             tail: FlowNode::Paragraph(tail),
         })
     }
+}
+
+/// One unwrapped run of `text` at origin `(0, baseline)`.
+pub(crate) fn single_line_run(
+    fonts: &mut FontStore,
+    text: &str,
+    style: &Style,
+    max_width: f32,
+) -> Result<GlyphRun> {
+    let clustered = ClusteredText::new(text);
+    let measured = measure_text(fonts, style.font, clustered.glyph_text())?;
+    let width = measured.advance_norm * style.font_size.as_pt();
+    if width > max_width {
+        return Err(Error::UnbreakableWiderThanFrame {
+            width,
+            avail: max_width,
+        });
+    }
+    let face = fonts.metrics(style.font)?;
+    let metrics = line_metrics(face, style.font_size, style.line_height_factor)?;
+    let mut run = glyph_run_for_line(
+        &measured,
+        0..measured.glyphs.len(),
+        0..measured.text.len(),
+        style,
+        width,
+        max_width,
+        metrics.baseline,
+    )?;
+    run.origin = Point::try_pt(0.0, metrics.baseline)?;
+    Ok(run)
 }
 
 fn lines_fitting(avail_height: f32, line_height: f32) -> usize {

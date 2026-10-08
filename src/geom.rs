@@ -464,6 +464,24 @@ impl Path {
     pub fn verbs(&self) -> &[PathVerb] {
         &self.verbs
     }
+
+    pub(crate) fn translated(&self, dx: f32, dy: f32) -> Result<Self> {
+        let shift = |p: Point| Point::try_pt(p.x().as_pt() + dx, p.y().as_pt() + dy);
+        let verbs = self
+            .verbs
+            .iter()
+            .map(|verb| {
+                Ok(match *verb {
+                    PathVerb::MoveTo(p) => PathVerb::MoveTo(shift(p)?),
+                    PathVerb::LineTo(p) => PathVerb::LineTo(shift(p)?),
+                    PathVerb::Close => PathVerb::Close,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            verbs: verbs.into_boxed_slice(),
+        })
+    }
 }
 
 impl PathBuilder {

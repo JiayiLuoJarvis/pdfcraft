@@ -79,6 +79,34 @@ pub enum Error {
     },
     /// A node that cannot split is taller than the full body frame.
     UnsplittableTallerThanFrame,
+    /// Column or table track widths cannot be resolved inside the frame.
+    ColumnWidths {
+        /// Short static reason, such as `"fixed-sum-exceeds"`.
+        reason: &'static str,
+    },
+    /// `node` is not allowed inside `container`.
+    InvalidCellContent {
+        /// Container that rejected the node, such as `"table cell"`.
+        container: &'static str,
+        /// Rejected node kind, such as `"columns"`.
+        node: &'static str,
+    },
+    /// Table spans overlap, leave the grid, leave a slot empty, or cross from header into body.
+    InvalidCellSpan,
+    /// Header or footer content is taller than its margin band.
+    DecorationTallerThanMargin {
+        /// Measured decoration height.
+        height: f32,
+        /// Band height, the matching page margin.
+        margin: f32,
+    },
+    /// Header or footer content is wider than the page.
+    DecorationWiderThanFrame {
+        /// Measured decoration width.
+        width: f32,
+        /// Page width available to the band.
+        avail: f32,
+    },
     /// The PDF backend failed. The string is that failure's display text.
     Backend(String),
 }
@@ -120,6 +148,17 @@ impl fmt::Display for Error {
             ),
             Self::UnsplittableTallerThanFrame => {
                 f.write_str("unsplittable content is taller than the body frame")
+            }
+            Self::ColumnWidths { reason } => write!(f, "column widths cannot resolve: {reason}"),
+            Self::InvalidCellContent { container, node } => {
+                write!(f, "{node} is not allowed in a {container}")
+            }
+            Self::InvalidCellSpan => f.write_str("table cell spans are invalid"),
+            Self::DecorationTallerThanMargin { height, margin } => {
+                write!(f, "decoration height {height} exceeds margin band {margin}")
+            }
+            Self::DecorationWiderThanFrame { width, avail } => {
+                write!(f, "decoration width {width} exceeds page width {avail}")
             }
             Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
         }

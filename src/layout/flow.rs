@@ -7,8 +7,11 @@
 use crate::canvas::{Canvas, GlyphRun};
 use crate::error::{Error, Result};
 use crate::fonts::FontStore;
-use crate::geom::{Length, NonNegative, Point};
-use crate::layout::paragraph::ParagraphNode;
+use crate::geom::{Length, NonNegative, Paint, Path, Point, Stroke};
+use crate::layout::columns::ColumnsNode;
+use crate::layout::list::ListNode;
+use crate::layout::paragraph::{ParagraphNode, TextNode};
+use crate::layout::table::TableNode;
 
 /// Fonts available while splitting.
 pub(crate) struct LayoutCtx<'a> {
@@ -55,13 +58,14 @@ impl Fragment {
         }
     }
 
-    fn with_offset(mut self, dy: f32) -> Result<Self> {
+    pub(crate) fn with_offset(mut self, dx: f32, dy: f32) -> Result<Self> {
         for command in &mut self.commands {
             match command {
                 FragmentCommand::Glyphs(run) => {
                     run.origin =
-                        Point::try_pt(run.origin.x().as_pt(), run.origin.y().as_pt() + dy)?;
+                        Point::try_pt(run.origin.x().as_pt() + dx, run.origin.y().as_pt() + dy)?;
                 }
+                FragmentCommand::Stroke { path, .. } => *path = path.translated(dx, dy)?,
             }
         }
         Ok(self)
@@ -71,6 +75,18 @@ impl Fragment {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum FragmentCommand {
     Glyphs(GlyphRun),
+    Stroke {
+        path: Path,
+        paint: Paint,
+        stroke: Stroke,
+    },
+}
+
+/// A fragment pinned to page coordinates.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlacedFragment {
+    pub(crate) origin: Point,
+    pub(crate) fragment: Fragment,
 }
 
 /// Result of consuming a [`FlowNode`] against a frame.
@@ -110,10 +126,14 @@ pub(crate) enum KeepTogetherNode {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum FlowNode {
     Paragraph(ParagraphNode),
+    Text(TextNode),
     Spacer(SpacerNode),
     PageBreak,
     KeepTogether(KeepTogetherNode),
     Stack(Vec<FlowNode>),
+    Columns(ColumnsNode),
+    Table(TableNode),
+    List(ListNode),
 }
 
 impl FlowNode {
@@ -122,9 +142,13 @@ impl FlowNode {
         match self {
             FlowNode::PageBreak => Err(Error::InvalidGeometry),
             FlowNode::Paragraph(node) => node.split(avail),
+            FlowNode::Text(node) => node.split(ctx, avail),
             FlowNode::Spacer(node) => node.split(avail),
             FlowNode::KeepTogether(node) => split_keep_together(ctx, avail, node),
             FlowNode::Stack(kids) => split_stack(ctx, avail, kids),
+            FlowNode::Columns(node) => node.split(ctx, avail),
+            FlowNode::Table(node) => node.split(ctx, avail),
+            FlowNode::List(node) => node.split(ctx, avail),
         }
     }
 }
@@ -227,7 +251,7 @@ fn split_stack(
                 fragment: child_frag,
             } => {
                 let spacing = child_frag.spacing_after;
-                let offset = child_frag.with_offset(y)?;
+                let offset = child_frag.with_offset(0.0, y)?;
                 commands.extend(offset.commands);
                 y += height;
                 avail.height = (avail.height - height).max(0.0);
@@ -245,7 +269,7 @@ fn split_stack(
                 head,
                 tail,
             } => {
-                let offset = head.with_offset(y)?;
+                let offset = head.with_offset(0.0, y)?;
                 commands.extend(offset.commands);
                 y += head_height;
                 let mut rest = vec![tail];
@@ -318,6 +342,11 @@ pub(crate) fn draw_fragment(
                     Point::try_pt(ox + run.origin.x().as_pt(), oy + run.origin.y().as_pt())?;
                 canvas.draw_glyph_run(&placed)?;
             }
+            FragmentCommand::Stroke {
+                path,
+                paint,
+                stroke,
+            } => canvas.stroke_path(&path.translated(ox, oy)?, paint, stroke)?,
         }
     }
     Ok(())

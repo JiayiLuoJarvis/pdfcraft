@@ -5,9 +5,10 @@
 use crate::canvas::Canvas;
 use crate::error::{Error, Result};
 use crate::geom::{Margins, Point, Size};
-use crate::layout::flow::{draw_fragment, FlowNode, Fragment, Frame, LayoutCtx, Split};
+use crate::layout::decorate::{measure_bands, Decorations, PageBands};
+use crate::layout::flow::{draw_fragment, FlowNode, Frame, LayoutCtx, PlacedFragment, Split};
 
-/// Page geometry for pagination. Knife 6 does not paint header/footer bands.
+/// Page geometry for pagination. Header and footer bands sit inside the margins.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PaginateConfig {
     pub(crate) page_size: Size,
@@ -45,26 +46,25 @@ enum PageCursor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct PlacedFragment {
-    origin: Point,
-    fragment: Fragment,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 struct PagePlan {
     size: Size,
     placed: Vec<PlacedFragment>,
 }
 
 /// Paginate `root` and paint onto `canvas`.
+///
+/// Bands are measured after the body plan, so decorations can never move body content.
 pub(crate) fn paginate_root(
     root: FlowNode,
     ctx: &mut LayoutCtx<'_>,
     config: PaginateConfig,
+    decorations: &Decorations,
     canvas: &mut dyn Canvas,
 ) -> Result<()> {
     let pages = plan_pages(root, ctx, config)?;
-    paint_pages(&pages, canvas)
+    let sizes: Vec<Size> = pages.iter().map(|page| page.size).collect();
+    let bands = measure_bands(&sizes, config.margins, decorations, ctx)?;
+    paint_pages(&pages, &bands, canvas)
 }
 
 fn plan_pages(
@@ -213,10 +213,11 @@ fn finalize_eof(
     }
 }
 
-fn paint_pages(pages: &[PagePlan], canvas: &mut dyn Canvas) -> Result<()> {
-    for page in pages {
+fn paint_pages(pages: &[PagePlan], bands: &[PageBands], canvas: &mut dyn Canvas) -> Result<()> {
+    for (page, bands) in pages.iter().zip(bands) {
         canvas.start_page(page.size)?;
-        for placed in &page.placed {
+        let body = page.placed.iter();
+        for placed in bands.header.iter().chain(body).chain(&bands.footer) {
             draw_fragment(&placed.fragment, canvas, placed.origin)?;
         }
         canvas.finish_page()?;
@@ -323,7 +324,14 @@ mod tests {
 
             let mut ctx = LayoutCtx { fonts: &mut fonts };
             let mut rec = RecordingCanvas::new();
-            paginate_root(FlowNode::Paragraph(para), &mut ctx, config(page), &mut rec).unwrap();
+            paginate_root(
+                FlowNode::Paragraph(para),
+                &mut ctx,
+                config(page),
+                &Decorations::none(),
+                &mut rec,
+            )
+            .unwrap();
             let origins = glyph_origins(&rec);
             assert_eq!(origins.len(), 1);
             assert_eq!(origins[0].0.to_bits(), expected_x.to_bits());
@@ -340,6 +348,7 @@ mod tests {
             FlowNode::Stack(vec![FlowNode::PageBreak]),
             &mut ctx,
             config(A4),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -356,6 +365,7 @@ mod tests {
             FlowNode::Stack(vec![FlowNode::PageBreak, FlowNode::PageBreak]),
             &mut ctx,
             config(A4),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -372,6 +382,7 @@ mod tests {
             FlowNode::Stack(vec![FlowNode::Paragraph(para), FlowNode::PageBreak]),
             &mut ctx,
             config(A4),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -393,6 +404,7 @@ mod tests {
             ]),
             &mut ctx,
             config(A4),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -416,6 +428,7 @@ mod tests {
             ]),
             &mut ctx,
             config(A4),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -440,6 +453,7 @@ mod tests {
             ]),
             &mut ctx,
             config(A4),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -468,6 +482,7 @@ mod tests {
             ]),
             &mut ctx,
             config(page),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -490,7 +505,14 @@ mod tests {
         let para = ParagraphNode::layout(&mut fonts, "A\nB\nC", &style, 200.0).unwrap();
         let mut ctx = LayoutCtx { fonts: &mut fonts };
         let mut rec = RecordingCanvas::new();
-        paginate_root(FlowNode::Paragraph(para), &mut ctx, config(page), &mut rec).unwrap();
+        paginate_root(
+            FlowNode::Paragraph(para),
+            &mut ctx,
+            config(page),
+            &Decorations::none(),
+            &mut rec,
+        )
+        .unwrap();
         let pages = rec.pages();
         assert_eq!(pages.len(), 2);
         let first = page_runs(&pages[0]);
@@ -525,6 +547,7 @@ mod tests {
             ]),
             &mut ctx,
             config(page),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -558,6 +581,7 @@ mod tests {
             ]),
             &mut ctx,
             config(page),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -589,6 +613,7 @@ mod tests {
             ])),
             &mut ctx,
             config(page),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap_err();
@@ -614,6 +639,7 @@ mod tests {
             ]),
             &mut ctx,
             config(page),
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
@@ -646,6 +672,7 @@ mod tests {
                     NonNegative::pt(10.0).unwrap(),
                 ),
             },
+            &Decorations::none(),
             &mut rec,
         )
         .unwrap();
