@@ -11,7 +11,7 @@
 | 9 image | feat/image | a12b610 |
 | 10 section | feat/section | 9eda8da |
 | 11 layer path | feat/layer-path | 7cb1654 |
-| 12 flow hline | feat/hline | *(tip after commit)* |
+| 12 flow hline | feat/hline | c89f2c4 |
 
 Knife 12 tip stacks on `7cb1654`. Audit under `.audit/knife-12/` (untracked unless committed).
 
