@@ -341,6 +341,29 @@ impl Canvas for RecordingCanvas {
     }
 }
 
+#[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
+pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Result<()> {
+    for command in recording.commands() {
+        match command {
+            CanvasCommand::SetDocumentInfo(info) => canvas.set_document_info(info)?,
+            CanvasCommand::StartPage(size) => canvas.start_page(*size)?,
+            CanvasCommand::FinishPage => canvas.finish_page()?,
+            CanvasCommand::FillPath { path, paint } => canvas.fill_path(path, paint)?,
+            CanvasCommand::StrokePath {
+                path,
+                paint,
+                stroke,
+            } => canvas.stroke_path(path, paint, stroke)?,
+            CanvasCommand::DrawImage { image, rect } => canvas.draw_image(image, *rect)?,
+            CanvasCommand::DrawGlyphRun { run } => canvas.draw_glyph_run(run)?,
+            CanvasCommand::AnnotateLink { rect, target } => {
+                canvas.annotate_link(*rect, target.clone())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Absolute tolerance for coordinate asserts, in PDF points.
 pub const PT_ABS_TOLERANCE: f32 = 0.01;
 
@@ -470,6 +493,47 @@ mod tests {
         rec.start_page(A4)?;
         assert!(matches!(LinkTarget::uri(""), Err(Error::EmptyLink)));
         assert!(matches!(rec.commands(), [CanvasCommand::StartPage(_)]));
+        Ok(())
+    }
+
+    #[test]
+    fn replay_reissues_every_command_in_order() -> Result<()> {
+        let at = Point::try_pt(5.0, 6.0)?;
+        let mut source = RecordingCanvas::new();
+        source.set_document_info(&DocumentInfo {
+            title: Some("T".to_owned()),
+            ..DocumentInfo::default()
+        })?;
+        source.start_page(A4)?;
+        source.fill_path(&Path::line(at, at), &Paint::solid(Color::rgb(1, 2, 3)))?;
+        source.stroke_path(
+            &Path::line(at, at),
+            &Paint::solid(Color::rgb(0, 0, 0)),
+            &Stroke::new(Positive::pt(1.0)?),
+        )?;
+        source.draw_image(
+            &DecodedImage {
+                id: ImageId::from_raw(2),
+                pixel_width: 4,
+                pixel_height: 3,
+            },
+            Rect::try_pt(1.0, 2.0, 3.0, 4.0)?,
+        )?;
+        source.draw_glyph_run(&GlyphRun {
+            font: FontId::from_raw(0),
+            font_size: Positive::pt(9.0)?,
+            color: Color::rgb(0, 0, 0),
+            origin: at,
+            glyphs: Vec::new(),
+            text: String::new(),
+        })?;
+        source.annotate_link(Rect::try_pt(0.0, 0.0, 1.0, 1.0)?, LinkTarget::uri("u")?)?;
+        source.finish_page()?;
+
+        let mut copy = RecordingCanvas::new();
+        super::replay(&source, &mut copy)?;
+        assert_eq!(copy.commands(), source.commands());
+        assert_eq!(copy.commands().len(), 8);
         Ok(())
     }
 

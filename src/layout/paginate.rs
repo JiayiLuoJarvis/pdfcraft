@@ -58,7 +58,7 @@ pub(crate) fn paginate_root(
     root: FlowNode,
     ctx: &mut LayoutCtx<'_>,
     config: PaginateConfig,
-    decorations: &Decorations,
+    decorations: &Decorations<'_>,
     canvas: &mut dyn Canvas,
 ) -> Result<()> {
     let pages = plan_pages(root, ctx, config)?;
@@ -216,8 +216,12 @@ fn finalize_eof(
 fn paint_pages(pages: &[PagePlan], bands: &[PageBands], canvas: &mut dyn Canvas) -> Result<()> {
     for (page, bands) in pages.iter().zip(bands) {
         canvas.start_page(page.size)?;
-        let body = page.placed.iter();
-        for placed in bands.header.iter().chain(body).chain(&bands.footer) {
+        let stacked = (bands.behind.iter())
+            .chain(&bands.header)
+            .chain(&page.placed)
+            .chain(&bands.footer)
+            .chain(&bands.front);
+        for placed in stacked {
             draw_fragment(&placed.fragment, canvas, placed.origin)?;
         }
         canvas.finish_page()?;

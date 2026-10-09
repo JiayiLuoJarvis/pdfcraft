@@ -41,7 +41,15 @@ pub(crate) fn check_content(container: Container, nodes: &[FlowNode]) -> Result<
                 }
                 container == Container::Column
             }
-            FlowNode::Columns(_) | FlowNode::Table(_) => container == Container::Column,
+            FlowNode::Columns(columns) => match container {
+                Container::Column => true,
+                Container::Band => {
+                    check_content(container, columns.column_stacks())?;
+                    true
+                }
+                Container::TableCell | Container::ListItem => false,
+            },
+            FlowNode::Table(_) => container == Container::Column,
             FlowNode::List(_) => container != Container::Band,
             FlowNode::PageBreak => false,
         };

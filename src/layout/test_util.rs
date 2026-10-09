@@ -55,7 +55,7 @@ pub(crate) fn render(
     root: FlowNode,
     fonts: &mut FontStore,
     config: PaginateConfig,
-    decorations: &Decorations,
+    decorations: &Decorations<'_>,
 ) -> (Result<()>, RecordingCanvas) {
     let mut ctx = LayoutCtx { fonts };
     let mut rec = RecordingCanvas::new();

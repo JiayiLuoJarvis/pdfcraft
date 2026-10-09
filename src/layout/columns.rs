@@ -123,6 +123,10 @@ impl ColumnsNode {
         })
     }
 
+    pub(crate) fn column_stacks(&self) -> &[FlowNode] {
+        &self.columns
+    }
+
     pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
         let gaps: f32 = self.columns.iter().skip(1).map(|_| self.gap).sum();
         let inner = avail.width - gaps;
