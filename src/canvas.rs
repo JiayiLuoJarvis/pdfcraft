@@ -50,6 +50,22 @@ impl LinkTarget {
     }
 }
 
+/// Encoded format of image bytes passed to [`crate::Document::load_image`].
+///
+/// GIF and WebP draw their first frame as a still image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ImageFormat {
+    /// PNG bytes.
+    Png,
+    /// JPEG bytes.
+    Jpeg,
+    /// GIF bytes. The first frame is the still image.
+    Gif,
+    /// WebP bytes. The first frame is the still image.
+    Webp,
+}
+
 /// Opaque image identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]

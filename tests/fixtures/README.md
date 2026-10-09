@@ -8,4 +8,6 @@ See `LICENSE-OFL.txt`.
 Rebuild with `.audit/fonts-skrifa/subset-fixture.sh` plus a local rename step.
 Do not vendor a full CJK font.
 
+`one-pixel.png` is a 1 by 1 opaque red PNG for image tests.
+
 Integration tests load fixtures by path from `tests/`, not from `src/`.

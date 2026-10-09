@@ -19,13 +19,13 @@ pub mod document;
 pub mod fonts;
 
 pub use document::{
-    document, Band, Cell, Columns, Document, Flow, Layer, List, Numbering, Page, Paragraph,
-    Rendered, Table,
+    document, Band, Cell, Columns, Document, Flow, Image, ImageBox, Layer, List, Numbering, Page,
+    Paragraph, Rendered, Table,
 };
 
 pub use canvas::{
-    pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, ImageId,
-    LinkTarget, RecordedPage, RecordingCanvas, PT_ABS_TOLERANCE,
+    pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun,
+    ImageFormat, ImageId, LinkTarget, RecordedPage, RecordingCanvas, PT_ABS_TOLERANCE,
 };
 pub use fonts::FontId;
 

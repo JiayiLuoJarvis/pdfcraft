@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use crate::backend::emit;
+use crate::backend::images::{ImageTable, Raster};
 use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget};
 use crate::error::{Error, Result};
 use crate::fonts::FontStore;
@@ -80,6 +81,8 @@ pub(super) enum Mark {
         glyphs: Box<[GlyphPlacement]>,
         text: Box<str>,
     },
+    /// Decoded image painted into `rect` (page coordinates, top-left, y down).
+    Image { raster: Raster, rect: Rect },
 }
 
 /// Link recorded while a surface would still be borrowed.
@@ -93,6 +96,7 @@ pub(super) struct QueuedLink {
 #[derive(Debug)]
 pub(crate) struct KrillaCanvas {
     font_store: Arc<FontStore>,
+    images: ImageTable,
     info: Option<DocumentInfo>,
     closed_pages: Vec<PagePlan>,
     open_page: Option<OpenPage>,
@@ -101,12 +105,14 @@ pub(crate) struct KrillaCanvas {
 }
 
 impl KrillaCanvas {
-    fn with_fonts_and_serialization(
+    fn with_resources(
         font_store: Arc<FontStore>,
+        images: ImageTable,
         serialization: Serialization,
     ) -> Self {
         Self {
             font_store,
+            images,
             info: None,
             closed_pages: Vec::new(),
             open_page: None,
@@ -117,36 +123,55 @@ impl KrillaCanvas {
 
     /// Production serialize settings (compressed, not pretty).
     pub(crate) fn new() -> Self {
-        Self::with_fonts_and_serialization(Arc::new(FontStore::new()), Serialization::production())
+        Self::with_resources(
+            Arc::new(FontStore::new()),
+            ImageTable::default(),
+            Serialization::production(),
+        )
     }
 
     pub(crate) fn new_with_fonts(fonts: Arc<FontStore>) -> Self {
-        Self::with_fonts_and_serialization(fonts, Serialization::production())
+        Self::new_with_resources(fonts, ImageTable::default())
+    }
+
+    pub(crate) fn new_with_resources(fonts: Arc<FontStore>, images: ImageTable) -> Self {
+        Self::with_resources(fonts, images, Serialization::production())
     }
 
     /// Observable serialize settings for content-stream experiments.
     #[cfg(test)]
     pub(crate) fn new_observable_for_test() -> Self {
-        Self::with_fonts_and_serialization(Arc::new(FontStore::new()), Serialization::observable())
+        Self::with_resources(
+            Arc::new(FontStore::new()),
+            ImageTable::default(),
+            Serialization::observable(),
+        )
     }
 
     #[cfg(test)]
     pub(crate) fn new_observable_with_fonts(fonts: Arc<FontStore>) -> Self {
-        Self::with_fonts_and_serialization(fonts, Serialization::observable())
+        Self::with_resources(fonts, ImageTable::default(), Serialization::observable())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_observable_with_resources(fonts: Arc<FontStore>, images: ImageTable) -> Self {
+        Self::with_resources(fonts, images, Serialization::observable())
     }
 
     /// Consumes the plan and writes PDF bytes.
     pub(crate) fn finish(self) -> Result<Vec<u8>> {
         let Self {
             font_store,
+            images,
             info,
             closed_pages,
             open_page,
             failure,
             serialization,
         } = self;
-        // Glyph marks already own their bytes. Emission does not look up fonts.
+        // Marks already own font bytes and rasters. Emission does not look up either table.
         drop(font_store);
+        drop(images);
         if let Some(error) = failure {
             return Err(error);
         }
@@ -243,11 +268,19 @@ impl Canvas for KrillaCanvas {
         Ok(())
     }
 
-    fn draw_image(&mut self, _image: &DecodedImage, _rect: Rect) -> Result<()> {
+    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> Result<()> {
         self.open_page_mut("draw_image")?;
-        self.fail(Error::UnsupportedCanvasOperation {
-            operation: "draw_image",
-        })
+        let raster = match self.images.get(image.id) {
+            Some(raster) => raster.clone(),
+            None => {
+                return self.fail(Error::UnknownImage {
+                    id: image.id.as_u32(),
+                });
+            }
+        };
+        let page = self.open_page_mut("draw_image")?;
+        page.marks.push(Mark::Image { raster, rect });
+        Ok(())
     }
 
     fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<()> {

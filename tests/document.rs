@@ -3,11 +3,16 @@
 use std::num::NonZeroU16;
 
 use quire_pdf::{
-    document, pt_near, CanvasCommand, Cell, Error, Flow, Margins, NonNegative, Numbering, Point,
-    RecordedPage, Rendered, Result, Size, A4,
+    document, pt_near, CanvasCommand, Cell, Error, Flow, ImageFormat, Margins, NonNegative,
+    Numbering, Point, RecordedPage, Rendered, Result, Size, A4,
 };
+#[cfg(feature = "backend-krilla")]
+use quire_pdf::{Positive, Rect};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
+const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
+#[cfg(feature = "backend-krilla")]
+const BAD_IDAT: &[u8] = include_bytes!("fixtures/bad-idat.png");
 /// Fixture ascent at 12 pt: the baseline below the line-box top.
 const BASELINE: f32 = 13.812;
 /// Fixture ascent minus descent at 12 pt, which beats the 1.2 factor.
@@ -422,6 +427,212 @@ fn text_without_a_font_fails() {
         Ok(())
     });
     assert_eq!(result.err(), Some(Error::UnknownFont { id: 0 }));
+}
+
+#[cfg(feature = "backend-krilla")]
+fn image_rects(page: &RecordedPage) -> Vec<(u32, u32, u32, Rect)> {
+    page.ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawImage { image, rect } => Some((
+                image.id.as_u32(),
+                image.pixel_width,
+                image.pixel_height,
+                *rect,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(feature = "backend-krilla")]
+fn rect_bits(rect: Rect) -> (u32, u32, u32, u32) {
+    (
+        rect.origin().x().as_pt().to_bits(),
+        rect.origin().y().as_pt().to_bits(),
+        rect.size().width().as_pt().to_bits(),
+        rect.size().height().as_pt().to_bits(),
+    )
+}
+
+#[cfg(not(feature = "backend-krilla"))]
+#[test]
+fn load_image_without_decoder_is_an_image_error() {
+    let err = document(A4, |doc| {
+        let _ = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(err, Error::Image { .. }));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn image_only_document_needs_no_font() {
+    let page = Size::try_pt(200.0, 400.0).unwrap();
+    let rendered = document(page, |doc| {
+        let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+        assert_eq!(logo.pixel_width(), 1);
+        assert_eq!(logo.pixel_height(), 1);
+        let width = Positive::pt(40.0)?;
+        doc.image(&logo, |image| {
+            image.width(width);
+            image.center();
+        });
+        Ok(())
+    })
+    .unwrap();
+    let images = image_rects(&rendered.pages()[0]);
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].0, 0);
+    assert_eq!(images[0].1, 1);
+    assert_eq!(images[0].2, 1);
+    let expected = Rect::try_pt(80.0, 0.0, 40.0, 40.0).unwrap();
+    assert_eq!(rect_bits(images[0].3), rect_bits(expected));
+    assert!(rendered.to_pdf().unwrap().starts_with(b"%PDF"));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn cell_image_and_last_page_seal_share_coordinates() {
+    let page = Size::try_pt(200.0, 80.0).unwrap();
+    let rendered = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+        let mark = seal;
+        doc.table(|table| {
+            let side = Positive::pt(10.0).unwrap();
+            table.row([
+                Cell::new("A"),
+                Cell::image(&seal, |image| image.width(side)),
+            ]);
+        });
+        doc.page_break();
+        doc.paragraph(|p| p.text("B"));
+        doc.front(move |layer| {
+            if layer.is_last() {
+                layer.image_at(&mark, Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap());
+            }
+        });
+        Ok(())
+    })
+    .unwrap();
+    let pages = rendered.pages();
+    assert_eq!(pages.len(), 2);
+    let cell = image_rects(&pages[0]);
+    assert_eq!(cell.len(), 1);
+    let expected = Rect::try_pt(100.0, 0.0, 10.0, 10.0).unwrap();
+    assert_eq!(rect_bits(cell[0].3), rect_bits(expected));
+    let seal = image_rects(&pages[1]);
+    assert_eq!(seal.len(), 1);
+    let placed = Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap();
+    assert_eq!(rect_bits(seal[0].3), rect_bits(placed));
+    assert_eq!(seal[0].0, cell[0].0);
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn three_pages_of_one_image_share_one_xobject() {
+    let page = Size::try_pt(120.0, 40.0).unwrap();
+    let pdf = document(page, |doc| {
+        let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+        doc.image(&seal, |_| {});
+        doc.page_break();
+        doc.image(&seal, |_| {});
+        doc.page_break();
+        doc.image(&seal, |_| {});
+        Ok(())
+    })
+    .unwrap()
+    .to_pdf()
+    .unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+    let text = String::from_utf8_lossy(&pdf);
+    let count = text.matches("/Subtype /Image").count() + text.matches("/Subtype/Image").count();
+    assert_eq!(count, 1, "{text}");
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn garbage_empty_and_foreign_handles_are_image_errors() {
+    let garbage = document(A4, |doc| {
+        let _ = doc.load_image(b"not a png".to_vec(), ImageFormat::Png)?;
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(garbage, Error::Image { .. }));
+
+    let empty = document(A4, |doc| {
+        let _ = doc.load_image(Vec::new(), ImageFormat::Png)?;
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(empty, Error::Image { message } if message == "bytes are empty"));
+
+    let mut stolen = None;
+    let _ = document(A4, |doc| {
+        stolen = Some(doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?);
+        Ok(())
+    })
+    .unwrap();
+    let foreign = document(A4, |doc| {
+        doc.image(stolen.as_ref().unwrap(), |_| {});
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(foreign, Error::UnknownImage { id: 0 }));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn list_item_and_overwide_image_fail() {
+    let listed = document(A4, |doc| {
+        let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+        doc.ul(|list| list.item(|item| item.image(&logo, |_| {})));
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(
+        listed,
+        Error::InvalidCellContent {
+            container: "list item",
+            node: "image"
+        }
+    );
+
+    let wide = document(Size::try_pt(100.0, 100.0).unwrap(), |doc| {
+        let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+        let width = Positive::pt(101.0)?;
+        doc.image(&logo, |image| image.width(width));
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(
+        wide,
+        Error::UnbreakableWiderThanFrame {
+            width: 101.0,
+            avail: 100.0,
+        }
+    );
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn damaged_pixels_fail_at_pdf_time() {
+    let rendered = document(A4, |doc| {
+        let logo = doc.load_image(BAD_IDAT.to_vec(), ImageFormat::Png)?;
+        doc.image(&logo, |_| {});
+        Ok(())
+    })
+    .unwrap();
+    let err = rendered.to_pdf().unwrap_err();
+    assert!(matches!(err, Error::Backend(_)), "{err:?}");
 }
 
 #[cfg(feature = "backend-krilla")]

@@ -70,7 +70,7 @@ pub enum Error {
         /// Units per em from krilla.
         krilla_upem: f32,
     },
-    /// An unbreakable cluster run is wider than the available frame width.
+    /// Content that cannot break or shrink is wider than the available frame width.
     UnbreakableWiderThanFrame {
         /// Width from the current line start through the overflowing cluster.
         width: f32,
@@ -106,6 +106,16 @@ pub enum Error {
         width: f32,
         /// Page width available to the band.
         avail: f32,
+    },
+    /// Image bytes were rejected. Over a limit, unparsable, empty, or no decoder in this build.
+    Image {
+        /// Decoder or limit display text.
+        message: String,
+    },
+    /// `id` is not registered in this document's image table.
+    UnknownImage {
+        /// Raw identifier that was not found.
+        id: u32,
     },
     /// The PDF backend failed. The string is that failure's display text.
     Backend(String),
@@ -160,6 +170,8 @@ impl fmt::Display for Error {
             Self::DecorationWiderThanFrame { width, avail } => {
                 write!(f, "decoration width {width} exceeds page width {avail}")
             }
+            Self::Image { message } => write!(f, "image: {message}"),
+            Self::UnknownImage { id } => write!(f, "image {id} is not registered"),
             Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
         }
     }

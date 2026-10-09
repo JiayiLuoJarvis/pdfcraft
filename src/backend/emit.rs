@@ -19,7 +19,7 @@ use krilla::text::{Font, GlyphId, KrillaGlyph};
 use krilla::{Data, Document, SerializeSettings};
 
 use crate::backend::convert::{
-    to_fill, to_krilla_path, to_krilla_point, to_krilla_rect, to_stroke,
+    to_fill, to_krilla_path, to_krilla_point, to_krilla_rect, to_krilla_size, to_stroke,
 };
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
 use crate::canvas::DocumentInfo;
@@ -168,6 +168,18 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
                 font_size.as_pt(),
                 false,
             );
+        }
+        Mark::Image { raster, rect } => {
+            let size = to_krilla_size(rect.size()).ok_or(Error::InvalidGeometry)?;
+            // `draw_image` paints with the top edge at the current origin. Pair push and pop
+            // with nothing fallible between them; an unbalanced transform panics inside krilla.
+            let shift = krilla::geom::Transform::from_translate(
+                rect.origin().x().as_pt(),
+                rect.origin().y().as_pt(),
+            );
+            surface.push_transform(&shift);
+            surface.draw_image(raster.krilla().clone(), size);
+            surface.pop();
         }
     }
     Ok(())
@@ -475,8 +487,22 @@ mod tests {
         assert!(check_upem(1000.0, 1000.0).is_ok());
     }
 
+    fn registered_png() -> (
+        crate::backend::images::ImageTable,
+        crate::canvas::DecodedImage,
+    ) {
+        let mut table = crate::backend::images::ImageTable::default();
+        let image = table
+            .register(
+                crate::backend::images::one_pixel_png().to_vec(),
+                crate::canvas::ImageFormat::Png,
+            )
+            .unwrap();
+        (table, image)
+    }
+
     #[test]
-    fn unsupported_image_poisons_finish() {
+    fn unknown_image_poisons_finish() {
         let mut canvas = KrillaCanvas::new();
         canvas.start_page(A4).unwrap();
         let image = crate::canvas::DecodedImage {
@@ -487,13 +513,40 @@ mod tests {
         let err = canvas
             .draw_image(&image, Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap())
             .unwrap_err();
-        assert!(matches!(
-            err,
-            Error::UnsupportedCanvasOperation {
-                operation: "draw_image"
-            }
-        ));
+        assert!(matches!(err, Error::UnknownImage { id: 0 }));
         assert!(canvas.finish().is_err());
+    }
+
+    #[test]
+    fn one_pixel_png_finishes_as_pdf() {
+        let (table, image) = registered_png();
+        let mut canvas = KrillaCanvas::new_with_resources(Arc::new(FontStore::new()), table);
+        canvas.start_page(A4).unwrap();
+        canvas
+            .draw_image(&image, Rect::try_pt(12.0, 24.0, 30.0, 30.0).unwrap())
+            .unwrap();
+        canvas.finish_page().unwrap();
+        let bytes = canvas.finish().unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    #[test]
+    fn three_pages_share_one_image_xobject() {
+        let (table, image) = registered_png();
+        let mut canvas =
+            KrillaCanvas::new_observable_with_resources(Arc::new(FontStore::new()), table);
+        let rect = Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap();
+        for _ in 0..3 {
+            canvas
+                .start_page(Size::try_pt(200.0, 200.0).unwrap())
+                .unwrap();
+            canvas.draw_image(&image, rect).unwrap();
+            canvas.finish_page().unwrap();
+        }
+        let bytes = canvas.finish().unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+        let text = String::from_utf8_lossy(&bytes);
+        assert_eq!(text.matches("/Subtype /Image").count(), 1, "{text}");
     }
 
     #[test]

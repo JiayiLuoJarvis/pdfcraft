@@ -258,7 +258,7 @@ fn partial(commands: Vec<FragmentCommand>, y: f32, rest: ListNode) -> Split {
 fn first_baseline(fragment: &Fragment) -> Option<f32> {
     fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Glyphs(run) => Some(run.origin.y().as_pt()),
-        FragmentCommand::Stroke { .. } => None,
+        FragmentCommand::Stroke { .. } | FragmentCommand::Image { .. } => None,
     })
 }
 
@@ -474,11 +474,42 @@ mod tests {
     }
 
     #[test]
-    fn item_rejects_table_and_page_break() {
+    fn image_command_has_no_baseline() {
+        let fragment = Fragment {
+            height: 10.0,
+            spacing_after: 0.0,
+            commands: vec![FragmentCommand::Image {
+                image: crate::canvas::DecodedImage {
+                    id: crate::canvas::ImageId::from_raw(3),
+                    pixel_width: 1,
+                    pixel_height: 1,
+                },
+                rect: crate::geom::Rect::try_pt(0.0, 4.0, 10.0, 10.0).unwrap(),
+            }],
+        };
+        assert_eq!(first_baseline(&fragment), None);
+    }
+
+    #[test]
+    fn item_rejects_table_page_break_and_image() {
         let table = TableNode::new(TableSpec::new(vec![ColumnWidth::Auto])).unwrap();
+        let image = FlowNode::Image(
+            crate::layout::image::ImageNode::new(
+                crate::canvas::DecodedImage {
+                    id: crate::canvas::ImageId::from_raw(0),
+                    pixel_width: 1,
+                    pixel_height: 1,
+                },
+                Some(Positive::pt(10.0).unwrap()),
+                Some(Positive::pt(10.0).unwrap()),
+                crate::layout::style::TextAlign::Start,
+            )
+            .unwrap(),
+        );
         for (node, name) in [
             (FlowNode::Table(table), "table"),
             (FlowNode::PageBreak, "page break"),
+            (image, "image"),
         ] {
             assert_eq!(
                 ListItem::new(vec![node]).unwrap_err(),

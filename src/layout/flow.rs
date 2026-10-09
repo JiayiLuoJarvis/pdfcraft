@@ -4,11 +4,12 @@
 
 #![allow(dead_code)]
 
-use crate::canvas::{Canvas, GlyphRun};
+use crate::canvas::{Canvas, DecodedImage, GlyphRun};
 use crate::error::{Error, Result};
 use crate::fonts::FontStore;
-use crate::geom::{Length, NonNegative, Paint, Path, Point, Stroke};
+use crate::geom::{Length, NonNegative, Paint, Path, Point, Rect, Stroke};
 use crate::layout::columns::ColumnsNode;
+use crate::layout::image::ImageNode;
 use crate::layout::list::ListNode;
 use crate::layout::paragraph::{ParagraphNode, TextNode};
 use crate::layout::table::TableNode;
@@ -66,6 +67,7 @@ impl Fragment {
                         Point::try_pt(run.origin.x().as_pt() + dx, run.origin.y().as_pt() + dy)?;
                 }
                 FragmentCommand::Stroke { path, .. } => *path = path.translated(dx, dy)?,
+                FragmentCommand::Image { rect, .. } => *rect = rect.translated(dx, dy)?,
             }
         }
         Ok(self)
@@ -79,6 +81,10 @@ pub(crate) enum FragmentCommand {
         path: Path,
         paint: Paint,
         stroke: Stroke,
+    },
+    Image {
+        image: DecodedImage,
+        rect: Rect,
     },
 }
 
@@ -134,6 +140,7 @@ pub(crate) enum FlowNode {
     Columns(ColumnsNode),
     Table(TableNode),
     List(ListNode),
+    Image(ImageNode),
 }
 
 impl FlowNode {
@@ -149,6 +156,7 @@ impl FlowNode {
             FlowNode::Columns(node) => node.split(ctx, avail),
             FlowNode::Table(node) => node.split(ctx, avail),
             FlowNode::List(node) => node.split(ctx, avail),
+            FlowNode::Image(node) => node.split(avail),
         }
     }
 }
@@ -347,6 +355,9 @@ pub(crate) fn draw_fragment(
                 paint,
                 stroke,
             } => canvas.stroke_path(&path.translated(ox, oy)?, paint, stroke)?,
+            FragmentCommand::Image { image, rect } => {
+                canvas.draw_image(image, rect.translated(ox, oy)?)?;
+            }
         }
     }
     Ok(())

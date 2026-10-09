@@ -51,6 +51,7 @@ pub(crate) fn check_content(container: Container, nodes: &[FlowNode]) -> Result<
             },
             FlowNode::Table(_) => container == Container::Column,
             FlowNode::List(_) => container != Container::Band,
+            FlowNode::Image(_) => matches!(container, Container::Column | Container::TableCell),
             FlowNode::PageBreak => false,
         };
         if !allowed {
@@ -73,6 +74,7 @@ fn node_name(node: &FlowNode) -> &'static str {
         FlowNode::Columns(_) => "columns",
         FlowNode::Table(_) => "table",
         FlowNode::List(_) => "list",
+        FlowNode::Image(_) => "image",
     }
 }
 

@@ -6,20 +6,27 @@
 
 use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::canvas::{Canvas, RecordedPage, RecordingCanvas};
+use crate::canvas::{Canvas, DecodedImage, ImageFormat, RecordedPage, RecordingCanvas};
 use crate::error::{Error, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
-use crate::geom::{Color, Length, Margins, NonNegative, Point, Positive, Size};
+use crate::geom::{Color, Length, Margins, NonNegative, Point, Positive, Rect, Size};
 use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio};
-use crate::layout::decorate::{BandContent, Decorations, LayerContent, LayerText, PageInfo};
+use crate::layout::decorate::{
+    BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
+};
 use crate::layout::flow::{FlowNode, KeepTogetherNode, LayoutCtx, SpacerNode};
+use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
 use crate::layout::paginate::{paginate_root, PaginateConfig};
 use crate::layout::paragraph::TextNode;
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table::{self, TableNode, TableSpec};
+
+#[cfg(feature = "backend-krilla")]
+use crate::backend::ImageTable;
 
 /// Lays out a document of `page_size` pages.
 ///
@@ -36,8 +43,13 @@ pub fn document<'a>(
     let mut doc = Document::new(page_size);
     build(&mut doc)?;
     let mut recording = RecordingCanvas::new();
-    let fonts = doc.paint(&mut recording)?;
-    Ok(Rendered { recording, fonts })
+    let painted = doc.paint(&mut recording)?;
+    Ok(Rendered {
+        recording,
+        fonts: painted.fonts,
+        #[cfg(feature = "backend-krilla")]
+        images: painted.images,
+    })
 }
 
 type BandHook<'a> = Box<dyn Fn(&mut Band) + 'a>;
@@ -46,6 +58,7 @@ type LayerHook<'a> = Box<dyn Fn(&mut Layer) + 'a>;
 /// Document settings and page-time closures. Body methods come from [`Flow`].
 pub struct Document<'a> {
     page_size: Size,
+    doc: DocToken,
     fonts: FontStore,
     margins: Margins,
     body: Flow,
@@ -53,19 +66,46 @@ pub struct Document<'a> {
     footer: Option<BandHook<'a>>,
     behind: Option<LayerHook<'a>>,
     front: Option<LayerHook<'a>>,
+    #[cfg(feature = "backend-krilla")]
+    images: ImageTable,
 }
 
 impl<'a> Document<'a> {
     fn new(page_size: Size) -> Self {
+        let doc = DocToken::next();
         Self {
             page_size,
+            doc,
             fonts: FontStore::new(),
             margins: Margins::default(),
-            body: Flow::new(default_style()),
+            body: Flow::new(default_style(), doc),
             header: None,
             footer: None,
             behind: None,
             front: None,
+            #[cfg(feature = "backend-krilla")]
+            images: ImageTable::default(),
+        }
+    }
+
+    /// Decodes `bytes` once and returns a handle for [`Flow::image`], cells, and [`Layer::image_at`].
+    ///
+    /// Fails now on oversized, unparsable, or empty images. Without `backend-krilla` every call fails.
+    pub fn load_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<Image> {
+        #[cfg(feature = "backend-krilla")]
+        {
+            let decoded = self.images.register(bytes, format)?;
+            Ok(Image {
+                decoded,
+                doc: self.doc,
+            })
+        }
+        #[cfg(not(feature = "backend-krilla"))]
+        {
+            let _ = (self.doc, bytes, format);
+            Err(Error::Image {
+                message: "decoding needs feature `backend-krilla`".to_owned(),
+            })
         }
     }
 
@@ -104,9 +144,10 @@ impl<'a> Document<'a> {
         self.front = Some(Box::new(f));
     }
 
-    fn paint(self, canvas: &mut dyn Canvas) -> Result<FontStore> {
+    fn paint(self, canvas: &mut dyn Canvas) -> Result<Painted> {
         let Self {
             page_size,
+            doc,
             mut fonts,
             margins,
             body,
@@ -114,19 +155,120 @@ impl<'a> Document<'a> {
             footer,
             behind,
             front,
+            #[cfg(feature = "backend-krilla")]
+            images,
         } = self;
         let style = body.style.clone();
         let root = FlowNode::Stack(body.into_nodes()?);
         let decorations = Decorations {
             header: header.map(|hook| band_content(hook, style.clone())),
             footer: footer.map(|hook| band_content(hook, style.clone())),
-            behind: behind.map(|hook| layer_content(hook, style.clone())),
-            front: front.map(|hook| layer_content(hook, style.clone())),
+            behind: behind.map(|hook| layer_content(hook, style.clone(), doc)),
+            front: front.map(|hook| layer_content(hook, style.clone(), doc)),
         };
         let config = PaginateConfig { page_size, margins };
         let mut ctx = LayoutCtx { fonts: &mut fonts };
         paginate_root(root, &mut ctx, config, &decorations, canvas)?;
-        Ok(fonts)
+        Ok(Painted {
+            fonts,
+            #[cfg(feature = "backend-krilla")]
+            images,
+        })
+    }
+}
+
+struct Painted {
+    fonts: FontStore,
+    #[cfg(feature = "backend-krilla")]
+    images: ImageTable,
+}
+
+/// Identifies one [`Document`].
+///
+/// Image ids are dense indexes. A handle moved into another document would paint
+/// that document's image at the same index, so each document gets its own token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DocToken(u32);
+
+impl DocToken {
+    fn next() -> Self {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// An image registered with one document. Copy it into page closures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct Image {
+    decoded: DecodedImage,
+    doc: DocToken,
+}
+
+impl Image {
+    /// Width in pixels.
+    #[must_use]
+    pub const fn pixel_width(self) -> u32 {
+        self.decoded.pixel_width
+    }
+
+    /// Height in pixels.
+    #[must_use]
+    pub const fn pixel_height(self) -> u32 {
+        self.decoded.pixel_height
+    }
+}
+
+/// Display size and placement of a flow or cell image.
+///
+/// Both sides stretch the image. One side derives the other from the pixel aspect.
+/// Neither side uses 1 px = 1 pt. The default placement is the start of the frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct ImageBox {
+    width: Option<Length<Positive>>,
+    height: Option<Length<Positive>>,
+    align: TextAlign,
+}
+
+impl Default for ImageBox {
+    fn default() -> Self {
+        Self {
+            width: None,
+            height: None,
+            align: TextAlign::Start,
+        }
+    }
+}
+
+impl ImageBox {
+    /// Sets the display width. The height follows the pixel aspect when unset.
+    pub fn width(&mut self, width: Length<Positive>) {
+        self.width = Some(width);
+    }
+
+    /// Sets the display height. The width follows the pixel aspect when unset.
+    pub fn height(&mut self, height: Length<Positive>) {
+        self.height = Some(height);
+    }
+
+    /// Centers the image in the current frame when it is narrower than that frame.
+    pub fn center(&mut self) {
+        self.align = TextAlign::Center;
+    }
+
+    /// Places the image at the end of the current frame when it is narrower than that frame.
+    pub fn end(&mut self) {
+        self.align = TextAlign::End;
+    }
+
+    fn lower(self, image: &Image, doc: DocToken) -> Result<FlowNode> {
+        if image.doc != doc {
+            return Err(Error::UnknownImage {
+                id: image.decoded.id.as_u32(),
+            });
+        }
+        ImageNode::new(image.decoded, self.width, self.height, self.align).map(FlowNode::Image)
     }
 }
 
@@ -158,21 +300,23 @@ fn default_style() -> Style {
 /// Vertical content: the body, a column, a keep-together group, or a list item.
 pub struct Flow {
     style: Style,
+    doc: DocToken,
     nodes: Vec<FlowNode>,
     error: Option<Error>,
 }
 
 impl Flow {
-    fn new(style: Style) -> Self {
+    fn new(style: Style, doc: DocToken) -> Self {
         Self {
             style,
+            doc,
             nodes: Vec::new(),
             error: None,
         }
     }
 
     fn child(&self) -> Self {
-        Self::new(self.style.clone())
+        Self::new(self.style.clone(), self.doc)
     }
 
     fn push(&mut self, node: Result<FlowNode>) {
@@ -200,6 +344,15 @@ impl Flow {
 
     fn text(&self, text: String) -> FlowNode {
         FlowNode::Text(TextNode::new(text, self.style.clone()))
+    }
+
+    /// Appends an image that moves to the next page whole instead of splitting.
+    ///
+    /// Wider than the frame, or taller than the page body, is an error. The image never shrinks.
+    pub fn image(&mut self, image: &Image, f: impl FnOnce(&mut ImageBox)) {
+        let mut box_ = ImageBox::default();
+        f(&mut box_);
+        self.push(box_.lower(image, self.doc));
     }
 
     /// Appends a paragraph. It wraps at the width of wherever it lands.
@@ -372,8 +525,13 @@ impl Table {
                 .map(|row| {
                     row.into_iter()
                         .map(|cell| {
-                            Ok(table::Cell::new(vec![flow.text(cell.text)])?
-                                .with_span(cell.col_span, cell.row_span))
+                            let content = match cell.content {
+                                CellContent::Text(text) => vec![flow.text(text)],
+                                CellContent::Image(image, image_box) => {
+                                    vec![image_box.lower(&image, flow.doc)?]
+                                }
+                            };
+                            Ok(table::Cell::new(content)?.with_span(cell.col_span, cell.row_span))
                         })
                         .collect()
                 })
@@ -389,20 +547,37 @@ impl Table {
     }
 }
 
-/// One table cell of text.
+/// One table cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct Cell {
-    text: String,
+    content: CellContent,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CellContent {
+    Text(String),
+    Image(Image, ImageBox),
 }
 
 impl Cell {
     /// A cell spanning one column and one row.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            text: text.into(),
+            content: CellContent::Text(text.into()),
+            col_span: NonZeroU16::MIN,
+            row_span: NonZeroU16::MIN,
+        }
+    }
+
+    /// A one-by-one cell holding `image`.
+    pub fn image(image: &Image, f: impl FnOnce(&mut ImageBox)) -> Self {
+        let mut image_box = ImageBox::default();
+        f(&mut image_box);
+        Self {
+            content: CellContent::Image(*image, image_box),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
         }
@@ -616,7 +791,10 @@ fn band_content(hook: BandHook<'_>, style: Style) -> BandContent<'_> {
 /// One page's behind or front layer. Coordinates are page coordinates, not inset by margins.
 pub struct Layer {
     page: Page,
-    texts: Vec<(String, Point)>,
+    style: Style,
+    doc: DocToken,
+    items: Vec<LayerItem>,
+    error: Option<Error>,
 }
 
 impl Layer {
@@ -634,26 +812,46 @@ impl Layer {
 
     /// Draws `s` on one line with the top-left of its line box at `at`. It is not wrapped or clipped.
     pub fn text_at(&mut self, s: impl AsRef<str>, at: Point) {
-        self.texts.push((s.as_ref().to_owned(), at));
+        self.items.push(LayerItem::Text(LayerText {
+            text: s.as_ref().to_owned(),
+            at,
+            style: self.style.clone(),
+        }));
+    }
+
+    /// Draws `image` stretched into `rect`, in page coordinates.
+    ///
+    /// The rectangle is not clipped and is not inset by margins.
+    pub fn image_at(&mut self, image: &Image, rect: Rect) {
+        if image.doc != self.doc {
+            if self.error.is_none() {
+                self.error = Some(Error::UnknownImage {
+                    id: image.decoded.id.as_u32(),
+                });
+            }
+            return;
+        }
+        self.items.push(LayerItem::Image {
+            image: image.decoded,
+            rect,
+        });
     }
 }
 
-fn layer_content(hook: LayerHook<'_>, style: Style) -> LayerContent<'_> {
+fn layer_content(hook: LayerHook<'_>, style: Style, doc: DocToken) -> LayerContent<'_> {
     Box::new(move |info: &PageInfo| {
         let mut layer = Layer {
             page: Page::from(info),
-            texts: Vec::new(),
+            style: style.clone(),
+            doc,
+            items: Vec::new(),
+            error: None,
         };
         hook(&mut layer);
-        layer
-            .texts
-            .into_iter()
-            .map(|(text, at)| LayerText {
-                text,
-                at,
-                style: style.clone(),
-            })
-            .collect()
+        match layer.error {
+            Some(error) => Err(error),
+            None => Ok(layer.items),
+        }
     })
 }
 
@@ -663,6 +861,8 @@ pub struct Rendered {
     recording: RecordingCanvas,
     #[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
     fonts: FontStore,
+    #[cfg(feature = "backend-krilla")]
+    images: ImageTable,
 }
 
 impl Rendered {
@@ -675,7 +875,8 @@ impl Rendered {
     /// Writes the pages as PDF bytes.
     #[cfg(feature = "backend-krilla")]
     pub fn to_pdf(self) -> Result<Vec<u8>> {
-        let mut pdf = crate::backend::KrillaCanvas::new_with_fonts(Arc::new(self.fonts));
+        let mut pdf =
+            crate::backend::KrillaCanvas::new_with_resources(Arc::new(self.fonts), self.images);
         crate::canvas::replay(&self.recording, &mut pdf)?;
         pdf.finish()
     }

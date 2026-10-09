@@ -293,6 +293,13 @@ impl Rect {
     pub const fn size(self) -> Size {
         self.size
     }
+
+    pub(crate) fn translated(self, dx: f32, dy: f32) -> Result<Self> {
+        Ok(Self::new(
+            Point::try_pt(self.origin.x().as_pt() + dx, self.origin.y().as_pt() + dy)?,
+            self.size,
+        ))
+    }
 }
 
 /// Four page margins. Each side is finite and at least zero.

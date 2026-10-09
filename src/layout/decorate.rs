@@ -52,7 +52,18 @@ pub(crate) struct LayerText {
     pub(crate) style: Style,
 }
 
-pub(crate) type LayerContent<'a> = Box<dyn Fn(&PageInfo) -> Vec<LayerText> + 'a>;
+/// One behind or front primitive, painted in the order the closure added it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum LayerItem {
+    Text(LayerText),
+    /// Page-coordinate rect. Not inset by margins and not checked against the page.
+    Image {
+        image: crate::canvas::DecodedImage,
+        rect: crate::geom::Rect,
+    },
+}
+
+pub(crate) type LayerContent<'a> = Box<dyn Fn(&PageInfo) -> Result<Vec<LayerItem>> + 'a>;
 
 #[derive(Default)]
 pub(crate) struct Decorations<'a> {
@@ -134,17 +145,24 @@ fn measure_layer(
         return Ok(None);
     };
     let mut commands = Vec::new();
-    for item in content(page) {
-        let style = Style {
-            align: TextAlign::Start,
-            ..item.style
-        };
-        let mut run = single_line_run(ctx.fonts, &item.text, &style, f32::INFINITY)?;
-        run.origin = Point::try_pt(
-            item.at.x().as_pt() + run.origin.x().as_pt(),
-            item.at.y().as_pt() + run.origin.y().as_pt(),
-        )?;
-        commands.push(FragmentCommand::Glyphs(run));
+    for item in content(page)? {
+        match item {
+            LayerItem::Text(item) => {
+                let style = Style {
+                    align: TextAlign::Start,
+                    ..item.style
+                };
+                let mut run = single_line_run(ctx.fonts, &item.text, &style, f32::INFINITY)?;
+                run.origin = Point::try_pt(
+                    item.at.x().as_pt() + run.origin.x().as_pt(),
+                    item.at.y().as_pt() + run.origin.y().as_pt(),
+                )?;
+                commands.push(FragmentCommand::Glyphs(run));
+            }
+            LayerItem::Image { image, rect } => {
+                commands.push(FragmentCommand::Image { image, rect });
+            }
+        }
     }
     if commands.is_empty() {
         return Ok(None);
@@ -361,6 +379,42 @@ mod tests {
     }
 
     #[test]
+    fn band_rejects_images() {
+        let (mut fonts, style) = fonts_and_style();
+        let image = crate::layout::image::ImageNode::new(
+            crate::canvas::DecodedImage {
+                id: crate::canvas::ImageId::from_raw(0),
+                pixel_width: 1,
+                pixel_height: 1,
+            },
+            Some(crate::geom::Positive::pt(10.0).unwrap()),
+            Some(crate::geom::Positive::pt(10.0).unwrap()),
+            TextAlign::Start,
+        )
+        .unwrap();
+        let decorations = Decorations {
+            header: Some(Box::new(move |_: &PageInfo| {
+                Ok(vec![FlowNode::Image(image.clone())])
+            })),
+            ..Decorations::none()
+        };
+        let (result, rec) = render(
+            text("A", &style),
+            &mut fonts,
+            margins(40.0, 0.0, 0.0),
+            &decorations,
+        );
+        assert_eq!(
+            result,
+            Err(Error::InvalidCellContent {
+                container: "header/footer band",
+                node: "image"
+            })
+        );
+        assert!(rec.commands().is_empty());
+    }
+
+    #[test]
     fn band_rejects_tables() {
         let (mut fonts, style) = fonts_and_style();
         let decorations = Decorations {
@@ -458,11 +512,11 @@ mod tests {
     fn layer(label: &'static str, x: f32, y: f32, style: &Style) -> LayerContent<'static> {
         let style = style.clone();
         Box::new(move |_: &PageInfo| {
-            vec![LayerText {
+            Ok(vec![LayerItem::Text(LayerText {
                 text: label.to_owned(),
                 at: Point::try_pt(x, y).unwrap(),
                 style: style.clone(),
-            }]
+            })])
         })
     }
 
