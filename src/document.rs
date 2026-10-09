@@ -1438,6 +1438,17 @@ mod tests {
         missing_bold.paragraph(|p| p.bold("A"));
         assert_fails_with_empty_canvas(missing_bold, &Error::UnknownFont { id: 1 });
 
+        let mut missing_glyph = doc_with_font();
+        missing_glyph.bold_font(fixture_bytes().to_vec()).unwrap();
+        missing_glyph.paragraph(|p| p.bold(MISSING.to_string()));
+        assert_fails_with_empty_canvas(
+            missing_glyph,
+            &Error::MissingGlyph {
+                font: FontId::from_raw(1),
+                scalar: MISSING,
+            },
+        );
+
         let mut invalid_indent = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
         invalid_indent.font(fixture_bytes().to_vec()).unwrap();
         invalid_indent.paragraph(|p| {
@@ -1445,6 +1456,24 @@ mod tests {
             p.text("A");
         });
         assert_fails_with_empty_canvas(invalid_indent, &Error::InvalidGeometry);
+
+        let mut overwide = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
+        overwide.font(fixture_bytes().to_vec()).unwrap();
+        overwide.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(12.0).unwrap());
+            p.text("AA");
+        });
+        let mut rec = RecordingCanvas::new();
+        let error = overwide.paint(&mut rec).err().unwrap();
+        assert!(
+            matches!(
+                error,
+                Error::UnbreakableWiderThanFrame { avail, .. }
+                    if crate::canvas::pt_near(avail, 12.0)
+            ),
+            "{error:?}"
+        );
+        assert!(rec.commands().is_empty());
     }
 
     #[test]
