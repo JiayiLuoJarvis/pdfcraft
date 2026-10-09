@@ -4,10 +4,10 @@ use std::num::NonZeroU16;
 
 use quire_pdf::{
     document, pt_near, CanvasCommand, Cell, Error, Flow, ImageFormat, Margins, NonNegative,
-    Numbering, Point, RecordedPage, Rendered, Result, Size, A4,
+    Numbering, PageSize, Point, RecordedPage, Rendered, Result, Size, A4,
 };
 #[cfg(feature = "backend-krilla")]
-use quire_pdf::{Positive, Rect};
+use quire_pdf::{Paper, Positive, Rect};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
@@ -79,7 +79,7 @@ fn texts(page: &RecordedPage) -> Vec<String> {
 }
 
 fn first_example(c: &Contract) -> Result<Rendered> {
-    document(A4, |doc| {
+    document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.paragraph(|p| p.text(format!("Contract {}", c.id)));
         if c.kind == Kind::A {
@@ -132,7 +132,7 @@ fn kind_b_flow_has_no_table() {
 }
 
 fn full_template(c: &Contract, company: &str) -> Result<Rendered> {
-    document(A4, |doc| {
+    document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
         doc.header(|h| {
@@ -220,7 +220,7 @@ fn text_at_places_the_top_left_of_the_line_box() {
 
 #[test]
 fn footer_sees_section_counters_equal_to_document_totals() {
-    let pages = document(A4, |doc| {
+    let pages = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.margins(Margins::uniform(NonNegative::pt(20.0)?));
         doc.footer(|f| {
@@ -242,7 +242,7 @@ fn footer_sees_section_counters_equal_to_document_totals() {
 
 #[test]
 fn a_later_header_call_replaces_the_earlier_one() {
-    let pages = document(A4, |doc| {
+    let pages = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.margins(Margins::uniform(NonNegative::pt(20.0)?));
         doc.header(|h| h.left("old"));
@@ -257,7 +257,7 @@ fn a_later_header_call_replaces_the_earlier_one() {
 
 #[test]
 fn header_with_zero_margin_is_rejected() {
-    let result = document(A4, |doc| {
+    let result = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.header(|h| h.left("H"));
         doc.paragraph(|p| p.text("A"));
@@ -272,7 +272,7 @@ fn header_with_zero_margin_is_rejected() {
 
 #[test]
 fn lists_number_bullet_and_custom_markers() {
-    let pages = document(A4, |doc| {
+    let pages = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.ul(|l| l.item(|i| i.paragraph(|p| p.text("dot"))));
         doc.ol(Numbering::UpperRoman, |l| {
@@ -296,7 +296,7 @@ fn lists_number_bullet_and_custom_markers() {
 #[test]
 fn table_spans_and_repeat_header_switch() {
     let build = |repeat: bool| {
-        document(A4, |doc| {
+        document(PageSize::A4, |doc| {
             doc.font(FONT.to_vec())?;
             doc.table(|t| {
                 t.repeat_header(repeat);
@@ -323,7 +323,7 @@ fn table_spans_and_repeat_header_switch() {
 
 #[test]
 fn keep_together_spacer_and_page_break() {
-    let pages = document(A4, |doc| {
+    let pages = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.paragraph(|p| p.text("A"));
         doc.spacer(NonNegative::pt(A4.height().as_pt() - 20.0)?);
@@ -349,7 +349,7 @@ fn a_paragraph_wraps_at_the_width_of_its_column() {
     let page = Size::try_pt(200.0, 400.0).unwrap();
     let words = "AA AA AA AA AA AA";
     let lines = |in_column: bool| {
-        let pages = document(page, |doc| {
+        let pages = document(PageSize::custom(page), |doc| {
             doc.font(FONT.to_vec())?;
             if in_column {
                 doc.columns(|row| {
@@ -375,7 +375,7 @@ fn a_paragraph_wraps_at_the_width_of_its_column() {
 
 #[test]
 fn nesting_rules_come_from_layout() {
-    let result = document(A4, |doc| {
+    let result = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.columns(|row| {
             row.col(Flow::page_break);
@@ -394,7 +394,7 @@ fn nesting_rules_come_from_layout() {
 
 #[test]
 fn first_builder_error_wins_and_later_calls_are_ignored() {
-    let result = document(A4, |doc| {
+    let result = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.columns(|row| row.col(|c| c.paragraph(|p| p.text("only one"))));
         doc.table(|t| {
@@ -413,7 +413,7 @@ fn first_builder_error_wins_and_later_calls_are_ignored() {
 
 #[test]
 fn closure_errors_propagate_unchanged() {
-    let result = document(A4, |doc| {
+    let result = document(PageSize::A4, |doc| {
         doc.spacer(NonNegative::pt(-1.0)?);
         Ok(())
     });
@@ -422,7 +422,7 @@ fn closure_errors_propagate_unchanged() {
 
 #[test]
 fn text_without_a_font_fails() {
-    let result = document(A4, |doc| {
+    let result = document(PageSize::A4, |doc| {
         doc.paragraph(|p| p.text("A"));
         Ok(())
     });
@@ -458,7 +458,7 @@ fn rect_bits(rect: Rect) -> (u32, u32, u32, u32) {
 #[cfg(not(feature = "backend-krilla"))]
 #[test]
 fn load_image_without_decoder_is_an_image_error() {
-    let err = document(A4, |doc| {
+    let err = document(PageSize::A4, |doc| {
         let _ = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         Ok(())
     })
@@ -471,7 +471,7 @@ fn load_image_without_decoder_is_an_image_error() {
 #[test]
 fn image_only_document_needs_no_font() {
     let page = Size::try_pt(200.0, 400.0).unwrap();
-    let rendered = document(page, |doc| {
+    let rendered = document(PageSize::custom(page), |doc| {
         let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         assert_eq!(logo.pixel_width(), 1);
         assert_eq!(logo.pixel_height(), 1);
@@ -497,7 +497,7 @@ fn image_only_document_needs_no_font() {
 #[test]
 fn cell_image_and_last_page_seal_share_coordinates() {
     let page = Size::try_pt(200.0, 80.0).unwrap();
-    let rendered = document(page, |doc| {
+    let rendered = document(PageSize::custom(page), |doc| {
         doc.font(FONT.to_vec())?;
         let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         let mark = seal;
@@ -535,7 +535,7 @@ fn cell_image_and_last_page_seal_share_coordinates() {
 #[test]
 fn three_pages_of_one_image_share_one_xobject() {
     let page = Size::try_pt(120.0, 40.0).unwrap();
-    let pdf = document(page, |doc| {
+    let pdf = document(PageSize::custom(page), |doc| {
         let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         doc.image(&seal, |_| {});
         doc.page_break();
@@ -556,7 +556,7 @@ fn three_pages_of_one_image_share_one_xobject() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn garbage_empty_and_foreign_handles_are_image_errors() {
-    let garbage = document(A4, |doc| {
+    let garbage = document(PageSize::A4, |doc| {
         let _ = doc.load_image(b"not a png".to_vec(), ImageFormat::Png)?;
         Ok(())
     })
@@ -564,7 +564,7 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     .unwrap();
     assert!(matches!(garbage, Error::Image { .. }));
 
-    let empty = document(A4, |doc| {
+    let empty = document(PageSize::A4, |doc| {
         let _ = doc.load_image(Vec::new(), ImageFormat::Png)?;
         Ok(())
     })
@@ -573,12 +573,12 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     assert!(matches!(empty, Error::Image { message } if message == "bytes are empty"));
 
     let mut stolen = None;
-    let _ = document(A4, |doc| {
+    let _ = document(PageSize::A4, |doc| {
         stolen = Some(doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?);
         Ok(())
     })
     .unwrap();
-    let foreign = document(A4, |doc| {
+    let foreign = document(PageSize::A4, |doc| {
         doc.image(stolen.as_ref().unwrap(), |_| {});
         Ok(())
     })
@@ -590,7 +590,7 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn list_item_and_overwide_image_fail() {
-    let listed = document(A4, |doc| {
+    let listed = document(PageSize::A4, |doc| {
         let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         doc.ul(|list| list.item(|item| item.image(&logo, |_| {})));
         Ok(())
@@ -605,12 +605,15 @@ fn list_item_and_overwide_image_fail() {
         }
     );
 
-    let wide = document(Size::try_pt(100.0, 100.0).unwrap(), |doc| {
-        let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        let width = Positive::pt(101.0)?;
-        doc.image(&logo, |image| image.width(width));
-        Ok(())
-    })
+    let wide = document(
+        PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
+        |doc| {
+            let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+            let width = Positive::pt(101.0)?;
+            doc.image(&logo, |image| image.width(width));
+            Ok(())
+        },
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -625,7 +628,7 @@ fn list_item_and_overwide_image_fail() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn damaged_pixels_fail_at_pdf_time() {
-    let rendered = document(A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         let logo = doc.load_image(BAD_IDAT.to_vec(), ImageFormat::Png)?;
         doc.image(&logo, |_| {});
         Ok(())
@@ -643,4 +646,145 @@ fn to_pdf_writes_a_pdf() {
         .to_pdf()
         .unwrap();
     assert!(pdf.starts_with(b"%PDF"));
+}
+
+fn section_footer(band: &mut quire_pdf::Band) {
+    let page = band.page();
+    band.left(format!("{}/{}", page.number, page.count));
+    band.right(format!("{}/{}", page.section_number, page.section_count));
+}
+
+#[test]
+fn two_sections_number_document_pages_and_section_pages() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        let margin = NonNegative::pt(20.0)?;
+        doc.section(|section| {
+            section.margins(Margins::uniform(margin));
+            section.footer(section_footer);
+            section.paragraph(|p| p.text("A"));
+            section.page_break();
+            section.paragraph(|p| p.text("B"));
+            Ok(())
+        })?;
+        doc.section(|section| {
+            section.margins(Margins::uniform(margin));
+            section.footer(section_footer);
+            section.paragraph(|p| p.text("C"));
+            Ok(())
+        })?;
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 3);
+    assert_eq!(texts(&pages[0]), ["A", "1/3", "1/2"]);
+    assert_eq!(texts(&pages[1]), ["B", "2/3", "2/2"]);
+    assert_eq!(texts(&pages[2]), ["C", "3/3", "1/1"]);
+}
+
+#[test]
+fn second_section_header_insets_by_that_sections_left_margin() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.section(|section| {
+            section.margins(Margins::uniform(NonNegative::pt(20.0)?));
+            section.header(|header| header.left("One"));
+            section.paragraph(|p| p.text("A"));
+            Ok(())
+        })?;
+        doc.section(|section| {
+            section.margins(Margins::new(
+                NonNegative::pt(20.0)?,
+                NonNegative::pt(10.0)?,
+                NonNegative::pt(20.0)?,
+                NonNegative::pt(48.0)?,
+            ));
+            section.header(|header| header.left("Two"));
+            section.paragraph(|p| p.text("B"));
+            Ok(())
+        })?;
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert!(pt_near(runs(&pages[0])[0].x, 20.0));
+    assert_eq!(runs(&pages[0])[0].text, "One");
+    assert!(pt_near(runs(&pages[1])[0].x, 48.0));
+    assert_eq!(runs(&pages[1])[0].text, "Two");
+}
+
+#[test]
+fn paragraph_then_section_is_content_outside_section() {
+    let err = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| p.text("A"));
+        doc.section(|section| {
+            section.paragraph(|p| p.text("B"));
+            Ok(())
+        })?;
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(err, Error::ContentOutsideSection);
+}
+
+#[test]
+fn empty_section_is_one_page_and_still_draws_its_footer() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.section(|section| {
+            section.margins(Margins::uniform(NonNegative::pt(20.0)?));
+            section.footer(|footer| footer.left("foot"));
+            Ok(())
+        })?;
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    assert_eq!(texts(&pages[0]), ["foot"]);
+}
+
+#[test]
+fn trailing_page_break_inside_a_section_does_not_add_a_page() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.section(|section| {
+            section.paragraph(|p| p.text("A"));
+            section.page_break();
+            Ok(())
+        })?;
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    assert_eq!(texts(&pages[0]), ["A"]);
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn two_sections_on_different_paper_write_a_pdf() {
+    let rendered = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.section(|section| {
+            section.paragraph(|p| p.text("A"));
+            Ok(())
+        })?;
+        doc.section(|section| {
+            section.page_size(Paper::Letter.landscape());
+            section.paragraph(|p| p.text("B"));
+            Ok(())
+        })?;
+        Ok(())
+    })
+    .unwrap();
+    let pages = rendered.pages();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages[0].size(), A4);
+    assert_eq!(pages[1].size(), Paper::Letter.landscape().resolve());
+    assert!(rendered.to_pdf().unwrap().starts_with(b"%PDF"));
 }

@@ -117,6 +117,8 @@ pub enum Error {
         /// Raw identifier that was not found.
         id: u32,
     },
+    /// Body, margins, or page hooks were written both on the document and in sections.
+    ContentOutsideSection,
     /// The PDF backend failed. The string is that failure's display text.
     Backend(String),
 }
@@ -172,6 +174,9 @@ impl fmt::Display for Error {
             }
             Self::Image { message } => write!(f, "image: {message}"),
             Self::UnknownImage { id } => write!(f, "image {id} is not registered"),
+            Self::ContentOutsideSection => {
+                f.write_str("body or decorations written both on the document and in sections")
+            }
             Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
         }
     }

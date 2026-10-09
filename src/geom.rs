@@ -254,6 +254,114 @@ pub const A4: Size = Size::from_trusted_pt(210.0 * MM_TO_PT, 297.0 * MM_TO_PT);
 /// US Letter, 612 pt by 792 pt.
 pub const LETTER: Size = Size::from_trusted_pt(612.0, 792.0);
 
+/// A standard paper size. Portrait dimensions are the short side by the long side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+#[must_use]
+pub enum Paper {
+    /// ISO A0, 841 mm by 1189 mm.
+    A0,
+    /// ISO A1, 594 mm by 841 mm.
+    A1,
+    /// ISO A2, 420 mm by 594 mm.
+    A2,
+    /// ISO A3, 297 mm by 420 mm.
+    A3,
+    /// ISO A4, 210 mm by 297 mm.
+    A4,
+    /// ISO A5, 148 mm by 210 mm.
+    A5,
+    /// ISO A6, 105 mm by 148 mm.
+    A6,
+    /// US Letter, 612 pt by 792 pt.
+    Letter,
+    /// US Legal, 612 pt by 1008 pt.
+    Legal,
+}
+
+impl Paper {
+    const fn portrait(self) -> Size {
+        match self {
+            Self::A0 => Size::from_trusted_pt(841.0 * MM_TO_PT, 1189.0 * MM_TO_PT),
+            Self::A1 => Size::from_trusted_pt(594.0 * MM_TO_PT, 841.0 * MM_TO_PT),
+            Self::A2 => Size::from_trusted_pt(420.0 * MM_TO_PT, 594.0 * MM_TO_PT),
+            Self::A3 => Size::from_trusted_pt(297.0 * MM_TO_PT, 420.0 * MM_TO_PT),
+            Self::A4 => A4,
+            Self::A5 => Size::from_trusted_pt(148.0 * MM_TO_PT, 210.0 * MM_TO_PT),
+            Self::A6 => Size::from_trusted_pt(105.0 * MM_TO_PT, 148.0 * MM_TO_PT),
+            Self::Letter => LETTER,
+            Self::Legal => Size::from_trusted_pt(612.0, 1008.0),
+        }
+    }
+
+    /// This paper with width and height swapped.
+    pub const fn landscape(self) -> PageSize {
+        PageSize::Paper(self, Orientation::Landscape)
+    }
+}
+
+/// Which way a [`Paper`] is turned. A [`PageSize::Custom`] size is already final.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum Orientation {
+    /// The paper's listed width and height.
+    Portrait,
+    /// The paper's height and width swapped.
+    Landscape,
+}
+
+/// Page size for a document or a section.
+///
+/// Portrait shortcuts are the associated constants. Landscape is
+/// [`Paper::landscape`] or [`Orientation::Landscape`] on [`PageSize::Paper`].
+/// [`PageSize::Custom`] is a final size and does not take an orientation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum PageSize {
+    /// A standard paper and an orientation.
+    Paper(Paper, Orientation),
+    /// Width and height already in PDF points.
+    Custom(Size),
+}
+
+impl PageSize {
+    /// ISO A0, portrait.
+    pub const A0: Self = Self::Paper(Paper::A0, Orientation::Portrait);
+    /// ISO A1, portrait.
+    pub const A1: Self = Self::Paper(Paper::A1, Orientation::Portrait);
+    /// ISO A2, portrait.
+    pub const A2: Self = Self::Paper(Paper::A2, Orientation::Portrait);
+    /// ISO A3, portrait.
+    pub const A3: Self = Self::Paper(Paper::A3, Orientation::Portrait);
+    /// ISO A4, portrait.
+    pub const A4: Self = Self::Paper(Paper::A4, Orientation::Portrait);
+    /// ISO A5, portrait.
+    pub const A5: Self = Self::Paper(Paper::A5, Orientation::Portrait);
+    /// ISO A6, portrait.
+    pub const A6: Self = Self::Paper(Paper::A6, Orientation::Portrait);
+    /// US Letter, portrait.
+    pub const LETTER: Self = Self::Paper(Paper::Letter, Orientation::Portrait);
+    /// US Legal, portrait.
+    pub const LEGAL: Self = Self::Paper(Paper::Legal, Orientation::Portrait);
+
+    /// A final page size. Orientation does not apply.
+    pub const fn custom(size: Size) -> Self {
+        Self::Custom(size)
+    }
+
+    /// The page width and height in PDF points.
+    pub const fn resolve(self) -> Size {
+        match self {
+            Self::Paper(paper, Orientation::Portrait) => paper.portrait(),
+            Self::Paper(paper, Orientation::Landscape) => {
+                let portrait = paper.portrait();
+                Size::new(portrait.height(), portrait.width())
+            }
+            Self::Custom(size) => size,
+        }
+    }
+}
+
 /// An axis-aligned rectangle. The extent is a [`Size`], so it is never empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
@@ -544,6 +652,49 @@ mod tests {
     fn letter_is_exactly_612_by_792() {
         assert_eq!(LETTER.width().as_pt().to_bits(), 612.0f32.to_bits());
         assert_eq!(LETTER.height().as_pt().to_bits(), 792.0f32.to_bits());
+    }
+
+    #[test]
+    fn paper_portrait_matches_a4_and_letter_bits_and_the_millimeter_formula() {
+        let a4 = PageSize::A4.resolve();
+        assert_eq!(a4.width().as_pt().to_bits(), A4.width().as_pt().to_bits());
+        assert_eq!(a4.height().as_pt().to_bits(), A4.height().as_pt().to_bits());
+
+        let letter = PageSize::LETTER.resolve();
+        assert_eq!(
+            letter.width().as_pt().to_bits(),
+            LETTER.width().as_pt().to_bits()
+        );
+        assert_eq!(
+            letter.height().as_pt().to_bits(),
+            LETTER.height().as_pt().to_bits()
+        );
+
+        let legal = PageSize::LEGAL.resolve();
+        assert_eq!(legal.width().as_pt().to_bits(), 612.0f32.to_bits());
+        assert_eq!(legal.height().as_pt().to_bits(), 1008.0f32.to_bits());
+
+        let landscape = PageSize::Paper(Paper::A4, Orientation::Landscape).resolve();
+        assert_eq!(landscape, Size::new(A4.height(), A4.width()));
+        assert_eq!(Paper::A4.landscape().resolve(), landscape);
+
+        let custom = Size::try_pt(100.0, 50.0).unwrap();
+        assert_eq!(PageSize::custom(custom).resolve(), custom);
+
+        let series = [
+            (Paper::A0, 841.0, 1189.0),
+            (Paper::A1, 594.0, 841.0),
+            (Paper::A2, 420.0, 594.0),
+            (Paper::A3, 297.0, 420.0),
+            (Paper::A4, 210.0, 297.0),
+            (Paper::A5, 148.0, 210.0),
+            (Paper::A6, 105.0, 148.0),
+        ];
+        for (paper, width_mm, height_mm) in series {
+            let size = PageSize::Paper(paper, Orientation::Portrait).resolve();
+            assert!(abs_err_pt(size.width().as_pt(), width_mm * 72.0 / 25.4) < 1e-3);
+            assert!(abs_err_pt(size.height().as_pt(), height_mm * 72.0 / 25.4) < 1e-3);
+        }
     }
 
     #[test]

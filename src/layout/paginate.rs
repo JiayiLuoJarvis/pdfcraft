@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+use std::num::NonZeroU32;
+
 use crate::canvas::Canvas;
 use crate::error::{Error, Result};
 use crate::geom::{Margins, Point, Size};
@@ -51,7 +53,22 @@ struct PagePlan {
     placed: Vec<PlacedFragment>,
 }
 
-/// Paginate `root` and paint onto `canvas`.
+/// One section's body, paper, and page decorations.
+pub(crate) struct SectionJob<'a> {
+    pub(crate) config: PaginateConfig,
+    pub(crate) root: FlowNode,
+    pub(crate) decorations: &'a Decorations<'a>,
+}
+
+/// Pages `[start, start + len)` share one section's margins and decorations.
+pub(crate) struct SectionSpan<'a> {
+    pub(crate) start: usize,
+    pub(crate) len: NonZeroU32,
+    pub(crate) margins: Margins,
+    pub(crate) decorations: &'a Decorations<'a>,
+}
+
+/// Paginate one section and paint onto `canvas`.
 ///
 /// Bands are measured after the body plan, so decorations can never move body content.
 pub(crate) fn paginate_root(
@@ -61,9 +78,42 @@ pub(crate) fn paginate_root(
     decorations: &Decorations<'_>,
     canvas: &mut dyn Canvas,
 ) -> Result<()> {
-    let pages = plan_pages(root, ctx, config)?;
+    paginate_sections(
+        vec![SectionJob {
+            config,
+            root,
+            decorations,
+        }],
+        ctx,
+        canvas,
+    )
+}
+
+/// Plan every section, then measure and paint the flat page list.
+pub(crate) fn paginate_sections(
+    jobs: Vec<SectionJob<'_>>,
+    ctx: &mut LayoutCtx<'_>,
+    canvas: &mut dyn Canvas,
+) -> Result<()> {
+    let mut pages = Vec::new();
+    let mut spans = Vec::with_capacity(jobs.len());
+    for job in jobs {
+        let planned = plan_pages(job.root, ctx, job.config)?;
+        let len = u32::try_from(planned.len())
+            .ok()
+            .and_then(NonZeroU32::new)
+            .ok_or(Error::InvalidGeometry)?;
+        let start = pages.len();
+        pages.extend(planned);
+        spans.push(SectionSpan {
+            start,
+            len,
+            margins: job.config.margins,
+            decorations: job.decorations,
+        });
+    }
     let sizes: Vec<Size> = pages.iter().map(|page| page.size).collect();
-    let bands = measure_bands(&sizes, config.margins, decorations, ctx)?;
+    let bands = measure_bands(&sizes, &spans, ctx)?;
     paint_pages(&pages, &bands, canvas)
 }
 
@@ -683,5 +733,64 @@ mod tests {
         let origins = glyph_origins(&rec);
         assert_eq!(origins[0].0.to_bits(), 10.0f32.to_bits());
         assert_eq!(origins[0].1.to_bits(), (15.0 + metrics.baseline).to_bits());
+    }
+
+    #[test]
+    fn two_sections_keep_page_size_and_margins_when_the_first_page_is_not_full() {
+        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let face = fonts.metrics(style.font).unwrap();
+        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
+        let second_width = 400.0 - 30.0 - 8.0;
+        let second = ParagraphNode::layout(&mut fonts, "B", &style, second_width).unwrap();
+        let decorations = Decorations::none();
+        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut rec = RecordingCanvas::new();
+        paginate_sections(
+            vec![
+                SectionJob {
+                    config: PaginateConfig {
+                        page_size: Size::try_pt(200.0, 400.0).unwrap(),
+                        margins: Margins::default(),
+                    },
+                    root: FlowNode::Paragraph(first),
+                    decorations: &decorations,
+                },
+                SectionJob {
+                    config: PaginateConfig {
+                        page_size: Size::try_pt(400.0, 200.0).unwrap(),
+                        margins: Margins::new(
+                            NonNegative::pt(12.0).unwrap(),
+                            NonNegative::pt(8.0).unwrap(),
+                            NonNegative::pt(12.0).unwrap(),
+                            NonNegative::pt(30.0).unwrap(),
+                        ),
+                    },
+                    root: FlowNode::Paragraph(second),
+                    decorations: &decorations,
+                },
+            ],
+            &mut ctx,
+            &mut rec,
+        )
+        .unwrap();
+        let pages = rec.pages();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].size(), Size::try_pt(200.0, 400.0).unwrap());
+        assert_eq!(pages[1].size(), Size::try_pt(400.0, 200.0).unwrap());
+        let origin = |page: &RecordedPage| {
+            page.ops().iter().find_map(|op| match op {
+                CanvasCommand::DrawGlyphRun { run } => {
+                    Some((run.origin.x().as_pt(), run.origin.y().as_pt()))
+                }
+                _ => None,
+            })
+        };
+        let (first_x, first_y) = origin(&pages[0]).unwrap();
+        let (second_x, second_y) = origin(&pages[1]).unwrap();
+        assert_eq!(first_x.to_bits(), 0.0f32.to_bits());
+        assert_eq!(first_y.to_bits(), metrics.baseline.to_bits());
+        assert_eq!(second_x.to_bits(), 30.0f32.to_bits());
+        assert_eq!(second_y.to_bits(), (12.0 + metrics.baseline).to_bits());
     }
 }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::canvas::{Canvas, DecodedImage, ImageFormat, RecordedPage, RecordingCanvas};
 use crate::error::{Error, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
-use crate::geom::{Color, Length, Margins, NonNegative, Point, Positive, Rect, Size};
+use crate::geom::{Color, Length, Margins, NonNegative, PageSize, Point, Positive, Rect, Size};
 use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio};
 use crate::layout::decorate::{
     BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
@@ -20,7 +20,7 @@ use crate::layout::decorate::{
 use crate::layout::flow::{FlowNode, KeepTogetherNode, LayoutCtx, SpacerNode};
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
-use crate::layout::paginate::{paginate_root, PaginateConfig};
+use crate::layout::paginate::{paginate_sections, PaginateConfig, SectionJob};
 use crate::layout::paragraph::TextNode;
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table::{self, TableNode, TableSpec};
@@ -28,7 +28,7 @@ use crate::layout::table::{self, TableNode, TableSpec};
 #[cfg(feature = "backend-krilla")]
 use crate::backend::ImageTable;
 
-/// Lays out a document of `page_size` pages.
+/// Lays out a document whose default paper is `page_size`.
 ///
 /// `build` runs once. Builder mistakes are deferred: the first one is
 /// returned from here, before any page is drawn. A missing glyph anywhere,
@@ -37,7 +37,7 @@ use crate::backend::ImageTable;
 /// Text uses the first font passed to [`Document::font`] at 12 pt with line
 /// height 1.2, black, start-aligned. Margins default to zero.
 pub fn document<'a>(
-    page_size: Size,
+    page_size: PageSize,
     build: impl FnOnce(&mut Document<'a>) -> Result<()>,
 ) -> Result<Rendered> {
     let mut doc = Document::new(page_size);
@@ -55,34 +55,152 @@ pub fn document<'a>(
 type BandHook<'a> = Box<dyn Fn(&mut Band) + 'a>;
 type LayerHook<'a> = Box<dyn Fn(&mut Layer) + 'a>;
 
-/// Document settings and page-time closures. Body methods come from [`Flow`].
-pub struct Document<'a> {
-    page_size: Size,
-    doc: DocToken,
-    fonts: FontStore,
+/// Implicit lead section, or the explicit sections that replaced it.
+enum Sections<'a> {
+    Implicit(Section<'a>),
+    Explicit {
+        sections: Vec<Section<'a>>,
+        /// Body pushes after the first `section` are rejected.
+        closed: Flow,
+    },
+}
+
+/// One run of pages with its own paper, margins, and page decorations.
+pub struct Section<'a> {
+    page_size: Option<PageSize>,
     margins: Margins,
-    body: Flow,
+    flow: Flow,
     header: Option<BandHook<'a>>,
     footer: Option<BandHook<'a>>,
     behind: Option<LayerHook<'a>>,
     front: Option<LayerHook<'a>>,
+}
+
+impl<'a> Section<'a> {
+    fn new(style: Style, doc: DocToken) -> Self {
+        Self {
+            page_size: None,
+            margins: Margins::default(),
+            flow: Flow::new(style, doc),
+            header: None,
+            footer: None,
+            behind: None,
+            front: None,
+        }
+    }
+
+    fn written(&self) -> bool {
+        self.flow.written()
+            || self.margins != Margins::default()
+            || self.header.is_some()
+            || self.footer.is_some()
+            || self.behind.is_some()
+            || self.front.is_some()
+    }
+
+    /// Sets this section's paper. Otherwise the document default is used.
+    pub fn page_size(&mut self, page_size: PageSize) {
+        self.page_size = Some(page_size);
+    }
+
+    /// Sets the four margins. Top and bottom are also the header and footer band heights.
+    pub fn margins(&mut self, margins: Margins) {
+        self.margins = margins;
+    }
+
+    /// Runs `f` on every page of this section to fill the header band.
+    ///
+    /// A later call replaces an earlier one.
+    pub fn header(&mut self, f: impl Fn(&mut Band) + 'a) {
+        self.header = Some(Box::new(f));
+    }
+
+    /// Runs `f` on every page of this section to fill the footer band.
+    ///
+    /// A later call replaces an earlier one.
+    pub fn footer(&mut self, f: impl Fn(&mut Band) + 'a) {
+        self.footer = Some(Box::new(f));
+    }
+
+    /// Runs `f` on every page of this section to draw under everything else.
+    ///
+    /// A later call replaces an earlier one.
+    pub fn behind(&mut self, f: impl Fn(&mut Layer) + 'a) {
+        self.behind = Some(Box::new(f));
+    }
+
+    /// Runs `f` on every page of this section to draw over everything else.
+    ///
+    /// A later call replaces an earlier one.
+    pub fn front(&mut self, f: impl Fn(&mut Layer) + 'a) {
+        self.front = Some(Box::new(f));
+    }
+
+    fn lower(
+        self,
+        default_page: PageSize,
+        doc: DocToken,
+    ) -> Result<(PaginateConfig, FlowNode, Decorations<'a>)> {
+        let Self {
+            page_size,
+            margins,
+            flow,
+            header,
+            footer,
+            behind,
+            front,
+        } = self;
+        let style = flow.style.clone();
+        let config = PaginateConfig {
+            page_size: page_size.unwrap_or(default_page).resolve(),
+            margins,
+        };
+        let root = FlowNode::Stack(flow.into_nodes()?);
+        let decorations = Decorations {
+            header: header.map(|hook| band_content(hook, style.clone())),
+            footer: footer.map(|hook| band_content(hook, style.clone())),
+            behind: behind.map(|hook| layer_content(hook, style.clone(), doc)),
+            front: front.map(|hook| layer_content(hook, style, doc)),
+        };
+        Ok((config, root, decorations))
+    }
+}
+
+impl Deref for Section<'_> {
+    type Target = Flow;
+
+    fn deref(&self) -> &Flow {
+        &self.flow
+    }
+}
+
+impl DerefMut for Section<'_> {
+    fn deref_mut(&mut self) -> &mut Flow {
+        &mut self.flow
+    }
+}
+
+/// Document settings and page-time closures. Body methods come from [`Flow`].
+pub struct Document<'a> {
+    page_size: PageSize,
+    doc: DocToken,
+    fonts: FontStore,
+    body: Sections<'a>,
+    /// First [`Error::ContentOutsideSection`], or the error from a section closure.
+    error: Option<Error>,
     #[cfg(feature = "backend-krilla")]
     images: ImageTable,
 }
 
 impl<'a> Document<'a> {
-    fn new(page_size: Size) -> Self {
+    fn new(page_size: PageSize) -> Self {
         let doc = DocToken::next();
         Self {
             page_size,
             doc,
             fonts: FontStore::new(),
-            margins: Margins::default(),
-            body: Flow::new(default_style(), doc),
-            header: None,
-            footer: None,
-            behind: None,
-            front: None,
+            body: Sections::Implicit(Section::new(default_style(), doc)),
+            error: None,
             #[cfg(feature = "backend-krilla")]
             images: ImageTable::default(),
         }
@@ -121,27 +239,91 @@ impl<'a> Document<'a> {
 
     /// Sets the four page margins. Top and bottom are also the header and footer band heights.
     pub fn margins(&mut self, margins: Margins) {
-        self.margins = margins;
+        if let Sections::Implicit(section) = &mut self.body {
+            section.margins(margins);
+        } else {
+            self.fail_outside();
+        }
     }
 
     /// Runs `f` on every page to fill the header band. A later call replaces an earlier one.
     pub fn header(&mut self, f: impl Fn(&mut Band) + 'a) {
-        self.header = Some(Box::new(f));
+        if let Sections::Implicit(section) = &mut self.body {
+            section.header(f);
+        } else {
+            self.fail_outside();
+        }
     }
 
     /// Runs `f` on every page to fill the footer band. A later call replaces an earlier one.
     pub fn footer(&mut self, f: impl Fn(&mut Band) + 'a) {
-        self.footer = Some(Box::new(f));
+        if let Sections::Implicit(section) = &mut self.body {
+            section.footer(f);
+        } else {
+            self.fail_outside();
+        }
     }
 
     /// Runs `f` on every page to draw under everything else. A later call replaces an earlier one.
     pub fn behind(&mut self, f: impl Fn(&mut Layer) + 'a) {
-        self.behind = Some(Box::new(f));
+        if let Sections::Implicit(section) = &mut self.body {
+            section.behind(f);
+        } else {
+            self.fail_outside();
+        }
     }
 
     /// Runs `f` on every page to draw over everything else. A later call replaces an earlier one.
     pub fn front(&mut self, f: impl Fn(&mut Layer) + 'a) {
-        self.front = Some(Box::new(f));
+        if let Sections::Implicit(section) = &mut self.body {
+            section.front(f);
+        } else {
+            self.fail_outside();
+        }
+    }
+
+    /// Appends a section that starts on a new page and keeps its own margins and hooks.
+    ///
+    /// Registering a font or an image does not count as writing the document.
+    /// Fails with [`Error::ContentOutsideSection`] when the implicit section
+    /// already has body content, non-default margins, or a page hook, and when
+    /// body content, margins, or hooks are written on the document after this.
+    pub fn section(&mut self, f: impl FnOnce(&mut Section<'a>) -> Result<()>) -> Result<()> {
+        if let Some(error) = self.error.clone() {
+            return Err(error);
+        }
+        let lead_written = matches!(&self.body, Sections::Implicit(section) if section.written());
+        if lead_written {
+            let error = Error::ContentOutsideSection;
+            self.error = Some(error.clone());
+            return Err(error);
+        }
+        let style = match &self.body {
+            Sections::Implicit(section) => section.flow.style.clone(),
+            Sections::Explicit { closed, .. } => closed.style.clone(),
+        };
+        let mut section = Section::new(style, self.doc);
+        if let Err(error) = f(&mut section) {
+            self.error = Some(error.clone());
+            return Err(error);
+        }
+        if matches!(self.body, Sections::Implicit(_)) {
+            let style = section.flow.style.clone();
+            let doc = self.doc;
+            self.body = Sections::Explicit {
+                sections: vec![section],
+                closed: Flow::rejecting(style, doc),
+            };
+        } else if let Sections::Explicit { sections, .. } = &mut self.body {
+            sections.push(section);
+        }
+        Ok(())
+    }
+
+    fn fail_outside(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(Error::ContentOutsideSection);
+        }
     }
 
     fn paint(self, canvas: &mut dyn Canvas) -> Result<Painted> {
@@ -149,26 +331,42 @@ impl<'a> Document<'a> {
             page_size,
             doc,
             mut fonts,
-            margins,
             body,
-            header,
-            footer,
-            behind,
-            front,
+            error,
             #[cfg(feature = "backend-krilla")]
             images,
         } = self;
-        let style = body.style.clone();
-        let root = FlowNode::Stack(body.into_nodes()?);
-        let decorations = Decorations {
-            header: header.map(|hook| band_content(hook, style.clone())),
-            footer: footer.map(|hook| band_content(hook, style.clone())),
-            behind: behind.map(|hook| layer_content(hook, style.clone(), doc)),
-            front: front.map(|hook| layer_content(hook, style.clone(), doc)),
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let sections = match body {
+            Sections::Implicit(section) => vec![section],
+            Sections::Explicit { sections, closed } => {
+                closed.into_nodes()?;
+                sections
+            }
         };
-        let config = PaginateConfig { page_size, margins };
+        let mut configs = Vec::with_capacity(sections.len());
+        let mut roots = Vec::with_capacity(sections.len());
+        let mut decorations = Vec::with_capacity(sections.len());
+        for section in sections {
+            let (config, root, deco) = section.lower(page_size, doc)?;
+            configs.push(config);
+            roots.push(root);
+            decorations.push(deco);
+        }
+        let jobs = configs
+            .into_iter()
+            .zip(roots)
+            .zip(&decorations)
+            .map(|((config, root), decorations)| SectionJob {
+                config,
+                root,
+                decorations,
+            })
+            .collect();
         let mut ctx = LayoutCtx { fonts: &mut fonts };
-        paginate_root(root, &mut ctx, config, &decorations, canvas)?;
+        paginate_sections(jobs, &mut ctx, canvas)?;
         Ok(Painted {
             fonts,
             #[cfg(feature = "backend-krilla")]
@@ -276,13 +474,19 @@ impl Deref for Document<'_> {
     type Target = Flow;
 
     fn deref(&self) -> &Flow {
-        &self.body
+        match &self.body {
+            Sections::Implicit(section) => &section.flow,
+            Sections::Explicit { closed, .. } => closed,
+        }
     }
 }
 
 impl DerefMut for Document<'_> {
     fn deref_mut(&mut self) -> &mut Flow {
-        &mut self.body
+        match &mut self.body {
+            Sections::Implicit(section) => &mut section.flow,
+            Sections::Explicit { closed, .. } => closed,
+        }
     }
 }
 
@@ -303,6 +507,7 @@ pub struct Flow {
     doc: DocToken,
     nodes: Vec<FlowNode>,
     error: Option<Error>,
+    reject_pushes: bool,
 }
 
 impl Flow {
@@ -312,7 +517,19 @@ impl Flow {
             doc,
             nodes: Vec::new(),
             error: None,
+            reject_pushes: false,
         }
+    }
+
+    fn rejecting(style: Style, doc: DocToken) -> Self {
+        Self {
+            reject_pushes: true,
+            ..Self::new(style, doc)
+        }
+    }
+
+    fn written(&self) -> bool {
+        !self.nodes.is_empty() || self.error.is_some()
     }
 
     fn child(&self) -> Self {
@@ -321,6 +538,10 @@ impl Flow {
 
     fn push(&mut self, node: Result<FlowNode>) {
         if self.error.is_some() {
+            return;
+        }
+        if self.reject_pushes {
+            self.error = Some(Error::ContentOutsideSection);
             return;
         }
         match node {
@@ -670,7 +891,8 @@ impl List {
 
 /// Page facts a page-time closure can read.
 ///
-/// The document is one implicit section, so section counters equal document totals.
+/// Section counters are filled after pagination. With one section they match
+/// `number` and `count`, because that section's span covers the document.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct Page {
@@ -701,8 +923,8 @@ impl From<&PageInfo> for Page {
         Self {
             number: info.number.get(),
             count: info.count.get(),
-            section_number: info.number.get(),
-            section_count: info.count.get(),
+            section_number: info.section_number.get(),
+            section_count: info.section_count.get(),
             size: info.size,
             margins: info.margins,
         }
@@ -886,10 +1108,10 @@ impl Rendered {
 mod tests {
     use super::*;
     use crate::fonts::fixture_bytes;
-    use crate::geom::A4;
+    use crate::geom::PageSize;
 
     fn doc_with_font<'a>() -> Document<'a> {
-        let mut doc = Document::new(A4);
+        let mut doc = Document::new(PageSize::A4);
         doc.font(fixture_bytes().to_vec()).unwrap();
 
         doc
@@ -899,8 +1121,11 @@ mod tests {
     fn paragraph_enters_the_flow_unwrapped() {
         let mut doc = doc_with_font();
         doc.paragraph(|p| p.text("A B"));
+        let Sections::Implicit(section) = &doc.body else {
+            panic!("paragraph stays on the implicit section");
+        };
         assert!(matches!(
-            doc.body.nodes.as_slice(),
+            section.flow.nodes.as_slice(),
             [FlowNode::Text(text)] if *text == TextNode::new("A B", default_style())
         ));
     }
@@ -970,5 +1195,47 @@ mod tests {
             }
         });
         assert_fails_with_empty_canvas(doc, &Error::UnsplittableTallerThanFrame);
+    }
+
+    #[test]
+    fn section_after_paragraph_fails_before_any_page() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| p.text("A"));
+        let err = doc
+            .section(|section| {
+                section.paragraph(|p| p.text("B"));
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(err, Error::ContentOutsideSection);
+        assert_eq!(
+            err.to_string(),
+            "body or decorations written both on the document and in sections"
+        );
+        assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+    }
+
+    #[test]
+    fn paragraph_after_section_fails_before_any_page() {
+        let mut doc = doc_with_font();
+        doc.section(|section| {
+            section.paragraph(|p| p.text("A"));
+            Ok(())
+        })
+        .unwrap();
+        doc.paragraph(|p| p.text("B"));
+        assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+    }
+
+    #[test]
+    fn margins_after_section_fail_before_any_page() {
+        let mut doc = doc_with_font();
+        doc.section(|section| {
+            section.paragraph(|p| p.text("A"));
+            Ok(())
+        })
+        .unwrap();
+        doc.margins(Margins::uniform(NonNegative::pt(12.0).unwrap()));
+        assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
     }
 }

@@ -38,6 +38,8 @@ impl PageCount {
 pub(crate) struct PageInfo {
     pub(crate) number: PageNumber,
     pub(crate) count: PageCount,
+    pub(crate) section_number: PageNumber,
+    pub(crate) section_count: PageCount,
     pub(crate) size: Size,
     pub(crate) margins: Margins,
 }
@@ -88,52 +90,91 @@ pub(crate) struct PageBands {
 }
 
 /// Measures bands and layers before paint. Failure leaves the canvas untouched.
+///
+/// `spans` tile `sizes` in order. Each span supplies that section's margins,
+/// decorations, and section page counters. `number` and `count` stay document-wide.
 pub(crate) fn measure_bands(
     sizes: &[Size],
-    margins: Margins,
-    decorations: &Decorations<'_>,
+    spans: &[crate::layout::paginate::SectionSpan<'_>],
     ctx: &mut LayoutCtx<'_>,
 ) -> Result<Vec<PageBands>> {
-    let count = u32::try_from(sizes.len())
+    let count = page_count(sizes.len())?;
+    let mut covered = 0usize;
+    for span in spans {
+        if span.start != covered {
+            return Err(Error::InvalidGeometry);
+        }
+        covered = covered
+            .checked_add(usize::try_from(span.len.get()).map_err(|_| Error::InvalidGeometry)?)
+            .ok_or(Error::InvalidGeometry)?;
+    }
+    if covered != sizes.len() {
+        return Err(Error::InvalidGeometry);
+    }
+    let mut bands = Vec::with_capacity(sizes.len());
+    for span in spans {
+        let section_count = PageCount(span.len);
+        let margins = span.margins;
+        let decorations = span.decorations;
+        for offset in 0..span.len.get() {
+            let index = span
+                .start
+                .checked_add(offset as usize)
+                .ok_or(Error::InvalidGeometry)?;
+            let size = sizes.get(index).copied().ok_or(Error::InvalidGeometry)?;
+            let page = PageInfo {
+                number: PageNumber(page_index(index)?),
+                count,
+                section_number: PageNumber(page_index(offset as usize)?),
+                section_count,
+                size,
+                margins,
+            };
+            let top = margins.top().as_pt();
+            let bottom = margins.bottom().as_pt();
+            let page_h = size.height().as_pt();
+            let mut band = |content: &Option<BandContent<'_>>, y: f32, margin: f32| -> Result<_> {
+                let Some(content) = content else {
+                    return Ok(None);
+                };
+                let fragment = measure_band(ctx, content(&page)?, size, margin)?;
+                fragment
+                    .map(|fragment| {
+                        Ok(PlacedFragment {
+                            origin: Point::try_pt(0.0, y)?,
+                            fragment,
+                        })
+                    })
+                    .transpose()
+            };
+            let header = band(&decorations.header, 0.0, top)?;
+            let footer = band(&decorations.footer, page_h - bottom, bottom)?;
+            bands.push(PageBands {
+                behind: measure_layer(ctx, decorations.behind.as_ref(), &page)?,
+                header,
+                footer,
+                front: measure_layer(ctx, decorations.front.as_ref(), &page)?,
+            });
+        }
+    }
+    Ok(bands)
+}
+
+fn page_count(len: usize) -> Result<PageCount> {
+    u32::try_from(len)
         .ok()
         .and_then(NonZeroU32::new)
         .map(PageCount)
-        .ok_or(Error::InvalidGeometry)?;
-    let mut bands = Vec::with_capacity(sizes.len());
-    for (number, size) in (1u32..).zip(sizes) {
-        let page = PageInfo {
-            number: PageNumber(NonZeroU32::new(number).expect("starts at one")),
-            count,
-            size: *size,
-            margins,
-        };
-        let top = margins.top().as_pt();
-        let bottom = margins.bottom().as_pt();
-        let page_h = size.height().as_pt();
-        let mut band = |content: &Option<BandContent<'_>>, y: f32, margin: f32| -> Result<_> {
-            let Some(content) = content else {
-                return Ok(None);
-            };
-            let fragment = measure_band(ctx, content(&page)?, *size, margin)?;
-            fragment
-                .map(|fragment| {
-                    Ok(PlacedFragment {
-                        origin: Point::try_pt(0.0, y)?,
-                        fragment,
-                    })
-                })
-                .transpose()
-        };
-        let header = band(&decorations.header, 0.0, top)?;
-        let footer = band(&decorations.footer, page_h - bottom, bottom)?;
-        bands.push(PageBands {
-            behind: measure_layer(ctx, decorations.behind.as_ref(), &page)?,
-            header,
-            footer,
-            front: measure_layer(ctx, decorations.front.as_ref(), &page)?,
-        });
-    }
-    Ok(bands)
+        .ok_or(Error::InvalidGeometry)
+}
+
+/// `index` is zero-based. The result is the one-based page number.
+fn page_index(index: usize) -> Result<NonZeroU32> {
+    u32::try_from(index)
+        .ok()
+        .and_then(|value| value.checked_add(1))
+        .and_then(NonZeroU32::new)
+        .ok_or(Error::InvalidGeometry)
 }
 
 fn measure_layer(
