@@ -14,7 +14,7 @@
 | 12 flow hline | feat/hline | c89f2c4 |
 | 13 style / bold / first-line indent | feat/style-builders | 45c9a07 |
 
-Knife 13 tip stacks on `f208329` (feat/hline tip with handoff hash note). Audit under `.audit/knife-13/` (how / arena / implement-status). Feature tip `aaf14bf`; full tip recorded in the next commit.
+Knife 13 tip stacks on `f208329` (feat/hline tip with handoff hash note). Audit under `.audit/knife-13/` (how / arena / implement-status). Feature tip `aaf14bf`. Full branch tip is `git rev-parse feat/style-builders` after the tip-hash note commit.
 
 ## What callers get (knife 13)
 
