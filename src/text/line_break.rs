@@ -39,15 +39,47 @@ pub(crate) struct BrokenLine<'a> {
     record: &'a LineRecord,
 }
 
-/// Break `text` to fit `avail` using `width_of` for each non-BK cluster.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LineBudget {
+    pub(crate) first: f32,
+    pub(crate) rest: f32,
+}
+
+impl LineBudget {
+    pub(crate) const fn uniform(width: f32) -> Self {
+        Self {
+            first: width,
+            rest: width,
+        }
+    }
+
+    fn for_line(self, index: usize) -> f32 {
+        if index == 0 {
+            self.first
+        } else {
+            self.rest
+        }
+    }
+
+    fn validate(self) -> Result<()> {
+        if !self.first.is_finite()
+            || self.first <= 0.0
+            || !self.rest.is_finite()
+            || self.rest <= 0.0
+        {
+            return Err(Error::InvalidGeometry);
+        }
+        Ok(())
+    }
+}
+
+/// Break `text` to fit `budget` using `width_of` for each non-BK cluster.
 pub(crate) fn break_lines<'text>(
     text: &'text ClusteredText,
-    avail: f32,
+    budget: LineBudget,
     mut width_of: impl FnMut(Cluster<'text>) -> f32,
 ) -> Result<BrokenLines<'text>> {
-    if !avail.is_finite() || avail <= 0.0 {
-        return Err(Error::InvalidGeometry);
-    }
+    budget.validate()?;
 
     if text.is_empty() {
         let origin = ClusterCursor {
@@ -66,7 +98,7 @@ pub(crate) fn break_lines<'text>(
     }
 
     let atoms = project_atoms(text, &mut width_of)?;
-    let records = pack_lines(text, &atoms, avail)?;
+    let records = pack_lines(text, &atoms, budget)?;
     Ok(BrokenLines {
         text,
         records: records.into_boxed_slice(),
@@ -98,13 +130,14 @@ fn project_atoms<'text>(
     Ok(atoms)
 }
 
-fn pack_lines(text: &ClusteredText, atoms: &[Atom], avail: f32) -> Result<Vec<LineRecord>> {
+fn pack_lines(text: &ClusteredText, atoms: &[Atom], budget: LineBudget) -> Result<Vec<LineRecord>> {
     let mut records = Vec::new();
     let mut line_start = 0usize;
     let mut i = 0usize;
     let mut line_width = 0.0f32;
 
     while i < atoms.len() {
+        let avail = budget.for_line(records.len());
         if line_start == i {
             if let Atom::Ink {
                 pair: PairClass::Sp,
@@ -280,7 +313,7 @@ mod tests {
 
     fn break_owned(source: &str, avail: f32) -> Result<Vec<(String, f32, Range<usize>)>> {
         let text = ClusteredText::new(source);
-        let broken = break_lines(&text, avail, |cluster| {
+        let broken = break_lines(&text, LineBudget::uniform(avail), |cluster| {
             f32::from(u16::try_from(cluster.scalar_count()).expect("stub cluster scalar count"))
         })?;
         Ok(broken
@@ -430,6 +463,66 @@ mod tests {
             break_owned("A", f32::NAN),
             Err(Error::InvalidGeometry)
         ));
+    }
+
+    #[test]
+    fn first_and_rest_budgets_follow_visual_lines() {
+        let text = ClusteredText::new("你你好");
+        let broken = break_lines(
+            &text,
+            LineBudget {
+                first: 1.0,
+                rest: 2.0,
+            },
+            |_| 1.0,
+        )
+        .unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|line| line.text().to_owned())
+                .collect::<Vec<_>>(),
+            ["你", "你好"]
+        );
+
+        let hard = ClusteredText::new("你\n你好");
+        let broken = break_lines(
+            &hard,
+            LineBudget {
+                first: 1.0,
+                rest: 1.0,
+            },
+            |_| 1.0,
+        )
+        .unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|line| line.text().to_owned())
+                .collect::<Vec<_>>(),
+            ["你", "你", "好"]
+        );
+    }
+
+    #[test]
+    fn first_line_overflow_reports_the_first_budget() {
+        let text = ClusteredText::new("你");
+        let error = break_lines(
+            &text,
+            LineBudget {
+                first: 0.5,
+                rest: 10.0,
+            },
+            |_| 1.0,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            Error::UnbreakableWiderThanFrame {
+                width: 1.0,
+                avail: 0.5,
+            }
+        );
     }
 
     #[test]

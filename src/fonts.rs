@@ -63,6 +63,7 @@ pub(crate) struct ResolvedFont {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FontStore {
     faces: Vec<FontFace>,
+    bold: Option<FontId>,
 }
 
 impl FontStore {
@@ -124,6 +125,14 @@ impl FontStore {
 
     pub(crate) fn metrics(&self, id: FontId) -> Result<&FaceMetrics> {
         Ok(&self.face(id)?.metrics)
+    }
+
+    pub(crate) fn set_bold(&mut self, id: FontId) {
+        self.bold = Some(id);
+    }
+
+    pub(crate) fn bold(&self) -> Result<FontId> {
+        self.bold.ok_or(Error::UnknownFont { id: 1 })
     }
 
     pub(crate) fn face(&self, id: FontId) -> Result<&FontFace> {
@@ -219,5 +228,15 @@ mod tests {
         let store = FontStore::new();
         let err = store.metrics(FontId::from_raw(9)).unwrap_err();
         assert!(matches!(err, Error::UnknownFont { id: 9 }));
+    }
+
+    #[test]
+    fn bold_slot_rebinds_and_empty_slot_uses_conventional_id() {
+        let mut store = FontStore::new();
+        assert_eq!(store.bold().unwrap_err(), Error::UnknownFont { id: 1 });
+        store.set_bold(FontId::from_raw(2));
+        assert_eq!(store.bold().unwrap(), FontId::from_raw(2));
+        store.set_bold(FontId::from_raw(4));
+        assert_eq!(store.bold().unwrap(), FontId::from_raw(4));
     }
 }

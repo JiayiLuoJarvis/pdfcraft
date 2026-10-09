@@ -17,6 +17,12 @@ pub(crate) struct ClusteredText {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TaggedClusteredText<T> {
+    clustered: ClusteredText,
+    glyph_tags: Box<[T]>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct ClusterRecord {
     normalized_bytes: Range<usize>,
     start: ClusterCursor,
@@ -43,7 +49,11 @@ pub(crate) struct Cluster<'a> {
 impl ClusteredText {
     /// Normalize CRLF, segment graphemes, omit BK from `glyph_text`.
     pub(crate) fn new(source: &str) -> Self {
-        let normalized = normalize_line_endings(source);
+        let (normalized, _) = normalize_tagged(source.chars().map(|scalar| (scalar, ())));
+        Self::from_normalized(normalized)
+    }
+
+    fn from_normalized(normalized: String) -> Self {
         let mut glyph_text = String::new();
         let mut clusters = Vec::new();
         let mut glyph = 0usize;
@@ -108,6 +118,45 @@ impl ClusteredText {
     }
 }
 
+impl<T> TaggedClusteredText<T> {
+    pub(crate) fn clustered(&self) -> &ClusteredText {
+        &self.clustered
+    }
+
+    pub(crate) fn glyph_tags(&self) -> &[T] {
+        &self.glyph_tags
+    }
+}
+
+pub(crate) fn cluster_tagged<T: Copy, S: AsRef<str>>(
+    runs: impl IntoIterator<Item = (T, S)>,
+) -> TaggedClusteredText<T> {
+    let tagged_scalars = runs.into_iter().flat_map(|(tag, text)| {
+        text.as_ref()
+            .chars()
+            .map(move |scalar| (scalar, tag))
+            .collect::<Vec<_>>()
+    });
+    let (normalized, normalized_tags) = normalize_tagged(tagged_scalars);
+    let clustered = ClusteredText::from_normalized(normalized);
+    let mut glyph_tags = Vec::with_capacity(clustered.glyph_text().chars().count());
+    let mut tag_cursor = 0usize;
+    for index in 0..clustered.len() {
+        let cluster = clustered.cluster(index);
+        let count = cluster.scalar_count();
+        if !cluster.glyph_range().is_empty() {
+            glyph_tags.extend_from_slice(&normalized_tags[tag_cursor..tag_cursor + count]);
+        }
+        tag_cursor += count;
+    }
+    debug_assert_eq!(tag_cursor, normalized_tags.len());
+    debug_assert_eq!(glyph_tags.len(), clustered.glyph_text().chars().count());
+    TaggedClusteredText {
+        clustered,
+        glyph_tags: glyph_tags.into_boxed_slice(),
+    }
+}
+
 impl<'a> Cluster<'a> {
     pub(crate) fn as_str(&self) -> &'a str {
         let record = &self.owner.clusters[self.index];
@@ -140,21 +189,28 @@ impl<'a> Cluster<'a> {
     }
 }
 
-fn normalize_line_endings(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
+fn normalize_tagged<T: Copy>(
+    tagged_scalars: impl IntoIterator<Item = (char, T)>,
+) -> (String, Vec<T>) {
+    let mut text = String::new();
+    let mut tags = Vec::new();
+    let mut scalars = tagged_scalars.into_iter().peekable();
+    while let Some((scalar, tag)) = scalars.next() {
+        match scalar {
             '\r' => {
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
+                if matches!(scalars.peek(), Some(('\n', _))) {
+                    scalars.next();
                 }
-                out.push('\n');
+                text.push('\n');
+                tags.push(tag);
             }
-            other => out.push(other),
+            other => {
+                text.push(other);
+                tags.push(tag);
+            }
         }
     }
-    out
+    (text, tags)
 }
 
 #[cfg(test)]
@@ -179,5 +235,21 @@ mod tests {
         assert_eq!(text.cluster(0).scalar_count(), 2);
         assert_eq!(text.cluster(0).glyph_range(), 0..2);
         assert_eq!(text.glyph_text(), "e\u{0301}X");
+    }
+
+    #[test]
+    fn tagged_clusters_keep_each_scalars_source_across_run_boundaries() {
+        let text = cluster_tagged([(0, "e"), (1, "\u{0301}X")]);
+        assert_eq!(text.clustered().len(), 2);
+        assert_eq!(text.clustered().cluster(0).glyph_range(), 0..2);
+        assert_eq!(text.glyph_tags(), [0, 1, 1]);
+    }
+
+    #[test]
+    fn tagged_crlf_across_runs_is_one_bk_without_a_glyph_tag() {
+        let text = cluster_tagged([(0, "A\r"), (1, "\nB")]);
+        assert_eq!(text.clustered().normalized_text(), "A\nB");
+        assert_eq!(text.clustered().glyph_text(), "AB");
+        assert_eq!(text.glyph_tags(), [0, 1]);
     }
 }

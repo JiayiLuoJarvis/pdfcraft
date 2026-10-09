@@ -9,7 +9,7 @@ use crate::geom::Point;
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
 use crate::text::cluster::ClusteredText;
-use crate::text::line_break::break_lines;
+use crate::text::line_break::{break_lines, LineBudget};
 use crate::text::measure::{line_metrics, measure_text, MeasuredText};
 
 /// One laid-out line, coordinates relative to the paragraph fragment origin.
@@ -62,7 +62,7 @@ impl ParagraphNode {
         let clustered = ClusteredText::new(text);
         let measured = measure_text(fonts, style.font, clustered.glyph_text())?;
         let font_size = style.font_size.as_pt();
-        let broken = break_lines(&clustered, width, |cluster| {
+        let broken = break_lines(&clustered, LineBudget::uniform(width), |cluster| {
             cluster_width_pt(&measured, cluster.glyph_range(), font_size)
         })?;
         let face = fonts.metrics(style.font)?;
