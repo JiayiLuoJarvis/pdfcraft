@@ -536,6 +536,47 @@ impl Stroke {
     }
 }
 
+/// A colored stroke. Width is strictly positive, so a pen always leaves a mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct Pen {
+    color: Color,
+    stroke: Stroke,
+}
+
+impl Pen {
+    /// Stroke of `color` and `width`.
+    pub const fn new(color: Color, width: Length<Positive>) -> Self {
+        Self {
+            color,
+            stroke: Stroke::new(width),
+        }
+    }
+
+    /// Stroke color, including alpha.
+    pub const fn color(self) -> Color {
+        self.color
+    }
+
+    /// Stroke width.
+    pub const fn width(self) -> Length<Positive> {
+        self.stroke.width()
+    }
+}
+
+/// How a closed shape is painted. Every arm paints something.
+///
+/// Opacity comes from the colors' alpha. [`Ink::FillStroke`] paints the fill first, then the stroke.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ink {
+    /// Fills the shape.
+    Fill(Color),
+    /// Strokes the shape.
+    Stroke(Pen),
+    /// Fills the shape, then strokes it.
+    FillStroke(Color, Pen),
+}
+
 /// One command in a [`Path`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathVerb {
@@ -543,9 +584,21 @@ pub enum PathVerb {
     MoveTo(Point),
     /// Draws a straight segment.
     LineTo(Point),
+    /// Cubic Bézier from the current point through two control points to `to`.
+    CubicTo {
+        /// First control point.
+        c1: Point,
+        /// Second control point.
+        c2: Point,
+        /// End point.
+        to: Point,
+    },
     /// Closes the current subpath back to its most recent `MoveTo`.
     Close,
 }
+
+// 4/3 * (sqrt(2) - 1). Four cubics stay within about 0.027% of a true quarter ellipse.
+const KAPPA: f32 = 0.552_284_8;
 
 /// A non-empty path. The first verb is [`PathVerb::MoveTo`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -574,6 +627,66 @@ impl Path {
         Self::begin(from).line_to(to).finish()
     }
 
+    /// Closed rectangle. `MoveTo` the top-left, then three `LineTo` clockwise, then `Close`.
+    ///
+    /// Fails when `origin + extent` is not finite.
+    pub(crate) fn rect(rect: Rect) -> Result<Self> {
+        let x = rect.origin().x().as_pt();
+        let y = rect.origin().y().as_pt();
+        let right = x + rect.size().width().as_pt();
+        let bottom = y + rect.size().height().as_pt();
+        Ok(Self::begin(Point::try_pt(x, y)?)
+            .line_to(Point::try_pt(right, y)?)
+            .line_to(Point::try_pt(right, bottom)?)
+            .line_to(Point::try_pt(x, bottom)?)
+            .close())
+    }
+
+    /// Ellipse inscribed in `rect`.
+    ///
+    /// `MoveTo` the right-middle, then four `CubicTo` quarter arcs clockwise (y down), then `Close`.
+    /// Each control point is `KAPPA` radii off its endpoint.
+    /// Fails when a constructed point is not finite.
+    pub(crate) fn ellipse(rect: Rect) -> Result<Self> {
+        let rx = rect.size().width().as_pt() / 2.0;
+        let ry = rect.size().height().as_pt() / 2.0;
+        let cx = rect.origin().x().as_pt() + rx;
+        let cy = rect.origin().y().as_pt() + ry;
+        let kx = KAPPA * rx;
+        let ky = KAPPA * ry;
+        let right = Point::try_pt(cx + rx, cy)?;
+        let bottom = Point::try_pt(cx, cy + ry)?;
+        let left = Point::try_pt(cx - rx, cy)?;
+        let top = Point::try_pt(cx, cy - ry)?;
+        Ok(Self {
+            verbs: vec![
+                PathVerb::MoveTo(right),
+                PathVerb::CubicTo {
+                    c1: Point::try_pt(cx + rx, cy + ky)?,
+                    c2: Point::try_pt(cx + kx, cy + ry)?,
+                    to: bottom,
+                },
+                PathVerb::CubicTo {
+                    c1: Point::try_pt(cx - kx, cy + ry)?,
+                    c2: Point::try_pt(cx - rx, cy + ky)?,
+                    to: left,
+                },
+                PathVerb::CubicTo {
+                    c1: Point::try_pt(cx - rx, cy - ky)?,
+                    c2: Point::try_pt(cx - kx, cy - ry)?,
+                    to: top,
+                },
+                PathVerb::CubicTo {
+                    c1: Point::try_pt(cx + kx, cy - ry)?,
+                    c2: Point::try_pt(cx + rx, cy - ky)?,
+                    to: right,
+                },
+                PathVerb::Close,
+            ]
+            .into_boxed_slice(),
+        })
+    }
+
     /// The verbs in order. The slice is never empty and starts with `MoveTo`.
     #[must_use]
     pub fn verbs(&self) -> &[PathVerb] {
@@ -581,14 +694,38 @@ impl Path {
     }
 
     pub(crate) fn translated(&self, dx: f32, dy: f32) -> Result<Self> {
-        let shift = |p: Point| Point::try_pt(p.x().as_pt() + dx, p.y().as_pt() + dy);
+        self.map_points(|point| Point::try_pt(point.x().as_pt() + dx, point.y().as_pt() + dy))
+    }
+
+    /// Rotates every point, including control points, by `degrees` about `about`.
+    ///
+    /// Positive is clockwise on the page, matching krilla `Transform::from_rotate`.
+    /// Fails when a rotated coordinate is not finite.
+    pub(crate) fn rotated(&self, degrees: f32, about: Point) -> Result<Self> {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let ox = about.x().as_pt();
+        let oy = about.y().as_pt();
+        self.map_points(|point| {
+            let dx = point.x().as_pt() - ox;
+            let dy = point.y().as_pt() - oy;
+            // y grows downward, so this matrix is clockwise for a positive angle.
+            Point::try_pt(ox + cos * dx - sin * dy, oy + sin * dx + cos * dy)
+        })
+    }
+
+    fn map_points(&self, mut map: impl FnMut(Point) -> Result<Point>) -> Result<Self> {
         let verbs = self
             .verbs
             .iter()
             .map(|verb| {
                 Ok(match *verb {
-                    PathVerb::MoveTo(p) => PathVerb::MoveTo(shift(p)?),
-                    PathVerb::LineTo(p) => PathVerb::LineTo(shift(p)?),
+                    PathVerb::MoveTo(point) => PathVerb::MoveTo(map(point)?),
+                    PathVerb::LineTo(point) => PathVerb::LineTo(map(point)?),
+                    PathVerb::CubicTo { c1, c2, to } => PathVerb::CubicTo {
+                        c1: map(c1)?,
+                        c2: map(c2)?,
+                        to: map(to)?,
+                    },
                     PathVerb::Close => PathVerb::Close,
                 })
             })
@@ -841,5 +978,121 @@ mod tests {
             Positive::pt(0.0).unwrap_err().to_string(),
             "0 is not a positive length"
         );
+    }
+
+    fn pt(x: f32, y: f32) -> Point {
+        Point::try_pt(x, y).unwrap()
+    }
+
+    #[test]
+    fn rect_walks_clockwise_from_the_top_left() {
+        let path = Path::rect(Rect::try_pt(1.0, 2.0, 3.0, 4.0).unwrap()).unwrap();
+        assert_eq!(
+            path.verbs(),
+            &[
+                PathVerb::MoveTo(pt(1.0, 2.0)),
+                PathVerb::LineTo(pt(4.0, 2.0)),
+                PathVerb::LineTo(pt(4.0, 6.0)),
+                PathVerb::LineTo(pt(1.0, 6.0)),
+                PathVerb::Close,
+            ]
+        );
+    }
+
+    #[test]
+    fn ellipse_endpoints_and_kappa_controls_run_clockwise() {
+        let path = Path::ellipse(Rect::try_pt(0.0, 0.0, 4.0, 2.0).unwrap()).unwrap();
+        let k = 0.552_284_8_f32;
+        let (cx, cy, rx, ry) = (2.0_f32, 1.0, 2.0, 1.0);
+        let (kx, ky) = (k * rx, k * ry);
+        assert_eq!(
+            path.verbs(),
+            &[
+                PathVerb::MoveTo(pt(4.0, 1.0)),
+                PathVerb::CubicTo {
+                    c1: pt(cx + rx, cy + ky),
+                    c2: pt(cx + kx, cy + ry),
+                    to: pt(2.0, 2.0),
+                },
+                PathVerb::CubicTo {
+                    c1: pt(cx - kx, cy + ry),
+                    c2: pt(cx - rx, cy + ky),
+                    to: pt(0.0, 1.0),
+                },
+                PathVerb::CubicTo {
+                    c1: pt(cx - rx, cy - ky),
+                    c2: pt(cx - kx, cy - ry),
+                    to: pt(2.0, 0.0),
+                },
+                PathVerb::CubicTo {
+                    c1: pt(cx + kx, cy - ry),
+                    c2: pt(cx + rx, cy - ky),
+                    to: pt(4.0, 1.0),
+                },
+                PathVerb::Close,
+            ]
+        );
+    }
+
+    #[test]
+    fn rotated_quarter_turn_is_clockwise() {
+        let about = pt(10.0, 20.0);
+        let path = Path::line(pt(13.0, 20.0), pt(10.0, 24.0));
+        let turned = path.rotated(90.0, about).unwrap();
+        let [PathVerb::MoveTo(start), PathVerb::LineTo(end)] = turned.verbs() else {
+            panic!("expected a segment, got {:?}", turned.verbs());
+        };
+        assert!(crate::canvas::pt_near(start.x().as_pt(), 10.0));
+        assert!(crate::canvas::pt_near(start.y().as_pt(), 23.0));
+        assert!(crate::canvas::pt_near(end.x().as_pt(), 6.0));
+        assert!(crate::canvas::pt_near(end.y().as_pt(), 20.0));
+
+        let ellipse = Path::ellipse(Rect::try_pt(0.0, 0.0, 4.0, 2.0).unwrap()).unwrap();
+        let spun = ellipse.rotated(90.0, pt(2.0, 1.0)).unwrap();
+        let PathVerb::MoveTo(right) = spun.verbs()[0] else {
+            panic!("expected move");
+        };
+        assert!(crate::canvas::pt_near(right.x().as_pt(), 2.0));
+        assert!(crate::canvas::pt_near(right.y().as_pt(), 3.0));
+        let PathVerb::CubicTo { c1, .. } = spun.verbs()[1] else {
+            panic!("expected cubic");
+        };
+        let ky = 0.552_284_8_f32;
+        assert!(crate::canvas::pt_near(c1.x().as_pt(), 2.0 - ky));
+        assert!(crate::canvas::pt_near(c1.y().as_pt(), 3.0));
+    }
+
+    #[test]
+    fn translated_shifts_cubic_controls() {
+        let path = Path::ellipse(Rect::try_pt(0.0, 0.0, 4.0, 2.0).unwrap()).unwrap();
+        let shifted = path.translated(5.0, 6.0).unwrap();
+        for (before, after) in path.verbs().iter().zip(shifted.verbs()) {
+            match (before, after) {
+                (PathVerb::Close, PathVerb::Close) => {}
+                (PathVerb::MoveTo(from), PathVerb::MoveTo(to))
+                | (PathVerb::LineTo(from), PathVerb::LineTo(to)) => {
+                    assert_eq!(to.x().as_pt().to_bits(), (from.x().as_pt() + 5.0).to_bits());
+                    assert_eq!(to.y().as_pt().to_bits(), (from.y().as_pt() + 6.0).to_bits());
+                }
+                (
+                    PathVerb::CubicTo {
+                        c1: a1,
+                        c2: a2,
+                        to: a3,
+                    },
+                    PathVerb::CubicTo {
+                        c1: b1,
+                        c2: b2,
+                        to: b3,
+                    },
+                ) => {
+                    for (from, to) in [(a1, b1), (a2, b2), (a3, b3)] {
+                        assert_eq!(to.x().as_pt().to_bits(), (from.x().as_pt() + 5.0).to_bits());
+                        assert_eq!(to.y().as_pt().to_bits(), (from.y().as_pt() + 6.0).to_bits());
+                    }
+                }
+                _ => panic!("verb shape changed"),
+            }
+        }
     }
 }

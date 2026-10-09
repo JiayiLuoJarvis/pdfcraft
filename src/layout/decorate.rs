@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 
 use crate::error::{Error, Result};
-use crate::geom::{Margins, Point, Size};
+use crate::geom::{Ink, Margins, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::{
     FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
 };
@@ -62,6 +62,11 @@ pub(crate) enum LayerItem {
     Image {
         image: crate::canvas::DecodedImage,
         rect: crate::geom::Rect,
+    },
+    /// Final page-coordinate geometry. Ellipse arcs and rotation are already baked in.
+    Shape {
+        path: Path,
+        ink: Ink,
     },
 }
 
@@ -203,6 +208,28 @@ fn measure_layer(
             LayerItem::Image { image, rect } => {
                 commands.push(FragmentCommand::Image { image, rect });
             }
+            LayerItem::Shape { path, ink } => match ink {
+                Ink::Fill(color) => commands.push(FragmentCommand::Fill {
+                    path,
+                    paint: Paint::solid(color),
+                }),
+                Ink::Stroke(pen) => commands.push(FragmentCommand::Stroke {
+                    path,
+                    paint: Paint::solid(pen.color()),
+                    stroke: Stroke::new(pen.width()),
+                }),
+                Ink::FillStroke(color, pen) => {
+                    commands.push(FragmentCommand::Fill {
+                        path: path.clone(),
+                        paint: Paint::solid(color),
+                    });
+                    commands.push(FragmentCommand::Stroke {
+                        path,
+                        paint: Paint::solid(pen.color()),
+                        stroke: Stroke::new(pen.width()),
+                    });
+                }
+            },
         }
     }
     if commands.is_empty() {
@@ -250,12 +277,14 @@ fn measure_band(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::NonNegative;
+    use crate::canvas::CanvasCommand;
+    use crate::geom::{Color, Ink, NonNegative, Path, Pen, Positive, Rect};
     use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
     use crate::layout::paginate::PaginateConfig;
     use crate::layout::table::{TableNode, TableSpec};
     use crate::layout::test_util::{
-        bits, fonts_and_style, metrics, page, pt, render, runs, text, texts,
+        bits, ellipse_center_radii, fills, fonts_and_style, metrics, page, pt, render, runs, text,
+        texts,
     };
 
     fn band(label: &'static str, style: &Style) -> BandContent<'static> {
@@ -639,5 +668,85 @@ mod tests {
             })
         ));
         assert!(rec.commands().is_empty());
+    }
+
+    #[test]
+    fn path_behind_paints_before_header_glyphs() {
+        let (mut fonts, style) = fonts_and_style();
+        let path = Path::line(
+            Point::try_pt(0.0, 0.0).unwrap(),
+            Point::try_pt(40.0, 10.0).unwrap(),
+        );
+        let decorations = Decorations {
+            header: Some(band("H", &style)),
+            behind: Some(Box::new(move |_: &PageInfo| {
+                Ok(vec![LayerItem::Shape {
+                    path: path.clone(),
+                    ink: Ink::Stroke(Pen::new(Color::rgb(1, 2, 3), Positive::pt(1.5).unwrap())),
+                }])
+            })),
+            ..Decorations::none()
+        };
+        let (result, rec) = render(
+            text("A", &style),
+            &mut fonts,
+            margins(30.0, 20.0, 30.0),
+            &decorations,
+        );
+        result.unwrap();
+        let pages = rec.pages();
+        let ops = pages[0].ops();
+        assert!(matches!(ops[0], CanvasCommand::StrokePath { .. }));
+        assert!(matches!(ops[1], CanvasCommand::DrawGlyphRun { .. }));
+        assert_eq!(texts(&pages[0])[0], "H");
+    }
+
+    #[test]
+    fn fill_stroke_paints_fill_then_stroke() {
+        let (mut fonts, style) = fonts_and_style();
+        let rect = Rect::try_pt(10.0, 20.0, 40.0, 20.0).unwrap();
+        let path = Path::ellipse(rect).unwrap();
+        let decorations = Decorations {
+            behind: Some(Box::new(move |_: &PageInfo| {
+                Ok(vec![LayerItem::Shape {
+                    path: path.clone(),
+                    ink: Ink::FillStroke(
+                        Color::rgba(9, 8, 7, 40),
+                        Pen::new(Color::rgb(1, 2, 3), Positive::pt(2.0).unwrap()),
+                    ),
+                }])
+            })),
+            ..Decorations::none()
+        };
+        let (result, rec) = render(
+            text("A", &style),
+            &mut fonts,
+            page(200.0, 400.0),
+            &decorations,
+        );
+        result.unwrap();
+        let pages = rec.pages();
+        let ops = pages[0].ops();
+        let CanvasCommand::FillPath {
+            path: filled,
+            paint,
+        } = &ops[0]
+        else {
+            panic!("expected fill first, got {:?}", ops[0]);
+        };
+        let CanvasCommand::StrokePath {
+            path: stroked,
+            paint: stroke_paint,
+            stroke,
+        } = &ops[1]
+        else {
+            panic!("expected stroke second, got {:?}", ops[1]);
+        };
+        assert_eq!(filled, stroked);
+        assert_eq!(paint.color(), Color::rgba(9, 8, 7, 40));
+        assert_eq!(stroke_paint.color(), Color::rgb(1, 2, 3));
+        assert_eq!(stroke.width().as_pt().to_bits(), 2.0f32.to_bits());
+        assert_eq!(ellipse_center_radii(filled), Some((30.0, 30.0, 20.0, 10.0)));
+        assert_eq!(fills(&pages[0]).len(), 1);
     }
 }

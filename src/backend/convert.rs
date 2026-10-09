@@ -43,6 +43,16 @@ pub(crate) fn to_krilla_path(path: &Path) -> Result<krilla::geom::Path> {
             PathVerb::LineTo(point) => {
                 builder.line_to(point.x().as_pt(), point.y().as_pt());
             }
+            PathVerb::CubicTo { c1, c2, to } => {
+                builder.cubic_to(
+                    c1.x().as_pt(),
+                    c1.y().as_pt(),
+                    c2.x().as_pt(),
+                    c2.y().as_pt(),
+                    to.x().as_pt(),
+                    to.y().as_pt(),
+                );
+            }
             PathVerb::Close => builder.close(),
         }
     }
@@ -75,7 +85,7 @@ pub(crate) fn to_stroke(paint: Paint, stroke: Stroke) -> Result<KStroke> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::Positive;
+    use crate::geom::{Positive, Rect};
 
     #[test]
     fn to_krilla_point_is_identity() {
@@ -107,6 +117,12 @@ mod tests {
     fn lone_move_to_path_is_invalid_geometry() {
         let path = Path::begin(Point::try_pt(5.0, 5.0).unwrap()).finish();
         assert!(matches!(to_krilla_path(&path), Err(Error::InvalidGeometry)));
+    }
+
+    #[test]
+    fn ellipse_cubics_convert() {
+        let path = Path::ellipse(Rect::try_pt(1.0, 2.0, 8.0, 6.0).unwrap()).unwrap();
+        assert!(to_krilla_path(&path).is_ok());
     }
 
     #[test]

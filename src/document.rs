@@ -12,7 +12,9 @@ use std::sync::Arc;
 use crate::canvas::{Canvas, DecodedImage, ImageFormat, RecordedPage, RecordingCanvas};
 use crate::error::{Error, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
-use crate::geom::{Color, Length, Margins, NonNegative, PageSize, Point, Positive, Rect, Size};
+use crate::geom::{
+    Color, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect, Size,
+};
 use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio};
 use crate::layout::decorate::{
     BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
@@ -1058,6 +1060,99 @@ impl Layer {
             rect,
         });
     }
+
+    /// Straight segment in page coordinates. `from == to` fails the document with
+    /// [`Error::InvalidGeometry`] before any page is drawn.
+    pub fn line(&mut self, from: Point, to: Point, pen: Pen) {
+        self.push_shape(straight_path(from, to), Ink::Stroke(pen), None);
+    }
+
+    /// Rectangle in page coordinates. Not inset by margins and not clipped.
+    pub fn rect(&mut self, rect: Rect, ink: Ink) {
+        self.push_shape(Path::rect(rect), ink, None);
+    }
+
+    /// Ellipse inscribed in `rect`, in page coordinates.
+    pub fn ellipse(&mut self, rect: Rect, ink: Ink) {
+        self.push_shape(Path::ellipse(rect), ink, None);
+    }
+
+    /// Draws the shapes added in `draw` rotated by `degrees` about `about`.
+    ///
+    /// Positive is clockwise on the page. A non-finite angle fails the document with
+    /// [`Error::InvalidGeometry`] and does not run `draw`. Shapes keep their order relative
+    /// to the layer's other items.
+    pub fn rotated(&mut self, degrees: f32, about: Point, draw: impl FnOnce(&mut Shapes<'_>)) {
+        if !degrees.is_finite() {
+            if self.error.is_none() {
+                self.error = Some(Error::InvalidGeometry);
+            }
+            return;
+        }
+        let mut shapes = Shapes {
+            layer: self,
+            degrees,
+            about,
+        };
+        draw(&mut shapes);
+    }
+
+    fn push_shape(&mut self, path: Result<Path>, ink: Ink, turn: Option<(f32, Point)>) {
+        let path = path.and_then(|path| match turn {
+            Some((degrees, about)) if !is_zero_angle(degrees) => path.rotated(degrees, about),
+            _ => Ok(path),
+        });
+        match path {
+            Ok(path) => self.items.push(LayerItem::Shape { path, ink }),
+            Err(error) => {
+                if self.error.is_none() {
+                    self.error = Some(error);
+                }
+            }
+        }
+    }
+}
+
+/// Path-only view of a [`Layer`] inside [`Layer::rotated`].
+pub struct Shapes<'l> {
+    layer: &'l mut Layer,
+    degrees: f32,
+    about: Point,
+}
+
+impl Shapes<'_> {
+    /// Straight segment. See [`Layer::line`].
+    pub fn line(&mut self, from: Point, to: Point, pen: Pen) {
+        self.layer.push_shape(
+            straight_path(from, to),
+            Ink::Stroke(pen),
+            Some((self.degrees, self.about)),
+        );
+    }
+
+    /// Rectangle. See [`Layer::rect`].
+    pub fn rect(&mut self, rect: Rect, ink: Ink) {
+        self.layer
+            .push_shape(Path::rect(rect), ink, Some((self.degrees, self.about)));
+    }
+
+    /// Ellipse inscribed in `rect`. See [`Layer::ellipse`].
+    pub fn ellipse(&mut self, rect: Rect, ink: Ink) {
+        self.layer
+            .push_shape(Path::ellipse(rect), ink, Some((self.degrees, self.about)));
+    }
+}
+
+fn straight_path(from: Point, to: Point) -> Result<Path> {
+    if from == to {
+        Err(Error::InvalidGeometry)
+    } else {
+        Ok(Path::line(from, to))
+    }
+}
+
+fn is_zero_angle(degrees: f32) -> bool {
+    degrees.to_bits() == 0 || degrees.to_bits() == (-0.0f32).to_bits()
 }
 
 fn layer_content(hook: LayerHook<'_>, style: Style, doc: DocToken) -> LayerContent<'_> {
@@ -1152,6 +1247,34 @@ mod tests {
                 scalar: MISSING,
             },
         );
+    }
+
+    #[test]
+    fn degenerate_layer_line_fails_before_any_page() {
+        let mut doc = Document::new(PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()));
+        let point = Point::try_pt(4.0, 5.0).unwrap();
+        let pen = Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap());
+        doc.behind(|layer| {
+            layer.line(point, point, pen);
+            layer.rect(
+                Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
+                Ink::Fill(Color::rgb(0, 0, 0)),
+            );
+        });
+        assert_fails_with_empty_canvas(doc, &Error::InvalidGeometry);
+    }
+
+    #[test]
+    fn non_finite_rotation_does_not_draw() {
+        use std::cell::Cell;
+
+        let ran = Cell::new(false);
+        let mut doc = Document::new(PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()));
+        doc.behind(|layer| {
+            layer.rotated(f32::NAN, Point::ZERO, |_| ran.set(true));
+        });
+        assert_fails_with_empty_canvas(doc, &Error::InvalidGeometry);
+        assert!(!ran.get());
     }
 
     #[test]

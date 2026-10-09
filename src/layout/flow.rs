@@ -66,7 +66,9 @@ impl Fragment {
                     run.origin =
                         Point::try_pt(run.origin.x().as_pt() + dx, run.origin.y().as_pt() + dy)?;
                 }
-                FragmentCommand::Stroke { path, .. } => *path = path.translated(dx, dy)?,
+                FragmentCommand::Fill { path, .. } | FragmentCommand::Stroke { path, .. } => {
+                    *path = path.translated(dx, dy)?;
+                }
                 FragmentCommand::Image { rect, .. } => *rect = rect.translated(dx, dy)?,
             }
         }
@@ -77,6 +79,10 @@ impl Fragment {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum FragmentCommand {
     Glyphs(GlyphRun),
+    Fill {
+        path: Path,
+        paint: Paint,
+    },
     Stroke {
         path: Path,
         paint: Paint,
@@ -349,6 +355,9 @@ pub(crate) fn draw_fragment(
                 placed.origin =
                     Point::try_pt(ox + run.origin.x().as_pt(), oy + run.origin.y().as_pt())?;
                 canvas.draw_glyph_run(&placed)?;
+            }
+            FragmentCommand::Fill { path, paint } => {
+                canvas.fill_path(&path.translated(ox, oy)?, paint)?;
             }
             FragmentCommand::Stroke {
                 path,

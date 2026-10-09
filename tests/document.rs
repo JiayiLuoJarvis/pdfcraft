@@ -2,12 +2,13 @@
 
 use std::num::NonZeroU16;
 
-use quire_pdf::{
-    document, pt_near, CanvasCommand, Cell, Error, Flow, ImageFormat, Margins, NonNegative,
-    Numbering, PageSize, Point, RecordedPage, Rendered, Result, Size, A4,
-};
 #[cfg(feature = "backend-krilla")]
-use quire_pdf::{Paper, Positive, Rect};
+use quire_pdf::Paper;
+use quire_pdf::{
+    document, pt_near, CanvasCommand, Cell, Color, Error, Flow, ImageFormat, Ink, Margins,
+    NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect,
+    Rendered, Result, Size, A4,
+};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
@@ -787,4 +788,220 @@ fn two_sections_on_different_paper_write_a_pdf() {
     assert_eq!(pages[0].size(), A4);
     assert_eq!(pages[1].size(), Paper::Letter.landscape().resolve());
     assert!(rendered.to_pdf().unwrap().starts_with(b"%PDF"));
+}
+
+/// `(cx, cy, rx, ry)` from a four-cubic ellipse's endpoints.
+fn ellipse_center_radii(path: &Path) -> Option<(f32, f32, f32, f32)> {
+    let [PathVerb::MoveTo(right), PathVerb::CubicTo { to: bottom, .. }, PathVerb::CubicTo { to: left, .. }, PathVerb::CubicTo { to: top, .. }, PathVerb::CubicTo { .. }, PathVerb::Close] =
+        path.verbs()
+    else {
+        return None;
+    };
+    Some((
+        f32::midpoint(right.x().as_pt(), left.x().as_pt()),
+        f32::midpoint(bottom.y().as_pt(), top.y().as_pt()),
+        (right.x().as_pt() - left.x().as_pt()) * 0.5,
+        (bottom.y().as_pt() - top.y().as_pt()) * 0.5,
+    ))
+}
+
+fn painted_layer_paths() -> Rendered {
+    document(
+        PageSize::custom(Size::try_pt(200.0, 160.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.margins(Margins::uniform(NonNegative::pt(20.0)?));
+            doc.header(|header| header.left("H"));
+            doc.paragraph(|p| p.text("A"));
+            doc.behind(|layer| {
+                layer.line(
+                    Point::try_pt(0.0, 0.0).unwrap(),
+                    Point::try_pt(40.0, 40.0).unwrap(),
+                    Pen::new(Color::rgba(200, 0, 0, 64), Positive::pt(0.8).unwrap()),
+                );
+                layer.rect(
+                    Rect::try_pt(4.0, 6.0, 10.0, 12.0).unwrap(),
+                    Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), Positive::pt(0.5).unwrap())),
+                );
+            });
+            doc.front(|layer| {
+                layer.text_at("SEAL", Point::try_pt(12.0, 30.0).unwrap());
+                layer.ellipse(
+                    Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
+                    Ink::FillStroke(
+                        Color::rgba(200, 0, 0, 40),
+                        Pen::new(Color::rgb(200, 0, 0), Positive::pt(2.0).unwrap()),
+                    ),
+                );
+                layer.rotated(90.0, Point::try_pt(10.0, 12.0).unwrap(), |shapes| {
+                    shapes.rect(
+                        Rect::try_pt(10.0, 12.0, 20.0, 8.0).unwrap(),
+                        Ink::Fill(Color::rgba(0, 0, 255, 128)),
+                    );
+                });
+                layer.rotated(0.0, Point::ZERO, |shapes| {
+                    shapes.line(
+                        Point::try_pt(1.0, 2.0).unwrap(),
+                        Point::try_pt(8.0, 9.0).unwrap(),
+                        Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap()),
+                    );
+                });
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn layer_paths_keep_stack_order_and_bake_rotation() {
+    let rendered = painted_layer_paths();
+    let pages = rendered.pages();
+    let page = &pages[0];
+    let ops = page.ops();
+    assert!(matches!(ops[0], CanvasCommand::StrokePath { .. }));
+    assert!(matches!(ops[1], CanvasCommand::StrokePath { .. }));
+    assert!(matches!(ops[2], CanvasCommand::DrawGlyphRun { .. }));
+    assert!(matches!(ops[3], CanvasCommand::DrawGlyphRun { .. }));
+    assert!(matches!(ops[4], CanvasCommand::DrawGlyphRun { .. }));
+    assert!(matches!(ops[5], CanvasCommand::FillPath { .. }));
+    assert!(matches!(ops[6], CanvasCommand::StrokePath { .. }));
+    assert!(matches!(ops[7], CanvasCommand::FillPath { .. }));
+    assert!(matches!(ops[8], CanvasCommand::StrokePath { .. }));
+    assert_eq!(texts(page), ["H", "A", "SEAL"]);
+    assert_behind_paths(ops);
+    assert_front_paths(page, ops);
+}
+
+fn assert_behind_paths(ops: &[CanvasCommand]) {
+    let CanvasCommand::StrokePath {
+        path,
+        paint,
+        stroke,
+    } = &ops[0]
+    else {
+        unreachable!();
+    };
+    assert_eq!(paint.color(), Color::rgba(200, 0, 0, 64));
+    assert_eq!(stroke.width().as_pt().to_bits(), 0.8f32.to_bits());
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 0.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(40.0, 40.0).unwrap()),
+        ]
+    );
+    let CanvasCommand::StrokePath {
+        path: frame,
+        paint: frame_paint,
+        stroke: frame_stroke,
+    } = &ops[1]
+    else {
+        unreachable!();
+    };
+    assert_eq!(frame_paint.color(), Color::rgb(0, 0, 0));
+    assert_eq!(frame_stroke.width().as_pt().to_bits(), 0.5f32.to_bits());
+    assert_eq!(
+        frame.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(4.0, 6.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(14.0, 6.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(14.0, 18.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(4.0, 18.0).unwrap()),
+            PathVerb::Close,
+        ]
+    );
+}
+
+fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
+    let CanvasCommand::FillPath {
+        path: filled,
+        paint: fill_paint,
+    } = &ops[5]
+    else {
+        unreachable!();
+    };
+    let CanvasCommand::StrokePath {
+        path: stroked,
+        paint: stroke_paint,
+        stroke: ellipse_stroke,
+    } = &ops[6]
+    else {
+        unreachable!();
+    };
+    assert_eq!(filled, stroked);
+    assert_eq!(fill_paint.color(), Color::rgba(200, 0, 0, 40));
+    assert_eq!(stroke_paint.color(), Color::rgb(200, 0, 0));
+    assert_eq!(ellipse_stroke.width().as_pt().to_bits(), 2.0f32.to_bits());
+    let (cx, cy, rx, ry) = ellipse_center_radii(filled).unwrap();
+    assert_eq!(cx.to_bits(), 50.0f32.to_bits());
+    assert_eq!(cy.to_bits(), 55.0f32.to_bits());
+    assert_eq!(rx.to_bits(), 10.0f32.to_bits());
+    assert_eq!(ry.to_bits(), 5.0f32.to_bits());
+
+    let CanvasCommand::FillPath {
+        path: turned,
+        paint: turned_paint,
+    } = &ops[7]
+    else {
+        unreachable!();
+    };
+    assert_eq!(turned_paint.color(), Color::rgba(0, 0, 255, 128));
+    let points: Vec<(f32, f32)> = turned
+        .verbs()
+        .iter()
+        .filter_map(|verb| match verb {
+            PathVerb::MoveTo(point) | PathVerb::LineTo(point) => {
+                Some((point.x().as_pt(), point.y().as_pt()))
+            }
+            PathVerb::Close => None,
+            PathVerb::CubicTo { .. } => panic!("rotated rect stays lines"),
+        })
+        .collect();
+    for (got, expected) in points
+        .iter()
+        .zip([(10.0, 12.0), (10.0, 32.0), (2.0, 32.0), (2.0, 12.0)])
+    {
+        assert!(pt_near(got.0, expected.0));
+        assert!(pt_near(got.1, expected.1));
+    }
+
+    let CanvasCommand::StrokePath { path: flat, .. } = &ops[8] else {
+        unreachable!();
+    };
+    assert_eq!(
+        flat.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(1.0, 2.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(8.0, 9.0).unwrap()),
+        ]
+    );
+    let seal = runs(page)
+        .into_iter()
+        .find(|run| run.text == "SEAL")
+        .unwrap();
+    assert!(pt_near(seal.x, 12.0));
+    assert!(pt_near(seal.y, 30.0 + BASELINE));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn layer_paths_write_a_pdf() {
+    let pdf = document(PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()), |doc| {
+        doc.behind(|layer| {
+            layer.rect(
+                Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
+                Ink::Fill(Color::rgba(0, 0, 0, 128)),
+            );
+            layer.ellipse(
+                Rect::try_pt(30.0, 30.0, 16.0, 12.0).unwrap(),
+                Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap())),
+            );
+        });
+        Ok(())
+    })
+    .unwrap()
+    .to_pdf()
+    .unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
 }

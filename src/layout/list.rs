@@ -258,7 +258,9 @@ fn partial(commands: Vec<FragmentCommand>, y: f32, rest: ListNode) -> Split {
 fn first_baseline(fragment: &Fragment) -> Option<f32> {
     fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Glyphs(run) => Some(run.origin.y().as_pt()),
-        FragmentCommand::Stroke { .. } | FragmentCommand::Image { .. } => None,
+        FragmentCommand::Fill { .. }
+        | FragmentCommand::Stroke { .. }
+        | FragmentCommand::Image { .. } => None,
     })
 }
 
