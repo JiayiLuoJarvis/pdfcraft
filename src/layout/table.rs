@@ -657,6 +657,19 @@ mod tests {
     }
 
     #[test]
+    fn cell_allows_hline() {
+        let line = crate::layout::hline::HLineNode::new(
+            None,
+            crate::layout::style::TextAlign::Center,
+            Positive::pt(1.0).unwrap(),
+            Color::rgb(0, 0, 0),
+            NonNegative::ZERO,
+            NonNegative::ZERO,
+        );
+        Cell::new(vec![FlowNode::HLine(line)]).unwrap();
+    }
+
+    #[test]
     fn overlapping_spans_are_rejected() {
         let (_, style) = fonts_and_style();
         let (c1, r2) = span(1, 2);

@@ -30,7 +30,10 @@ impl Container {
 pub(crate) fn check_content(container: Container, nodes: &[FlowNode]) -> Result<()> {
     for node in nodes {
         let allowed = match node {
-            FlowNode::Text(_) | FlowNode::Paragraph(_) | FlowNode::Spacer(_) => true,
+            FlowNode::Text(_)
+            | FlowNode::Paragraph(_)
+            | FlowNode::Spacer(_)
+            | FlowNode::HLine(_) => true,
             FlowNode::Stack(kids) => {
                 check_content(container, kids)?;
                 true
@@ -75,6 +78,7 @@ fn node_name(node: &FlowNode) -> &'static str {
         FlowNode::Table(_) => "table",
         FlowNode::List(_) => "list",
         FlowNode::Image(_) => "image",
+        FlowNode::HLine(_) => "horizontal line",
     }
 }
 

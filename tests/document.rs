@@ -7,7 +7,7 @@ use quire_pdf::Paper;
 use quire_pdf::{
     document, pt_near, CanvasCommand, Cell, Color, Error, Flow, ImageFormat, Ink, Margins,
     NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect,
-    Rendered, Result, Size, A4,
+    Rendered, Result, Size, Stroke, A4,
 };
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
@@ -998,6 +998,119 @@ fn layer_paths_write_a_pdf() {
                 Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap())),
             );
         });
+        Ok(())
+    })
+    .unwrap()
+    .to_pdf()
+    .unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+}
+
+#[test]
+fn hline_moves_whole_and_pins_stroke() {
+    let thick = Positive::pt(2.0).unwrap();
+    let gap = NonNegative::pt(4.0).unwrap();
+    let pages = document(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        |doc| {
+            doc.spacer(NonNegative::pt(31.0)?);
+            doc.hline(|h| {
+                h.thickness(thick);
+                h.space_before(gap);
+                h.space_after(gap);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert!(pages[0]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+    let CanvasCommand::StrokePath {
+        path,
+        paint,
+        stroke,
+    } = &pages[1].ops()[0]
+    else {
+        panic!("expected stroke on page 2");
+    };
+    assert_eq!(paint.color(), Color::rgb(0, 0, 0));
+    assert_eq!(*stroke, Stroke::new(thick));
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 5.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 5.0).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn hline_taller_than_body_fails_before_any_page() {
+    let gap = NonNegative::pt(12.0).unwrap();
+    let result = document(
+        PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
+        |doc| {
+            doc.hline(|h| {
+                h.space_before(gap);
+                h.space_after(gap);
+            });
+            Ok(())
+        },
+    );
+    assert_eq!(result.err(), Some(Error::UnsplittableTallerThanFrame));
+}
+
+#[test]
+fn hline_in_list_item_and_cell() {
+    let width = Positive::pt(40.0).unwrap();
+    let page = &document(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.ul(|list| {
+                list.item(|item| {
+                    item.hline(|h| {
+                        h.width(width);
+                        h.start();
+                    });
+                });
+            });
+            doc.table(|t| {
+                t.row([Cell::hline(|h| h.color(Color::rgb(9, 9, 9)))]);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages()[0];
+    let strokes: Vec<_> = page
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, CanvasCommand::StrokePath { .. }))
+        .collect();
+    assert!(strokes.len() >= 2);
+    let CanvasCommand::StrokePath { path, .. } = strokes[0] else {
+        panic!("list hline");
+    };
+    // Marker column is 18 pt; body starts at x=18. Start-aligned short line.
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(18.0, 0.5).unwrap()),
+            PathVerb::LineTo(Point::try_pt(58.0, 0.5).unwrap()),
+        ]
+    );
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn hline_writes_a_pdf() {
+    let pdf = document(PageSize::A4, |doc| {
+        doc.hline(|_| {});
         Ok(())
     })
     .unwrap()

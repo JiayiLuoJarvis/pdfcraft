@@ -267,6 +267,7 @@ fn first_baseline(fragment: &Fragment) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::{Color, NonNegative};
     use crate::layout::columns::ColumnWidth;
     use crate::layout::decorate::Decorations;
     use crate::layout::table::{TableNode, TableSpec};
@@ -521,5 +522,18 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn item_allows_hline() {
+        let line = crate::layout::hline::HLineNode::new(
+            None,
+            crate::layout::style::TextAlign::Center,
+            Positive::pt(1.0).unwrap(),
+            Color::rgb(0, 0, 0),
+            NonNegative::ZERO,
+            NonNegative::ZERO,
+        );
+        ListItem::new(vec![FlowNode::HLine(line)]).unwrap();
     }
 }

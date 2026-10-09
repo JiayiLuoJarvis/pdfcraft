@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 use crate::fonts::FontStore;
 use crate::geom::{Length, NonNegative, Paint, Path, Point, Rect, Stroke};
 use crate::layout::columns::ColumnsNode;
+use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::ListNode;
 use crate::layout::paragraph::{ParagraphNode, TextNode};
@@ -147,6 +148,7 @@ pub(crate) enum FlowNode {
     Table(TableNode),
     List(ListNode),
     Image(ImageNode),
+    HLine(HLineNode),
 }
 
 impl FlowNode {
@@ -163,6 +165,7 @@ impl FlowNode {
             FlowNode::Table(node) => node.split(ctx, avail),
             FlowNode::List(node) => node.split(ctx, avail),
             FlowNode::Image(node) => node.split(avail),
+            FlowNode::HLine(node) => node.split(avail),
         }
     }
 }

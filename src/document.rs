@@ -20,6 +20,7 @@ use crate::layout::decorate::{
     BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
 };
 use crate::layout::flow::{FlowNode, KeepTogetherNode, LayoutCtx, SpacerNode};
+use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
 use crate::layout::paginate::{paginate_sections, PaginateConfig, SectionJob};
@@ -472,6 +473,83 @@ impl ImageBox {
     }
 }
 
+/// A solid horizontal line in the flow, cell, or list item it is added to.
+///
+/// Defaults: full width of the current frame, centered when shorter, 1 pt thick,
+/// black, no space above or below. The line never splits; it moves to the next
+/// page whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct HLine {
+    width: Option<Length<Positive>>,
+    align: TextAlign,
+    thickness: Length<Positive>,
+    color: Color,
+    space_before: Length<NonNegative>,
+    space_after: Length<NonNegative>,
+}
+
+impl Default for HLine {
+    fn default() -> Self {
+        Self {
+            width: None,
+            align: TextAlign::Center,
+            thickness: Positive::pt(1.0).expect("1 pt is positive"),
+            color: Color::rgb(0, 0, 0),
+            space_before: NonNegative::ZERO,
+            space_after: NonNegative::ZERO,
+        }
+    }
+}
+
+impl HLine {
+    /// Sets the line length. Longer than the frame is an error when laid out.
+    pub fn width(&mut self, width: Length<Positive>) {
+        self.width = Some(width);
+    }
+
+    /// Line thickness.
+    pub fn thickness(&mut self, thickness: Length<Positive>) {
+        self.thickness = thickness;
+    }
+
+    /// Line color, including alpha.
+    pub fn color(&mut self, color: Color) {
+        self.color = color;
+    }
+
+    /// Blank space above the line. Counts toward the line's height.
+    pub fn space_before(&mut self, space: Length<NonNegative>) {
+        self.space_before = space;
+    }
+
+    /// Blank space below the line. Counts toward the line's height.
+    pub fn space_after(&mut self, space: Length<NonNegative>) {
+        self.space_after = space;
+    }
+
+    /// Places a shorter line at the start of the frame.
+    pub fn start(&mut self) {
+        self.align = TextAlign::Start;
+    }
+
+    /// Places a shorter line at the end of the frame.
+    pub fn end(&mut self) {
+        self.align = TextAlign::End;
+    }
+
+    fn lower(self) -> FlowNode {
+        FlowNode::HLine(HLineNode::new(
+            self.width,
+            self.align,
+            self.thickness,
+            self.color,
+            self.space_before,
+            self.space_after,
+        ))
+    }
+}
+
 impl Deref for Document<'_> {
     type Target = Flow;
 
@@ -624,6 +702,15 @@ impl Flow {
         self.push(Ok(FlowNode::Spacer(SpacerNode { height })));
     }
 
+    /// Appends a horizontal line that moves to the next page whole instead of splitting.
+    ///
+    /// Longer than the frame, or taller than the page body, is an error. The line never shrinks.
+    pub fn hline(&mut self, f: impl FnOnce(&mut HLine)) {
+        let mut line = HLine::default();
+        f(&mut line);
+        self.push(Ok(line.lower()));
+    }
+
     /// Starts the next content on a new page. Only allowed in the body.
     pub fn page_break(&mut self) {
         self.push(Ok(FlowNode::PageBreak));
@@ -753,6 +840,7 @@ impl Table {
                                 CellContent::Image(image, image_box) => {
                                     vec![image_box.lower(&image, flow.doc)?]
                                 }
+                                CellContent::HLine(line) => vec![line.lower()],
                             };
                             Ok(table::Cell::new(content)?.with_span(cell.col_span, cell.row_span))
                         })
@@ -783,6 +871,7 @@ pub struct Cell {
 enum CellContent {
     Text(String),
     Image(Image, ImageBox),
+    HLine(HLine),
 }
 
 impl Cell {
@@ -801,6 +890,17 @@ impl Cell {
         f(&mut image_box);
         Self {
             content: CellContent::Image(*image, image_box),
+            col_span: NonZeroU16::MIN,
+            row_span: NonZeroU16::MIN,
+        }
+    }
+
+    /// A one-by-one cell holding a horizontal line as wide as the cell content.
+    pub fn hline(f: impl FnOnce(&mut HLine)) -> Self {
+        let mut line = HLine::default();
+        f(&mut line);
+        Self {
+            content: CellContent::HLine(line),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
         }
