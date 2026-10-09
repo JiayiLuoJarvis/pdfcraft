@@ -1,7 +1,8 @@
 # Knife 13 implement status
 
-**Branch:** `feat/style-builders`
-**Baseline:** `f208329`
+**Branch:** `feat/style-builders`  
+**Baseline:** `f208329` (`feat/hline` tip)  
+**Feature tip:** `aaf14bf`  
 **Date:** 2026-10-09
 
 ## Shipped
@@ -19,7 +20,7 @@
 
 ## Gates
 
-All seven required commands exit with code 0.
+Parent re-ran all seven on feature tip `aaf14bf` (2026-10-09). Exit code 0.
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets --no-default-features -- -D warnings`
