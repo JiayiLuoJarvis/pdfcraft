@@ -21,6 +21,7 @@ pub(crate) struct Style {
     pub(crate) line_height_factor: f32,
     pub(crate) color: Color,
     pub(crate) paragraph_spacing: Length<NonNegative>,
+    pub(crate) first_line_indent: Length<NonNegative>,
     pub(crate) align: TextAlign,
 }
 
@@ -42,6 +43,7 @@ impl Style {
             line_height_factor,
             color,
             paragraph_spacing,
+            first_line_indent: NonNegative::ZERO,
             align,
         })
     }

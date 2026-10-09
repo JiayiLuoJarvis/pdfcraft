@@ -24,7 +24,7 @@ use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
 use crate::layout::paginate::{paginate_sections, PaginateConfig, SectionJob};
-use crate::layout::paragraph::TextNode;
+use crate::layout::paragraph::{Face, TextNode, TextRun};
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table::{self, TableNode, TableSpec};
 
@@ -238,6 +238,24 @@ impl<'a> Document<'a> {
                 index: 0,
             })
             .map(drop)
+    }
+
+    /// Registers the face used by [`Paragraph::bold`].
+    ///
+    /// A body font must be registered first. A later call replaces the bold binding.
+    pub fn bold_font(&mut self, bytes: Vec<u8>) -> Result<()> {
+        if self.fonts.face(FontId::from_raw(0)).is_err() {
+            return Err(Error::Font {
+                index: 0,
+                message: "body font is not registered".to_owned(),
+            });
+        }
+        let id = self.fonts.register(FontSource {
+            bytes: Arc::new(bytes),
+            index: 0,
+        })?;
+        self.fonts.set_bold(id);
+        Ok(())
     }
 
     /// Sets the four page margins. Top and bottom are also the header and footer band heights.
@@ -577,6 +595,7 @@ fn default_style() -> Style {
         line_height_factor: 1.2,
         color: Color::rgb(0, 0, 0),
         paragraph_spacing: NonNegative::ZERO,
+        first_line_indent: NonNegative::ZERO,
         align: TextAlign::Start,
     }
 }
@@ -660,7 +679,9 @@ impl Flow {
     pub fn paragraph(&mut self, f: impl FnOnce(&mut Paragraph)) {
         let mut paragraph = Paragraph::default();
         f(&mut paragraph);
-        let node = self.text(paragraph.text);
+        let mut style = self.style.clone();
+        style.first_line_indent = paragraph.first_line_indent;
+        let node = FlowNode::Text(TextNode::from_runs(paragraph.runs, style));
         self.push(Ok(node));
     }
 
@@ -750,16 +771,48 @@ impl Flow {
     }
 }
 
-/// Text of one paragraph.
-#[derive(Default)]
+/// Text and paragraph-level settings for one paragraph.
 pub struct Paragraph {
-    text: String,
+    runs: Vec<TextRun>,
+    first_line_indent: Length<NonNegative>,
+}
+
+impl Default for Paragraph {
+    fn default() -> Self {
+        Self {
+            runs: Vec::new(),
+            first_line_indent: NonNegative::ZERO,
+        }
+    }
 }
 
 impl Paragraph {
     /// Appends `s` to the paragraph.
     pub fn text(&mut self, s: impl AsRef<str>) {
-        self.text.push_str(s.as_ref());
+        self.append(Face::Body, s.as_ref());
+    }
+
+    /// Appends `s` using the face registered by [`Document::bold_font`].
+    pub fn bold(&mut self, s: impl AsRef<str>) {
+        self.append(Face::Bold, s.as_ref());
+    }
+
+    /// Sets the horizontal inset of the first visual line.
+    pub fn first_line_indent(&mut self, indent: Length<NonNegative>) {
+        self.first_line_indent = indent;
+    }
+
+    fn append(&mut self, face: Face, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if let Some(last) = self.runs.last_mut() {
+            if last.face == face {
+                last.text.push_str(text);
+                return;
+            }
+        }
+        self.runs.push(TextRun::new(text, face));
     }
 }
 
@@ -1325,6 +1378,51 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn paragraph_coalesces_adjacent_faces_and_ignores_empty_appends() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| {
+            p.text("A");
+            p.text("");
+            p.text("B");
+            p.bold("C");
+            p.bold("D");
+            p.text("E");
+        });
+        let Sections::Implicit(section) = &doc.body else {
+            panic!("paragraph stays on the implicit section");
+        };
+        let expected = TextNode::from_runs(
+            vec![
+                TextRun::new("AB", Face::Body),
+                TextRun::new("CD", Face::Bold),
+                TextRun::new("E", Face::Body),
+            ],
+            default_style(),
+        );
+        assert!(matches!(
+            section.flow.nodes.as_slice(),
+            [FlowNode::Text(text)] if *text == expected
+        ));
+    }
+
+    #[test]
+    fn bold_font_requires_body_and_rebinds_to_the_latest_face() {
+        let mut doc = Document::new(PageSize::A4);
+        assert_eq!(
+            doc.bold_font(fixture_bytes().to_vec()).unwrap_err(),
+            Error::Font {
+                index: 0,
+                message: "body font is not registered".to_owned(),
+            }
+        );
+        doc.font(fixture_bytes().to_vec()).unwrap();
+        doc.bold_font(fixture_bytes().to_vec()).unwrap();
+        assert_eq!(doc.fonts.bold().unwrap(), FontId::from_raw(1));
+        doc.bold_font(fixture_bytes().to_vec()).unwrap();
+        assert_eq!(doc.fonts.bold().unwrap(), FontId::from_raw(2));
+    }
+
     fn assert_fails_with_empty_canvas(doc: Document<'_>, expected: &Error) {
         let mut rec = RecordingCanvas::new();
         let result = doc.paint(&mut rec);
@@ -1333,6 +1431,21 @@ mod tests {
     }
 
     const MISSING: char = '\u{6f22}';
+
+    #[test]
+    fn bold_and_indent_failures_happen_before_any_page() {
+        let mut missing_bold = doc_with_font();
+        missing_bold.paragraph(|p| p.bold("A"));
+        assert_fails_with_empty_canvas(missing_bold, &Error::UnknownFont { id: 1 });
+
+        let mut invalid_indent = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
+        invalid_indent.font(fixture_bytes().to_vec()).unwrap();
+        invalid_indent.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(24.0).unwrap());
+            p.text("A");
+        });
+        assert_fails_with_empty_canvas(invalid_indent, &Error::InvalidGeometry);
+    }
 
     #[test]
     fn missing_glyph_in_header_fails_before_any_page() {

@@ -4,38 +4,66 @@
 
 use crate::canvas::{GlyphPlacement, GlyphRun};
 use crate::error::{Error, Result};
-use crate::fonts::FontStore;
+use crate::fonts::{FontId, FontStore};
 use crate::geom::Point;
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
-use crate::text::cluster::ClusteredText;
+use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
 use crate::text::line_break::{break_lines, LineBudget};
 use crate::text::measure::{line_metrics, measure_text, MeasuredText};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Face {
+    Body,
+    Bold,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TextRun {
+    pub(crate) text: String,
+    pub(crate) face: Face,
+}
+
+impl TextRun {
+    pub(crate) fn new(text: impl Into<String>, face: Face) -> Self {
+        Self {
+            text: text.into(),
+            face,
+        }
+    }
+}
 
 /// One laid-out line, coordinates relative to the paragraph fragment origin.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LineBox {
-    pub(crate) run: GlyphRun,
+    pub(crate) runs: Vec<GlyphRun>,
 }
 
 /// Unwrapped text. Wraps at the width of the first frame it is split against.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TextNode {
-    text: String,
+    runs: Vec<TextRun>,
     style: Style,
 }
 
 impl TextNode {
     pub(crate) fn new(text: impl Into<String>, style: Style) -> Self {
-        Self {
-            text: text.into(),
-            style,
-        }
+        let text = text.into();
+        let runs = if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![TextRun::new(text, Face::Body)]
+        };
+        Self { runs, style }
+    }
+
+    pub(crate) fn from_runs(runs: Vec<TextRun>, style: Style) -> Self {
+        Self { runs, style }
     }
 
     /// Every outcome hands back a laid-out `Paragraph`, so a page move never wraps twice.
     pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
-        ParagraphNode::layout(ctx.fonts, &self.text, &self.style, avail.width)?.split(avail)
+        ParagraphNode::layout_runs(ctx.fonts, &self.runs, &self.style, avail.width)?.split(avail)
     }
 }
 
@@ -55,32 +83,56 @@ impl ParagraphNode {
         style: &Style,
         width: f32,
     ) -> Result<Self> {
+        let runs = if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![TextRun::new(text, Face::Body)]
+        };
+        Self::layout_runs(fonts, &runs, style, width)
+    }
+
+    fn layout_runs(
+        fonts: &mut FontStore,
+        runs: &[TextRun],
+        style: &Style,
+        width: f32,
+    ) -> Result<Self> {
         if !width.is_finite() || width <= 0.0 {
             return Err(Error::InvalidGeometry);
         }
 
-        let clustered = ClusteredText::new(text);
-        let measured = measure_text(fonts, style.font, clustered.glyph_text())?;
+        let indent = style.first_line_indent.as_pt();
+        let first_width = width - indent;
+        if !first_width.is_finite() || first_width <= 0.0 {
+            return Err(Error::InvalidGeometry);
+        }
+        let measured = measure_inline(fonts, runs, style.font)?;
         let font_size = style.font_size.as_pt();
-        let broken = break_lines(&clustered, LineBudget::uniform(width), |cluster| {
-            cluster_width_pt(&measured, cluster.glyph_range(), font_size)
-        })?;
+        let broken = break_lines(
+            measured.text.clustered(),
+            LineBudget {
+                first: first_width,
+                rest: width,
+            },
+            |cluster| cluster_width_pt(&measured, cluster.glyph_range(), font_size),
+        )?;
         let face = fonts.metrics(style.font)?;
         let metrics = line_metrics(face, style.font_size, style.line_height_factor)?;
         let line_height = metrics.line_height;
 
         let mut lines = Vec::with_capacity(broken.len());
-        for line in broken.iter() {
-            let run = glyph_run_for_line(
+        for (index, line) in broken.iter().enumerate() {
+            let frame_width = if index == 0 { first_width } else { width };
+            let frame_x = if index == 0 { indent } else { 0.0 };
+            let line_x = frame_x + align_x(frame_width, line.width(), style.align);
+            let runs = glyph_runs_for_line(
                 &measured,
                 line.glyph_range(),
-                line.glyph_byte_range(),
                 style,
-                line.width(),
-                width,
+                line_x,
                 metrics.baseline,
             )?;
-            lines.push(LineBox { run });
+            lines.push(LineBox { runs });
         }
 
         Ok(Self {
@@ -199,12 +251,14 @@ fn fragment_from_lines(
     line_height: f32,
     spacing_after: f32,
 ) -> Result<Fragment> {
-    let mut commands = Vec::with_capacity(lines.len());
+    let mut commands = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        let mut run = line.run.clone();
-        let y = lines_height(index, line_height) + run.origin.y().as_pt();
-        run.origin = Point::try_pt(run.origin.x().as_pt(), y)?;
-        commands.push(FragmentCommand::Glyphs(run));
+        for run in &line.runs {
+            let mut run = run.clone();
+            let y = lines_height(index, line_height) + run.origin.y().as_pt();
+            run.origin = Point::try_pt(run.origin.x().as_pt(), y)?;
+            commands.push(FragmentCommand::Glyphs(run));
+        }
     }
     Ok(Fragment {
         height: lines_height(lines.len(), line_height),
@@ -213,8 +267,67 @@ fn fragment_from_lines(
     })
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct MeasuredInline {
+    text: TaggedClusteredText<Face>,
+    glyphs: Vec<InlineGlyph>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InlineGlyph {
+    font: FontId,
+    glyph_id: u32,
+    advance_norm: f32,
+    byte_range: std::ops::Range<usize>,
+}
+
+fn measure_inline(fonts: &mut FontStore, runs: &[TextRun], body: FontId) -> Result<MeasuredInline> {
+    let text = cluster_tagged(runs.iter().map(|run| (run.face, run.text.as_str())));
+    let bold = if runs
+        .iter()
+        .any(|run| run.face == Face::Bold && !run.text.is_empty())
+    {
+        Some(fonts.bold()?)
+    } else {
+        None
+    };
+    let font_ids: Vec<_> = text
+        .glyph_tags()
+        .iter()
+        .map(|face| match face {
+            Face::Body => Ok(body),
+            Face::Bold => bold.ok_or(Error::UnknownFont { id: 1 }),
+        })
+        .collect::<Result<_>>()?;
+    let glyph_text = text.clustered().glyph_text();
+    let mut byte_boundaries: Vec<_> = glyph_text.char_indices().map(|(byte, _)| byte).collect();
+    byte_boundaries.push(glyph_text.len());
+
+    let mut glyphs = Vec::with_capacity(font_ids.len());
+    let mut start = 0usize;
+    while start < font_ids.len() {
+        let font = font_ids[start];
+        let mut end = start + 1;
+        while end < font_ids.len() && font_ids[end] == font {
+            end += 1;
+        }
+        let byte_start = byte_boundaries[start];
+        let measured = measure_text(fonts, font, &glyph_text[byte_start..byte_boundaries[end]])?;
+        debug_assert_eq!(measured.glyphs.len(), end - start);
+        glyphs.extend(measured.glyphs.into_iter().map(|glyph| InlineGlyph {
+            font,
+            glyph_id: glyph.glyph_id,
+            advance_norm: glyph.advance_norm,
+            byte_range: (glyph.byte_range.start + byte_start)..(glyph.byte_range.end + byte_start),
+        }));
+        start = end;
+    }
+
+    Ok(MeasuredInline { text, glyphs })
+}
+
 fn cluster_width_pt(
-    measured: &MeasuredText,
+    measured: &MeasuredInline,
     glyph_range: std::ops::Range<usize>,
     font_size: f32,
 ) -> f32 {
@@ -222,6 +335,62 @@ fn cluster_width_pt(
         .iter()
         .map(|glyph| glyph.advance_norm * font_size)
         .sum()
+}
+
+fn glyph_runs_for_line(
+    measured: &MeasuredInline,
+    glyph_range: std::ops::Range<usize>,
+    style: &Style,
+    line_x: f32,
+    baseline: f32,
+) -> Result<Vec<GlyphRun>> {
+    if glyph_range.is_empty() {
+        return Ok(vec![GlyphRun {
+            font: style.font,
+            font_size: style.font_size,
+            color: style.color,
+            origin: Point::try_pt(line_x, baseline)?,
+            glyphs: Vec::new(),
+            text: String::new(),
+        }]);
+    }
+
+    let mut runs = Vec::new();
+    let mut x = line_x;
+    let mut start = glyph_range.start;
+    while start < glyph_range.end {
+        let font = measured.glyphs[start].font;
+        let mut end = start + 1;
+        while end < glyph_range.end && measured.glyphs[end].font == font {
+            end += 1;
+        }
+        let byte_start = measured.glyphs[start].byte_range.start;
+        let byte_end = measured.glyphs[end - 1].byte_range.end;
+        let glyphs = measured.glyphs[start..end]
+            .iter()
+            .map(|glyph| GlyphPlacement {
+                glyph_id: glyph.glyph_id,
+                advance_norm: glyph.advance_norm,
+                byte_range: (glyph.byte_range.start - byte_start)
+                    ..(glyph.byte_range.end - byte_start),
+            })
+            .collect();
+        let advance = measured.glyphs[start..end]
+            .iter()
+            .map(|glyph| glyph.advance_norm * style.font_size.as_pt())
+            .sum::<f32>();
+        runs.push(GlyphRun {
+            font,
+            font_size: style.font_size,
+            color: style.color,
+            origin: Point::try_pt(x, baseline)?,
+            glyphs,
+            text: measured.text.clustered().glyph_text()[byte_start..byte_end].to_owned(),
+        });
+        x += advance;
+        start = end;
+    }
+    Ok(runs)
 }
 
 fn glyph_run_for_line(

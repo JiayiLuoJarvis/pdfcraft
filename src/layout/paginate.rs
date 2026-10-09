@@ -353,25 +353,27 @@ mod tests {
     }
 
     #[test]
-    fn start_center_end_x_and_baseline_y() {
+    fn first_line_indent_uses_the_inset_alignment_box() {
         let body_w = 200.0f32;
+        let indent = 24.0f32;
         let page = Size::try_pt(body_w, 400.0).unwrap();
         for align in [TextAlign::Start, TextAlign::Center, TextAlign::End] {
-            let (mut fonts, style) = fonts_and_style(align, 0.0);
+            let (mut fonts, mut style) = fonts_and_style(align, 0.0);
+            style.first_line_indent = NonNegative::pt(indent).unwrap();
             let para = ParagraphNode::layout(&mut fonts, "AB", &style, body_w).unwrap();
             let face = fonts.metrics(style.font).unwrap();
             let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
             let line_width = {
                 // Recompute via first run advance.
-                let run = &para.lines[0].run;
+                let run = &para.lines[0].runs[0];
                 run.glyphs
                     .iter()
                     .map(|g| g.advance_norm * style.font_size.as_pt())
                     .sum::<f32>()
             };
             let expected_x = match align {
-                TextAlign::Start => 0.0,
-                TextAlign::Center => (body_w - line_width) / 2.0,
+                TextAlign::Start => indent,
+                TextAlign::Center => indent + (body_w - indent - line_width) / 2.0,
                 TextAlign::End => body_w - line_width,
             };
             let expected_y = metrics.baseline;

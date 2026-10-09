@@ -21,6 +21,7 @@ const LINE: f32 = 17.244;
 
 struct GlyphSample {
     text: String,
+    font: u32,
     x: f32,
     y: f32,
     width: f32,
@@ -65,6 +66,7 @@ fn runs(page: &RecordedPage) -> Vec<GlyphSample> {
         .filter_map(|op| match op {
             CanvasCommand::DrawGlyphRun { run } => Some(GlyphSample {
                 text: run.text.clone(),
+                font: run.font.as_u32(),
                 x: run.origin.x().as_pt(),
                 y: run.origin.y().as_pt(),
                 width: run.glyphs.iter().map(|g| g.advance_norm).sum::<f32>()
@@ -428,6 +430,129 @@ fn text_without_a_font_fails() {
         Ok(())
     });
     assert_eq!(result.err(), Some(Error::UnknownFont { id: 0 }));
+}
+
+#[test]
+fn mixed_body_and_bold_runs_keep_fonts_and_origins() {
+    let page = &document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.bold_font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.text("A");
+            p.bold("B");
+            p.text("C");
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages()[0];
+    let recorded = runs(page);
+    assert_eq!(
+        recorded
+            .iter()
+            .map(|run| (run.text.as_str(), run.font))
+            .collect::<Vec<_>>(),
+        [("A", 0), ("B", 1), ("C", 0)]
+    );
+    assert!(pt_near(recorded[1].x, recorded[0].x + recorded[0].width));
+    assert!(pt_near(recorded[2].x, recorded[1].x + recorded[1].width));
+    assert!(recorded.iter().all(|run| pt_near(run.y, recorded[0].y)));
+}
+
+#[test]
+fn first_line_indent_wraps_inside_the_inset_and_does_not_repeat_after_pagination() {
+    let rendered = document(PageSize::custom(Size::try_pt(24.0, LINE).unwrap()), |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(12.0).unwrap());
+            p.text("第第第");
+        });
+        Ok(())
+    })
+    .unwrap();
+    let pages = rendered.pages();
+    assert_eq!(pages.len(), 2);
+    let first = runs(&pages[0]);
+    let second = runs(&pages[1]);
+    assert_eq!(first[0].text, "第");
+    assert!(pt_near(first[0].x, 12.0));
+    assert_eq!(second[0].text, "第第");
+    assert!(pt_near(second[0].x, 0.0));
+}
+
+#[test]
+fn bold_and_indent_configuration_errors_are_specific() {
+    let before_body = document(PageSize::A4, |doc| {
+        doc.bold_font(FONT.to_vec())?;
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(
+        before_body,
+        Error::Font {
+            index: 0,
+            message: "body font is not registered".to_owned(),
+        }
+    );
+
+    let missing_bold = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| p.bold("A"));
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(missing_bold, Error::UnknownFont { id: 1 });
+
+    let invalid_indent = document(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()), |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(24.0).unwrap());
+            p.text("A");
+        });
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(invalid_indent, Error::InvalidGeometry);
+
+    let overwide = document(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()), |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(12.0).unwrap());
+            p.text("AA");
+        });
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert!(
+        matches!(
+            overwide,
+            Error::UnbreakableWiderThanFrame { avail, .. } if pt_near(avail, 12.0)
+        ),
+        "{overwide:?}"
+    );
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn mixed_bold_and_indent_write_a_pdf() {
+    let pdf = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.bold_font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(24.0).unwrap());
+            p.text("Contract ");
+            p.bold("A");
+        });
+        Ok(())
+    })
+    .unwrap()
+    .to_pdf()
+    .unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
 }
 
 #[cfg(feature = "backend-krilla")]
