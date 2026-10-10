@@ -381,9 +381,13 @@ pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Re
 }
 
 /// Absolute tolerance for coordinate asserts, in PDF points.
+///
+/// Also at the crate root under feature `test-utils`.
 pub const PT_ABS_TOLERANCE: f32 = 0.01;
 
 /// Reports whether `a` and `b` differ by at most [`PT_ABS_TOLERANCE`] points.
+///
+/// Also at the crate root under feature `test-utils`.
 #[must_use]
 pub fn pt_near(a: f32, b: f32) -> bool {
     (a - b).abs() <= PT_ABS_TOLERANCE

@@ -61,7 +61,8 @@ quire/
   docs/                 提案与设计（先定产品，再写接口）
   src/
     lib.rs              只挂模块；公共重导出随实现 PR 增加
-    error.rs geom.rs limits.rs
+    error.rs geom.rs
+    # limits.rs returns with the limits PR (not an empty pub shell)
     canvas.rs           Canvas / RecordingCanvas；无 krilla
     document.rs         公共 DSL（§2 定后再写）
     fonts.rs
@@ -111,13 +112,12 @@ backend     → canvas, fonts, error, geom, krilla     # 禁止 → layout / doc
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo clippy --all-targets --features test-utils -- -D warnings
+cargo test --features test-utils
 cargo doc --no-deps
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
+# `--all-targets` / 集成测试需要 `test-utils`（根导出 `pt_near`）。
 #
-# backend-krilla 落地后启用：
-#   cargo test --features backend-krilla
 # feature 组合变多后再强制：
 #   cargo hack check --each-feature
 ```

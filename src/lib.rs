@@ -6,7 +6,6 @@
 
 pub mod error;
 pub mod geom;
-pub mod limits;
 
 pub use error::{
     CellIndex, CellSpanReason, ColumnWidthsReason, Error, ErrorKind, GeometryKind, Location,
@@ -28,9 +27,11 @@ pub use document::{
     Section, Shapes, Table, TextAt, TextProps, Track,
 };
 
+#[cfg(feature = "test-utils")]
+pub use canvas::{pt_near, PT_ABS_TOLERANCE};
 pub use canvas::{
-    pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun,
-    ImageFormat, ImageId, LinkTarget, RecordedPage, RecordingCanvas, PT_ABS_TOLERANCE,
+    Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, ImageFormat,
+    ImageId, LinkTarget, RecordedPage, RecordingCanvas,
 };
 pub use fonts::FontId;
 

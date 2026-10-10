@@ -33,26 +33,18 @@
 
 下面按优先级粗排。真正动手顺序等逐条讨论后再定。
 
-### 1–4. 错误可诊断性 — **方向已确认**
+### 1–4. 错误可诊断性 — **刀 1–3 已落地**
 
-现象摘要（仍成立）：`InvalidGeometry` 等不可定位；只记首错且无位置；依赖错误字符串化且无 `source()`；死变体与误导字段。
+见 [`error-diagnosability.md`](error-diagnosability.md)。`Error { kind, at }`、结构化变体、`Location`、`source()` 链、`BoldFaceRequired`、删 `UnsupportedCanvasOperation`、修正 decoration 高度。**刀 4（多错收集）未做。**
 
-**已确认方向**见 [`error-diagnosability.md`](error-diagnosability.md)：`Error { kind, at }`、变体结构化、Location、依赖错误翻译+`source()` 链、删 `UnsupportedCanvasOperation`。多错收集为后续刀。
+### 5–6. 公开面清理与隐性默认 — **已落地**
 
-### 5–6. 公开面清理与隐性默认 — **方向已确认**
-
-现象摘要（仍成立）：`pt_near` / `PT_ABS_TOLERANCE` 进 crate 根；空的 `pub mod limits`；粗体缺失报成 `UnknownFont { id: 1 }`；`ImageBox` rustdoc 与提案书/实现不一致。
-
-**已确认：**
-
-| 项 | 方向 |
+| 项 | 状态 |
 | --- | --- |
-| `pt_near` / `PT_ABS_TOLERANCE` | 移出默认根 API；经 **`feature = "test-utils"`** 导出，供集成测试使用 |
-| `limits` | **先撤公开空壳**（删或改内部）；`MAX_*` 等限额 PR 做实后再以完整模块公开 |
-| 粗体未注册 | **并入错误刀 1**：独立 `ErrorKind`（如 `BoldFaceRequired`），不再用 `UnknownFont { id: 1 }` |
-| `ImageBox` 默认尺寸 | **只修 rustdoc**，行为保持提案书 §2.7：两边都不给 → **1 px = 1 pt** |
-
-实现可与错误刀分开的小 PR；粗体 kind 必须跟错误刀 1。
+| `pt_near` / `PT_ABS_TOLERANCE` | 默认根 API 已撤；`feature = "test-utils"` 下从 crate 根导出 |
+| `limits` | 空 `pub mod` 已删；限额 PR 再公开完整模块 |
+| 粗体未注册 | `ErrorKind::BoldFaceRequired`（随错误刀 1） |
+| `ImageBox` 默认尺寸 | rustdoc 已对齐 1 px = 1 pt；行为未改 |
 
 ### 7. 组织与依赖 — **方向已确认**
 
@@ -90,29 +82,26 @@
 | --- | --- |
 | 模块组织 | 目标 DAG 与禁环已确认（[`module-dependency.md`](module-dependency.md)）。拆环与 document↔backend 解耦待落地 |
 | 风格 | 机械层统一。API 三种形态 0.x 可接受，1.0 前宜收敛 |
-| 报错 / 批跑 | 安全够用。可诊断性不够，是上生产前最大缺口 |
-| 对照官方 Rust | 错误骨架像 rustls / std。上下文与 `source()` 达不到 serde_json / toml。正文入流已改为 `FlowWriter`（不再用 `Deref` 转发） |
+| 报错 / 批跑 | 刀 1–3 已落地（定位 + `source()`）。多错收集仍开 |
+| 对照官方 Rust | `Error` 已是 kind+location+source。正文入流为 `FlowWriter` |
 
 ## 两类读者分别要知道的
 
 **迁几十份 PDF 的调用方。**
 
 - 可以依赖「一份失败就整份不出」和「缺字必报」。
-- 需要自己包装每份文档的上下文。不要指望 `Error` 告诉你第几页、哪个单元格。
-- 遇到 `InvalidGeometry` / `InvalidCellSpan` / `ColumnWidths` 时，预期要二分模板。
-- `pt_near` 将只在 `test-utils` feature 下可用；不要把空 `limits` 当正式 API（将先撤壳）。
+- `Error.at` 可带节/页/页眉页脚/单元格；仍只保留首错（多错收集未做）。
+- `pt_near` 仅在 `test-utils` feature 下从 crate 根导出。
 
 **维护者。**
 
 - 依赖只许沿 [`module-dependency.md`](module-dependency.md) 的 DAG 向下；禁止环。
-- DSL→节点转换在 `document/*`；`layout/lower`（将改名 nesting）只做嵌套内容规则。
-- 补错误上下文：`note()` 与各处 `lower()`；动 `decorate` 时注意它会改写下层错误语义。
+- DSL→节点转换在 `document/*`；`layout/nesting`（原 lower）只做嵌套内容规则（组织刀落地后）。
+- 补错误上下文：组装与 layout 的 `Location` 钩子；动 `decorate` 时注意它会改写下层错误语义。
 
 ## 讨论顺序建议
 
-1. 报错可诊断性（本文 §1–§4）——**方向已确认**，见 [`error-diagnosability.md`](error-diagnosability.md)。
-2. 公开面清理（本文 §5–§6）——**方向已确认**。
-3. 组织与依赖（本文 §7）——**方向已确认**，见 [`module-dependency.md`](module-dependency.md)。
-4. `Deref` 到 `Flow`（[`deref-flow-api.md`](deref-flow-api.md)）——**已落地**。
-
-评估条目讨论已收束。实现按各专项刀序；未开刀前不改代码。
+1. 报错可诊断性——**刀 1–3 已落地**；刀 4 另开。
+2. 公开面清理——**已落地**。
+3. 组织与依赖——**方向已确认**，见 [`module-dependency.md`](module-dependency.md)；落地中。
+4. `Deref` 到 `Flow`——**已落地**。

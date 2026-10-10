@@ -600,9 +600,9 @@ impl Default for Margins {
 
 /// A named set of four equal page margins.
 ///
-/// [`Inch`] is exactly 72 PDF points, one international inch. [`HalfInch`] is
-/// exactly 36 PDF points. Choosing a preset sets all four sides, including the
-/// header and footer band heights.
+/// [`MarginPreset::Inch`] is exactly 72 PDF points, one international inch.
+/// [`MarginPreset::HalfInch`] is exactly 36 PDF points. Choosing a preset sets
+/// all four sides, including the header and footer band heights.
 ///
 /// This enum has no [`Default`]. [`Margins::default`] stays four zeros.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

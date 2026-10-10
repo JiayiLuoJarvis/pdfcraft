@@ -19,6 +19,7 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `pt_near` and `PT_ABS_TOLERANCE` are no longer on the default crate root. Enable feature `test-utils` to import them. The empty public `limits` module is removed until real limits land.
 - **Breaking.** `Error` is now a struct: `kind: ErrorKind` says what failed and `at: Option<Location>` says where (section index, page number, page region, table cell). Match on `error.kind` where you matched on `Error` variants before. `Error`, `ErrorKind`, `Location`, `Region`, `CellIndex`, `GeometryKind`, `ColumnWidthsReason`, and `CellSpanReason` are exported from the crate root.
 - `ErrorKind::InvalidGeometry` carries a `GeometryKind` with the rejected values. `ErrorKind::InvalidCellSpan` carries a `CellSpanReason`, and the slot is in `at.cell`. `ErrorKind::ColumnWidths` carries a `ColumnWidthsReason` instead of a string. `ErrorKind::UnsplittableTallerThanFrame` carries the measured `height` and the frame `avail`. `ErrorKind::Backend` is a struct variant with `message`.
 - `ErrorKind::DecorationTallerThanMargin.height` is the measured band content height. It was the page height when the content was taller than the page.
