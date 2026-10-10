@@ -1315,13 +1315,15 @@ struct BandSlot {
 
 /// One page's header or footer band.
 ///
-/// The band is as tall as its margin. Slots inset by the left and right
-/// margins so they line up with the body. Content that does not fit is an
-/// error.
+/// The band is as tall as its margin and spans the full page width. Call
+/// [`Band::inset`] when slots should line up with the body. Content that does
+/// not fit is an error.
 pub struct Band {
     page: Page,
     left: Option<BandSlot>,
     right: Option<BandSlot>,
+    inset_left: Length<NonNegative>,
+    inset_right: Length<NonNegative>,
     error: Option<Error>,
 }
 
@@ -1330,6 +1332,15 @@ impl Band {
     #[must_use]
     pub fn page(&self) -> Page {
         self.page
+    }
+
+    /// Shrinks the slot area inward from the page edges.
+    ///
+    /// Defaults are zero. Side margins do not apply automatically; pass
+    /// [`Page::margins`] when the slots should align with the body.
+    pub fn inset(&mut self, left: Length<NonNegative>, right: Length<NonNegative>) {
+        self.inset_left = left;
+        self.inset_right = right;
     }
 
     /// Sets the start-aligned text.
@@ -1414,19 +1425,18 @@ impl Band {
         if slots.is_empty() {
             return Ok(Vec::new());
         }
-        let inset = |margin: Length<NonNegative>| -> Result<Option<(ColumnWidth, Vec<FlowNode>)>> {
-            if margin.as_pt() == 0.0 {
+        let spacer = |pad: Length<NonNegative>| -> Result<Option<(ColumnWidth, Vec<FlowNode>)>> {
+            if pad.as_pt() == 0.0 {
                 return Ok(None);
             }
             Ok(Some((
-                ColumnWidth::Fixed(Positive::pt(margin.as_pt())?),
+                ColumnWidth::Fixed(Positive::pt(pad.as_pt())?),
                 Vec::new(),
             )))
         };
-        let margins = self.page.margins;
-        let mut tracks: Vec<_> = inset(margins.left())?.into_iter().collect();
+        let mut tracks: Vec<_> = spacer(self.inset_left)?.into_iter().collect();
         tracks.extend(slots);
-        tracks.extend(inset(margins.right())?);
+        tracks.extend(spacer(self.inset_right)?);
         if tracks.len() == 1 {
             return Ok(tracks.remove(0).1);
         }
@@ -1443,6 +1453,8 @@ fn band_content(hook: BandHook<'_>, style: Style) -> BandContent<'_> {
             page: Page::from(info),
             left: None,
             right: None,
+            inset_left: NonNegative::ZERO,
+            inset_right: NonNegative::ZERO,
             error: None,
         };
         hook(&mut band);

@@ -187,14 +187,38 @@ fn header_numbers_every_page_and_layers_stack_behind_header_body_footer_front() 
 }
 
 #[test]
-fn header_slots_inset_by_side_margins_and_body_sits_below_the_band() {
+fn header_slots_span_full_page_width_without_inset_and_body_sits_below_the_band() {
     let pages = full_template(&contract(Kind::A), "ACME").unwrap().pages();
     let r = runs(&pages[0]);
     let (left, right, body) = (&r[1], &r[2], &r[3]);
-    assert!(pt_near(left.x, 36.0));
+    assert!(pt_near(left.x, 0.0));
     assert!(pt_near(left.y, BASELINE));
-    assert!(pt_near(right.x + right.width, A4.width().as_pt() - 36.0));
+    assert!(pt_near(right.x + right.width, A4.width().as_pt()));
     assert!(pt_near(right.y, BASELINE));
+    assert!(pt_near(body.x, 36.0));
+    assert!(pt_near(body.y, 36.0 + BASELINE));
+}
+
+#[test]
+fn header_inset_aligns_slots_with_caller_chosen_side_margins() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
+        doc.header(|h| {
+            let m = h.page().margins;
+            h.inset(m.left(), m.right());
+            h.left("ACME");
+            h.right("page");
+        });
+        doc.paragraph(|p| p.text("Body"));
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let r = runs(&pages[0]);
+    let (left, right, body) = (&r[0], &r[1], &r[2]);
+    assert!(pt_near(left.x, 36.0));
+    assert!(pt_near(right.x + right.width, A4.width().as_pt() - 36.0));
     assert!(pt_near(body.x, 36.0));
     assert!(pt_near(body.y, 36.0 + BASELINE));
 }
@@ -810,7 +834,7 @@ fn two_sections_number_document_pages_and_section_pages() {
 }
 
 #[test]
-fn second_section_header_insets_by_that_sections_left_margin() {
+fn second_section_header_stays_at_page_edge_until_caller_insets() {
     let pages = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.section(|section| {
@@ -826,7 +850,11 @@ fn second_section_header_insets_by_that_sections_left_margin() {
                 NonNegative::pt(20.0)?,
                 NonNegative::pt(48.0)?,
             ));
-            section.header(|header| header.left("Two"));
+            section.header(|header| {
+                let m = header.page().margins;
+                header.inset(m.left(), m.right());
+                header.left("Two");
+            });
             section.paragraph(|p| p.text("B"));
             Ok(())
         })?;
@@ -835,7 +863,7 @@ fn second_section_header_insets_by_that_sections_left_margin() {
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 2);
-    assert!(pt_near(runs(&pages[0])[0].x, 20.0));
+    assert!(pt_near(runs(&pages[0])[0].x, 0.0));
     assert_eq!(runs(&pages[0])[0].text, "One");
     assert!(pt_near(runs(&pages[1])[0].x, 48.0));
     assert_eq!(runs(&pages[1])[0].text, "Two");
@@ -1927,16 +1955,16 @@ fn header_and_footer_slots_annotate_at_the_band_origin() {
         .iter()
         .find(|hit| hit.target == "https://example.com/foot")
         .unwrap();
-    assert!(pt_near(left.x, margin));
+    assert!(pt_near(left.x, 0.0));
     assert!(pt_near(left_hit.x, left.x));
     assert!(pt_near(left_hit.width, left.width));
     assert!(pt_near(left_hit.y, 0.0));
     assert!(pt_near(left_hit.height, LINE));
-    assert!(pt_near(right.x + right.width, A4.width().as_pt() - margin));
+    assert!(pt_near(right.x + right.width, A4.width().as_pt()));
     assert!(pt_near(right_hit.x, right.x));
     assert!(pt_near(right_hit.width, right.width));
     assert!(pt_near(right_hit.y, 0.0));
-    assert!(pt_near(foot.x, margin));
+    assert!(pt_near(foot.x, 0.0));
     assert!(pt_near(foot.y, A4.height().as_pt() - margin + BASELINE));
     assert!(pt_near(foot_hit.x, foot.x));
     assert!(pt_near(foot_hit.y, A4.height().as_pt() - margin));
