@@ -1,6 +1,6 @@
-//! Lower public document nodes into `FlowNode`s.
+//! Which nodes each nested container may hold.
 //!
-//! Holds the one content rule matrix for nested containers.
+//! Holds the one content rule matrix, plus the checked bodies of table cells and list items.
 
 #![cfg_attr(not(test), allow(dead_code))]
 

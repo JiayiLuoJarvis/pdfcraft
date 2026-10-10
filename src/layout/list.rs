@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use crate::error::{GeometryKind, Result};
 use crate::geom::{Length, Point, Positive};
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::lower::ItemBody;
+use crate::layout::nesting::ItemBody;
 use crate::layout::paragraph::single_line_run;
 use crate::layout::style::Style;
 

@@ -9,7 +9,7 @@ use crate::geom::{Ink, Margins, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::{
     stacked_height, FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
 };
-use crate::layout::lower::{check_content, Container};
+use crate::layout::nesting::{check_content, Container};
 use crate::layout::paragraph::single_line_run;
 use crate::layout::style::{Style, TextAlign};
 

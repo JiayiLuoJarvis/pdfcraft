@@ -1,4 +1,4 @@
-//! Layout engine: lower DSL nodes, split/draw flowables, paginate, decorate.
+//! Layout engine: split/draw flowables, check nested content, paginate, decorate.
 
 pub mod columns;
 pub mod decorate;
@@ -6,7 +6,7 @@ pub mod flow;
 pub mod hline;
 pub mod image;
 pub mod list;
-pub mod lower;
+pub mod nesting;
 pub mod paginate;
 pub mod paragraph;
 pub mod style;

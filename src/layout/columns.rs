@@ -5,7 +5,7 @@
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Result};
 use crate::geom::{Length, NonNegative, Positive};
 use crate::layout::flow::{FlowNode, Fragment, Frame, LayoutCtx, Split};
-use crate::layout::lower::{check_content, Container};
+use crate::layout::nesting::{check_content, Container};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ColumnWidth {

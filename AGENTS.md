@@ -67,7 +67,7 @@ quire/
     document.rs         公共 DSL（§2 定后再写）
     fonts.rs
     text/               cluster / measure / break_class / line_break
-    layout/             flow lower paragraph columns table list decorate paginate dump
+    layout/             flow nesting paragraph columns table list decorate paginate dump
     backend/            仅 feature backend-krilla；唯一可 use krilla 处
   tests/                集成测试；fixtures/ 放字体与样张
   examples/             可运行示例（API 稳定后再填）

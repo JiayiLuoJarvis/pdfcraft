@@ -12,7 +12,7 @@ use crate::layout::columns::{resolve_column_widths, ColumnWidth};
 use crate::layout::flow::{
     natural_height, FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split,
 };
-use crate::layout::lower::CellBody;
+use crate::layout::nesting::CellBody;
 
 /// Grid-line stroke centered on cell edges. Width zero draws nothing.
 #[derive(Debug, Clone, Copy, PartialEq)]
