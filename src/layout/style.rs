@@ -1,6 +1,6 @@
 //! Crate-internal paragraph style for flow layout.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use crate::fonts::FontId;
 use crate::geom::{Color, Length, NonNegative, Positive};

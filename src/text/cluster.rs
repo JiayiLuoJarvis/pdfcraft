@@ -1,6 +1,6 @@
 //! Extended grapheme clusters (UAX #29) as line-break atoms.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::ops::Range;
 
@@ -27,7 +27,6 @@ struct ClusterRecord {
     normalized_bytes: Range<usize>,
     start: ClusterCursor,
     end: ClusterCursor,
-    first_scalar: char,
     class: BreakClass,
 }
 
@@ -83,7 +82,6 @@ impl ClusteredText {
                 normalized_bytes: byte_start..byte_end,
                 start,
                 end,
-                first_scalar: first,
                 class,
             });
         }
@@ -170,10 +168,6 @@ impl<'a> Cluster<'a> {
 
     pub(crate) fn scalar_count(&self) -> usize {
         self.as_str().chars().count()
-    }
-
-    pub(crate) fn first_scalar(&self) -> char {
-        self.owner.clusters[self.index].first_scalar
     }
 
     pub(crate) fn class(&self) -> BreakClass {

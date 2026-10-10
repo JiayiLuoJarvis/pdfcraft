@@ -2,7 +2,7 @@
 //!
 //! Missing cmap entries become errors; v1 does not draw `.notdef` or fall back.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::ops::Range;
 

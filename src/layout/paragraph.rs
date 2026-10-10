@@ -1,6 +1,6 @@
 //! Paragraph measurement, wrapping, and fragment drawing.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
 use crate::error::{Error, Result};

@@ -2,7 +2,6 @@
 
 pub mod columns;
 pub mod decorate;
-pub mod dump;
 pub mod flow;
 pub mod hline;
 pub mod image;

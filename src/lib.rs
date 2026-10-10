@@ -30,9 +30,9 @@ pub use canvas::{
 };
 pub use fonts::FontId;
 
-pub mod text;
+pub(crate) mod text;
 
-pub mod layout;
+pub(crate) mod layout;
 
 #[cfg(feature = "backend-krilla")]
 pub(crate) mod backend;

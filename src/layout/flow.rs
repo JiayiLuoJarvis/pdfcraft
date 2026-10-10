@@ -2,7 +2,7 @@
 //!
 //! Not part of the public API. Callers never implement this protocol.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
 use crate::error::{Error, Result};

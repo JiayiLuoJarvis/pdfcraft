@@ -2,7 +2,7 @@
 //!
 //! Holds the one content rule matrix for nested containers.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use crate::error::{Error, Result};
 use crate::layout::flow::{FlowNode, KeepTogetherNode};

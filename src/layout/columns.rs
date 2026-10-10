@@ -1,6 +1,6 @@
 //! Side-by-side columns in the flow, and the track width solver tables share.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use crate::error::{Error, Result};
 use crate::geom::{Length, NonNegative, Positive};

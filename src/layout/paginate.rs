@@ -1,6 +1,6 @@
 //! Page breaking and page assembly over the flow.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::num::NonZeroU32;
 

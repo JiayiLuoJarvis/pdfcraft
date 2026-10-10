@@ -1,6 +1,6 @@
 //! Pure line-breaking over clustered text.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::ops::Range;
 
@@ -501,10 +501,6 @@ impl<T> BrokenSpans<T> {
         self.lines.len()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.lines.is_empty()
-    }
-
     pub(crate) fn get(&self, index: usize) -> &SpanLine<T> {
         &self.lines[index]
     }
@@ -529,21 +525,6 @@ impl<T> SpanLine<T> {
 }
 
 impl BrokenLines<'_> {
-    pub(crate) fn len(&self) -> usize {
-        self.records.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.records.is_empty()
-    }
-
-    pub(crate) fn get(&self, index: usize) -> BrokenLine<'_> {
-        BrokenLine {
-            text: self.text,
-            record: &self.records[index],
-        }
-    }
-
     pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = BrokenLine<'_>> + '_ {
         self.records.iter().map(|record| BrokenLine {
             text: self.text,
@@ -561,10 +542,6 @@ impl BrokenLine<'_> {
 
     pub(crate) fn glyph_range(&self) -> Range<usize> {
         self.record.start.glyph..self.record.end.glyph
-    }
-
-    pub(crate) fn glyph_byte_range(&self) -> Range<usize> {
-        self.record.start.glyph_byte..self.record.end.glyph_byte
     }
 
     pub(crate) fn width(&self) -> f32 {

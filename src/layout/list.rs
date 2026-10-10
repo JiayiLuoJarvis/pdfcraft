@@ -1,6 +1,6 @@
 //! Bulleted and numbered lists with a hanging marker column.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::VecDeque;
 use std::num::NonZeroU32;

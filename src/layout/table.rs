@@ -1,6 +1,6 @@
 //! Table column sizing, row placement, optional repeating headers.
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::VecDeque;
 use std::num::NonZeroU16;

@@ -1,6 +1,6 @@
 //! Break-class table for CJK-aware line breaking (not full UAX #14).
 
-#![allow(dead_code)]
+#![cfg_attr(not(test), allow(dead_code))]
 
 /// Cluster-head class. `Hard` is BK and never enters the pair matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
