@@ -1,8 +1,8 @@
-# Handoff: knives 7–17
+# Handoff: knives 7–19
 
 **Date:** 2026-10-10  
 **Repo:** /mnt/data/demo/quire  
-**Exit predicate (tonight):** knives 16–19 green locally (no remote/PR).
+**Exit predicate:** knives 16–19 green locally (no remote/PR).
 
 | Knife | Branch | Tip (feature) |
 | --- | --- | --- |
@@ -15,26 +15,40 @@
 | 13 style / bold / first-line indent | feat/style-builders | 5deb0df (feature tip aaf14bf) |
 | 14 §2.2 fill-in underscore | feat/inline-blank | b83712e |
 | 15 §8 text URI link | feat/text-uri-link | 16749da |
-| 16 Cell::spacer | feat/cell-spacer | c9c2af7 (status/audit a5ba3fb) |
-| 17 cell paragraph + list | feat/cell-rich | c3035df |
+| 16 Cell::spacer | feat/cell-spacer | c9c2af7 (audit a5ba3fb) |
+| 17 cell paragraph + list | feat/cell-rich | c3035df (audit 9b939b8) |
+| 18 §7 margin presets | feat/margin-presets | 3c9e3da |
+| 19 crate name / paper | feat/crate-rename | (verify-only; tip = margin-presets audit tip) |
 
-Knife 17 stacks on `feat/cell-spacer` @ `a5ba3fb`. Feature tip `c3035df`. Design trail under `.audit/knife-17/`.
+## What callers get (knives 16–18)
 
-## What callers get (knife 17)
+**16.** `Cell::spacer(height)` → empty vertical cell; too tall → `UnsplittableTallerThanFrame`.
 
-`Cell::paragraph(|p| …)` runs immediately and reuses body `Paragraph` (text/bold/blank/link). Shared `lower_paragraph` emits unwrapped `FlowNode::Text` so wrap width is the cell inner width.
+**17.** `Cell::paragraph` (bold/blank/link at cell width). `Cell::ul` / `Cell::ol` with `'static` deferred closures. `Cell` drops `Clone`/`PartialEq`/`Eq`.
 
-`Cell::ul` / `Cell::ol` store a `'static` `FnOnce` and run it at `Table::lower` with `flow.child()`. Nested item lists work. Move owned data into the closure.
+**18.** `MarginPreset::{Inch, HalfInch}` → uniform 72/36 pt via `.into()` into existing `margins(Margins)`. Default margins still four zeros.
 
-`Cell` no longer implements `Clone` / `PartialEq` / `Eq` (keeps `Debug`). Tall cell content still fails with `UnsplittableTallerThanFrame`. Forbidden kids unchanged.
+## Knife 19 (verified, no code change)
+
+Measured on `feat/margin-presets` tip after knife 18:
+
+- `Cargo.toml` `name = "quire-pdf"`, `publish = false` already.
+- README title and body already say `quire-pdf`.
+- `Paper` / `PageSize` already expose A0–A6 (+ Letter/Legal). Geom unit tests pin mm sizes.
+- No A-series gap to fill this knife. Nothing to rename.
 
 ## Gates (parent re-verified 2026-10-10)
 
-On `feat/cell-rich` @ `c3035df`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (198 lib + 1 ignored, 76 `tests/document.rs`).
+On `feat/margin-presets` @ `3c9e3da`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (200 lib + 1 ignored, 78 `tests/document.rs`).
 
 ## Next
 
-- Knife 18: §7 margin presets (optional sugar; default still 0)
-- Knife 19: confirm `quire-pdf` naming leftovers; A-series gaps only if small
-- Named styles / flow canvas still out
-- Open PR when remote and token are available
+Empty for settled product work. Deferred / out (not blocking):
+
+- Named styles / images dictionary
+- Flow canvas; qr / svg / toc
+- In-doc jumps; image-only links; `Layer::text_at` URI
+- Electronic seal follows flow; per-page header/footer off
+- Second PDF backend; `use krilla` in layout
+- Open PR when remote and token exist
+- Optional: write `Inch`/`HalfInch` into 提案书「可再钉」list as now fixed
