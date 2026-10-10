@@ -2183,4 +2183,135 @@ fn cell_rich_taller_than_frame_does_not_continue() {
         Ok(())
     });
     assert_eq!(paragraph.err(), Some(Error::UnsplittableTallerThanFrame));
+
+    let list = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.row([Cell::ul(|list| {
+                list.item(|item| item.paragraph(|p| p.text("A")));
+                list.item(|item| item.paragraph(|p| p.text("B")));
+            })]);
+        });
+        Ok(())
+    });
+    assert_eq!(list.err(), Some(Error::UnsplittableTallerThanFrame));
+}
+
+#[test]
+fn cell_list_marker_at_cell_x() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.row([
+                    Cell::new("L"),
+                    Cell::ul(|list| {
+                        list.item(|item| item.paragraph(|p| p.text("dot")));
+                        list.item(|item| {
+                            item.ul(|inner| inner.item(|n| n.paragraph(|p| p.text("child"))));
+                        });
+                    }),
+                ]);
+                t.row([
+                    Cell::new("M"),
+                    Cell::ol(Numbering::Decimal, |list| {
+                        list.item(|item| item.paragraph(|p| p.text("one")));
+                        list.item_marked("(c)", |item| item.paragraph(|p| p.text("custom")));
+                    }),
+                ]);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    assert_eq!(
+        texts(page),
+        [
+            "L", "\u{2022}", "dot", "\u{2022}", "\u{2022}", "child", "M", "1.", "one", "(c)",
+            "custom",
+        ]
+    );
+    let bullet_x: Vec<f32> = runs(page)
+        .into_iter()
+        .filter(|run| run.text == "\u{2022}")
+        .map(|run| run.x)
+        .collect();
+    assert!(pt_near(bullet_x[0], 100.0), "{}", bullet_x[0]);
+    assert!(pt_near(bullet_x[1], 100.0), "{}", bullet_x[1]);
+    assert!(pt_near(bullet_x[2], 118.0), "{}", bullet_x[2]);
+    assert!(pt_near(glyph(page, "dot").x, 118.0));
+    assert!(pt_near(glyph(page, "child").x, 136.0));
+    assert!(pt_near(glyph(page, "1.").x, 100.0));
+    assert!(pt_near(glyph(page, "one").x, 118.0));
+    assert!(pt_near(glyph(page, "(c)").x, 100.0));
+    assert!(pt_near(glyph(page, "custom").x, 118.0));
+}
+
+#[test]
+fn cell_list_item_rejects_forbidden_kids() {
+    let reject = |node: &'static str, item: fn(&mut Flow)| {
+        let result = document(PageSize::A4, |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.row([Cell::ul(move |list| list.item(item))]);
+            });
+            Ok(())
+        });
+        assert_eq!(
+            result.err(),
+            Some(Error::InvalidCellContent {
+                container: "list item",
+                node,
+            })
+        );
+    };
+    reject("table", |item| item.table(|t| t.row(["a"])));
+    reject("columns", |item| {
+        item.columns(|row| {
+            row.col(|col| col.paragraph(|p| p.text("a")));
+            row.col(|col| col.paragraph(|p| p.text("b")));
+        });
+    });
+    reject("page break", Flow::page_break);
+    reject("keep together", |item| item.keep_together(|_| {}));
+
+    #[cfg(feature = "backend-krilla")]
+    {
+        let result = document(PageSize::A4, |doc| {
+            let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+            doc.table(|t| {
+                t.row([Cell::ul(move |list| {
+                    list.item(|item| item.image(&logo, |_| {}));
+                })]);
+            });
+            Ok(())
+        });
+        assert_eq!(
+            result.err(),
+            Some(Error::InvalidCellContent {
+                container: "list item",
+                node: "image",
+            })
+        );
+    }
+}
+
+#[test]
+fn cell_list_narrower_than_marker_is_invalid_geometry() {
+    let result = document(
+        PageSize::custom(Size::try_pt(18.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.row([Cell::ul(|list| {
+                    list.item(|item| item.paragraph(|p| p.text("A")));
+                })]);
+            });
+            Ok(())
+        },
+    );
+    assert_eq!(result.err(), Some(Error::InvalidGeometry));
 }

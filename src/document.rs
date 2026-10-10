@@ -741,16 +741,9 @@ impl Flow {
 
     /// Appends a numbered list starting at 1.
     pub fn ol(&mut self, numbering: Numbering, f: impl FnOnce(&mut List)) {
-        let style = match numbering {
-            Numbering::Decimal => MarkerKind::Decimal,
-            Numbering::UpperAlpha => MarkerKind::UpperAlpha,
-            Numbering::LowerAlpha => MarkerKind::LowerAlpha,
-            Numbering::UpperRoman => MarkerKind::UpperRoman,
-            Numbering::LowerRoman => MarkerKind::LowerRoman,
-        };
         self.list(
             ListKind::Ordered {
-                style,
+                style: numbering_kind(numbering),
                 start: NonZeroU32::MIN,
             },
             f,
@@ -758,13 +751,7 @@ impl Flow {
     }
 
     fn list(&mut self, kind: ListKind, f: impl FnOnce(&mut List)) {
-        let mut list = List {
-            parent: self.child(),
-            items: Vec::new(),
-        };
-        f(&mut list);
-        let node = list.lower(kind);
-        self.push(node);
+        self.push(assemble_list(self.child(), kind, f));
     }
 }
 
@@ -777,8 +764,27 @@ fn lower_paragraph(paragraph: Paragraph, parent: &Style) -> Result<FlowNode> {
     Ok(FlowNode::Text(TextNode::from_items(paragraph.items, style)))
 }
 
+fn numbering_kind(numbering: Numbering) -> MarkerKind {
+    match numbering {
+        Numbering::Decimal => MarkerKind::Decimal,
+        Numbering::UpperAlpha => MarkerKind::UpperAlpha,
+        Numbering::LowerAlpha => MarkerKind::LowerAlpha,
+        Numbering::UpperRoman => MarkerKind::UpperRoman,
+        Numbering::LowerRoman => MarkerKind::LowerRoman,
+    }
+}
+
+fn assemble_list(parent: Flow, kind: ListKind, f: impl FnOnce(&mut List)) -> Result<FlowNode> {
+    let mut list = List {
+        parent,
+        items: Vec::new(),
+    };
+    f(&mut list);
+    list.lower(kind)
+}
+
 /// Text and paragraph-level settings for one paragraph.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct Paragraph {
     items: Vec<InlineItem>,
     first_line_indent: Length<NonNegative>,
@@ -1012,6 +1018,19 @@ impl Table {
                                 CellContent::Paragraph(paragraph) => {
                                     vec![lower_paragraph(paragraph, &flow.style)?]
                                 }
+                                CellContent::List(DeferredList::Bullet(build)) => {
+                                    vec![assemble_list(flow.child(), ListKind::Bullet, build)?]
+                                }
+                                CellContent::List(DeferredList::Ordered(numbering, build)) => {
+                                    vec![assemble_list(
+                                        flow.child(),
+                                        ListKind::Ordered {
+                                            style: numbering_kind(numbering),
+                                            start: NonZeroU32::MIN,
+                                        },
+                                        build,
+                                    )?]
+                                }
                                 CellContent::Image(image, image_box) => {
                                     vec![image_box.lower(&image, flow.doc)?]
                                 }
@@ -1037,7 +1056,7 @@ impl Table {
 }
 
 /// One table cell.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 #[must_use]
 pub struct Cell {
     content: CellContent,
@@ -1045,13 +1064,30 @@ pub struct Cell {
     row_span: NonZeroU16,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 enum CellContent {
     Text(String),
     Paragraph(Paragraph),
     Image(Image, ImageBox),
     HLine(HLine),
     Spacer(Length<NonNegative>),
+    List(DeferredList),
+}
+
+enum DeferredList {
+    Bullet(Box<dyn FnOnce(&mut List) + 'static>),
+    Ordered(Numbering, Box<dyn FnOnce(&mut List) + 'static>),
+}
+
+impl std::fmt::Debug for DeferredList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeferredList::Bullet(_) => f.debug_tuple("Bullet").finish(),
+            DeferredList::Ordered(numbering, _) => {
+                f.debug_tuple("Ordered").field(numbering).finish()
+            }
+        }
+    }
 }
 
 impl Cell {
@@ -1073,6 +1109,38 @@ impl Cell {
         f(&mut paragraph);
         Self {
             content: CellContent::Paragraph(paragraph),
+            col_span: NonZeroU16::MIN,
+            row_span: NonZeroU16::MIN,
+        }
+    }
+
+    /// A one-by-one cell holding a bulleted list.
+    ///
+    /// The closure is `'static` and runs when the table is lowered, after the
+    /// table closure returns. Move owned data in. A local declared inside the
+    /// table closure cannot be borrowed.
+    ///
+    /// Content taller than the cell's inner full frame is
+    /// [`Error::UnsplittableTallerThanFrame`].
+    pub fn ul(f: impl FnOnce(&mut List) + 'static) -> Self {
+        Self {
+            content: CellContent::List(DeferredList::Bullet(Box::new(f))),
+            col_span: NonZeroU16::MIN,
+            row_span: NonZeroU16::MIN,
+        }
+    }
+
+    /// A one-by-one cell holding a numbered list starting at 1.
+    ///
+    /// The closure is `'static` and runs when the table is lowered, after the
+    /// table closure returns. Move owned data in. A local declared inside the
+    /// table closure cannot be borrowed.
+    ///
+    /// Content taller than the cell's inner full frame is
+    /// [`Error::UnsplittableTallerThanFrame`].
+    pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'static) -> Self {
+        Self {
+            content: CellContent::List(DeferredList::Ordered(numbering, Box::new(f))),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
         }
