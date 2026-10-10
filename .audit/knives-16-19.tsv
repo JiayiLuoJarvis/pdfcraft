@@ -24,3 +24,4 @@ ts	phase	decision	why	evidence	result
 2026-10-10T04:02:19Z	knife-18-gates	parent re-ran gates on 3c9e3da	Prove It Works	200 lib + 78 document	green
 2026-10-10T04:02:19Z	knife-19-verify	quire-pdf and A0-A6 already present; no code change	proposal 9 and paper enum already satisfied	.audit/knife-19/verify.md; Cargo.toml:2	done
 2026-10-10T04:02:29Z	exit	knives 16-19 complete; Next only deferred outs	exit predicate met locally	handoff knives-done.md; tip 472373c	done
+2026-10-10T04:03:14Z	knife-19-gates	re-ran cargo test on feat/crate-rename tip after trail review	address verify tip mismatch flag	git tip a97b18b; cargo test exit 0	green

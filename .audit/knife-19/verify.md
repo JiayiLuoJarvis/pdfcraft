@@ -22,3 +22,7 @@ No production diff this knife. A-series gap is absent. Rename work was already l
 ## Gates
 
 Same green suite as knife 18 tip (`cargo fmt` / `clippy -D warnings` / `cargo test`). No new commits required for behavior.
+
+## Parent gate re-run
+
+Re-ran `cargo test` on branch tip `a97b18b6dde08e2c630536a2c908187d9d081731` after handoff close. Exit 0. Suite matches knife 18 counts (200 lib + 1 ignored, 78 document).

@@ -18,7 +18,7 @@
 | 16 Cell::spacer | feat/cell-spacer | c9c2af7 (audit a5ba3fb) |
 | 17 cell paragraph + list | feat/cell-rich | c3035df (audit 9b939b8) |
 | 18 §7 margin presets | feat/margin-presets | 3c9e3da |
-| 19 crate name / paper | feat/crate-rename | eeba400fffbb76cf7fdc3f8164fac8063861d635 (verify-only) |
+| 19 crate name / paper | feat/crate-rename | a97b18b6dde08e2c630536a2c908187d9d081731 (verify-only) |
 
 ## What callers get (knives 16–18)
 
@@ -39,7 +39,7 @@ Measured on `feat/margin-presets` tip after knife 18:
 
 ## Gates (parent re-verified 2026-10-10)
 
-On `feat/margin-presets` @ `3c9e3da`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (200 lib + 1 ignored, 78 `tests/document.rs`).
+On `feat/crate-rename` @ `a97b18b` (includes knife 18 feature tip 3c9e3da): `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (200 lib + 1 ignored, 78 `tests/document.rs`).
 
 ## Next
 
