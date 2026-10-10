@@ -1,6 +1,6 @@
 //! Public `document` DSL against recorded canvas commands.
 
-use std::num::NonZeroU16;
+use std::num::{NonZeroU16, NonZeroU32};
 
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::Paper;
@@ -318,6 +318,57 @@ fn lists_number_bullet_and_custom_markers() {
     let r = runs(&pages[0]);
     assert!(pt_near(r[0].x, 0.0));
     assert!(pt_near(r[1].x, 18.0));
+}
+
+#[test]
+fn ordered_list_start_numbers_from_the_given_value() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.ol(Numbering::Decimal, |l| {
+            l.start(NonZeroU32::new(4).unwrap());
+            l.item(|i| i.paragraph(|p| p.text("four")));
+            l.item(|i| i.paragraph(|p| p.text("five")));
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(texts(&pages[0]), ["4.", "four", "5.", "five"]);
+}
+
+#[test]
+fn custom_marker_wider_than_marker_width_errors() {
+    let result = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.ul(|l| {
+            l.marker_width(Positive::pt(10.0).unwrap());
+            l.item_marked("(1000)", |i| i.paragraph(|p| p.text("A")));
+        });
+        Ok(())
+    });
+    assert!(matches!(
+        result,
+        Err(Error::UnbreakableWiderThanFrame { avail, .. }) if pt_near(avail, 10.0)
+    ));
+}
+
+#[test]
+fn nest_indent_shifts_the_inner_list() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.ul(|l| {
+            l.nest_indent(Positive::pt(30.0).unwrap());
+            l.item(|i| {
+                i.paragraph(|p| p.text("outer"));
+                i.ul(|inner| inner.item(|n| n.paragraph(|p| p.text("child"))));
+            });
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert!(pt_near(glyph(&pages[0], "outer").x, 30.0));
+    assert!(pt_near(glyph(&pages[0], "child").x, 48.0));
 }
 
 #[test]

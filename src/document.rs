@@ -747,7 +747,7 @@ impl Flow {
         self.list(ListKind::Bullet, f);
     }
 
-    /// Appends a numbered list starting at 1.
+    /// Appends a numbered list. Numbering starts at 1 unless [`List::start`] says otherwise.
     pub fn ol(&mut self, numbering: Numbering, f: impl FnOnce(&mut List)) {
         self.list(
             ListKind::Ordered {
@@ -787,8 +787,18 @@ fn assemble_list(parent: Flow, kind: ListKind, f: impl FnOnce(&mut List)) -> Res
     let mut list = List {
         parent,
         items: Vec::new(),
+        start: NonZeroU32::MIN,
+        marker_width: Positive::pt(18.0).expect("18 pt is positive"),
+        nest_indent: None,
     };
     f(&mut list);
+    let kind = match kind {
+        ListKind::Ordered { style, .. } => ListKind::Ordered {
+            style,
+            start: list.start,
+        },
+        ListKind::Bullet => ListKind::Bullet,
+    };
     list.lower(kind)
 }
 
@@ -1355,13 +1365,33 @@ pub enum Numbering {
     LowerRoman,
 }
 
-/// Items being added to a list. Markers hang in an 18 pt column.
+/// Items being added to a list. Markers hang in an 18 pt column by default.
 pub struct List {
     parent: Flow,
     items: Vec<Result<ListItem>>,
+    start: NonZeroU32,
+    marker_width: Length<Positive>,
+    nest_indent: Option<Length<Positive>>,
 }
 
 impl List {
+    /// First number of an ordered list. Default 1.
+    ///
+    /// Ignored on a bulleted list.
+    pub fn start(&mut self, start: NonZeroU32) {
+        self.start = start;
+    }
+
+    /// Width of the hanging marker column. Default 18 pt.
+    pub fn marker_width(&mut self, width: Length<Positive>) {
+        self.marker_width = width;
+    }
+
+    /// Extra inset of nested list bodies. Default is the marker column width.
+    pub fn nest_indent(&mut self, indent: Length<Positive>) {
+        self.nest_indent = Some(indent);
+    }
+
     /// Adds an item with the list's own marker.
     pub fn item(&mut self, f: impl FnOnce(&mut Flow)) {
         let item = self.parent.nested(f).and_then(ListItem::new);
@@ -1369,6 +1399,8 @@ impl List {
     }
 
     /// Adds an item with `marker` in place of the list's marker. An empty marker is an error.
+    ///
+    /// A custom marker does not consume an ordered number.
     pub fn item_marked(&mut self, marker: impl Into<String>, f: impl FnOnce(&mut Flow)) {
         let marker = marker.into();
         let item = self
@@ -1381,8 +1413,8 @@ impl List {
     fn lower(self, kind: ListKind) -> Result<FlowNode> {
         let spec = ListSpec {
             kind,
-            marker_width: Positive::pt(18.0)?,
-            nest_indent: None,
+            marker_width: self.marker_width,
+            nest_indent: self.nest_indent,
             marker_style: self.parent.style,
             items: self.items.into_iter().collect::<Result<_>>()?,
         };
