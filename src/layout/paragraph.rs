@@ -655,3 +655,51 @@ fn align_x(frame_width: f32, line_width: f32, align: TextAlign) -> f32 {
         TextAlign::End => frame_width - line_width,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::flow::Frame;
+    use crate::layout::style::TextAlign;
+    use crate::layout::test_util::fonts_and_style;
+
+    #[test]
+    fn centered_fill_blank_starts_at_the_frame_x() {
+        let (mut fonts, mut style) = fonts_and_style();
+        style.align = TextAlign::Center;
+        let node = TextNode::from_items(
+            vec![
+                InlineItem::Text(TextRun::new("A", Face::Body)),
+                InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
+            ],
+            style,
+        );
+        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let Split::Fit { fragment, .. } = node
+            .split(
+                &mut ctx,
+                Frame {
+                    width: 120.0,
+                    height: 400.0,
+                    full_height: 400.0,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("paragraph fits");
+        };
+        let glyph = fragment.commands.iter().find_map(|command| match command {
+            FragmentCommand::Glyphs(run) if run.text == "A" => Some(run.origin.x().as_pt()),
+            _ => None,
+        });
+        assert_eq!(glyph.map(f32::to_bits), Some(0.0f32.to_bits()));
+        let end = fragment.commands.iter().find_map(|command| match command {
+            FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
+                crate::geom::PathVerb::LineTo(point) => point.x().as_pt(),
+                _ => f32::NAN,
+            }),
+            _ => None,
+        });
+        assert_eq!(end.map(f32::to_bits), Some(120.0f32.to_bits()));
+    }
+}

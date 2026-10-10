@@ -1600,6 +1600,26 @@ mod tests {
     }
 
     #[test]
+    fn fixed_blank_wider_than_the_indented_line_fails_before_any_page() {
+        let mut doc = Document::new(PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()));
+        doc.font(fixture_bytes().to_vec()).unwrap();
+        doc.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(40.0).unwrap());
+            p.blank(NonNegative::pt(80.0).unwrap());
+        });
+        let mut rec = RecordingCanvas::new();
+        let Err(error) = doc.paint(&mut rec) else {
+            panic!("expected the blank to be wider than the indented line");
+        };
+        let Error::UnbreakableWiderThanFrame { width, avail } = error else {
+            panic!("{error:?}");
+        };
+        assert!(crate::canvas::pt_near(width, 80.0), "{width}");
+        assert!(crate::canvas::pt_near(avail, 60.0), "{avail}");
+        assert!(rec.commands().is_empty());
+    }
+
+    #[test]
     fn bold_font_requires_body_and_rebinds_to_the_latest_face() {
         let mut doc = Document::new(PageSize::A4);
         assert_eq!(

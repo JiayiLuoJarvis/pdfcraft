@@ -1243,3 +1243,266 @@ fn hline_writes_a_pdf() {
     .unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
+
+struct StrokeSample {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    width: f32,
+    color: Color,
+}
+
+fn stroke_samples(page: &RecordedPage) -> Vec<StrokeSample> {
+    page.ops()
+        .iter()
+        .filter_map(|op| {
+            let CanvasCommand::StrokePath {
+                path,
+                paint,
+                stroke,
+            } = op
+            else {
+                return None;
+            };
+            let [PathVerb::MoveTo(from), PathVerb::LineTo(to)] = path.verbs() else {
+                return None;
+            };
+            Some(StrokeSample {
+                x0: from.x().as_pt(),
+                y0: from.y().as_pt(),
+                x1: to.x().as_pt(),
+                y1: to.y().as_pt(),
+                width: stroke.width().as_pt(),
+                color: paint.color(),
+            })
+        })
+        .collect()
+}
+
+fn glyph(page: &RecordedPage, text: &str) -> GlyphSample {
+    runs(page)
+        .into_iter()
+        .find(|run| run.text == text)
+        .unwrap_or_else(|| panic!("missing glyph run {text}"))
+}
+
+#[test]
+fn middle_blank_shifts_the_next_glyph_and_strokes_the_gap() {
+    let gap = NonNegative::pt(30.0).unwrap();
+    let thick = Positive::pt(2.0).unwrap();
+    let offset = NonNegative::pt(4.0).unwrap();
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                p.text("AB");
+                p.blank(gap).thickness(thick).baseline_offset(offset);
+                p.text("C");
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let ab = glyph(&pages[0], "AB");
+    let c = glyph(&pages[0], "C");
+    assert!(pt_near(c.x, ab.x + ab.width + 30.0), "c.x {}", c.x);
+    let stroke = &stroke_samples(&pages[0])[0];
+    assert!(pt_near(stroke.x0, ab.x + ab.width));
+    assert!(pt_near(stroke.x1, c.x));
+    assert!(pt_near(stroke.y0, ab.y + 4.0));
+    assert!(pt_near(stroke.y1, stroke.y0));
+    assert!(pt_near(stroke.width, 2.0));
+    assert_eq!(stroke.color, Color::rgb(0, 0, 0));
+}
+
+#[test]
+fn blank_does_not_change_line_height() {
+    let y_of_b = |with_blank: bool| {
+        let gap = NonNegative::pt(20.0).unwrap();
+        let pages = document(PageSize::A4, |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                if with_blank {
+                    p.text("A");
+                    p.blank(gap);
+                    p.text("\nB");
+                } else {
+                    p.text("A\nB");
+                }
+            });
+            Ok(())
+        })
+        .unwrap()
+        .pages();
+        glyph(&pages[0], "B").y
+    };
+    assert!(pt_near(y_of_b(true), y_of_b(false)));
+}
+
+#[test]
+fn fill_blank_reaches_the_frame_edge_with_the_default_stroke() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(120.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                p.text("A");
+                p.blank_to_end();
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let a = glyph(&pages[0], "A");
+    let stroke = &stroke_samples(&pages[0])[0];
+    assert!(pt_near(stroke.x0, a.x + a.width));
+    assert!(pt_near(stroke.x1, 120.0));
+    assert!(pt_near(stroke.y0, a.y + 1.0));
+    assert!(pt_near(stroke.width, 1.0));
+    assert_eq!(stroke.color, Color::rgb(0, 0, 0));
+}
+
+#[test]
+fn blank_em_is_font_size_times_count_and_needs_no_bold_face() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                p.blank_em(2);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let stroke = &stroke_samples(&pages[0])[0];
+    assert!(
+        pt_near(stroke.x1 - stroke.x0, 24.0),
+        "{}",
+        stroke.x1 - stroke.x0
+    );
+    assert!(runs(&pages[0]).iter().any(|run| run.text.is_empty()));
+}
+
+#[test]
+fn zero_width_blank_draws_no_stroke_and_does_not_shift() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                p.text("A");
+                p.blank(NonNegative::ZERO);
+                p.blank_em(0);
+                p.text("B");
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert!(stroke_samples(&pages[0]).is_empty());
+    let a = glyph(&pages[0], "A");
+    let b = glyph(&pages[0], "B");
+    assert!(pt_near(b.x, a.x + a.width));
+}
+
+#[test]
+fn list_fill_blank_starts_after_the_marker_column() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.ul(|list| {
+                list.item(|item| {
+                    item.paragraph(|p| {
+                        p.text("A");
+                        p.blank_to_end();
+                    });
+                });
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let a = glyph(&pages[0], "A");
+    assert!(pt_near(a.x, 18.0), "{}", a.x);
+    let stroke = &stroke_samples(&pages[0])[0];
+    assert!(pt_near(stroke.x0, a.x + a.width));
+    assert!(pt_near(stroke.x1, 200.0));
+}
+
+#[test]
+fn column_fill_blank_is_shifted_with_its_column() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.columns(|row| {
+                row.col(|col| col.paragraph(|p| p.text("L")));
+                row.col(|col| {
+                    col.paragraph(|p| {
+                        p.text("A");
+                        p.blank_to_end();
+                    });
+                });
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let a = glyph(&pages[0], "A");
+    let col = (200.0 - 12.0) / 2.0;
+    assert!(pt_near(a.x, col + 12.0), "{}", a.x);
+    let stroke = &stroke_samples(&pages[0])[0];
+    assert!(pt_near(stroke.x0, a.x + a.width));
+    assert!(pt_near(stroke.x1, 200.0), "{}", stroke.x1);
+}
+
+#[test]
+fn blank_stays_on_its_line_when_the_paragraph_splits() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, LINE).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                p.text("A");
+                p.blank(NonNegative::pt(20.0).unwrap());
+                p.text("\nB");
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(stroke_samples(&pages[0]).len(), 1);
+    assert!(stroke_samples(&pages[1]).is_empty());
+    let b = glyph(&pages[1], "B");
+    assert!(pt_near(b.x, 0.0));
+    assert!(pt_near(b.y, BASELINE));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn inline_blank_writes_a_pdf() {
+    let pdf = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.text("A");
+            p.blank(NonNegative::pt(12.0).unwrap());
+        });
+        Ok(())
+    })
+    .unwrap()
+    .to_pdf()
+    .unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+}
