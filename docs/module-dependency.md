@@ -86,7 +86,7 @@ layout/paginate       → decorate, flow, …
 | `decorate` → `paginate` | `SectionSpan` 归 `decorate`；`decorate` 测试的页面夹具挪进 `layout/test_util` |
 | `document` → `backend` | `canvas::ImageRegistry`（`Any + Send + Sync`）是注册缝，`canvas::RejectingImageRegistry` 是无后端实现。`backend::ImageTable` 实现它；`backend::write_pdf` 把录制回放成 PDF。`lib.rs` 的 `document()` 在开 `backend-krilla` 时换上 `ImageTable`；`quire_pdf::to_pdf(rendered)` 调 `backend::write_pdf` |
 
-**未清项：** 各节点模块的单元测试（`#[cfg(test)]`）仍 `use crate::layout::flow::FlowNode`，并经 `test_util` 走 `paginate`。这些是只在测试里出现的反向边，与上文硬规则 3 不符；整体挪到 `flow` / `paginate` 测试或集成测试是单独一刀。
+**未清项：** 节点测试上的硬规则 3 已清。`paragraph`、`columns`、`table`、`list`、`image`、`hline` 的生产和测试代码都不引用 `crate::layout::flow`。原 `#[cfg(test)]` 在 `layout/node_tests/`，按节点分文件，可以依赖 `flow`、`paginate` 与 `test_util`。`layout/test_util` 仍使用 `flow` 与 `paginate`。调用方是 `node_tests`，以及 `paginate` 和 `flow` 的测试。
 
 ## 明确不做
 

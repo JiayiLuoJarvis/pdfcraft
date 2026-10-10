@@ -52,7 +52,7 @@
 
 **硬规则：** 禁止循环依赖；单向 DAG 见 [`AGENTS.md`](../AGENTS.md) 与 [`module-dependency.md`](module-dependency.md)。
 
-**落地：** 下表各项均已实现，形态见 [`module-dependency.md`](module-dependency.md)「落地记录」。仅剩节点单元测试里的测试期反向边。
+**落地：** 下表各项均已实现，形态见 [`module-dependency.md`](module-dependency.md)「落地记录」。节点单元测试在 `layout/node_tests`。对 `flow` 的依赖留在该目录。
 
 **已确认：**
 

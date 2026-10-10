@@ -1,0 +1,400 @@
+use crate::canvas::{pt_near, CanvasCommand, LinkTarget, RecordingCanvas};
+use crate::fonts::{fixture_bytes, FontSource, FontStore};
+use crate::geom::{NonNegative, Point};
+use crate::layout::frame::{draw_fragment, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
+use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun};
+use crate::layout::style::{Style, TextAlign};
+use crate::layout::test_util::fonts_and_style;
+use crate::text::measure::line_metrics;
+
+fn uri(text: &str) -> LinkTarget {
+    LinkTarget::uri(text).unwrap()
+}
+
+fn text_item(text: &str, face: Face, link: Option<&str>) -> InlineItem {
+    InlineItem::Text(TextRun::new(text, face).with_link(link.map(uri)))
+}
+
+fn fit(
+    items: Vec<InlineItem>,
+    style: &Style,
+    fonts: &mut FontStore,
+    width: f32,
+    height: f32,
+) -> Fragment {
+    let node = TextNode::from_items(items, style.clone());
+    let mut ctx = LayoutCtx { fonts };
+    let Split::Fit { fragment, .. } = node
+        .split(
+            &mut ctx,
+            Frame {
+                width,
+                height,
+                full_height: height,
+            },
+        )
+        .unwrap()
+    else {
+        panic!("paragraph fits");
+    };
+    fragment
+}
+
+struct Hit {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    target: String,
+}
+
+fn hits(fragment: &Fragment) -> Vec<Hit> {
+    fragment
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            FragmentCommand::Link { rect, target } => Some(Hit {
+                x: rect.origin().x().as_pt(),
+                y: rect.origin().y().as_pt(),
+                width: rect.size().width().as_pt(),
+                height: rect.size().height().as_pt(),
+                target: target.as_str().to_owned(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn glyph_spans(fragment: &Fragment) -> Vec<(String, f32, f32)> {
+    fragment
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            FragmentCommand::Glyphs(run) => {
+                let width = run
+                    .glyphs
+                    .iter()
+                    .map(|glyph| glyph.advance_norm * run.font_size.as_pt())
+                    .sum();
+                Some((run.text.clone(), run.origin.x().as_pt(), width))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn body_line(fonts: &FontStore, style: &Style) -> f32 {
+    let face = fonts.metrics(style.font).unwrap();
+    line_metrics(face, style.font_size, style.line_height_factor)
+        .unwrap()
+        .line_height
+}
+
+#[test]
+fn centered_fill_blank_starts_at_the_frame_x() {
+    let (mut fonts, mut style) = fonts_and_style();
+    style.align = TextAlign::Center;
+    let node = TextNode::from_items(
+        vec![
+            InlineItem::Text(TextRun::new("A", Face::Body)),
+            InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
+        ],
+        style,
+    );
+    let mut ctx = LayoutCtx { fonts: &mut fonts };
+    let Split::Fit { fragment, .. } = node
+        .split(
+            &mut ctx,
+            Frame {
+                width: 120.0,
+                height: 400.0,
+                full_height: 400.0,
+            },
+        )
+        .unwrap()
+    else {
+        panic!("paragraph fits");
+    };
+    let glyph = fragment.commands.iter().find_map(|command| match command {
+        FragmentCommand::Glyphs(run) if run.text == "A" => Some(run.origin.x().as_pt()),
+        _ => None,
+    });
+    assert_eq!(glyph.map(f32::to_bits), Some(0.0f32.to_bits()));
+    let end = fragment.commands.iter().find_map(|command| match command {
+        FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
+            crate::geom::PathVerb::LineTo(point) => point.x().as_pt(),
+            _ => f32::NAN,
+        }),
+        _ => None,
+    });
+    assert_eq!(end.map(f32::to_bits), Some(120.0f32.to_bits()));
+}
+
+#[test]
+fn partial_link_rect_covers_only_the_linked_glyphs() {
+    let (mut fonts, style) = fonts_and_style();
+    let line = body_line(&fonts, &style);
+    let fragment = fit(
+        vec![
+            text_item("A", Face::Body, None),
+            text_item("BC", Face::Body, Some("https://example.com/bc")),
+            text_item("D", Face::Body, None),
+        ],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    let glyphs = glyph_spans(&fragment);
+    assert_eq!(
+        glyphs
+            .iter()
+            .map(|(text, _, _)| text.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "BC", "D"]
+    );
+    let links = hits(&fragment);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target, "https://example.com/bc");
+    assert!(pt_near(links[0].x, glyphs[1].1));
+    assert!(pt_near(links[0].width, glyphs[1].2));
+    assert!(pt_near(glyphs[1].1, glyphs[0].2));
+    assert_eq!(links[0].y.to_bits(), 0.0f32.to_bits());
+    assert_eq!(links[0].height.to_bits(), line.to_bits());
+}
+
+#[test]
+fn wrapped_link_emits_one_rect_per_visual_line() {
+    let (mut fonts, style) = fonts_and_style();
+    let line = body_line(&fonts, &style);
+    let fragment = fit(
+        vec![text_item(
+            "第第",
+            Face::Body,
+            Some("https://example.com/wrap"),
+        )],
+        &style,
+        &mut fonts,
+        12.0,
+        80.0,
+    );
+    let links = hits(&fragment);
+    assert_eq!(links.len(), 2);
+    assert!(links
+        .iter()
+        .all(|hit| hit.target == "https://example.com/wrap"));
+    assert_eq!(links[0].x.to_bits(), 0.0f32.to_bits());
+    assert_eq!(links[0].y.to_bits(), 0.0f32.to_bits());
+    assert_eq!(links[0].width.to_bits(), 12.0f32.to_bits());
+    assert_eq!(links[0].height.to_bits(), line.to_bits());
+    assert_eq!(links[1].x.to_bits(), 0.0f32.to_bits());
+    assert_eq!(links[1].y.to_bits(), line.to_bits());
+    assert_eq!(links[1].width.to_bits(), 12.0f32.to_bits());
+    assert_eq!(links[1].height.to_bits(), line.to_bits());
+}
+
+#[test]
+fn same_link_keeps_body_and_bold_in_one_rect() {
+    let (mut fonts, style) = fonts_and_style();
+    let bold = fonts
+        .register(FontSource {
+            bytes: fixture_bytes(),
+            index: 0,
+        })
+        .unwrap();
+    fonts.set_bold(bold);
+    let fragment = fit(
+        vec![
+            text_item("A", Face::Body, Some("u")),
+            text_item("B", Face::Bold, Some("u")),
+            text_item("C", Face::Body, Some("u")),
+        ],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    let glyphs = glyph_spans(&fragment);
+    assert_eq!(glyphs.len(), 3);
+    let links = hits(&fragment);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target, "u");
+    assert_eq!(links[0].x.to_bits(), 0.0f32.to_bits());
+    assert!(pt_near(
+        links[0].width,
+        glyphs.iter().map(|(_, _, width)| width).sum()
+    ));
+}
+
+#[test]
+fn link_changes_flush_and_a_repeat_uri_stays_its_own_rect() {
+    let (mut fonts, style) = fonts_and_style();
+    let fragment = fit(
+        vec![
+            text_item("A", Face::Body, Some("a")),
+            text_item("B", Face::Body, Some("b")),
+            text_item("C", Face::Body, None),
+            text_item("D", Face::Body, Some("a")),
+        ],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    let glyphs = glyph_spans(&fragment);
+    let links = hits(&fragment);
+    assert_eq!(
+        links
+            .iter()
+            .map(|hit| hit.target.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "a"]
+    );
+    assert!(pt_near(links[0].x, glyphs[0].1));
+    assert!(pt_near(links[0].width, glyphs[0].2));
+    assert!(pt_near(links[1].x, glyphs[1].1));
+    assert!(pt_near(links[1].width, glyphs[1].2));
+    assert!(pt_near(links[2].x, glyphs[3].1));
+    assert!(pt_near(links[2].width, glyphs[3].2));
+    assert!(links[0].x + links[0].width <= links[1].x + f32::EPSILON);
+    assert!(links[1].x + links[1].width < links[2].x);
+}
+
+#[test]
+fn adjacent_runs_with_the_same_link_share_one_rect() {
+    let (mut fonts, style) = fonts_and_style();
+    let fragment = fit(
+        vec![
+            text_item("A", Face::Body, Some("u")),
+            text_item("B", Face::Body, Some("u")),
+        ],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    let glyphs = glyph_spans(&fragment);
+    let links = hits(&fragment);
+    assert_eq!(glyphs.len(), 1);
+    assert_eq!(glyphs[0].0, "AB");
+    assert_eq!(links.len(), 1);
+    assert!(pt_near(links[0].width, glyphs[0].2));
+}
+
+#[test]
+fn blank_splits_a_link_and_is_not_inside_either_rect() {
+    let (mut fonts, style) = fonts_and_style();
+    let fragment = fit(
+        vec![
+            text_item("A", Face::Body, Some("u")),
+            InlineItem::Blank(InlineBlank::new(BlankWidth::Fixed(
+                NonNegative::pt(30.0).unwrap(),
+            ))),
+            text_item("B", Face::Body, Some("u")),
+        ],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    let links = hits(&fragment);
+    assert_eq!(links.len(), 2);
+    assert!(fragment
+        .commands
+        .iter()
+        .any(|command| matches!(command, FragmentCommand::Stroke { .. })));
+    assert!(pt_near(links[1].x - (links[0].x + links[0].width), 30.0));
+}
+
+#[test]
+fn link_rect_follows_alignment_and_first_line_indent() {
+    let (mut fonts, mut style) = fonts_and_style();
+    style.align = TextAlign::Center;
+    let centered = fit(
+        vec![text_item("A", Face::Body, Some("u"))],
+        &style,
+        &mut fonts,
+        120.0,
+        80.0,
+    );
+    let center_glyphs = glyph_spans(&centered);
+    let center_links = hits(&centered);
+    assert!(pt_near(center_links[0].x, center_glyphs[0].1));
+    assert!(center_links[0].x > 0.0);
+
+    style.align = TextAlign::End;
+    let ended = fit(
+        vec![text_item("A", Face::Body, Some("u"))],
+        &style,
+        &mut fonts,
+        120.0,
+        80.0,
+    );
+    let end_glyphs = glyph_spans(&ended);
+    let end_links = hits(&ended);
+    assert!(pt_near(end_links[0].x, end_glyphs[0].1));
+    assert!(pt_near(end_links[0].x + end_links[0].width, 120.0));
+
+    style.align = TextAlign::Start;
+    style.first_line_indent = NonNegative::pt(10.0).unwrap();
+    let indented = fit(
+        vec![text_item("A", Face::Body, Some("u"))],
+        &style,
+        &mut fonts,
+        120.0,
+        80.0,
+    );
+    let indent_links = hits(&indented);
+    assert!(pt_near(indent_links[0].x, 10.0));
+    assert!(pt_near(indent_links[0].x, glyph_spans(&indented)[0].1));
+}
+
+#[test]
+fn offset_and_paint_move_the_link_rect() {
+    let (mut fonts, style) = fonts_and_style();
+    let fragment = fit(
+        vec![text_item("A", Face::Body, Some("https://example.com/a"))],
+        &style,
+        &mut fonts,
+        80.0,
+        40.0,
+    );
+    let local = &hits(&fragment)[0];
+    let shifted = fragment.clone().with_offset(10.0, 20.0).unwrap();
+    let moved = &hits(&shifted)[0];
+    assert!(pt_near(moved.x, local.x + 10.0));
+    assert!(pt_near(moved.y, local.y + 20.0));
+    assert_eq!(moved.target, local.target);
+
+    let mut rec = RecordingCanvas::new();
+    draw_fragment(&fragment, &mut rec, Point::try_pt(3.0, 4.0).unwrap()).unwrap();
+    let painted: Vec<_> = rec
+        .commands()
+        .iter()
+        .filter_map(|command| match command {
+            CanvasCommand::AnnotateLink { rect, target } => Some((
+                rect.origin().x().as_pt(),
+                rect.origin().y().as_pt(),
+                target.as_str().to_owned(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(painted.len(), 1);
+    assert!(pt_near(painted[0].0, local.x + 3.0));
+    assert!(pt_near(painted[0].1, local.y + 4.0));
+    assert_eq!(painted[0].2, "https://example.com/a");
+}
+
+#[test]
+fn empty_linked_text_emits_no_rect() {
+    let (mut fonts, style) = fonts_and_style();
+    let fragment = fit(
+        vec![text_item("", Face::Body, Some("u"))],
+        &style,
+        &mut fonts,
+        80.0,
+        40.0,
+    );
+    assert!(hits(&fragment).is_empty());
+}
