@@ -2277,6 +2277,23 @@ fn cell_rich_taller_than_frame_does_not_continue() {
 }
 
 #[test]
+fn cell_list_can_borrow_a_table_local() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            let label = String::from("borrowed");
+            t.row([Cell::ul(|list| {
+                list.item(|item| item.paragraph(|p| p.text(&label)));
+            })]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert!(texts(&pages[0]).iter().any(|s| s == "borrowed"));
+}
+
+#[test]
 fn cell_list_marker_at_cell_x() {
     let pages = document(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
@@ -2362,7 +2379,7 @@ fn cell_list_item_rejects_forbidden_kids() {
         let result = document(PageSize::A4, |doc| {
             let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
             doc.table(|t| {
-                t.row([Cell::ul(move |list| {
+                t.row([Cell::ul(|list| {
                     list.item(|item| item.image(&logo, |_| {}));
                 })]);
             });

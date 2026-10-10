@@ -700,6 +700,7 @@ impl Flow {
     /// The column count is the span sum of the first row.
     pub fn table(&mut self, f: impl FnOnce(&mut Table)) {
         let mut table = Table {
+            parent: self.child(),
             header: Vec::new(),
             body: Vec::new(),
             repeat_header: true,
@@ -711,7 +712,7 @@ impl Flow {
             },
         };
         f(&mut table);
-        let node = table.lower(self);
+        let node = table.lower();
         self.push(node);
     }
 
@@ -1066,32 +1067,77 @@ pub struct Border {
 
 /// Rows being added to a table.
 pub struct Table {
-    header: Vec<Vec<Cell>>,
-    body: Vec<Vec<Cell>>,
+    parent: Flow,
+    header: Vec<Vec<StoredCell>>,
+    body: Vec<Vec<StoredCell>>,
     repeat_header: bool,
     tracks: Option<Vec<Track>>,
     padding: Length<NonNegative>,
     border: Border,
 }
 
+struct StoredCell {
+    content: StoredContent,
+    col_span: NonZeroU16,
+    row_span: NonZeroU16,
+}
+
+enum StoredContent {
+    Text(String),
+    Paragraph(Paragraph),
+    Image(Image, ImageBox),
+    HLine(HLine),
+    Spacer(Length<NonNegative>),
+    List(Result<FlowNode>),
+}
+
 impl Table {
     /// Adds a header row. Several calls make a multi-row header.
-    pub fn header<I>(&mut self, cells: I)
+    pub fn header<'c, I>(&mut self, cells: I)
     where
         I: IntoIterator,
-        I::Item: Into<Cell>,
+        I::Item: Into<Cell<'c>>,
     {
-        self.header
-            .push(cells.into_iter().map(Into::into).collect());
+        let row = cells.into_iter().map(|c| self.store(c.into())).collect();
+        self.header.push(row);
     }
 
     /// Adds a body row.
-    pub fn row<I>(&mut self, cells: I)
+    pub fn row<'c, I>(&mut self, cells: I)
     where
         I: IntoIterator,
-        I::Item: Into<Cell>,
+        I::Item: Into<Cell<'c>>,
     {
-        self.body.push(cells.into_iter().map(Into::into).collect());
+        let row = cells.into_iter().map(|c| self.store(c.into())).collect();
+        self.body.push(row);
+    }
+
+    fn store(&self, cell: Cell<'_>) -> StoredCell {
+        let content = match cell.content {
+            CellContent::Text(text) => StoredContent::Text(text),
+            CellContent::Paragraph(paragraph) => StoredContent::Paragraph(paragraph),
+            CellContent::Image(image, image_box) => StoredContent::Image(image, image_box),
+            CellContent::HLine(line) => StoredContent::HLine(line),
+            CellContent::Spacer(height) => StoredContent::Spacer(height),
+            CellContent::List(DeferredList::Bullet(build)) => {
+                StoredContent::List(assemble_list(self.parent.child(), ListKind::Bullet, build))
+            }
+            CellContent::List(DeferredList::Ordered(numbering, build)) => {
+                StoredContent::List(assemble_list(
+                    self.parent.child(),
+                    ListKind::Ordered {
+                        style: numbering_kind(numbering),
+                        start: NonZeroU32::MIN,
+                    },
+                    build,
+                ))
+            }
+        };
+        StoredCell {
+            content,
+            col_span: cell.col_span,
+            row_span: cell.row_span,
+        }
     }
 
     /// Whether header rows repeat at the top of each page the table continues on. Default on.
@@ -1114,7 +1160,8 @@ impl Table {
         self.border = Border { width, color };
     }
 
-    fn lower(self, flow: &Flow) -> Result<FlowNode> {
+    fn lower(self) -> Result<FlowNode> {
+        let flow = &self.parent;
         let first = self.header.first().or(self.body.first());
         let cols: usize = first.map_or(0, |row| {
             row.iter()
@@ -1137,34 +1184,22 @@ impl Table {
             None => vec![even; cols],
         };
         reject_auto_with_ratio(&widths)?;
-        let lower_rows = |rows: Vec<Vec<Cell>>| -> Result<Vec<Vec<table::Cell>>> {
+        let lower_rows = |rows: Vec<Vec<StoredCell>>| -> Result<Vec<Vec<table::Cell>>> {
             rows.into_iter()
                 .map(|row| {
                     row.into_iter()
                         .map(|cell| {
                             let content = match cell.content {
-                                CellContent::Text(text) => vec![flow.text(text)],
-                                CellContent::Paragraph(paragraph) => {
+                                StoredContent::Text(text) => vec![flow.text(text)],
+                                StoredContent::Paragraph(paragraph) => {
                                     vec![lower_paragraph(paragraph, &flow.style)?]
                                 }
-                                CellContent::List(DeferredList::Bullet(build)) => {
-                                    vec![assemble_list(flow.child(), ListKind::Bullet, build)?]
-                                }
-                                CellContent::List(DeferredList::Ordered(numbering, build)) => {
-                                    vec![assemble_list(
-                                        flow.child(),
-                                        ListKind::Ordered {
-                                            style: numbering_kind(numbering),
-                                            start: NonZeroU32::MIN,
-                                        },
-                                        build,
-                                    )?]
-                                }
-                                CellContent::Image(image, image_box) => {
+                                StoredContent::List(node) => vec![node?],
+                                StoredContent::Image(image, image_box) => {
                                     vec![image_box.lower(&image, flow.doc)?]
                                 }
-                                CellContent::HLine(line) => vec![line.lower()],
-                                CellContent::Spacer(height) => {
+                                StoredContent::HLine(line) => vec![line.lower()],
+                                StoredContent::Spacer(height) => {
                                     vec![FlowNode::Spacer(SpacerNode { height })]
                                 }
                             };
@@ -1192,28 +1227,28 @@ impl Table {
 /// One table cell.
 #[derive(Debug)]
 #[must_use]
-pub struct Cell {
-    content: CellContent,
+pub struct Cell<'a> {
+    content: CellContent<'a>,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
 }
 
 #[derive(Debug)]
-enum CellContent {
+enum CellContent<'a> {
     Text(String),
     Paragraph(Paragraph),
     Image(Image, ImageBox),
     HLine(HLine),
     Spacer(Length<NonNegative>),
-    List(DeferredList),
+    List(DeferredList<'a>),
 }
 
-enum DeferredList {
-    Bullet(Box<dyn FnOnce(&mut List) + 'static>),
-    Ordered(Numbering, Box<dyn FnOnce(&mut List) + 'static>),
+enum DeferredList<'a> {
+    Bullet(Box<dyn FnOnce(&mut List) + 'a>),
+    Ordered(Numbering, Box<dyn FnOnce(&mut List) + 'a>),
 }
 
-impl std::fmt::Debug for DeferredList {
+impl std::fmt::Debug for DeferredList<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DeferredList::Bullet(_) => f.debug_tuple("Bullet").finish(),
@@ -1224,7 +1259,7 @@ impl std::fmt::Debug for DeferredList {
     }
 }
 
-impl Cell {
+impl<'a> Cell<'a> {
     /// A cell spanning one column and one row.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
@@ -1250,13 +1285,12 @@ impl Cell {
 
     /// A one-by-one cell holding a bulleted list.
     ///
-    /// The closure is `'static` and runs when the table is lowered, after the
-    /// table closure returns. Move owned data in. A local declared inside the
-    /// table closure cannot be borrowed.
+    /// The closure runs when the cell is written into a row. It may borrow
+    /// locals that live until that `row` or `header` call returns.
     ///
     /// Content taller than the cell's inner full frame is
     /// [`Error::UnsplittableTallerThanFrame`].
-    pub fn ul(f: impl FnOnce(&mut List) + 'static) -> Self {
+    pub fn ul(f: impl FnOnce(&mut List) + 'a) -> Self {
         Self {
             content: CellContent::List(DeferredList::Bullet(Box::new(f))),
             col_span: NonZeroU16::MIN,
@@ -1266,13 +1300,12 @@ impl Cell {
 
     /// A one-by-one cell holding a numbered list starting at 1.
     ///
-    /// The closure is `'static` and runs when the table is lowered, after the
-    /// table closure returns. Move owned data in. A local declared inside the
-    /// table closure cannot be borrowed.
+    /// The closure runs when the cell is written into a row. It may borrow
+    /// locals that live until that `row` or `header` call returns.
     ///
     /// Content taller than the cell's inner full frame is
     /// [`Error::UnsplittableTallerThanFrame`].
-    pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'static) -> Self {
+    pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'a) -> Self {
         Self {
             content: CellContent::List(DeferredList::Ordered(numbering, Box::new(f))),
             col_span: NonZeroU16::MIN,
@@ -1332,19 +1365,19 @@ impl Cell {
     }
 }
 
-impl From<&str> for Cell {
+impl From<&str> for Cell<'_> {
     fn from(text: &str) -> Self {
         Self::new(text)
     }
 }
 
-impl From<String> for Cell {
+impl From<String> for Cell<'_> {
     fn from(text: String) -> Self {
         Self::new(text)
     }
 }
 
-impl From<&String> for Cell {
+impl From<&String> for Cell<'_> {
     fn from(text: &String) -> Self {
         Self::new(text.as_str())
     }
