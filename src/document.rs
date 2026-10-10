@@ -701,6 +701,12 @@ impl Flow {
             header: Vec::new(),
             body: Vec::new(),
             repeat_header: true,
+            tracks: None,
+            padding: NonNegative::ZERO,
+            border: Border {
+                width: NonNegative::ZERO,
+                color: Color::rgb(0, 0, 0),
+            },
         };
         f(&mut table);
         let node = table.lower(self);
@@ -981,11 +987,42 @@ impl Columns {
     }
 }
 
+/// A table or column track width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Track {
+    /// A length in points.
+    Fixed(Length<Positive>),
+    /// A positive finite weight. Rejected at conversion with [`Error::ColumnWidths`].
+    Ratio(f32),
+    /// Remaining width after Fixed tracks. At most one Auto per set of tracks.
+    Auto,
+}
+
+impl Track {
+    fn into_width(self) -> Result<ColumnWidth> {
+        match self {
+            Self::Fixed(width) => Ok(ColumnWidth::Fixed(width)),
+            Self::Ratio(weight) => Ok(ColumnWidth::Ratio(Ratio::new(weight)?)),
+            Self::Auto => Ok(ColumnWidth::Auto),
+        }
+    }
+}
+
+/// Grid-line stroke. Width zero draws nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Border {
+    width: Length<NonNegative>,
+    color: Color,
+}
+
 /// Rows being added to a table.
 pub struct Table {
     header: Vec<Vec<Cell>>,
     body: Vec<Vec<Cell>>,
     repeat_header: bool,
+    tracks: Option<Vec<Track>>,
+    padding: Length<NonNegative>,
+    border: Border,
 }
 
 impl Table {
@@ -1013,6 +1050,21 @@ impl Table {
         self.repeat_header = on;
     }
 
+    /// Sets per-column widths. Length must match the first row's span sum.
+    pub fn tracks(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        self.tracks = Some(tracks.into_iter().collect());
+    }
+
+    /// Inner padding on every side of each cell. Default zero.
+    pub fn cell_padding(&mut self, padding: Length<NonNegative>) {
+        self.padding = padding;
+    }
+
+    /// Grid-line stroke. Width zero draws nothing. Default black, width zero.
+    pub fn border(&mut self, width: Length<NonNegative>, color: Color) {
+        self.border = Border { width, color };
+    }
+
     fn lower(self, flow: &Flow) -> Result<FlowNode> {
         let first = self.header.first().or(self.body.first());
         let cols: usize = first.map_or(0, |row| {
@@ -1021,6 +1073,20 @@ impl Table {
                 .sum()
         });
         let even = ColumnWidth::Ratio(Ratio::new(1.0)?);
+        let widths = match self.tracks {
+            Some(tracks) => {
+                if tracks.len() != cols {
+                    return Err(Error::ColumnWidths {
+                        reason: "column-count",
+                    });
+                }
+                tracks
+                    .into_iter()
+                    .map(Track::into_width)
+                    .collect::<Result<Vec<_>>>()?
+            }
+            None => vec![even; cols],
+        };
         let lower_rows = |rows: Vec<Vec<Cell>>| -> Result<Vec<Vec<table::Cell>>> {
             rows.into_iter()
                 .map(|row| {
@@ -1062,7 +1128,12 @@ impl Table {
             header: lower_rows(self.header)?,
             body: lower_rows(self.body)?,
             repeat_header: self.repeat_header,
-            ..TableSpec::new(vec![even; cols])
+            padding: self.padding,
+            border: table::Border {
+                width: self.border.width,
+                color: self.border.color,
+            },
+            ..TableSpec::new(widths)
         };
         Ok(FlowNode::Table(TableNode::new(spec)?))
     }

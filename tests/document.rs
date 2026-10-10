@@ -7,7 +7,7 @@ use quire_pdf::Paper;
 use quire_pdf::{
     document, pt_near, CanvasCommand, Cell, Color, Error, Flow, ImageFormat, Ink, MarginPreset,
     Margins, NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage,
-    Rect, Rendered, Result, Size, Stroke, A4,
+    Rect, Rendered, Result, Size, Stroke, Track, A4,
 };
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
@@ -2372,6 +2372,109 @@ fn margin_presets_match_uniform_insets() {
     assert!(pt_near(half.1, 36.0 + BASELINE));
     assert!(pt_near(half.0, half_uniform.0));
     assert!(pt_near(half.1, half_uniform.1));
+}
+
+#[test]
+fn table_tracks_fill_the_frame_and_keep_fixed_width() {
+    let page_w = 200.0;
+    let pages = document(
+        PageSize::custom(Size::try_pt(page_w, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.tracks([
+                    Track::Fixed(Positive::pt(40.0).unwrap()),
+                    Track::Ratio(1.0),
+                    Track::Auto,
+                ]);
+                t.row(["A", "B", "C"]);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let a = glyph(&pages[0], "A");
+    let b = glyph(&pages[0], "B");
+    let c = glyph(&pages[0], "C");
+    assert!(pt_near(a.x, 0.0));
+    assert!(pt_near(b.x, 40.0));
+    assert!(pt_near(c.x, 120.0));
+}
+
+#[test]
+fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
+    let width = 0.707 * 12.0;
+    let page = PageSize::custom(Size::try_pt(width * 4.0, 400.0).unwrap());
+    let open = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| t.row([Cell::paragraph(|p| p.text("A A"))]));
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let padded = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.cell_padding(NonNegative::pt(width).unwrap());
+            t.row([Cell::paragraph(|p| p.text("A A"))]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(runs(&open[0]).len(), 1);
+    assert_eq!(runs(&padded[0]).len(), 2);
+    assert!(pt_near(runs(&padded[0])[1].y, LINE + width + BASELINE));
+}
+
+#[test]
+fn table_zero_border_draws_no_stroke_and_a_positive_border_does() {
+    let page = PageSize::custom(Size::try_pt(200.0, 400.0).unwrap());
+    let none = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| t.row(["A"]));
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert!(none[0]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+
+    let stroked = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.border(NonNegative::pt(0.5).unwrap(), Color::rgb(0, 0, 0));
+            t.row(["A"]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert!(stroked[0]
+        .ops()
+        .iter()
+        .any(|op| matches!(op, CanvasCommand::StrokePath { .. })));
+}
+
+#[test]
+fn table_tracks_length_must_match_the_first_row() {
+    let result = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.tracks([Track::Ratio(1.0)]);
+            t.row(["A", "B"]);
+        });
+        Ok(())
+    });
+    assert_eq!(
+        result.err(),
+        Some(Error::ColumnWidths {
+            reason: "column-count"
+        })
+    );
 }
 
 #[test]
