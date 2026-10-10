@@ -470,6 +470,40 @@ impl Default for Margins {
     }
 }
 
+/// A named set of four equal page margins.
+///
+/// [`Inch`] is exactly 72 PDF points, one international inch. [`HalfInch`] is
+/// exactly 36 PDF points. Choosing a preset sets all four sides, including the
+/// header and footer band heights.
+///
+/// This enum has no [`Default`]. [`Margins::default`] stays four zeros.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+#[must_use]
+pub enum MarginPreset {
+    /// Exactly 72 PDF points (one international inch) on every side.
+    Inch,
+    /// Exactly 36 PDF points (one half international inch) on every side.
+    HalfInch,
+}
+
+impl MarginPreset {
+    /// Uniform margins for this preset.
+    pub const fn into_margins(self) -> Margins {
+        let side = match self {
+            Self::Inch => Length::from_trusted_pt(72.0),
+            Self::HalfInch => Length::from_trusted_pt(36.0),
+        };
+        Margins::uniform(side)
+    }
+}
+
+impl From<MarginPreset> for Margins {
+    fn from(value: MarginPreset) -> Self {
+        value.into_margins()
+    }
+}
+
 /// An 8-bit RGBA color. Channels are already in range, so construction is total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
@@ -902,6 +936,20 @@ mod tests {
         assert_eq!(margins.right(), NonNegative::ZERO);
         assert_eq!(margins.bottom(), NonNegative::ZERO);
         assert_eq!(margins.left(), NonNegative::ZERO);
+    }
+
+    #[test]
+    fn inch_margin_preset_is_uniform_72pt() {
+        let expected = Margins::uniform(NonNegative::pt(72.0).unwrap());
+        assert_eq!(MarginPreset::Inch.into_margins(), expected);
+        assert_eq!(Margins::from(MarginPreset::Inch), expected);
+    }
+
+    #[test]
+    fn half_inch_margin_preset_is_uniform_36pt() {
+        let expected = Margins::uniform(NonNegative::pt(36.0).unwrap());
+        assert_eq!(MarginPreset::HalfInch.into_margins(), expected);
+        assert_eq!(Margins::from(MarginPreset::HalfInch), expected);
     }
 
     #[test]

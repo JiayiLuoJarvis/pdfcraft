@@ -10,8 +10,9 @@ pub mod limits;
 
 pub use error::{Error, Result};
 pub use geom::{
-    Color, Finite, Ink, Length, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path,
-    PathBuilder, PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER, MM_TO_PT,
+    Color, Finite, Ink, Length, MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint,
+    Paper, Path, PathBuilder, PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER,
+    MM_TO_PT,
 };
 
 pub mod canvas;
