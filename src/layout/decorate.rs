@@ -278,7 +278,7 @@ fn measure_band(
 mod tests {
     use super::*;
     use crate::canvas::CanvasCommand;
-    use crate::geom::{Color, Ink, NonNegative, Path, Pen, Positive, Rect};
+    use crate::geom::{Color, Ink, NonNegative, Path, Pen, Rect};
     use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
     use crate::layout::paginate::PaginateConfig;
     use crate::layout::table::{TableNode, TableSpec};
@@ -682,7 +682,7 @@ mod tests {
             behind: Some(Box::new(move |_: &PageInfo| {
                 Ok(vec![LayerItem::Shape {
                     path: path.clone(),
-                    ink: Ink::Stroke(Pen::new(Color::rgb(1, 2, 3), Positive::pt(1.5).unwrap())),
+                    ink: Ink::Stroke(Pen::new(Color::rgb(1, 2, 3), 1.5).unwrap()),
                 }])
             })),
             ..Decorations::none()
@@ -712,7 +712,7 @@ mod tests {
                     path: path.clone(),
                     ink: Ink::FillStroke(
                         Color::rgba(9, 8, 7, 40),
-                        Pen::new(Color::rgb(1, 2, 3), Positive::pt(2.0).unwrap()),
+                        Pen::new(Color::rgb(1, 2, 3), 2.0).unwrap(),
                     ),
                 }])
             })),

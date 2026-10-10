@@ -1,45 +1,41 @@
-//! Small PDF smoke demo. Needs a font with the glyphs you print.
+//! Multi-page smoke demo that walks most of the public flow DSL.
 //!
 //! ```text
 //! cargo run --example hello
 //! ```
 //!
 //! Writes `hello.pdf` in the current directory. Pass another path as argv[1].
-//! The bundled fixture only maps a Latin subset. A missing glyph fails the document.
+//! The bundled fixture maps printable ASCII, U+2022, and 第 / 页 / 共. Other
+//! missing glyphs fail the document.
 
 use std::env;
 use std::fs;
+use std::num::{NonZeroU16, NonZeroU32};
 use std::path::PathBuf;
 
-use quire_pdf::{document, Margins, NonNegative, Numbering, PageSize};
+use quire_pdf::{
+    document, Cell, Color, Document, Flow, Image, ImageFormat, Ink, Margins, Numbering, PageSize,
+    Pen, Track,
+};
 
 const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
+const PIXEL: &[u8] = include_bytes!("../tests/fixtures/one-pixel.png");
 
 fn main() -> quire_pdf::Result<()> {
     let out = env::args()
         .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("hello.pdf"));
+        .map_or_else(|| PathBuf::from("hello.pdf"), PathBuf::from);
 
     let pdf = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
-        doc.header(|h| {
-            let m = h.page().margins;
-            h.inset(m.left(), m.right());
-            h.left("quire hello");
-            h.right(format!("page {}", h.page().number));
-        });
-        doc.paragraph(|p| {
-            p.center();
-            p.text("Hello from quire");
-        });
-        doc.paragraph(|p| p.text("Body text uses the first registered font at 12 pt."));
-        doc.ol(Numbering::Decimal, |list| {
-            list.item(|item| item.paragraph(|p| p.text("measure")));
-            list.item(|item| item.paragraph(|p| p.text("break lines")));
-            list.item(|item| item.paragraph(|p| p.text("write PDF")));
-        });
+        doc.bold_font(FONT.to_vec())?;
+        let logo = doc.load_image(PIXEL.to_vec(), ImageFormat::Png)?;
+        decorate_pages(doc, logo)?;
+        write_title(doc, &logo);
+        write_lists(doc);
+        write_table(doc, &logo);
+        doc.page_break();
+        write_closing(doc);
         Ok(())
     })?
     .to_pdf()?;
@@ -47,4 +43,246 @@ fn main() -> quire_pdf::Result<()> {
     fs::write(&out, &pdf).expect("write PDF");
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());
     Ok(())
+}
+
+fn decorate_pages(doc: &mut Document<'_>, seal: Image) -> quire_pdf::Result<()> {
+    doc.margins(Margins::try_uniform(48.0)?);
+    doc.header(|h| {
+        let m = h.page().margins;
+        h.inset(m.left(), m.right());
+        h.left_link("https://example.test/quire", "quire demo");
+        h.right(format!(
+            "第 {} 页 / 共 {} 页",
+            h.page().number,
+            h.page().count
+        ));
+    });
+    doc.footer(|f| {
+        let m = f.page().margins;
+        f.inset(m.left(), m.right());
+        f.left("layout smoke");
+        f.right_link("https://example.test/footer", "footer link");
+    });
+    let faint = Pen::new(Color::rgba(180, 180, 180, 80), 0.6)?;
+    let box_pen = Pen::new(Color::rgba(0, 0, 0, 40), 0.5)?;
+    let seal_pen = Pen::new(Color::rgba(200, 40, 40, 50), 1.0)?;
+    doc.behind(move |layer| {
+        let page = layer.page();
+        let cx = page.size.width().as_pt() * 0.5;
+        let cy = page.size.height().as_pt() * 0.45;
+        layer.text_at("DRAFT", (cx - 40.0, cy));
+        layer.line(
+            (72.0, 120.0),
+            (page.size.width().as_pt() - 72.0, 120.0),
+            faint,
+        );
+        layer.rect((60.0, 200.0, 40.0, 28.0), Ink::Stroke(box_pen));
+        layer.ellipse(
+            (cx - 36.0, cy - 24.0, 72.0, 48.0),
+            Ink::FillStroke(Color::rgba(200, 40, 40, 18), seal_pen),
+        );
+        layer.rotated(18.0, (cx, cy), |shapes| {
+            shapes.rect(
+                (cx - 50.0, cy - 8.0, 100.0, 16.0),
+                Ink::Fill(Color::rgba(0, 0, 255, 12)),
+            );
+        });
+    });
+    doc.front(move |layer| {
+        if layer.is_last() {
+            layer.image_at(&seal, (430.0, 680.0, 72.0, 72.0));
+            layer.text_at("SEAL", (448.0, 710.0));
+        }
+    });
+    Ok(())
+}
+
+fn write_title(flow: &mut Flow, logo: &Image) {
+    flow.paragraph(|p| {
+        p.center();
+        p.bold("Quire layout tour");
+    });
+    flow.hline(|h| {
+        h.width(220.0);
+        h.thickness(1.25);
+        h.color(Color::rgb(40, 40, 40));
+        h.space_before(6.0);
+        h.space_after(12.0);
+    });
+    flow.image(logo, |image| {
+        image.width(36.0);
+        image.center();
+    });
+    flow.spacer(10.0);
+    flow.paragraph(|p| {
+        p.first_line_indent(18.0);
+        p.text("This example exercises paragraph runs, ");
+        p.bold("bold");
+        p.text(", ");
+        p.link("https://example.test/docs", |p| p.text("links"));
+        p.text(", blanks, lists, columns, tables, images, keep-together,");
+        p.text(" page breaks, and page-time layers.");
+    });
+    flow.paragraph(|p| {
+        p.text("Signed: ");
+        p.blank(96.0).thickness(0.75).color(Color::rgb(0, 0, 0));
+        p.text("  date ");
+        p.blank_em(6).thickness(0.75).baseline_offset(1.5);
+    });
+    flow.paragraph(|p| {
+        p.text("Notes");
+        p.blank_to_end()
+            .thickness(0.5)
+            .color(Color::rgb(90, 90, 90));
+    });
+}
+
+fn write_lists(flow: &mut Flow) {
+    flow.columns(|row| {
+        row.gap(16.0);
+        row.col(|col| {
+            col.paragraph(|p| p.bold("Bullets"));
+            col.ul(|list| {
+                list.marker_width(16.0);
+                list.nest_indent(20.0);
+                list.item(|item| {
+                    item.paragraph(|p| p.text("measure with skrifa"));
+                    item.ul(|inner| {
+                        inner.item(|n| n.paragraph(|p| p.text("cluster")));
+                        inner.item(|n| n.paragraph(|p| p.text("advance")));
+                    });
+                });
+                list.item(|item| item.paragraph(|p| p.text("break lines in the frame")));
+                list.item_marked("*", |item| {
+                    item.paragraph(|p| p.text("custom marker item"));
+                });
+            });
+        });
+        row.col_ratio(1.2, |col| {
+            col.paragraph(|p| p.bold("Ordered"));
+            col.ol(Numbering::LowerAlpha, |list| {
+                list.start(NonZeroU32::new(2).unwrap());
+                list.item(|item| item.paragraph(|p| p.text("paginate")));
+                list.item(|item| item.paragraph(|p| p.text("decorate")));
+                list.item_marked("(x)", |item| {
+                    item.paragraph(|p| p.text("marked, no number burn"));
+                });
+                list.item(|item| item.paragraph(|p| p.text("emit PDF")));
+            });
+        });
+    });
+    flow.hline(|h| {
+        h.start();
+        h.width(160.0);
+        h.space_before(14.0);
+        h.space_after(10.0);
+    });
+}
+
+fn write_table(flow: &mut Flow, logo: &Image) {
+    flow.paragraph(|p| p.bold("Shipment table"));
+    flow.table(|t| {
+        t.repeat_header(true);
+        t.cell_padding(4.0);
+        t.border(0.5, Color::rgb(30, 30, 30));
+        t.tracks([
+            Track::Fixed(54.0),
+            Track::Ratio(2.0),
+            Track::Ratio(1.0),
+            Track::Fixed(48.0),
+        ]);
+        t.header(["Code", "Item", "Notes", "Qty"]);
+        t.header([Cell::new("group A").col_span(NonZeroU16::new(4).unwrap())]);
+        t.row([
+            Cell::new("A1").row_span(NonZeroU16::new(2).unwrap()),
+            Cell::paragraph(|p| {
+                p.text("Pen ");
+                p.bold("set");
+            }),
+            Cell::ul(|list| {
+                list.item(|item| item.paragraph(|p| p.text("black")));
+                list.item(|item| item.paragraph(|p| p.text("blue")));
+            }),
+            Cell::new("12"),
+        ]);
+        t.row([
+            Cell::paragraph(|p| {
+                p.link("https://example.test/ink", |p| p.text("Ink"));
+            }),
+            Cell::ol(Numbering::Decimal, |list| {
+                list.item(|item| item.paragraph(|p| p.text("bottle")));
+                list.item_marked("+", |item| item.paragraph(|p| p.text("refill")));
+            }),
+            Cell::new("3"),
+        ]);
+        t.row([
+            Cell::new("B2"),
+            Cell::image(logo, |image| {
+                image.width(18.0);
+                image.center();
+            }),
+            Cell::hline(|h| {
+                h.thickness(0.75);
+                h.color(Color::rgb(120, 0, 0));
+            }),
+            Cell::spacer(8.0),
+        ]);
+        for n in 0..36 {
+            t.row([
+                format!("R{n}"),
+                format!("part {n}"),
+                "stock".to_owned(),
+                format!("{}", (n % 9) + 1),
+            ]);
+        }
+        t.row([Cell::new("Total rows above").col_span(NonZeroU16::new(4).unwrap())]);
+    });
+}
+
+fn write_closing(flow: &mut Flow) {
+    flow.keep_together(|g| {
+        g.paragraph(|p| {
+            p.center();
+            p.bold("Keep-together block");
+        });
+        g.paragraph(|p| {
+            p.text("These two lines move as one piece when the remaining");
+            p.text(" frame is too short.");
+        });
+        g.hline(|h| {
+            h.end();
+            h.width(120.0);
+            h.space_before(4.0);
+        });
+    });
+    flow.spacer(8.0);
+    flow.columns(|row| {
+        row.col_fixed(140.0, |col| {
+            col.paragraph(|p| p.bold("Fixed column"));
+            col.paragraph(|p| p.text("Narrow frame wraps AA AA AA AA AA words here."));
+            col.ol(Numbering::UpperRoman, |list| {
+                list.item(|item| item.paragraph(|p| p.text("one")));
+                list.item(|item| item.paragraph(|p| p.text("two")));
+            });
+        });
+        row.col_auto(|col| {
+            col.paragraph(|p| p.bold("Auto column"));
+            col.table(|t| {
+                t.border(0.4, Color::rgb(0, 0, 0));
+                t.cell_padding(3.0);
+                t.header(["Side", "Val"]);
+                t.row(["L", "1"]);
+                t.row(["R", "2"]);
+            });
+            col.paragraph(|p| {
+                p.end();
+                p.text("end-aligned note");
+            });
+        });
+    });
+    flow.spacer(16.0);
+    flow.paragraph(|p| {
+        p.center();
+        p.text("End of tour. Seal draws on the last page via front.");
+    });
 }

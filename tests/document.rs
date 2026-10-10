@@ -1021,11 +1021,11 @@ fn painted_layer_paths() -> Rendered {
                 layer.line(
                     Point::try_pt(0.0, 0.0).unwrap(),
                     Point::try_pt(40.0, 40.0).unwrap(),
-                    Pen::new(Color::rgba(200, 0, 0, 64), Positive::pt(0.8).unwrap()),
+                    Pen::new(Color::rgba(200, 0, 0, 64), 0.8).unwrap(),
                 );
                 layer.rect(
                     Rect::try_pt(4.0, 6.0, 10.0, 12.0).unwrap(),
-                    Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), Positive::pt(0.5).unwrap())),
+                    Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
                 );
             });
             doc.front(|layer| {
@@ -1034,7 +1034,7 @@ fn painted_layer_paths() -> Rendered {
                     Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
                     Ink::FillStroke(
                         Color::rgba(200, 0, 0, 40),
-                        Pen::new(Color::rgb(200, 0, 0), Positive::pt(2.0).unwrap()),
+                        Pen::new(Color::rgb(200, 0, 0), 2.0).unwrap(),
                     ),
                 );
                 layer.rotated(90.0, Point::try_pt(10.0, 12.0).unwrap(), |shapes| {
@@ -1047,7 +1047,7 @@ fn painted_layer_paths() -> Rendered {
                     shapes.line(
                         Point::try_pt(1.0, 2.0).unwrap(),
                         Point::try_pt(8.0, 9.0).unwrap(),
-                        Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap()),
+                        Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
                     );
                 });
             });
@@ -1199,7 +1199,7 @@ fn layer_paths_write_a_pdf() {
             );
             layer.ellipse(
                 Rect::try_pt(30.0, 30.0, 16.0, 12.0).unwrap(),
-                Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap())),
+                Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
             );
         });
         Ok(())
@@ -2450,7 +2450,7 @@ fn table_tracks_fill_the_frame_and_keep_fixed_width() {
         |doc| {
             doc.font(FONT.to_vec())?;
             doc.table(|t| {
-                t.tracks([Track::Fixed(Positive::pt(40.0).unwrap()), Track::Auto]);
+                t.tracks([Track::Fixed(40.0), Track::Auto]);
                 t.row(["A", "B"]);
             });
             Ok(())

@@ -168,6 +168,114 @@ impl From<Length<NonNegative>> for Length<Finite> {
     }
 }
 
+/// Converts a value into a non-negative length at a DSL or geometry boundary.
+pub trait IntoNonNegative {
+    /// Rejects non-finite or negative inputs.
+    fn into_non_negative(self) -> Result<Length<NonNegative>>;
+}
+
+impl IntoNonNegative for Length<NonNegative> {
+    fn into_non_negative(self) -> Result<Length<NonNegative>> {
+        Ok(self)
+    }
+}
+
+impl IntoNonNegative for Length<Positive> {
+    fn into_non_negative(self) -> Result<Length<NonNegative>> {
+        Ok(self.into())
+    }
+}
+
+impl IntoNonNegative for f32 {
+    fn into_non_negative(self) -> Result<Length<NonNegative>> {
+        NonNegative::pt(self)
+    }
+}
+
+/// Converts a value into a strictly positive length at a DSL or geometry boundary.
+pub trait IntoPositive {
+    /// Rejects non-finite or non-positive inputs.
+    fn into_positive(self) -> Result<Length<Positive>>;
+}
+
+impl IntoPositive for Length<Positive> {
+    fn into_positive(self) -> Result<Length<Positive>> {
+        Ok(self)
+    }
+}
+
+impl IntoPositive for f32 {
+    fn into_positive(self) -> Result<Length<Positive>> {
+        Positive::pt(self)
+    }
+}
+
+/// Converts a value into a finite length at a DSL or geometry boundary.
+pub trait IntoFinite {
+    /// Rejects non-finite inputs.
+    fn into_finite(self) -> Result<Length<Finite>>;
+}
+
+impl IntoFinite for Length<Finite> {
+    fn into_finite(self) -> Result<Length<Finite>> {
+        Ok(self)
+    }
+}
+
+impl IntoFinite for Length<NonNegative> {
+    fn into_finite(self) -> Result<Length<Finite>> {
+        Ok(self.into())
+    }
+}
+
+impl IntoFinite for Length<Positive> {
+    fn into_finite(self) -> Result<Length<Finite>> {
+        Ok(self.into())
+    }
+}
+
+impl IntoFinite for f32 {
+    fn into_finite(self) -> Result<Length<Finite>> {
+        Finite::pt(self)
+    }
+}
+
+/// Converts a value into a [`Point`] at a DSL or geometry boundary.
+pub trait IntoPoint {
+    /// Rejects non-finite coordinates.
+    fn into_point(self) -> Result<Point>;
+}
+
+impl IntoPoint for Point {
+    fn into_point(self) -> Result<Point> {
+        Ok(self)
+    }
+}
+
+impl IntoPoint for (f32, f32) {
+    fn into_point(self) -> Result<Point> {
+        Point::try_pt(self.0, self.1)
+    }
+}
+
+/// Converts a value into a [`Rect`] at a DSL or geometry boundary.
+pub trait IntoRect {
+    /// Rejects non-finite origins or non-positive size.
+    fn into_rect(self) -> Result<Rect>;
+}
+
+impl IntoRect for Rect {
+    fn into_rect(self) -> Result<Rect> {
+        Ok(self)
+    }
+}
+
+impl IntoRect for (f32, f32, f32, f32) {
+    fn into_rect(self) -> Result<Rect> {
+        Rect::try_pt(self.0, self.1, self.2, self.3)
+    }
+}
+
 /// A position in page space. Both axes are finite and may be negative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
@@ -443,6 +551,26 @@ impl Margins {
         Self::new(value, value, value, value)
     }
 
+    /// The same length on every side, from a length or pt value.
+    pub fn try_uniform(value: impl IntoNonNegative) -> Result<Self> {
+        Ok(Self::uniform(value.into_non_negative()?))
+    }
+
+    /// Four sides from lengths or pt values.
+    pub fn try_new(
+        top: impl IntoNonNegative,
+        right: impl IntoNonNegative,
+        bottom: impl IntoNonNegative,
+        left: impl IntoNonNegative,
+    ) -> Result<Self> {
+        Ok(Self::new(
+            top.into_non_negative()?,
+            right.into_non_negative()?,
+            bottom.into_non_negative()?,
+            left.into_non_negative()?,
+        ))
+    }
+
     /// Top margin.
     pub const fn top(self) -> Length<NonNegative> {
         self.top
@@ -579,12 +707,12 @@ pub struct Pen {
 }
 
 impl Pen {
-    /// Stroke of `color` and `width`.
-    pub const fn new(color: Color, width: Length<Positive>) -> Self {
-        Self {
+    /// Stroke of `color` and `width` (a positive length or pt value).
+    pub fn new(color: Color, width: impl IntoPositive) -> Result<Self> {
+        Ok(Self {
             color,
-            stroke: Stroke::new(width),
-        }
+            stroke: Stroke::new(width.into_positive()?),
+        })
     }
 
     /// Stroke color, including alpha.
@@ -888,6 +1016,43 @@ mod tests {
                 Err(Error::NonFiniteLength { .. })
             ));
         }
+    }
+
+    #[test]
+    fn into_length_traits_accept_f32_and_typed_lengths() {
+        assert_eq!(
+            12.0f32.into_non_negative().unwrap(),
+            NonNegative::pt(12.0).unwrap()
+        );
+        assert_eq!(
+            NonNegative::pt(3.0).unwrap().into_non_negative().unwrap(),
+            NonNegative::pt(3.0).unwrap()
+        );
+        assert_eq!(1.5f32.into_positive().unwrap(), Positive::pt(1.5).unwrap());
+        assert!(matches!(
+            (-1.0f32).into_non_negative(),
+            Err(Error::NegativeLength { .. })
+        ));
+        assert!(matches!(
+            0.0f32.into_positive(),
+            Err(Error::NonPositiveLength { .. })
+        ));
+        assert_eq!(
+            (1.0f32, 2.0f32).into_point().unwrap(),
+            Point::try_pt(1.0, 2.0).unwrap()
+        );
+        assert_eq!(
+            (1.0f32, 2.0f32, 3.0f32, 4.0f32).into_rect().unwrap(),
+            Rect::try_pt(1.0, 2.0, 3.0, 4.0).unwrap()
+        );
+        assert_eq!(
+            Margins::try_uniform(36.0).unwrap(),
+            Margins::uniform(NonNegative::pt(36.0).unwrap())
+        );
+        assert_eq!(
+            Pen::new(Color::rgb(1, 2, 3), 0.75).unwrap().width(),
+            Positive::pt(0.75).unwrap()
+        );
     }
 
     #[test]

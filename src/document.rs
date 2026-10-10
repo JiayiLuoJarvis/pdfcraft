@@ -13,7 +13,8 @@ use crate::canvas::{Canvas, DecodedImage, ImageFormat, LinkTarget, RecordedPage,
 use crate::error::{Error, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
 use crate::geom::{
-    Color, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect, Size,
+    Color, Ink, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length, Margins, NonNegative,
+    PageSize, Path, Pen, Point, Positive, Size,
 };
 use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio};
 use crate::layout::decorate::{
@@ -442,12 +443,13 @@ impl Image {
 ///
 /// Both sides stretch the image. One side derives the other from the pixel aspect.
 /// Neither side uses 1 px = 1 pt. The default placement is the start of the frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct ImageBox {
     width: Option<Length<Positive>>,
     height: Option<Length<Positive>>,
     align: TextAlign,
+    error: Option<Error>,
 }
 
 impl Default for ImageBox {
@@ -456,19 +458,26 @@ impl Default for ImageBox {
             width: None,
             height: None,
             align: TextAlign::Start,
+            error: None,
         }
     }
 }
 
 impl ImageBox {
     /// Sets the display width. The height follows the pixel aspect when unset.
-    pub fn width(&mut self, width: Length<Positive>) {
-        self.width = Some(width);
+    pub fn width(&mut self, width: impl IntoPositive) {
+        match width.into_positive() {
+            Ok(width) => self.width = Some(width),
+            Err(error) => self.note(error),
+        }
     }
 
     /// Sets the display height. The width follows the pixel aspect when unset.
-    pub fn height(&mut self, height: Length<Positive>) {
-        self.height = Some(height);
+    pub fn height(&mut self, height: impl IntoPositive) {
+        match height.into_positive() {
+            Ok(height) => self.height = Some(height),
+            Err(error) => self.note(error),
+        }
     }
 
     /// Centers the image in the current frame when it is narrower than that frame.
@@ -481,7 +490,16 @@ impl ImageBox {
         self.align = TextAlign::End;
     }
 
+    fn note(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
+    }
+
     fn lower(self, image: &Image, doc: DocToken) -> Result<FlowNode> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
         if image.doc != doc {
             return Err(Error::UnknownImage {
                 id: image.decoded.id.as_u32(),
@@ -496,7 +514,7 @@ impl ImageBox {
 /// Defaults: full width of the current frame, centered when shorter, 1 pt thick,
 /// black, no space above or below. The line never splits; it moves to the next
 /// page whole.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct HLine {
     width: Option<Length<Positive>>,
@@ -505,6 +523,7 @@ pub struct HLine {
     color: Color,
     space_before: Length<NonNegative>,
     space_after: Length<NonNegative>,
+    error: Option<Error>,
 }
 
 impl Default for HLine {
@@ -516,19 +535,26 @@ impl Default for HLine {
             color: Color::rgb(0, 0, 0),
             space_before: NonNegative::ZERO,
             space_after: NonNegative::ZERO,
+            error: None,
         }
     }
 }
 
 impl HLine {
     /// Sets the line length. Longer than the frame is an error when laid out.
-    pub fn width(&mut self, width: Length<Positive>) {
-        self.width = Some(width);
+    pub fn width(&mut self, width: impl IntoPositive) {
+        match width.into_positive() {
+            Ok(width) => self.width = Some(width),
+            Err(error) => self.note(error),
+        }
     }
 
     /// Line thickness.
-    pub fn thickness(&mut self, thickness: Length<Positive>) {
-        self.thickness = thickness;
+    pub fn thickness(&mut self, thickness: impl IntoPositive) {
+        match thickness.into_positive() {
+            Ok(thickness) => self.thickness = thickness,
+            Err(error) => self.note(error),
+        }
     }
 
     /// Line color, including alpha.
@@ -537,13 +563,19 @@ impl HLine {
     }
 
     /// Blank space above the line. Counts toward the line's height.
-    pub fn space_before(&mut self, space: Length<NonNegative>) {
-        self.space_before = space;
+    pub fn space_before(&mut self, space: impl IntoNonNegative) {
+        match space.into_non_negative() {
+            Ok(space) => self.space_before = space,
+            Err(error) => self.note(error),
+        }
     }
 
     /// Blank space below the line. Counts toward the line's height.
-    pub fn space_after(&mut self, space: Length<NonNegative>) {
-        self.space_after = space;
+    pub fn space_after(&mut self, space: impl IntoNonNegative) {
+        match space.into_non_negative() {
+            Ok(space) => self.space_after = space,
+            Err(error) => self.note(error),
+        }
     }
 
     /// Places a shorter line at the start of the frame.
@@ -556,15 +588,24 @@ impl HLine {
         self.align = TextAlign::End;
     }
 
-    fn lower(self) -> FlowNode {
-        FlowNode::HLine(HLineNode::new(
+    fn note(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
+    }
+
+    fn lower(self) -> Result<FlowNode> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        Ok(FlowNode::HLine(HLineNode::new(
             self.width,
             self.align,
             self.thickness,
             self.color,
             self.space_before,
             self.space_after,
-        ))
+        )))
     }
 }
 
@@ -710,6 +751,7 @@ impl Flow {
                 width: NonNegative::ZERO,
                 color: Color::rgb(0, 0, 0),
             },
+            error: None,
         };
         f(&mut table);
         let node = table.lower();
@@ -725,8 +767,12 @@ impl Flow {
     }
 
     /// Appends vertical space. The part that does not fit continues on the next page.
-    pub fn spacer(&mut self, height: Length<NonNegative>) {
-        self.push(Ok(FlowNode::Spacer(SpacerNode { height })));
+    pub fn spacer(&mut self, height: impl IntoNonNegative) {
+        self.push(
+            height
+                .into_non_negative()
+                .map(|height| FlowNode::Spacer(SpacerNode { height })),
+        );
     }
 
     /// Appends a horizontal line that moves to the next page whole instead of splitting.
@@ -735,7 +781,7 @@ impl Flow {
     pub fn hline(&mut self, f: impl FnOnce(&mut HLine)) {
         let mut line = HLine::default();
         f(&mut line);
-        self.push(Ok(line.lower()));
+        self.push(line.lower());
     }
 
     /// Starts the next content on a new page. Only allowed in the body.
@@ -791,6 +837,7 @@ fn assemble_list(parent: Flow, kind: ListKind, f: impl FnOnce(&mut List)) -> Res
         start: NonZeroU32::MIN,
         marker_width: Positive::pt(18.0).expect("18 pt is positive"),
         nest_indent: None,
+        error: None,
     };
     f(&mut list);
     let kind = match kind {
@@ -837,8 +884,17 @@ impl Paragraph {
     }
 
     /// Appends a fixed-width blank. Stroke settings keep their defaults when the result is ignored.
-    pub fn blank(&mut self, width: Length<NonNegative>) -> Blank<'_> {
-        self.push_blank(BlankWidth::Fixed(width))
+    pub fn blank(&mut self, width: impl IntoNonNegative) -> Blank<'_> {
+        match width.into_non_negative() {
+            Ok(width) => self.push_blank(BlankWidth::Fixed(width)),
+            Err(error) => {
+                self.note(error);
+                Blank {
+                    paragraph: self,
+                    index: usize::MAX,
+                }
+            }
+        }
     }
 
     /// Appends a blank `ems` times the paragraph font size wide.
@@ -854,8 +910,11 @@ impl Paragraph {
     }
 
     /// Sets the horizontal inset of the first visual line.
-    pub fn first_line_indent(&mut self, indent: Length<NonNegative>) {
-        self.first_line_indent = indent;
+    pub fn first_line_indent(&mut self, indent: impl IntoNonNegative) {
+        match indent.into_non_negative() {
+            Ok(indent) => self.first_line_indent = indent,
+            Err(error) => self.note(error),
+        }
     }
 
     /// Centers each visual line in the current frame.
@@ -942,9 +1001,14 @@ pub struct Blank<'a> {
 
 impl Blank<'_> {
     /// Sets the stroke thickness. The default is 1 pt.
-    pub fn thickness(&mut self, thickness: Length<Positive>) -> &mut Self {
-        if let Some(blank) = self.blank_mut() {
-            blank.thickness = thickness;
+    pub fn thickness(&mut self, thickness: impl IntoPositive) -> &mut Self {
+        match thickness.into_positive() {
+            Ok(thickness) => {
+                if let Some(blank) = self.blank_mut() {
+                    blank.thickness = thickness;
+                }
+            }
+            Err(error) => self.paragraph.note(error),
         }
         self
     }
@@ -958,9 +1022,14 @@ impl Blank<'_> {
     }
 
     /// Sets the distance from the baseline down to the stroke. The default is 1 pt.
-    pub fn baseline_offset(&mut self, offset: Length<NonNegative>) -> &mut Self {
-        if let Some(blank) = self.blank_mut() {
-            blank.baseline_offset = offset;
+    pub fn baseline_offset(&mut self, offset: impl IntoNonNegative) -> &mut Self {
+        match offset.into_non_negative() {
+            Ok(offset) => {
+                if let Some(blank) = self.blank_mut() {
+                    blank.baseline_offset = offset;
+                }
+            }
+            Err(error) => self.paragraph.note(error),
         }
         self
     }
@@ -982,8 +1051,11 @@ pub struct Columns {
 
 impl Columns {
     /// Space between columns. Default 12 pt.
-    pub fn gap(&mut self, gap: Length<NonNegative>) {
-        self.gap = gap;
+    pub fn gap(&mut self, gap: impl IntoNonNegative) {
+        match gap.into_non_negative() {
+            Ok(gap) => self.gap = gap,
+            Err(error) => self.cols.push(Err(error)),
+        }
     }
 
     /// Adds an equal-ratio column to the right of the previous ones.
@@ -995,8 +1067,11 @@ impl Columns {
     }
 
     /// Adds a fixed-width column.
-    pub fn col_fixed(&mut self, width: Length<Positive>, f: impl FnOnce(&mut Flow)) {
-        self.push_col(ColumnWidth::Fixed(width), f);
+    pub fn col_fixed(&mut self, width: impl IntoPositive, f: impl FnOnce(&mut Flow)) {
+        match width.into_positive() {
+            Ok(width) => self.push_col(ColumnWidth::Fixed(width), f),
+            Err(error) => self.cols.push(Err(error)),
+        }
     }
 
     /// Adds a ratio-weighted column. Non-finite or non-positive weights fail assembly.
@@ -1040,8 +1115,8 @@ fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Result<()> {
 /// A table or column track width.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Track {
-    /// A length in points.
-    Fixed(Length<Positive>),
+    /// A length in points. Validated when the table is assembled.
+    Fixed(f32),
     /// A positive finite weight. Rejected at conversion with [`Error::ColumnWidths`].
     Ratio(f32),
     /// Remaining width after Fixed tracks. At most one Auto per set of tracks.
@@ -1051,7 +1126,7 @@ pub enum Track {
 impl Track {
     fn into_width(self) -> Result<ColumnWidth> {
         match self {
-            Self::Fixed(width) => Ok(ColumnWidth::Fixed(width)),
+            Self::Fixed(width) => Ok(ColumnWidth::Fixed(Positive::pt(width)?)),
             Self::Ratio(weight) => Ok(ColumnWidth::Ratio(Ratio::new(weight)?)),
             Self::Auto => Ok(ColumnWidth::Auto),
         }
@@ -1074,6 +1149,7 @@ pub struct Table {
     tracks: Option<Vec<Track>>,
     padding: Length<NonNegative>,
     border: Border,
+    error: Option<Error>,
 }
 
 struct StoredCell {
@@ -1112,7 +1188,10 @@ impl Table {
         self.body.push(row);
     }
 
-    fn store(&self, cell: Cell<'_>) -> StoredCell {
+    fn store(&mut self, cell: Cell<'_>) -> StoredCell {
+        if let Some(error) = cell.error {
+            self.note(error);
+        }
         let content = match cell.content {
             CellContent::Text(text) => StoredContent::Text(text),
             CellContent::Paragraph(paragraph) => StoredContent::Paragraph(paragraph),
@@ -1151,16 +1230,31 @@ impl Table {
     }
 
     /// Inner padding on every side of each cell. Default zero.
-    pub fn cell_padding(&mut self, padding: Length<NonNegative>) {
-        self.padding = padding;
+    pub fn cell_padding(&mut self, padding: impl IntoNonNegative) {
+        match padding.into_non_negative() {
+            Ok(padding) => self.padding = padding,
+            Err(error) => self.note(error),
+        }
     }
 
     /// Grid-line stroke. Width zero draws nothing. Default black, width zero.
-    pub fn border(&mut self, width: Length<NonNegative>, color: Color) {
-        self.border = Border { width, color };
+    pub fn border(&mut self, width: impl IntoNonNegative, color: Color) {
+        match width.into_non_negative() {
+            Ok(width) => self.border = Border { width, color },
+            Err(error) => self.note(error),
+        }
+    }
+
+    fn note(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
     }
 
     fn lower(self) -> Result<FlowNode> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
         let flow = &self.parent;
         let first = self.header.first().or(self.body.first());
         let cols: usize = first.map_or(0, |row| {
@@ -1198,7 +1292,7 @@ impl Table {
                                 StoredContent::Image(image, image_box) => {
                                     vec![image_box.lower(&image, flow.doc)?]
                                 }
-                                StoredContent::HLine(line) => vec![line.lower()],
+                                StoredContent::HLine(line) => vec![line.lower()?],
                                 StoredContent::Spacer(height) => {
                                     vec![FlowNode::Spacer(SpacerNode { height })]
                                 }
@@ -1231,6 +1325,7 @@ pub struct Cell<'a> {
     content: CellContent<'a>,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
+    error: Option<Error>,
 }
 
 #[derive(Debug)]
@@ -1260,13 +1355,18 @@ impl std::fmt::Debug for DeferredList<'_> {
 }
 
 impl<'a> Cell<'a> {
-    /// A cell spanning one column and one row.
-    pub fn new(text: impl Into<String>) -> Self {
+    fn bare(content: CellContent<'a>) -> Self {
         Self {
-            content: CellContent::Text(text.into()),
+            content,
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
+            error: None,
         }
+    }
+
+    /// A cell spanning one column and one row.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self::bare(CellContent::Text(text.into()))
     }
 
     /// A one-by-one cell holding one paragraph. The closure runs immediately.
@@ -1276,11 +1376,7 @@ impl<'a> Cell<'a> {
     pub fn paragraph(f: impl FnOnce(&mut Paragraph)) -> Self {
         let mut paragraph = Paragraph::default();
         f(&mut paragraph);
-        Self {
-            content: CellContent::Paragraph(paragraph),
-            col_span: NonZeroU16::MIN,
-            row_span: NonZeroU16::MIN,
-        }
+        Self::bare(CellContent::Paragraph(paragraph))
     }
 
     /// A one-by-one cell holding a bulleted list.
@@ -1291,11 +1387,7 @@ impl<'a> Cell<'a> {
     /// Content taller than the cell's inner full frame is
     /// [`Error::UnsplittableTallerThanFrame`].
     pub fn ul(f: impl FnOnce(&mut List) + 'a) -> Self {
-        Self {
-            content: CellContent::List(DeferredList::Bullet(Box::new(f))),
-            col_span: NonZeroU16::MIN,
-            row_span: NonZeroU16::MIN,
-        }
+        Self::bare(CellContent::List(DeferredList::Bullet(Box::new(f))))
     }
 
     /// A one-by-one cell holding a numbered list starting at 1.
@@ -1306,33 +1398,24 @@ impl<'a> Cell<'a> {
     /// Content taller than the cell's inner full frame is
     /// [`Error::UnsplittableTallerThanFrame`].
     pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'a) -> Self {
-        Self {
-            content: CellContent::List(DeferredList::Ordered(numbering, Box::new(f))),
-            col_span: NonZeroU16::MIN,
-            row_span: NonZeroU16::MIN,
-        }
+        Self::bare(CellContent::List(DeferredList::Ordered(
+            numbering,
+            Box::new(f),
+        )))
     }
 
     /// A one-by-one cell holding `image`.
     pub fn image(image: &Image, f: impl FnOnce(&mut ImageBox)) -> Self {
         let mut image_box = ImageBox::default();
         f(&mut image_box);
-        Self {
-            content: CellContent::Image(*image, image_box),
-            col_span: NonZeroU16::MIN,
-            row_span: NonZeroU16::MIN,
-        }
+        Self::bare(CellContent::Image(*image, image_box))
     }
 
     /// A one-by-one cell holding a horizontal line as wide as the cell content.
     pub fn hline(f: impl FnOnce(&mut HLine)) -> Self {
         let mut line = HLine::default();
         f(&mut line);
-        Self {
-            content: CellContent::HLine(line),
-            col_span: NonZeroU16::MIN,
-            row_span: NonZeroU16::MIN,
-        }
+        Self::bare(CellContent::HLine(line))
     }
 
     /// A one-by-one cell holding vertical space that paints nothing.
@@ -1340,11 +1423,13 @@ impl<'a> Cell<'a> {
     /// Height may be zero. Taller than the cell's inner full frame is
     /// [`Error::UnsplittableTallerThanFrame`]. Unlike [`Flow::spacer`], the blank
     /// does not split across pages inside the cell.
-    pub fn spacer(height: Length<NonNegative>) -> Self {
-        Self {
-            content: CellContent::Spacer(height),
-            col_span: NonZeroU16::MIN,
-            row_span: NonZeroU16::MIN,
+    pub fn spacer(height: impl IntoNonNegative) -> Self {
+        match height.into_non_negative() {
+            Ok(height) => Self::bare(CellContent::Spacer(height)),
+            Err(error) => Self {
+                error: Some(error),
+                ..Self::bare(CellContent::Spacer(NonNegative::ZERO))
+            },
         }
     }
 
@@ -1405,6 +1490,7 @@ pub struct List {
     start: NonZeroU32,
     marker_width: Length<Positive>,
     nest_indent: Option<Length<Positive>>,
+    error: Option<Error>,
 }
 
 impl List {
@@ -1416,13 +1502,19 @@ impl List {
     }
 
     /// Width of the hanging marker column. Default 18 pt.
-    pub fn marker_width(&mut self, width: Length<Positive>) {
-        self.marker_width = width;
+    pub fn marker_width(&mut self, width: impl IntoPositive) {
+        match width.into_positive() {
+            Ok(width) => self.marker_width = width,
+            Err(error) => self.note(error),
+        }
     }
 
     /// Extra inset of nested list bodies. Default is the marker column width.
-    pub fn nest_indent(&mut self, indent: Length<Positive>) {
-        self.nest_indent = Some(indent);
+    pub fn nest_indent(&mut self, indent: impl IntoPositive) {
+        match indent.into_positive() {
+            Ok(indent) => self.nest_indent = Some(indent),
+            Err(error) => self.note(error),
+        }
     }
 
     /// Adds an item with the list's own marker.
@@ -1443,7 +1535,16 @@ impl List {
         self.items.push(item);
     }
 
+    fn note(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
+    }
+
     fn lower(self, kind: ListKind) -> Result<FlowNode> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
         let spec = ListSpec {
             kind,
             marker_width: self.marker_width,
@@ -1527,9 +1628,14 @@ impl Band {
     ///
     /// Defaults are zero. Side margins do not apply automatically; pass
     /// [`Page::margins`] when the slots should align with the body.
-    pub fn inset(&mut self, left: Length<NonNegative>, right: Length<NonNegative>) {
-        self.inset_left = left;
-        self.inset_right = right;
+    pub fn inset(&mut self, left: impl IntoNonNegative, right: impl IntoNonNegative) {
+        match (left.into_non_negative(), right.into_non_negative()) {
+            (Ok(left), Ok(right)) => {
+                self.inset_left = left;
+                self.inset_right = right;
+            }
+            (Err(error), _) | (_, Err(error)) => self.note(error),
+        }
     }
 
     /// Sets the start-aligned text.
@@ -1674,7 +1780,14 @@ impl Layer {
     }
 
     /// Draws `s` on one line with the top-left of its line box at `at`. It is not wrapped or clipped.
-    pub fn text_at(&mut self, s: impl AsRef<str>, at: Point) {
+    pub fn text_at(&mut self, s: impl AsRef<str>, at: impl IntoPoint) {
+        let at = match at.into_point() {
+            Ok(at) => at,
+            Err(error) => {
+                self.note(error);
+                return;
+            }
+        };
         self.items.push(LayerItem::Text(LayerText {
             text: s.as_ref().to_owned(),
             at,
@@ -1685,13 +1798,18 @@ impl Layer {
     /// Draws `image` stretched into `rect`, in page coordinates.
     ///
     /// The rectangle is not clipped and is not inset by margins.
-    pub fn image_at(&mut self, image: &Image, rect: Rect) {
-        if image.doc != self.doc {
-            if self.error.is_none() {
-                self.error = Some(Error::UnknownImage {
-                    id: image.decoded.id.as_u32(),
-                });
+    pub fn image_at(&mut self, image: &Image, rect: impl IntoRect) {
+        let rect = match rect.into_rect() {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.note(error);
+                return;
             }
+        };
+        if image.doc != self.doc {
+            self.note(Error::UnknownImage {
+                id: image.decoded.id.as_u32(),
+            });
             return;
         }
         self.items.push(LayerItem::Image {
@@ -1702,17 +1820,38 @@ impl Layer {
 
     /// Straight segment in page coordinates. `from == to` fails the document with
     /// [`Error::InvalidGeometry`] before any page is drawn.
-    pub fn line(&mut self, from: Point, to: Point, pen: Pen) {
+    pub fn line(&mut self, from: impl IntoPoint, to: impl IntoPoint, pen: Pen) {
+        let (from, to) = match (from.into_point(), to.into_point()) {
+            (Ok(from), Ok(to)) => (from, to),
+            (Err(error), _) | (_, Err(error)) => {
+                self.note(error);
+                return;
+            }
+        };
         self.push_shape(straight_path(from, to), Ink::Stroke(pen), None);
     }
 
     /// Rectangle in page coordinates. Not inset by margins and not clipped.
-    pub fn rect(&mut self, rect: Rect, ink: Ink) {
+    pub fn rect(&mut self, rect: impl IntoRect, ink: Ink) {
+        let rect = match rect.into_rect() {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.note(error);
+                return;
+            }
+        };
         self.push_shape(Path::rect(rect), ink, None);
     }
 
     /// Ellipse inscribed in `rect`, in page coordinates.
-    pub fn ellipse(&mut self, rect: Rect, ink: Ink) {
+    pub fn ellipse(&mut self, rect: impl IntoRect, ink: Ink) {
+        let rect = match rect.into_rect() {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.note(error);
+                return;
+            }
+        };
         self.push_shape(Path::ellipse(rect), ink, None);
     }
 
@@ -1721,19 +1860,35 @@ impl Layer {
     /// Positive is clockwise on the page. A non-finite angle fails the document with
     /// [`Error::InvalidGeometry`] and does not run `draw`. Shapes keep their order relative
     /// to the layer's other items.
-    pub fn rotated(&mut self, degrees: f32, about: Point, draw: impl FnOnce(&mut Shapes<'_>)) {
+    pub fn rotated(
+        &mut self,
+        degrees: f32,
+        about: impl IntoPoint,
+        draw: impl FnOnce(&mut Shapes<'_>),
+    ) {
         if !degrees.is_finite() {
-            if self.error.is_none() {
-                self.error = Some(Error::InvalidGeometry);
-            }
+            self.note(Error::InvalidGeometry);
             return;
         }
+        let about = match about.into_point() {
+            Ok(about) => about,
+            Err(error) => {
+                self.note(error);
+                return;
+            }
+        };
         let mut shapes = Shapes {
             layer: self,
             degrees,
             about,
         };
         draw(&mut shapes);
+    }
+
+    fn note(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
     }
 
     fn push_shape(&mut self, path: Result<Path>, ink: Ink, turn: Option<(f32, Point)>) {
@@ -1761,7 +1916,14 @@ pub struct Shapes<'l> {
 
 impl Shapes<'_> {
     /// Straight segment. See [`Layer::line`].
-    pub fn line(&mut self, from: Point, to: Point, pen: Pen) {
+    pub fn line(&mut self, from: impl IntoPoint, to: impl IntoPoint, pen: Pen) {
+        let (from, to) = match (from.into_point(), to.into_point()) {
+            (Ok(from), Ok(to)) => (from, to),
+            (Err(error), _) | (_, Err(error)) => {
+                self.layer.note(error);
+                return;
+            }
+        };
         self.layer.push_shape(
             straight_path(from, to),
             Ink::Stroke(pen),
@@ -1770,13 +1932,27 @@ impl Shapes<'_> {
     }
 
     /// Rectangle. See [`Layer::rect`].
-    pub fn rect(&mut self, rect: Rect, ink: Ink) {
+    pub fn rect(&mut self, rect: impl IntoRect, ink: Ink) {
+        let rect = match rect.into_rect() {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.layer.note(error);
+                return;
+            }
+        };
         self.layer
             .push_shape(Path::rect(rect), ink, Some((self.degrees, self.about)));
     }
 
     /// Ellipse inscribed in `rect`. See [`Layer::ellipse`].
-    pub fn ellipse(&mut self, rect: Rect, ink: Ink) {
+    pub fn ellipse(&mut self, rect: impl IntoRect, ink: Ink) {
+        let rect = match rect.into_rect() {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.layer.note(error);
+                return;
+            }
+        };
         self.layer
             .push_shape(Path::ellipse(rect), ink, Some((self.degrees, self.about)));
     }
@@ -1842,7 +2018,7 @@ impl Rendered {
 mod tests {
     use super::*;
     use crate::fonts::fixture_bytes;
-    use crate::geom::PageSize;
+    use crate::geom::{PageSize, Rect};
 
     fn doc_with_font<'a>() -> Document<'a> {
         let mut doc = Document::new(PageSize::A4);
@@ -2176,7 +2352,7 @@ mod tests {
     fn degenerate_layer_line_fails_before_any_page() {
         let mut doc = Document::new(PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()));
         let point = Point::try_pt(4.0, 5.0).unwrap();
-        let pen = Pen::new(Color::rgb(0, 0, 0), Positive::pt(1.0).unwrap());
+        let pen = Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap();
         doc.behind(|layer| {
             layer.line(point, point, pen);
             layer.rect(
