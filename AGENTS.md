@@ -12,7 +12,15 @@
 
 提案书 §1–§9 主线已确认（见提案书文末总表）。实现按层推进；预置边距枚举、分隔线最终方法名等小糖可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
-仍须遵守：未确认功能不「顺便」做；最小 diff；`publish = false` 直到限额与信件夹具通过。
+仍须遵守：未确认功能不「顺便」做；`publish = false` 直到限额与信件夹具通过。
+
+## 现阶段姿态（无生产包袱）
+
+当前仍是 **0.x 初期**：尚未用于生产，**不背历史包袱**。宗旨是做成扎实的开源库与企业可批量生产的底座，而不是在半成品上打补丁凑合。
+
+- **主题内不将就。** 已确认要改的设计/API/错误面，优先选长期正确的形状；不要因为「改动小」「兼容旧写法」「少动测试」而留下已知歪的公共面或内部结构。
+- **「最小 diff」指克制范围，不是降低标准。** 一 PR 一件事、不顺手改无关模块、不把未确认功能塞进当前 PR——这些仍成立。但在该主题 internally，允许为夯实基础做必要的较大重构。
+- **公开 API 与错误诊断** 按开源 / 批跑生产预期设计；0.x 可以 breaking，宁可现在拆干净，不要把「以后再补上下文」当默认答案。
 
 ## 这是什么库
 
@@ -65,19 +73,28 @@ quire/
   .github/workflows/    CI
 ```
 
-依赖方向只许向下：
+### 依赖方向（禁止环）
+
+**不允许循环依赖**（含同 crate 模块之间）。边只许沿 DAG 向下；单 crate 能编译出环也不接受。目标图与拆环刀序见 [`docs/module-dependency.md`](docs/module-dependency.md)。
 
 ```text
-document → layout → (fonts, text, canvas)
-backend → canvas + krilla     # 单向；layout 不知 krilla
+geom
+error       → geom；不依赖 fonts / layout / document / backend
+fonts       → error, geom
+canvas      → error, geom
+text        → fonts, error, geom
+layout      → text, fonts, canvas, error, geom
+document    → layout, canvas, fonts, error, geom     # 禁止 → backend
+backend     → canvas, fonts, error, geom, krilla     # 禁止 → layout / document
 ```
 
 | 区域 | 可以 | 不可以 |
 | --- | --- | --- |
-| `layout/`、`text/`、`fonts/`、`document/` | 自有几何、Canvas、skrifa（测量 PR 起） | `use krilla::…` |
-| `backend/` | krilla、把 Canvas 指令译成 PDF | 被 layout 反向依赖 |
+| `layout/`、`text/`、`fonts/`、`document/` | 自有几何、Canvas、skrifa（测量 PR 起） | `use krilla::…`；`document` → `backend` |
+| `backend/` | krilla、把 Canvas 指令译成 PDF | 被 `layout` / `document` 反向依赖 |
+| `error` | 自有 kind / Display | 依赖 `fonts::FontId` 等上层类型 |
 | `lib.rs` 重导出 | 公共 DSL / geom / error / Canvas | 任何 krilla 类型 |
-| 测试 | 排版用 `RecordingCanvas` 断言坐标 | 把 krilla 压缩字节当排版断言 |
+| 测试 | 排版用 `RecordingCanvas` 断言坐标 | 用测试依赖反转生产 DAG；把 krilla 压缩字节当排版断言 |
 
 ## 代码与贡献规范
 
@@ -86,7 +103,7 @@ backend → canvas + krilla     # 单向；layout 不知 krilla
 1. [Rust Style Guide](https://doc.rust-lang.org/style-guide/) + 本仓库 `rustfmt.toml` / `clippy.toml` / `Cargo.toml` `[lints]`
 2. [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) — 公共 API 命名、文档、错误、trait；DSL 落地时按 [checklist](https://rust-lang.github.io/api-guidelines/checklist.html) 过一遍
 3. 工程门禁气质对齐 [krilla](https://github.com/LaurenzV/krilla)（`-Dwarnings`、fmt、clippy、`cargo doc`、MSRV）；贡献粒度对齐 Typst（单主题、少改接口、新公共类型有文档）
-4. 评审纪律对齐 [Google Eng Practices](https://google.github.io/eng-practices/)：**小改动**、审行为与可测性，不为口味重写
+4. 评审纪律对齐 [Google Eng Practices](https://google.github.io/eng-practices/)：审行为与可测性，不为口味重写；改动范围保持单主题（见上「现阶段姿态」）
 
 不照搬：krilla 的多 viewer 视觉回归与 `^` 依赖；大厂内部语言手册与巨型 monorepo 流程。
 
@@ -124,7 +141,7 @@ cargo doc --no-deps
 
 ### PR 纪律
 
-- **一 PR 一件事**；**最小 diff**：不顺手重构无关模块；不把未确认功能「顺便」做进当前 PR。
+- **一 PR 一件事**：不顺手重构无关模块；不把未确认功能「顺便」做进当前 PR。主题内为夯实基础的必要大改可以做（见「现阶段姿态」）。
 - 用户可见行为写入 `CHANGELOG.md`（有公共行为起记；`publish = false` 期间也记）。
 - 外部贡献说明见 `CONTRIBUTING.md`（英文短版，细节仍以本文件为准）。
 
