@@ -286,7 +286,7 @@ mod tests {
     use crate::fonts::{fixture_bytes, FontSource, FontStore};
     use crate::geom::{Color, NonNegative, Positive, A4};
     use crate::layout::flow::{KeepTogetherNode, SpacerNode};
-    use crate::layout::paragraph::ParagraphNode;
+    use crate::layout::paragraph::{LinePiece, ParagraphNode};
     use crate::layout::style::{Style, TextAlign};
     use crate::text::measure::line_metrics;
 
@@ -365,7 +365,9 @@ mod tests {
             let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
             let line_width = {
                 // Recompute via first run advance.
-                let run = &para.lines[0].runs[0];
+                let LinePiece::Glyphs(run) = &para.lines[0].pieces[0] else {
+                    panic!("text line starts with glyphs");
+                };
                 run.glyphs
                     .iter()
                     .map(|g| g.advance_norm * style.font_size.as_pt())
