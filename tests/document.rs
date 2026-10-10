@@ -2084,3 +2084,103 @@ fn text_link_writes_a_pdf() {
     .unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
+
+#[test]
+fn cell_paragraph_pins_bold_blank_and_link() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.bold_font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.row([
+                    Cell::paragraph(|p| {
+                        p.text("A");
+                        p.bold("B");
+                        p.blank_to_end();
+                    }),
+                    Cell::paragraph(|p| {
+                        p.link("https://example.test/a", |p| p.text("Go"));
+                    }),
+                ]);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let a = glyph(page, "A");
+    let b = glyph(page, "B");
+    assert_eq!((a.text.as_str(), a.font), ("A", 0));
+    assert_eq!((b.text.as_str(), b.font), ("B", 1));
+    let stroke = &stroke_samples(page)[0];
+    assert!(pt_near(stroke.x0, b.x + b.width), "{}", stroke.x0);
+    assert!(pt_near(stroke.x1, 100.0), "{}", stroke.x1);
+    let hits = links(page);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].target, "https://example.test/a");
+    assert!(pt_near(hits[0].x, 100.0), "{}", hits[0].x);
+    assert!(pt_near(hits[0].y, 0.0));
+    assert!(pt_near(hits[0].height, LINE));
+}
+
+#[test]
+fn cell_paragraph_errors_record_no_pages() {
+    let empty_link = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.row([Cell::paragraph(|p| {
+                p.link("", |p| p.text("x"));
+            })]);
+        });
+        Ok(())
+    });
+    assert_eq!(empty_link.err(), Some(Error::EmptyLink));
+
+    let after_fill = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.row([Cell::paragraph(|p| {
+                p.blank_to_end();
+                p.text("x");
+            })]);
+        });
+        Ok(())
+    });
+    assert_eq!(after_fill.err(), Some(Error::RunAfterFillBlank));
+}
+
+#[test]
+fn cell_paragraph_indent_uses_cell_width() {
+    let result = document(
+        PageSize::custom(Size::try_pt(40.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.row([
+                    Cell::paragraph(|p| {
+                        p.first_line_indent(NonNegative::pt(24.0).unwrap());
+                        p.text("A");
+                    }),
+                    Cell::new("B"),
+                ]);
+            });
+            Ok(())
+        },
+    );
+    assert_eq!(result.err(), Some(Error::InvalidGeometry));
+}
+
+#[test]
+fn cell_rich_taller_than_frame_does_not_continue() {
+    let page = PageSize::custom(Size::try_pt(200.0, LINE).unwrap());
+    let paragraph = document(page, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.row([Cell::paragraph(|p| p.text("A\nB"))]);
+        });
+        Ok(())
+    });
+    assert_eq!(paragraph.err(), Some(Error::UnsplittableTallerThanFrame));
+}

@@ -679,14 +679,7 @@ impl Flow {
     pub fn paragraph(&mut self, f: impl FnOnce(&mut Paragraph)) {
         let mut paragraph = Paragraph::default();
         f(&mut paragraph);
-        if let Some(error) = paragraph.error {
-            self.push(Err(error));
-            return;
-        }
-        let mut style = self.style.clone();
-        style.first_line_indent = paragraph.first_line_indent;
-        let node = FlowNode::Text(TextNode::from_items(paragraph.items, style));
-        self.push(Ok(node));
+        self.push(lower_paragraph(paragraph, &self.style));
     }
 
     /// Appends equal-width columns side by side, 12 pt apart. Needs at least two.
@@ -775,7 +768,17 @@ impl Flow {
     }
 }
 
+fn lower_paragraph(paragraph: Paragraph, parent: &Style) -> Result<FlowNode> {
+    if let Some(error) = paragraph.error {
+        return Err(error);
+    }
+    let mut style = parent.clone();
+    style.first_line_indent = paragraph.first_line_indent;
+    Ok(FlowNode::Text(TextNode::from_items(paragraph.items, style)))
+}
+
 /// Text and paragraph-level settings for one paragraph.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Paragraph {
     items: Vec<InlineItem>,
     first_line_indent: Length<NonNegative>,
@@ -1006,6 +1009,9 @@ impl Table {
                         .map(|cell| {
                             let content = match cell.content {
                                 CellContent::Text(text) => vec![flow.text(text)],
+                                CellContent::Paragraph(paragraph) => {
+                                    vec![lower_paragraph(paragraph, &flow.style)?]
+                                }
                                 CellContent::Image(image, image_box) => {
                                     vec![image_box.lower(&image, flow.doc)?]
                                 }
@@ -1031,7 +1037,7 @@ impl Table {
 }
 
 /// One table cell.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct Cell {
     content: CellContent,
@@ -1039,9 +1045,10 @@ pub struct Cell {
     row_span: NonZeroU16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum CellContent {
     Text(String),
+    Paragraph(Paragraph),
     Image(Image, ImageBox),
     HLine(HLine),
     Spacer(Length<NonNegative>),
@@ -1052,6 +1059,20 @@ impl Cell {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             content: CellContent::Text(text.into()),
+            col_span: NonZeroU16::MIN,
+            row_span: NonZeroU16::MIN,
+        }
+    }
+
+    /// A one-by-one cell holding one paragraph. The closure runs immediately.
+    ///
+    /// Content taller than the cell's inner full frame is
+    /// [`Error::UnsplittableTallerThanFrame`].
+    pub fn paragraph(f: impl FnOnce(&mut Paragraph)) -> Self {
+        let mut paragraph = Paragraph::default();
+        f(&mut paragraph);
+        Self {
+            content: CellContent::Paragraph(paragraph),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
         }
