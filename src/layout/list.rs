@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
-use crate::error::{Error, Result};
+use crate::error::{GeometryKind, Result};
 use crate::geom::{Length, Point, Positive};
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::lower::ItemBody;
@@ -23,8 +23,8 @@ pub(crate) enum MarkerKind {
 }
 
 impl MarkerKind {
-    /// Letters stop at Z and roman numerals at 3999; past that is [`Error::InvalidGeometry`].
-    fn label(self, number: u32) -> Result<String> {
+    /// Letters stop at Z and roman numerals at 3999; past that is [`GeometryKind::MarkerOutOfRange`].
+    fn label(self, number: u64) -> Result<String> {
         let body = match self {
             MarkerKind::Decimal => number.to_string(),
             MarkerKind::UpperAlpha => alpha(number)?.to_string(),
@@ -36,17 +36,17 @@ impl MarkerKind {
     }
 }
 
-fn alpha(number: u32) -> Result<char> {
+fn alpha(number: u64) -> Result<char> {
     match number {
         1..=26 => Ok(char::from(
             b'A' + u8::try_from(number - 1).expect("below 26"),
         )),
-        _ => Err(Error::InvalidGeometry),
+        _ => Err(GeometryKind::MarkerOutOfRange { number }.into()),
     }
 }
 
-fn roman(mut number: u32) -> Result<String> {
-    const DIGITS: [(u32, &str); 13] = [
+fn roman(mut number: u64) -> Result<String> {
+    const DIGITS: [(u64, &str); 13] = [
         (1000, "M"),
         (900, "CM"),
         (500, "D"),
@@ -62,7 +62,7 @@ fn roman(mut number: u32) -> Result<String> {
         (1, "I"),
     ];
     if !(1..=3999).contains(&number) {
-        return Err(Error::InvalidGeometry);
+        return Err(GeometryKind::MarkerOutOfRange { number }.into());
     }
     let mut out = String::new();
     for (value, digits) in DIGITS {
@@ -113,7 +113,7 @@ impl ListItem {
     pub(crate) fn custom(marker: impl Into<String>, content: Vec<FlowNode>) -> Result<Self> {
         let marker = marker.into();
         if marker.is_empty() {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::EmptyListMarker.into());
         }
         Ok(Self {
             marker: Some(marker),
@@ -141,7 +141,11 @@ impl ListNode {
         let marker_width = spec.marker_width.as_pt();
         let indent = spec.nest_indent.map_or(marker_width, Length::as_pt);
         if indent < marker_width {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::ListIndent {
+                indent,
+                marker_width,
+            }
+            .into());
         }
         let mut items = VecDeque::with_capacity(spec.items.len());
         for (index, item) in spec.items.into_iter().enumerate() {
@@ -149,11 +153,7 @@ impl ListNode {
                 (Some(custom), _) => custom,
                 (None, ListKind::Bullet) => ListKind::BULLET_MARKER.to_owned(),
                 (None, ListKind::Ordered { style, start }) => {
-                    let number = u32::try_from(index)
-                        .ok()
-                        .and_then(|i| start.get().checked_add(i))
-                        .ok_or(Error::InvalidGeometry)?;
-                    style.label(number)?
+                    style.label(u64::from(start.get()) + index as u64)?
                 }
             };
             items.push_back(PendingItem {
@@ -172,7 +172,11 @@ impl ListNode {
     pub(crate) fn split(mut self, ctx: &mut LayoutCtx<'_>, mut avail: Frame) -> Result<Split> {
         let body_w = avail.width - self.indent;
         if body_w <= 0.0 || self.marker_width >= avail.width {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::ListIndentWiderThanFrame {
+                indent: self.indent,
+                avail: avail.width,
+            }
+            .into());
         }
         let mut commands = Vec::new();
         let mut y = 0.0f32;
@@ -268,6 +272,7 @@ fn first_baseline(fragment: &Fragment) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{Error, ErrorKind};
     use crate::geom::{Color, NonNegative};
     use crate::layout::columns::ColumnWidth;
     use crate::layout::decorate::Decorations;
@@ -431,11 +436,11 @@ mod tests {
     fn labels_past_z_or_3999_are_errors() {
         assert_eq!(
             MarkerKind::UpperAlpha.label(27),
-            Err(Error::InvalidGeometry)
+            Err(GeometryKind::MarkerOutOfRange { number: 27 }.into())
         );
         assert_eq!(
             MarkerKind::LowerRoman.label(4000),
-            Err(Error::InvalidGeometry)
+            Err(GeometryKind::MarkerOutOfRange { number: 4000 }.into())
         );
         let (_, style) = fonts_and_style();
         let items = (0..2).map(|_| item("a", &style)).collect();
@@ -445,7 +450,10 @@ mod tests {
             &style,
             items,
         ));
-        assert_eq!(err.unwrap_err(), Error::InvalidGeometry);
+        assert_eq!(
+            err.unwrap_err(),
+            GeometryKind::MarkerOutOfRange { number: 27 }.into()
+        );
     }
 
     #[test]
@@ -465,7 +473,7 @@ mod tests {
             &Decorations::none(),
         );
         assert!(
-            matches!(result, Err(Error::UnbreakableWiderThanFrame { avail, .. }) if avail.to_bits() == 10.0f32.to_bits())
+            matches!(result.map_err(|error| error.kind), Err(ErrorKind::UnbreakableWiderThanFrame { avail, .. }) if avail.to_bits() == 10.0f32.to_bits())
         );
         assert!(rec.commands().is_empty());
     }
@@ -474,7 +482,7 @@ mod tests {
     fn empty_custom_marker_is_rejected() {
         let (_, style) = fonts_and_style();
         let err = ListItem::custom("", vec![text("A", &style)]).unwrap_err();
-        assert_eq!(err, Error::InvalidGeometry);
+        assert_eq!(err, GeometryKind::EmptyListMarker.into());
     }
 
     #[test]
@@ -517,10 +525,10 @@ mod tests {
         ] {
             assert_eq!(
                 ListItem::new(vec![node]).unwrap_err(),
-                Error::InvalidCellContent {
+                Error::from(ErrorKind::InvalidCellContent {
                     container: "list item",
                     node: name
-                }
+                })
             );
         }
     }

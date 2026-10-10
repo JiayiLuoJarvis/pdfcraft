@@ -4,7 +4,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::layout::flow::{FlowNode, KeepTogetherNode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,10 +58,10 @@ pub(crate) fn check_content(container: Container, nodes: &[FlowNode]) -> Result<
             FlowNode::PageBreak => false,
         };
         if !allowed {
-            return Err(Error::InvalidCellContent {
+            return Err(Error::from(ErrorKind::InvalidCellContent {
                 container: container.name(),
                 node: node_name(node),
-            });
+            }));
         }
     }
     Ok(())

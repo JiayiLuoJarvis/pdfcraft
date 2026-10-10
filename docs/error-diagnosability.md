@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-10 |
-| 状态 | **方向已确认。** 未改代码；按刀序实现。 |
+| 状态 | **刀 1–3 已落地**（`Error { kind, at }`、`Location`、`source()` 链）。刀 4（多错收集）仍开着。 |
 | 相关 | [`code-quality-assessment.md`](code-quality-assessment.md) §1–§4；姿态见 [`AGENTS.md`](../AGENTS.md)「现阶段姿态」 |
 | 代码 | 主要 `src/error.rs`；构造点遍布 `document/`、`layout/`、`text/`、`fonts.rs`、`backend/` |
 
@@ -31,9 +31,17 @@
 | 1 | `Error` / `ErrorKind` / `Location` 骨架；§1 结构化；§4 删/修；`BoldFaceRequired`；测试跟 |
 | 2 | 组装与 layout 填 `Location` |
 | 3 | 依赖错误的 `source()` 链（Font / Image / Backend 等） |
-| 4 | （可选）多错收集 API |
+| 4 | （可选）多错收集 API — **未做** |
 
 `Location` / `ErrorKind` 的精确字段名与变体表在刀 1 实现 PR 定；勿提前冻进提案书。
+
+### 落地记录（刀 1–3）
+
+- `Location { section, page, region, cell }`：`section` 从 0 计；`page` 是全文档 1 起的页码；`region` 为 `Body` / `Header` / `Footer` / `Behind` / `Front`；`cell` 为表格网格 0 起的行列（含表头行）。内层先写，外层不覆盖。
+- `InvalidCellSpan` 只带 `CellSpanReason`，行列放在 `at.cell`，不在变体里重复。
+- `source` 私有，存 `Arc<dyn Error + Send + Sync>`，以保住 `Error: Clone`（文档会克隆延迟的首错）。`PartialEq` 只比 `kind` 与 `at`。
+- `Display` 不拼 source 文本，按 Rust 错误惯例留给 `source()` 链。
+- 仍为 `None` 的位置：组装期在单元格构造时就拒绝的内容（此时还没有网格行列），以及 `to_pdf` 收尾阶段的序列化失败。
 
 ---
 

@@ -5,7 +5,7 @@
 
 use std::ops::Range;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::fonts::FontId;
 use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 
@@ -35,10 +35,10 @@ pub struct LinkTarget(String);
 impl LinkTarget {
     /// Builds a URI target.
     ///
-    /// An empty string is [`Error::EmptyLink`]. Spaces are kept.
+    /// An empty string is [`ErrorKind::EmptyLink`]. Spaces are kept.
     pub fn uri(uri: &str) -> Result<Self> {
         if uri.is_empty() {
-            return Err(Error::EmptyLink);
+            return Err(Error::from(ErrorKind::EmptyLink));
         }
         Ok(Self(uri.to_owned()))
     }
@@ -395,7 +395,7 @@ mod tests {
         pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun,
         ImageId, LinkTarget, RecordingCanvas,
     };
-    use crate::error::{Error, Result};
+    use crate::error::{ErrorKind, Result};
     use crate::fonts::FontId;
     use crate::geom::{Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4};
 
@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn empty_link_is_rejected_and_not_recorded() -> Result<()> {
         let error = LinkTarget::uri("").expect_err("empty uri");
-        assert!(matches!(error, Error::EmptyLink));
+        assert!(matches!(error.kind, ErrorKind::EmptyLink));
         assert_eq!(error.to_string(), "link URI is empty");
 
         let spaced = LinkTarget::uri(" ")?;
@@ -507,7 +507,10 @@ mod tests {
 
         let mut rec = RecordingCanvas::new();
         rec.start_page(A4)?;
-        assert!(matches!(LinkTarget::uri(""), Err(Error::EmptyLink)));
+        assert!(matches!(
+            LinkTarget::uri("").map_err(|error| error.kind),
+            Err(ErrorKind::EmptyLink)
+        ));
         assert!(matches!(rec.commands(), [CanvasCommand::StartPage(_)]));
         Ok(())
     }

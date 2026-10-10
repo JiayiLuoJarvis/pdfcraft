@@ -8,7 +8,10 @@ pub mod error;
 pub mod geom;
 pub mod limits;
 
-pub use error::{Error, Result};
+pub use error::{
+    CellIndex, CellSpanReason, ColumnWidthsReason, Error, ErrorKind, GeometryKind, Location,
+    Region, Result,
+};
 pub use geom::{
     Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length,
     MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path, PathBuilder,

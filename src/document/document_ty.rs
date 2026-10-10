@@ -31,7 +31,7 @@ pub struct Document<'a> {
     pub(crate) doc: DocToken,
     pub(crate) fonts: FontStore,
     pub(crate) body: Sections<'a>,
-    /// First [`Error::ContentOutsideSection`], or the error from a section closure.
+    /// First [`ErrorKind::ContentOutsideSection`], or the error from a section closure.
     pub(crate) error: Option<Error>,
     #[cfg(feature = "backend-krilla")]
     pub(crate) images: ImageTable,
@@ -66,9 +66,9 @@ impl<'a> Document<'a> {
         #[cfg(not(feature = "backend-krilla"))]
         {
             let _ = (self.doc, bytes, format);
-            Err(Error::Image {
+            Err(Error::from(ErrorKind::Image {
                 message: "decoding needs feature `backend-krilla`".to_owned(),
-            })
+            }))
         }
     }
 
@@ -87,10 +87,10 @@ impl<'a> Document<'a> {
     /// A body font must be registered first. A later call replaces the bold binding.
     pub fn bold_font(&mut self, bytes: Vec<u8>) -> Result<()> {
         if self.fonts.face(FontId::from_raw(0)).is_err() {
-            return Err(Error::Font {
+            return Err(Error::from(ErrorKind::Font {
                 index: 0,
                 message: "body font is not registered".to_owned(),
-            });
+            }));
         }
         let id = self.fonts.register(FontSource {
             bytes: Arc::new(bytes),
@@ -148,7 +148,7 @@ impl<'a> Document<'a> {
     /// Appends a section that starts on a new page and keeps its own margins and hooks.
     ///
     /// Registering a font or an image does not count as writing the document.
-    /// Fails with [`Error::ContentOutsideSection`] when the implicit section
+    /// Fails with [`ErrorKind::ContentOutsideSection`] when the implicit section
     /// already has body content, non-default margins, or a page hook, and when
     /// body content, margins, or hooks are written on the document after this.
     pub fn section(&mut self, f: impl FnOnce(&mut Section<'a>) -> Result<()>) -> Result<()> {
@@ -157,7 +157,7 @@ impl<'a> Document<'a> {
         }
         let lead_written = matches!(&self.body, Sections::Implicit(section) if section.written());
         if lead_written {
-            let error = Error::ContentOutsideSection;
+            let error = Error::from(ErrorKind::ContentOutsideSection);
             self.error = Some(error.clone());
             return Err(error);
         }
@@ -165,8 +165,13 @@ impl<'a> Document<'a> {
             Sections::Implicit(section) => section.flow.style.clone(),
             Sections::Explicit { closed, .. } => closed.style.clone(),
         };
+        let index = match &self.body {
+            Sections::Implicit(_) => 0,
+            Sections::Explicit { sections, .. } => sections.len(),
+        };
         let mut section = Section::new(style, self.doc);
         if let Err(error) = f(&mut section) {
+            let error = error.in_section(index);
             self.error = Some(error.clone());
             return Err(error);
         }
@@ -185,7 +190,7 @@ impl<'a> Document<'a> {
 
     pub(crate) fn fail_outside(&mut self) {
         if self.error.is_none() {
-            self.error = Some(Error::ContentOutsideSection);
+            self.error = Some(Error::from(ErrorKind::ContentOutsideSection));
         }
     }
 
@@ -212,8 +217,10 @@ impl<'a> Document<'a> {
         let mut configs = Vec::with_capacity(sections.len());
         let mut roots = Vec::with_capacity(sections.len());
         let mut decorations = Vec::with_capacity(sections.len());
-        for section in sections {
-            let (config, root, deco) = section.lower(page_size, doc)?;
+        for (index, section) in sections.into_iter().enumerate() {
+            let (config, root, deco) = section
+                .lower(page_size, doc)
+                .map_err(|error| error.in_section(index))?;
             configs.push(config);
             roots.push(root);
             decorations.push(deco);

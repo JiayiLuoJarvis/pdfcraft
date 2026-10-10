@@ -370,22 +370,26 @@ fn default_out_path() -> PathBuf {
 
 fn load_font(env_key: &str, candidates: &[&str]) -> quire_pdf::Result<Vec<u8>> {
     if let Ok(path) = env::var(env_key) {
-        return fs::read(&path).map_err(|error| quire_pdf::Error::Font {
-            index: 0,
-            message: format!("read {path}: {error}"),
+        return fs::read(&path).map_err(|error| {
+            quire_pdf::Error::from(quire_pdf::ErrorKind::Font {
+                index: 0,
+                message: format!("read {path}: {error}"),
+            })
         });
     }
     for candidate in candidates {
         let path = Path::new(candidate);
         if path.is_file() {
-            return fs::read(path).map_err(|error| quire_pdf::Error::Font {
-                index: 0,
-                message: format!("read {}: {error}", path.display()),
+            return fs::read(path).map_err(|error| {
+                quire_pdf::Error::from(quire_pdf::ErrorKind::Font {
+                    index: 0,
+                    message: format!("read {}: {error}", path.display()),
+                })
             });
         }
     }
-    Err(quire_pdf::Error::Font {
+    Err(quire_pdf::Error::from(quire_pdf::ErrorKind::Font {
         index: 0,
         message: format!("set {env_key} or place a CJK TTF at {}", candidates[0]),
-    })
+    }))
 }

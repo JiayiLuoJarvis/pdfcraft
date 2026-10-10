@@ -23,7 +23,7 @@ use crate::backend::convert::{
 };
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
 use crate::canvas::DocumentInfo;
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::geom::Paint;
 
 /// Renders closed page plans into PDF bytes.
@@ -35,13 +35,16 @@ pub(super) fn render(
     let mut document = Document::new_with(to_serialize_settings(serialization));
     document.set_metadata(to_metadata(info));
 
-    for page_plan in pages {
-        emit_page(&mut document, page_plan)?;
+    for (index, page_plan) in pages.iter().enumerate() {
+        emit_page(&mut document, page_plan).map_err(|error| error.on_page_index(index))?;
     }
 
-    document
-        .finish()
-        .map_err(|error| Error::Backend(error.to_string()))
+    document.finish().map_err(|error| {
+        Error::from(ErrorKind::Backend {
+            message: "cannot serialize the PDF".to_owned(),
+        })
+        .with_source(error)
+    })
 }
 
 fn to_serialize_settings(serialization: Serialization) -> SerializeSettings {
@@ -91,9 +94,9 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
         page_plan.size.width().as_pt(),
         page_plan.size.height().as_pt(),
     )
-    .ok_or(Error::Backend(
-        "PageSettings::from_wh rejected a positive Size".to_owned(),
-    ))?;
+    .ok_or(Error::from(ErrorKind::Backend {
+        message: "PageSettings::from_wh rejected a positive Size".to_owned(),
+    }))?;
 
     let mut page = document.start_page_with(settings);
     {
@@ -115,7 +118,7 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
 fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
     match mark {
         Mark::Fill { path, paint } => {
-            surface.set_fill(Some(to_fill(*paint)?));
+            surface.set_fill(Some(to_fill(*paint)));
             surface.set_stroke(None);
             surface.draw_path(&to_krilla_path(path)?);
         }
@@ -125,7 +128,7 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             stroke,
         } => {
             surface.set_fill(None);
-            surface.set_stroke(Some(to_stroke(*paint, *stroke)?));
+            surface.set_stroke(Some(to_stroke(*paint, *stroke)));
             surface.draw_path(&to_krilla_path(path)?);
         }
         Mark::Glyphs {
@@ -138,11 +141,12 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             glyphs,
             text,
         } => {
-            let font =
-                Font::new(Data::from(Arc::clone(font_bytes)), *font_index).ok_or(Error::Font {
+            let font = Font::new(Data::from(Arc::clone(font_bytes)), *font_index).ok_or(
+                Error::from(ErrorKind::Font {
                     index: *font_index,
                     message: "krilla Font::new returned None".to_owned(),
-                })?;
+                }),
+            )?;
             check_upem(*skrifa_units_per_em, font.units_per_em())?;
             let drawn: Vec<KrillaGlyph> = glyphs
                 .iter()
@@ -158,7 +162,7 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
                     )
                 })
                 .collect();
-            surface.set_fill(Some(to_fill(Paint::solid(*color))?));
+            surface.set_fill(Some(to_fill(Paint::solid(*color))));
             surface.set_stroke(None);
             surface.draw_glyphs(
                 to_krilla_point(*origin),
@@ -170,7 +174,9 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             );
         }
         Mark::Image { raster, rect } => {
-            let size = to_krilla_size(rect.size()).ok_or(Error::InvalidGeometry)?;
+            let size = to_krilla_size(rect.size()).ok_or(Error::from(ErrorKind::Backend {
+                message: "Size::from_wh rejected a positive image Size".to_owned(),
+            }))?;
             // `draw_image` paints with the top edge at the current origin. Pair push and pop
             // with nothing fallible between them; an unbalanced transform panics inside krilla.
             let shift = krilla::geom::Transform::from_translate(
@@ -187,19 +193,19 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
 
 fn check_upem(skrifa_upem: f32, krilla_upem: f32) -> Result<()> {
     if (skrifa_upem - krilla_upem).abs() >= 0.01 {
-        Err(Error::FontMetricsMismatch {
+        Err(Error::from(ErrorKind::FontMetricsMismatch {
             skrifa_upem,
             krilla_upem,
-        })
+        }))
     } else {
         Ok(())
     }
 }
 
 fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
-    let rect = to_krilla_rect(link.rect).ok_or(Error::Backend(
-        "Rect::from_xywh rejected a positive Rect".to_owned(),
-    ))?;
+    let rect = to_krilla_rect(link.rect).ok_or(Error::from(ErrorKind::Backend {
+        message: "Rect::from_xywh rejected a positive Rect".to_owned(),
+    }))?;
     Ok(LinkAnnotation::new(
         rect,
         Target::Action(LinkAction::new(link.target.as_str().to_owned()).into()),
@@ -314,8 +320,8 @@ mod tests {
         canvas.start_page(A4).unwrap();
         let err = canvas.start_page(A4).unwrap_err();
         assert!(matches!(
-            err,
-            Error::InvalidCanvasState {
+            err.kind,
+            ErrorKind::InvalidCanvasState {
                 operation: "start_page",
                 state: "a page is already open"
             }
@@ -329,8 +335,8 @@ mod tests {
             .stroke_path(&probe_path(), &black(), &thin())
             .unwrap_err();
         assert!(matches!(
-            err,
-            Error::InvalidCanvasState {
+            err.kind,
+            ErrorKind::InvalidCanvasState {
                 operation: "stroke_path",
                 state: "no page is open"
             }
@@ -343,8 +349,8 @@ mod tests {
         canvas.start_page(A4).unwrap();
         let err = canvas.finish().unwrap_err();
         assert!(matches!(
-            err,
-            Error::InvalidCanvasState {
+            err.kind,
+            ErrorKind::InvalidCanvasState {
                 operation: "finish",
                 state: "a page is still open"
             }
@@ -368,7 +374,7 @@ mod tests {
             text: "a".to_owned(),
         };
         let err = canvas.draw_glyph_run(&run).unwrap_err();
-        assert!(matches!(err, Error::UnknownFont { id: 0 }));
+        assert!(matches!(err.kind, ErrorKind::UnknownFont { id: 0 }));
         assert!(canvas.finish_page().is_err());
         assert!(canvas.finish().is_err());
     }
@@ -477,9 +483,7 @@ mod tests {
     #[test]
     fn upem_delta_of_one_hundredth_is_mismatch() {
         let err = check_upem(1000.0, 1000.01).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::FontMetricsMismatch {
+        assert!(matches!(err.kind, ErrorKind::FontMetricsMismatch {
                 skrifa_upem,
                 krilla_upem
             } if (skrifa_upem - 1000.0).abs() < f32::EPSILON && (krilla_upem - 1000.01).abs() < f32::EPSILON
@@ -513,7 +517,7 @@ mod tests {
         let err = canvas
             .draw_image(&image, Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap())
             .unwrap_err();
-        assert!(matches!(err, Error::UnknownImage { id: 0 }));
+        assert!(matches!(err.kind, ErrorKind::UnknownImage { id: 0 }));
         assert!(canvas.finish().is_err());
     }
 

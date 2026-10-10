@@ -1,10 +1,110 @@
-//! Failures from constructing lengths, geometry, canvas ops, fonts, and the PDF backend.
+//! Failures from constructing lengths, geometry, canvas ops, fonts, layout, and the PDF backend.
+//!
+//! An [`Error`] pairs what went wrong ([`ErrorKind`]) with where layout was when it
+//! happened ([`Location`]). Failures inside `skrifa` or `krilla` are translated into
+//! quire kinds; the dependency's own error, when it has one, is reachable through
+//! [`std::error::Error::source`].
 
+use std::error::Error as StdError;
 use std::fmt;
+use std::sync::Arc;
 
-use crate::fonts::FontId;
+/// A construction, layout, or drawing failure.
+///
+/// Equality compares [`kind`](Self::kind) and [`at`](Self::at) only. The dependency
+/// error behind [`source`](StdError::source) is not compared, so tests can match a
+/// quire failure without rebuilding a `skrifa` or `krilla` value.
+#[derive(Debug, Clone)]
+pub struct Error {
+    /// What went wrong.
+    pub kind: ErrorKind,
+    /// Where layout was when it went wrong. `None` when the failure is not tied to
+    /// a section, page, band, or table cell.
+    pub at: Option<Location>,
+    source: Option<Arc<dyn StdError + Send + Sync>>,
+}
 
-/// A construction or drawing failure.
+impl Error {
+    /// Keeps `source` as the dependency failure behind this error.
+    pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
+        self.source = Some(Arc::new(source));
+        self
+    }
+
+    /// Records the zero-based section index unless an inner layer already did.
+    pub(crate) fn in_section(mut self, index: usize) -> Self {
+        self.location().section.get_or_insert(index);
+        self
+    }
+
+    /// Records the page at zero-based `index` unless an inner layer already did.
+    ///
+    /// A page number that does not fit `u32` stays unknown.
+    pub(crate) fn on_page_index(mut self, index: usize) -> Self {
+        if let Some(number) = index.checked_add(1).and_then(|n| u32::try_from(n).ok()) {
+            self.location().page.get_or_insert(number);
+        }
+        self
+    }
+
+    /// Records the page region unless an inner layer already did.
+    pub(crate) fn in_region(mut self, region: Region) -> Self {
+        self.location().region.get_or_insert(region);
+        self
+    }
+
+    /// Records the table cell unless a nested table already did.
+    pub(crate) fn in_cell(mut self, row: usize, col: usize) -> Self {
+        self.location().cell.get_or_insert(CellIndex { row, col });
+        self
+    }
+
+    fn location(&mut self) -> &mut Location {
+        self.at.get_or_insert_with(Location::default)
+    }
+}
+
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Self {
+        Self {
+            kind,
+            at: None,
+            source: None,
+        }
+    }
+}
+
+impl From<GeometryKind> for Error {
+    fn from(kind: GeometryKind) -> Self {
+        ErrorKind::InvalidGeometry(kind).into()
+    }
+}
+
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.at == other.at
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)?;
+        match &self.at {
+            Some(at) if *at != Location::default() => write!(f, " ({at})"),
+            _ => Ok(()),
+        }
+    }
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn StdError + 'static))
+    }
+}
+
+/// What went wrong.
 ///
 /// Length variants carry `value`, the argument of `pt` or `mm`, in the unit
 /// the caller passed. When a finite millimeter converts to a non-finite point
@@ -12,7 +112,7 @@ use crate::fonts::FontId;
 /// positive, `value` is that point value.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub enum Error {
+pub enum ErrorKind {
     /// `value` is NaN or infinite.
     NonFiniteLength {
         /// The rejected number.
@@ -37,24 +137,21 @@ pub enum Error {
         /// The state that blocked it.
         state: &'static str,
     },
-    /// A `Canvas` method this build does not support yet.
-    UnsupportedCanvasOperation {
-        /// The method name.
-        operation: &'static str,
-    },
-    /// Geometry that brands allow but the backend cannot draw.
-    InvalidGeometry,
+    /// Geometry that brands allow but layout or the backend cannot use.
+    InvalidGeometry(GeometryKind),
     /// Font bytes could not be parsed or are unusable.
+    ///
+    /// When a parser rejected the bytes, its error is the [`source`](StdError::source).
     Font {
         /// Collection index passed to the parser.
         index: u32,
-        /// Parser or loader display text.
+        /// What quire was doing, or which of its limits the font broke.
         message: String,
     },
     /// `scalar` has no glyph in `font`. The document is not produced.
     MissingGlyph {
-        /// Font that was queried.
-        font: FontId,
+        /// Raw id of the font that was queried, as [`FontId::as_u32`](crate::FontId::as_u32) returns.
+        font: u32,
         /// Unmapped Unicode scalar.
         scalar: char,
     },
@@ -63,6 +160,8 @@ pub enum Error {
         /// Raw identifier that was not found.
         id: u32,
     },
+    /// Bold text was requested but no bold face was registered with `Document::bold_font`.
+    BoldFaceRequired,
     /// skrifa and krilla read different units per em from the same bytes.
     FontMetricsMismatch {
         /// Units per em from skrifa.
@@ -80,11 +179,17 @@ pub enum Error {
     /// A fill-to-end blank is followed by another inline run.
     RunAfterFillBlank,
     /// A node that cannot split is taller than the full body frame.
-    UnsplittableTallerThanFrame,
+    UnsplittableTallerThanFrame {
+        /// Measured height of the content that has to stay in one frame. Content that
+        /// split anyway is summed over fresh full frames until a frame placed nothing.
+        height: f32,
+        /// Full frame height that was exceeded.
+        avail: f32,
+    },
     /// Column or table track widths cannot be resolved inside the frame.
     ColumnWidths {
-        /// Short static reason, such as `"fixed-sum-exceeds"`.
-        reason: &'static str,
+        /// Which rule failed.
+        reason: ColumnWidthsReason,
     },
     /// `node` is not allowed inside `container`.
     InvalidCellContent {
@@ -93,11 +198,12 @@ pub enum Error {
         /// Rejected node kind, such as `"columns"`.
         node: &'static str,
     },
-    /// Table spans overlap, leave the grid, leave a slot empty, or cross from header into body.
-    InvalidCellSpan,
+    /// Table spans do not tile the grid. [`Location::cell`] names the offending slot.
+    InvalidCellSpan(CellSpanReason),
     /// Header or footer content is taller than its margin band.
     DecorationTallerThanMargin {
-        /// Measured decoration height.
+        /// Measured decoration height. Content taller than the page is summed over
+        /// page-high frames.
         height: f32,
         /// Band height, the matching page margin.
         margin: f32,
@@ -111,7 +217,7 @@ pub enum Error {
     },
     /// Image bytes were rejected. Over a limit, unparsable, empty, or no decoder in this build.
     Image {
-        /// Decoder or limit display text.
+        /// Which limit was broken, or the decoder's description of the failure.
         message: String,
     },
     /// `id` is not registered in this document's image table.
@@ -121,11 +227,16 @@ pub enum Error {
     },
     /// Body, margins, or page hooks were written both on the document and in sections.
     ContentOutsideSection,
-    /// The PDF backend failed. The string is that failure's display text.
-    Backend(String),
+    /// The PDF backend failed.
+    ///
+    /// When the PDF writer returned an error, it is the [`source`](StdError::source).
+    Backend {
+        /// What quire asked the backend to do.
+        message: String,
+    },
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NonFiniteLength { value } => write!(f, "{value} is not a finite length"),
@@ -135,20 +246,15 @@ impl fmt::Display for Error {
             Self::InvalidCanvasState { operation, state } => {
                 write!(f, "{operation} is invalid while {state}")
             }
-            Self::UnsupportedCanvasOperation { operation } => {
-                write!(f, "{operation} is not supported yet")
-            }
-            Self::InvalidGeometry => f.write_str("geometry is invalid"),
+            Self::InvalidGeometry(kind) => write!(f, "invalid geometry: {kind}"),
             Self::Font { index, message } => write!(f, "font index {index}: {message}"),
-            Self::MissingGlyph { font, scalar } => {
-                write!(
-                    f,
-                    "font {} has no glyph for U+{:04X}",
-                    font.as_u32(),
-                    u32::from(*scalar)
-                )
-            }
+            Self::MissingGlyph { font, scalar } => write!(
+                f,
+                "font {font} has no glyph for U+{:04X}",
+                u32::from(*scalar)
+            ),
             Self::UnknownFont { id } => write!(f, "font {id} is not registered"),
+            Self::BoldFaceRequired => f.write_str("bold text needs a registered bold font"),
             Self::FontMetricsMismatch {
                 skrifa_upem,
                 krilla_upem,
@@ -161,14 +267,15 @@ impl fmt::Display for Error {
                 "unbreakable content width {width} exceeds available width {avail}"
             ),
             Self::RunAfterFillBlank => f.write_str("a fill-to-end blank must be the last run"),
-            Self::UnsplittableTallerThanFrame => {
-                f.write_str("unsplittable content is taller than the body frame")
-            }
+            Self::UnsplittableTallerThanFrame { height, avail } => write!(
+                f,
+                "unsplittable content height {height} exceeds frame height {avail}"
+            ),
             Self::ColumnWidths { reason } => write!(f, "column widths cannot resolve: {reason}"),
             Self::InvalidCellContent { container, node } => {
                 write!(f, "{node} is not allowed in a {container}")
             }
-            Self::InvalidCellSpan => f.write_str("table cell spans are invalid"),
+            Self::InvalidCellSpan(reason) => write!(f, "table cell span is invalid: {reason}"),
             Self::DecorationTallerThanMargin { height, margin } => {
                 write!(f, "decoration height {height} exceeds margin band {margin}")
             }
@@ -180,12 +287,357 @@ impl fmt::Display for Error {
             Self::ContentOutsideSection => {
                 f.write_str("body or decorations written both on the document and in sections")
             }
-            Self::Backend(message) => write!(f, "PDF backend failed: {message}"),
+            Self::Backend { message } => write!(f, "PDF backend failed: {message}"),
         }
     }
 }
 
-impl std::error::Error for Error {}
+/// Why geometry was rejected. Point values are in pt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum GeometryKind {
+    /// A line width for text breaking is not finite and positive.
+    LineWidth {
+        /// The rejected width.
+        width: f32,
+    },
+    /// The first-line indent leaves no positive width for the first line.
+    FirstLineIndent {
+        /// The indent.
+        indent: f32,
+        /// The paragraph width it was taken from.
+        width: f32,
+    },
+    /// An inline advance, such as a blank's width, is negative or not finite.
+    AdvanceWidth {
+        /// The rejected advance.
+        width: f32,
+    },
+    /// A line height factor is not finite and positive.
+    LineHeightFactor {
+        /// The rejected factor.
+        factor: f32,
+    },
+    /// Margins leave no positive body width or height on the page.
+    BodyFrame {
+        /// Page width minus left and right margins.
+        width: f32,
+        /// Page height minus top and bottom margins.
+        height: f32,
+    },
+    /// A layout frame has a non-finite or non-positive extent.
+    LayoutFrame {
+        /// Frame width.
+        width: f32,
+        /// Height left in the frame.
+        height: f32,
+        /// Height of a fresh frame.
+        full_height: f32,
+    },
+    /// Content laid out at one width was offered a narrower frame.
+    LaidOutWiderThanFrame {
+        /// Width the content was laid out at.
+        width: f32,
+        /// Width of the frame offered later.
+        avail: f32,
+    },
+    /// A fresh page placed nothing and the content did not report why.
+    StalledOnFreshPage {
+        /// Body height of the fresh page.
+        height: f32,
+    },
+    /// A page break reached a nested frame, such as a column or a band.
+    NestedPageBreak,
+    /// A section has no pages, or the page count does not fit `u32`.
+    PageCount {
+        /// The page count, or the page index that overflowed.
+        pages: usize,
+    },
+    /// Section page spans do not tile the page list in order.
+    SectionSpans,
+    /// A straight segment starts and ends at the same point.
+    ZeroLengthSegment,
+    /// A path has no drawable segment, such as a lone move-to.
+    DegeneratePath,
+    /// A rotation angle is NaN or infinite.
+    NonFiniteRotation {
+        /// The rejected angle in degrees.
+        degrees: f32,
+    },
+    /// An ordered list number has no label. Letters stop at Z and roman numerals at 3999.
+    MarkerOutOfRange {
+        /// The item number.
+        number: u64,
+    },
+    /// A custom list marker is empty.
+    EmptyListMarker,
+    /// A nested list indent is narrower than the marker column.
+    ListIndent {
+        /// The nest indent.
+        indent: f32,
+        /// The marker column width.
+        marker_width: f32,
+    },
+    /// The list indent leaves no positive width for item bodies.
+    ListIndentWiderThanFrame {
+        /// The list indent.
+        indent: f32,
+        /// The frame width.
+        avail: f32,
+    },
+}
+
+impl fmt::Display for GeometryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LineWidth { width } => write!(f, "line width {width} is not positive"),
+            Self::FirstLineIndent { indent, width } => write!(
+                f,
+                "first-line indent {indent} leaves no room in width {width}"
+            ),
+            Self::AdvanceWidth { width } => write!(f, "advance {width} is negative or not finite"),
+            Self::LineHeightFactor { factor } => {
+                write!(f, "line height factor {factor} is not positive")
+            }
+            Self::BodyFrame { width, height } => write!(
+                f,
+                "margins leave a {width} x {height} body, which is not positive"
+            ),
+            Self::LayoutFrame {
+                width,
+                height,
+                full_height,
+            } => write!(
+                f,
+                "layout frame width {width}, height {height}, full height {full_height} is invalid"
+            ),
+            Self::LaidOutWiderThanFrame { width, avail } => write!(
+                f,
+                "content laid out at width {width} does not fit width {avail}"
+            ),
+            Self::StalledOnFreshPage { height } => {
+                write!(
+                    f,
+                    "nothing was placed on a fresh page of body height {height}"
+                )
+            }
+            Self::NestedPageBreak => f.write_str("a page break is not allowed in a nested frame"),
+            Self::PageCount { pages } => {
+                write!(f, "page count {pages} is zero or does not fit u32")
+            }
+            Self::SectionSpans => f.write_str("section page spans do not tile the pages"),
+            Self::ZeroLengthSegment => f.write_str("segment starts and ends at the same point"),
+            Self::DegeneratePath => f.write_str("path has no drawable segment"),
+            Self::NonFiniteRotation { degrees } => {
+                write!(f, "rotation {degrees} degrees is not finite")
+            }
+            Self::MarkerOutOfRange { number } => write!(f, "list number {number} has no label"),
+            Self::EmptyListMarker => f.write_str("custom list marker is empty"),
+            Self::ListIndent {
+                indent,
+                marker_width,
+            } => write!(
+                f,
+                "list indent {indent} is narrower than marker width {marker_width}"
+            ),
+            Self::ListIndentWiderThanFrame { indent, avail } => {
+                write!(f, "list indent {indent} leaves no room in width {avail}")
+            }
+        }
+    }
+}
+
+/// Which column or track width rule failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ColumnWidthsReason {
+    /// A ratio weight is NaN or infinite.
+    NonFiniteRatio,
+    /// A ratio weight is zero or negative.
+    NonPositiveRatio,
+    /// Too few columns, or the track count does not match the grid.
+    ColumnCount,
+    /// More than one Auto track.
+    MoreThanOneAuto,
+    /// Auto and Ratio tracks are mixed.
+    AutoWithRatio,
+    /// Fixed tracks are wider than the frame.
+    FixedSumExceeds,
+    /// Ratio or Auto tracks are left with no positive width.
+    NoRemainingWidth,
+    /// Gaps leave no positive width for the columns.
+    Gap,
+    /// Cell padding and border leave no positive content width.
+    ContentWidth,
+}
+
+impl fmt::Display for ColumnWidthsReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NonFiniteRatio => "a ratio is not finite",
+            Self::NonPositiveRatio => "a ratio is not positive",
+            Self::ColumnCount => "column count does not match",
+            Self::MoreThanOneAuto => "more than one auto track",
+            Self::AutoWithRatio => "auto and ratio tracks are mixed",
+            Self::FixedSumExceeds => "fixed tracks exceed the frame width",
+            Self::NoRemainingWidth => "no width remains for flexible tracks",
+            Self::Gap => "gaps leave no width for columns",
+            Self::ContentWidth => "padding and border leave no content width",
+        })
+    }
+}
+
+/// How table spans fail to tile the grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CellSpanReason {
+    /// A span runs past the last column or the last row.
+    OutOfGrid,
+    /// A header span runs into the body rows.
+    CrossesHeader,
+    /// Two spans claim the same slot.
+    Overlap,
+    /// No cell covers this slot.
+    EmptySlot,
+}
+
+impl fmt::Display for CellSpanReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::OutOfGrid => "span leaves the grid",
+            Self::CrossesHeader => "header span runs into the body",
+            Self::Overlap => "spans overlap",
+            Self::EmptySlot => "slot is not covered",
+        })
+    }
+}
+
+/// Where layout was when an error happened. Unknown parts are `None`.
+///
+/// An inner layer records first and outer layers do not overwrite it, so
+/// [`cell`](Self::cell) names the innermost table cell.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Location {
+    /// Zero-based section index, in the order sections were added. A document
+    /// without explicit sections has one section, index 0.
+    pub section: Option<usize>,
+    /// One-based page number across the whole document, as page numbers print.
+    pub page: Option<u32>,
+    /// Part of the page being laid out or painted.
+    pub region: Option<Region>,
+    /// Innermost table cell.
+    pub cell: Option<CellIndex>,
+}
+
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        if let Some(section) = self.section {
+            parts.push(format!("section {section}"));
+        }
+        if let Some(page) = self.page {
+            parts.push(format!("page {page}"));
+        }
+        if let Some(region) = self.region {
+            parts.push(region.to_string());
+        }
+        if let Some(CellIndex { row, col }) = self.cell {
+            parts.push(format!("cell row {row} column {col}"));
+        }
+        f.write_str(&parts.join(", "))
+    }
+}
+
+/// Part of a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Region {
+    /// The body frame inside the margins.
+    Body,
+    /// The top margin band.
+    Header,
+    /// The bottom margin band.
+    Footer,
+    /// The layer drawn under everything else.
+    Behind,
+    /// The layer drawn over everything else.
+    Front,
+}
+
+impl fmt::Display for Region {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Body => "body",
+            Self::Header => "header",
+            Self::Footer => "footer",
+            Self::Behind => "behind layer",
+            Self::Front => "front layer",
+        })
+    }
+}
+
+/// Zero-based table grid slot. Rows count header rows first, then body rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellIndex {
+    /// Grid row.
+    pub row: usize,
+    /// Grid column.
+    pub col: usize,
+}
 
 /// Result of constructing a value or drawing to a canvas.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_appends_the_known_location() {
+        let error = Error::from(ErrorKind::DecorationTallerThanMargin {
+            height: 30.0,
+            margin: 20.0,
+        })
+        .in_region(Region::Header)
+        .on_page_index(2)
+        .in_section(1);
+        assert_eq!(
+            error.to_string(),
+            "decoration height 30 exceeds margin band 20 (section 1, page 3, header)"
+        );
+        assert_eq!(
+            Error::from(GeometryKind::ZeroLengthSegment).to_string(),
+            "invalid geometry: segment starts and ends at the same point"
+        );
+    }
+
+    #[test]
+    fn inner_location_wins_over_outer() {
+        let error = Error::from(ErrorKind::EmptyLink)
+            .in_cell(1, 2)
+            .in_cell(0, 0)
+            .on_page_index(0)
+            .on_page_index(4);
+        assert_eq!(
+            error.at,
+            Some(Location {
+                section: None,
+                page: Some(1),
+                region: None,
+                cell: Some(CellIndex { row: 1, col: 2 }),
+            })
+        );
+    }
+
+    #[test]
+    fn equality_ignores_the_source() {
+        let plain = Error::from(ErrorKind::Backend {
+            message: "m".to_owned(),
+        });
+        let chained = plain.clone().with_source(std::fmt::Error);
+        assert_eq!(plain, chained);
+        assert!(plain.source().is_none());
+        assert!(chained.source().is_some());
+    }
+}

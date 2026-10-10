@@ -76,9 +76,9 @@ impl Layer {
             }
         };
         if image.doc != self.doc {
-            self.note(Error::UnknownImage {
+            self.note(Error::from(ErrorKind::UnknownImage {
                 id: image.decoded.id.as_u32(),
-            });
+            }));
             return;
         }
         self.items.push(LayerItem::Image {
@@ -88,7 +88,7 @@ impl Layer {
     }
 
     /// Straight segment in page coordinates. `from == to` fails the document with
-    /// [`Error::InvalidGeometry`] before any page is drawn.
+    /// [`GeometryKind::ZeroLengthSegment`] before any page is drawn.
     pub fn line(&mut self, from: impl IntoPoint, to: impl IntoPoint, pen: Pen) {
         let (from, to) = match (from.into_point(), to.into_point()) {
             (Ok(from), Ok(to)) => (from, to),
@@ -127,7 +127,7 @@ impl Layer {
     /// Draws the shapes added in `draw` rotated by `degrees` about `about`.
     ///
     /// Positive is clockwise on the page. A non-finite angle fails the document with
-    /// [`Error::InvalidGeometry`] and does not run `draw`. Shapes keep their order relative
+    /// [`GeometryKind::NonFiniteRotation`] and does not run `draw`. Shapes keep their order relative
     /// to the layer's other items.
     pub fn rotated(
         &mut self,
@@ -136,7 +136,7 @@ impl Layer {
         draw: impl FnOnce(&mut Shapes<'_>),
     ) {
         if !degrees.is_finite() {
-            self.note(Error::InvalidGeometry);
+            self.note(GeometryKind::NonFiniteRotation { degrees }.into());
             return;
         }
         let about = match about.into_point() {
@@ -259,7 +259,7 @@ impl Shapes<'_> {
 
 pub(crate) fn straight_path(from: Point, to: Point) -> Result<Path> {
     if from == to {
-        Err(Error::InvalidGeometry)
+        Err(GeometryKind::ZeroLengthSegment.into())
     } else {
         Ok(Path::line(from, to))
     }

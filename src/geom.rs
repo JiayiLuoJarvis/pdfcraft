@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 
 /// PDF points in one millimeter (`72 / 25.4`).
 pub const MM_TO_PT: f32 = 72.0 / 25.4;
@@ -74,11 +74,11 @@ pub enum NonNegative {}
 #[derive(Debug, Clone, Copy)]
 pub enum Positive {}
 
-const fn finite_pt(value: f32) -> Result<f32> {
+fn finite_pt(value: f32) -> Result<f32> {
     if value.is_finite() {
         Ok(value)
     } else {
-        Err(Error::NonFiniteLength { value })
+        Err(Error::from(ErrorKind::NonFiniteLength { value }))
     }
 }
 
@@ -107,7 +107,7 @@ impl NonNegative {
     pub fn pt(value: f32) -> Result<Length<Self>> {
         let value = finite_pt(value)?;
         if value < 0.0 {
-            return Err(Error::NegativeLength { value });
+            return Err(Error::from(ErrorKind::NegativeLength { value }));
         }
         Ok(Length::from_trusted_pt(value))
     }
@@ -116,11 +116,11 @@ impl NonNegative {
     pub fn mm(value: f32) -> Result<Length<Self>> {
         let mm = finite_pt(value)?;
         if mm < 0.0 {
-            return Err(Error::NegativeLength { value: mm });
+            return Err(Error::from(ErrorKind::NegativeLength { value: mm }));
         }
         let pt = finite_pt(mm * MM_TO_PT)?;
         if pt < 0.0 {
-            return Err(Error::NegativeLength { value: pt });
+            return Err(Error::from(ErrorKind::NegativeLength { value: pt }));
         }
         Ok(Length::from_trusted_pt(pt))
     }
@@ -131,7 +131,7 @@ impl Positive {
     pub fn pt(value: f32) -> Result<Length<Self>> {
         let value = finite_pt(value)?;
         if value <= 0.0 {
-            return Err(Error::NonPositiveLength { value });
+            return Err(Error::from(ErrorKind::NonPositiveLength { value }));
         }
         Ok(Length::from_trusted_pt(value))
     }
@@ -140,11 +140,11 @@ impl Positive {
     pub fn mm(value: f32) -> Result<Length<Self>> {
         let mm = finite_pt(value)?;
         if mm <= 0.0 {
-            return Err(Error::NonPositiveLength { value: mm });
+            return Err(Error::from(ErrorKind::NonPositiveLength { value: mm }));
         }
         let pt = finite_pt(mm * MM_TO_PT)?;
         if pt <= 0.0 {
-            return Err(Error::NonPositiveLength { value: pt });
+            return Err(Error::from(ErrorKind::NonPositiveLength { value: pt }));
         }
         Ok(Length::from_trusted_pt(pt))
     }
@@ -1000,20 +1000,20 @@ mod tests {
     fn finite_rejects_nan_and_infinity() {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             assert!(matches!(
-                Finite::pt(value),
-                Err(Error::NonFiniteLength { .. })
+                Finite::pt(value).map_err(|error| error.kind),
+                Err(ErrorKind::NonFiniteLength { .. })
             ));
             assert!(matches!(
-                Finite::mm(value),
-                Err(Error::NonFiniteLength { .. })
+                Finite::mm(value).map_err(|error| error.kind),
+                Err(ErrorKind::NonFiniteLength { .. })
             ));
             assert!(matches!(
-                NonNegative::pt(value),
-                Err(Error::NonFiniteLength { .. })
+                NonNegative::pt(value).map_err(|error| error.kind),
+                Err(ErrorKind::NonFiniteLength { .. })
             ));
             assert!(matches!(
-                Positive::pt(value),
-                Err(Error::NonFiniteLength { .. })
+                Positive::pt(value).map_err(|error| error.kind),
+                Err(ErrorKind::NonFiniteLength { .. })
             ));
         }
     }
@@ -1030,12 +1030,12 @@ mod tests {
         );
         assert_eq!(1.5f32.into_positive().unwrap(), Positive::pt(1.5).unwrap());
         assert!(matches!(
-            (-1.0f32).into_non_negative(),
-            Err(Error::NegativeLength { .. })
+            (-1.0f32).into_non_negative().map_err(|error| error.kind),
+            Err(ErrorKind::NegativeLength { .. })
         ));
         assert!(matches!(
-            0.0f32.into_positive(),
-            Err(Error::NonPositiveLength { .. })
+            0.0f32.into_positive().map_err(|error| error.kind),
+            Err(ErrorKind::NonPositiveLength { .. })
         ));
         assert_eq!(
             (1.0f32, 2.0f32).into_point().unwrap(),
@@ -1058,14 +1058,17 @@ mod tests {
     #[test]
     fn non_negative_rejects_negative_and_accepts_zero() {
         match NonNegative::pt(-1.5) {
-            Err(Error::NegativeLength { value }) => {
+            Err(Error {
+                kind: ErrorKind::NegativeLength { value },
+                ..
+            }) => {
                 assert_eq!(value.to_bits(), (-1.5f32).to_bits());
             }
             other => panic!("expected NegativeLength, got {other:?}"),
         }
         assert!(matches!(
-            NonNegative::mm(-1.0),
-            Err(Error::NegativeLength { .. })
+            NonNegative::mm(-1.0).map_err(|error| error.kind),
+            Err(ErrorKind::NegativeLength { .. })
         ));
         assert_eq!(NonNegative::pt(0.0).unwrap(), NonNegative::ZERO);
         assert_eq!(NonNegative::mm(0.0).unwrap(), NonNegative::ZERO);
@@ -1074,22 +1077,25 @@ mod tests {
     #[test]
     fn positive_rejects_zero_and_negative() {
         match Positive::pt(0.0) {
-            Err(Error::NonPositiveLength { value }) => {
+            Err(Error {
+                kind: ErrorKind::NonPositiveLength { value },
+                ..
+            }) => {
                 assert_eq!(value.to_bits(), 0.0f32.to_bits());
             }
             other => panic!("expected NonPositiveLength, got {other:?}"),
         }
         assert!(matches!(
-            Positive::pt(-0.25),
-            Err(Error::NonPositiveLength { .. })
+            Positive::pt(-0.25).map_err(|error| error.kind),
+            Err(ErrorKind::NonPositiveLength { .. })
         ));
         assert!(matches!(
-            Positive::mm(0.0),
-            Err(Error::NonPositiveLength { .. })
+            Positive::mm(0.0).map_err(|error| error.kind),
+            Err(ErrorKind::NonPositiveLength { .. })
         ));
         assert!(matches!(
-            Positive::mm(-3.0),
-            Err(Error::NonPositiveLength { .. })
+            Positive::mm(-3.0).map_err(|error| error.kind),
+            Err(ErrorKind::NonPositiveLength { .. })
         ));
         assert!(Positive::pt(f32::MIN_POSITIVE).is_ok());
     }
@@ -1146,8 +1152,8 @@ mod tests {
     #[test]
     fn stroke_rejects_zero_through_positive() {
         assert!(matches!(
-            Positive::pt(0.0),
-            Err(Error::NonPositiveLength { .. })
+            Positive::pt(0.0).map_err(|error| error.kind),
+            Err(ErrorKind::NonPositiveLength { .. })
         ));
         let width = Positive::pt(0.75).unwrap();
         let stroke = Stroke::new(width);

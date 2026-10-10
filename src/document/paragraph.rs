@@ -79,7 +79,7 @@ impl Paragraph {
 
     /// Appends a blank that fills the rest of its visual line.
     ///
-    /// A later non-empty run fails assembly with [`Error::RunAfterFillBlank`].
+    /// A later non-empty run fails assembly with [`ErrorKind::RunAfterFillBlank`].
     pub fn blank_to_end(&mut self) -> Blank<'_> {
         self.push_blank(BlankWidth::ToEndOfLine)
     }
@@ -105,7 +105,7 @@ impl Paragraph {
     /// Appends the text and bold calls inside `f` as one link to `uri`.
     ///
     /// `f` returns `()` because it runs inside [`Flow::paragraph`], which cannot
-    /// use `?`. An empty `uri` is stored as [`Error::EmptyLink`] and `f` does not run.
+    /// use `?`. An empty `uri` is stored as [`ErrorKind::EmptyLink`] and `f` does not run.
     pub fn link(&mut self, uri: impl AsRef<str>, f: impl FnOnce(&mut Paragraph)) {
         let target = match LinkTarget::uri(uri.as_ref()) {
             Ok(target) => target,
@@ -124,7 +124,7 @@ impl Paragraph {
             return;
         }
         if self.sealed() {
-            self.note(Error::RunAfterFillBlank);
+            self.note(Error::from(ErrorKind::RunAfterFillBlank));
             return;
         }
         if let Some(InlineItem::Text(last)) = self.items.last_mut() {
@@ -140,7 +140,7 @@ impl Paragraph {
 
     fn push_blank(&mut self, width: BlankWidth) -> Blank<'_> {
         if self.sealed() {
-            self.note(Error::RunAfterFillBlank);
+            self.note(Error::from(ErrorKind::RunAfterFillBlank));
             return Blank {
                 paragraph: self,
                 index: usize::MAX,

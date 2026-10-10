@@ -8,7 +8,7 @@ use std::sync::Arc;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 
 /// Opaque font identifier stored on a [`crate::canvas::GlyphRun`].
 ///
@@ -66,6 +66,17 @@ pub(crate) struct FontStore {
     bold: Option<FontId>,
 }
 
+/// Parses face `index` of `bytes`. skrifa's error stays reachable as the source.
+pub(crate) fn parse_face(bytes: &[u8], index: u32) -> Result<FontRef<'_>> {
+    FontRef::from_index(bytes, index).map_err(|error| {
+        Error::from(ErrorKind::Font {
+            index,
+            message: "cannot parse font data".to_owned(),
+        })
+        .with_source(error)
+    })
+}
+
 impl FontStore {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -76,39 +87,35 @@ impl FontStore {
     /// The returned id is the face's index in this store. The first face is 0.
     pub(crate) fn register(&mut self, source: FontSource) -> Result<FontId> {
         if source.bytes.is_empty() {
-            return Err(Error::Font {
+            return Err(Error::from(ErrorKind::Font {
                 index: source.index,
                 message: "font bytes are empty".to_owned(),
-            });
+            }));
         }
         if source.bytes.len() > MAX_FONT_BYTES {
-            return Err(Error::Font {
+            return Err(Error::from(ErrorKind::Font {
                 index: source.index,
                 message: format!(
                     "font is {} bytes; max is {MAX_FONT_BYTES}",
                     source.bytes.len()
                 ),
-            });
+            }));
         }
 
-        let font_ref =
-            FontRef::from_index(source.bytes.as_slice(), source.index).map_err(|error| {
-                Error::Font {
-                    index: source.index,
-                    message: error.to_string(),
-                }
-            })?;
+        let font_ref = parse_face(source.bytes.as_slice(), source.index)?;
         let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
         if metrics.units_per_em == 0 {
-            return Err(Error::Font {
+            return Err(Error::from(ErrorKind::Font {
                 index: source.index,
                 message: "units per em is 0".to_owned(),
-            });
+            }));
         }
 
-        let id = FontId::from_raw(u32::try_from(self.faces.len()).map_err(|_| Error::Font {
-            index: source.index,
-            message: "too many registered fonts".to_owned(),
+        let id = FontId::from_raw(u32::try_from(self.faces.len()).map_err(|_| {
+            Error::from(ErrorKind::Font {
+                index: source.index,
+                message: "too many registered fonts".to_owned(),
+            })
         })?);
         self.faces.push(FontFace {
             source,
@@ -132,19 +139,19 @@ impl FontStore {
     }
 
     pub(crate) fn bold(&self) -> Result<FontId> {
-        self.bold.ok_or(Error::UnknownFont { id: 1 })
+        self.bold.ok_or(ErrorKind::BoldFaceRequired.into())
     }
 
     pub(crate) fn face(&self, id: FontId) -> Result<&FontFace> {
         self.faces
             .get(id.as_u32() as usize)
-            .ok_or(Error::UnknownFont { id: id.as_u32() })
+            .ok_or(Error::from(ErrorKind::UnknownFont { id: id.as_u32() }))
     }
 
     pub(crate) fn face_mut(&mut self, id: FontId) -> Result<&mut FontFace> {
         self.faces
             .get_mut(id.as_u32() as usize)
-            .ok_or(Error::UnknownFont { id: id.as_u32() })
+            .ok_or(Error::from(ErrorKind::UnknownFont { id: id.as_u32() }))
     }
 
     pub(crate) fn resolve(&self, id: FontId) -> Result<ResolvedFont> {
@@ -181,7 +188,7 @@ mod tests {
                 index: 0,
             })
             .unwrap_err();
-        assert!(matches!(err, Error::Font { index: 0, .. }));
+        assert!(matches!(err.kind, ErrorKind::Font { index: 0, .. }));
     }
 
     #[test]
@@ -193,7 +200,8 @@ mod tests {
                 index: 0,
             })
             .unwrap_err();
-        assert!(matches!(err, Error::Font { index: 0, .. }));
+        assert!(matches!(err.kind, ErrorKind::Font { index: 0, .. }));
+        assert!(std::error::Error::source(&err).is_some());
     }
 
     #[test]
@@ -220,20 +228,23 @@ mod tests {
                 index: 3,
             })
             .unwrap_err();
-        assert!(matches!(err, Error::Font { index: 3, .. }));
+        assert!(matches!(err.kind, ErrorKind::Font { index: 3, .. }));
     }
 
     #[test]
     fn unknown_id_is_error() {
         let store = FontStore::new();
         let err = store.metrics(FontId::from_raw(9)).unwrap_err();
-        assert!(matches!(err, Error::UnknownFont { id: 9 }));
+        assert!(matches!(err.kind, ErrorKind::UnknownFont { id: 9 }));
     }
 
     #[test]
-    fn bold_slot_rebinds_and_empty_slot_uses_conventional_id() {
+    fn bold_slot_rebinds_and_empty_slot_requires_bold_face() {
         let mut store = FontStore::new();
-        assert_eq!(store.bold().unwrap_err(), Error::UnknownFont { id: 1 });
+        assert_eq!(
+            store.bold().unwrap_err(),
+            ErrorKind::BoldFaceRequired.into()
+        );
         store.set_bold(FontId::from_raw(2));
         assert_eq!(store.bold().unwrap(), FontId::from_raw(2));
         store.set_bold(FontId::from_raw(4));

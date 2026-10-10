@@ -1,6 +1,6 @@
 //! Atomic horizontal rule. Width resolves against the frame at split time.
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
@@ -44,13 +44,17 @@ impl HLineNode {
         let width = self.width.map_or(avail.width, Length::as_pt);
         let height = self.height();
         if width > avail.width {
-            return Err(Error::UnbreakableWiderThanFrame {
+            return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width,
                 avail: avail.width,
-            });
+            }));
         }
         if height > avail.full_height {
-            return Err(Error::UnsplittableTallerThanFrame);
+            return Err(ErrorKind::UnsplittableTallerThanFrame {
+                height,
+                avail: avail.full_height,
+            }
+            .into());
         }
         if height > avail.height {
             return Ok(Split::MoveToNextPage(FlowNode::HLine(self)));
@@ -173,16 +177,19 @@ mod tests {
         let wide = node(Some(400.0), TextAlign::Start, 1.0, 0.0, 0.0);
         assert_eq!(
             wide.split(frame(300.0, 100.0, 100.0)).unwrap_err(),
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 400.0,
                 avail: 300.0,
-            }
+            })
         );
 
         let tall = node(None, TextAlign::Start, 1.0, 80.0, 80.0);
         assert_eq!(
             tall.split(frame(300.0, 100.0, 100.0)).unwrap_err(),
-            Error::UnsplittableTallerThanFrame
+            Error::from(ErrorKind::UnsplittableTallerThanFrame {
+                height: 161.0,
+                avail: 100.0,
+            })
         );
 
         let moved = node(None, TextAlign::Center, 1.0, 20.0, 20.0);
@@ -204,7 +211,10 @@ mod tests {
         );
         assert_eq!(
             tall.split(frame(300.0, 100.0, 100.0)).unwrap_err(),
-            Error::UnsplittableTallerThanFrame
+            Error::from(ErrorKind::UnsplittableTallerThanFrame {
+                height: f32::MAX,
+                avail: 100.0,
+            })
         );
     }
 

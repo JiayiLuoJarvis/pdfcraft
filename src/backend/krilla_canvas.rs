@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::backend::emit;
 use crate::backend::images::{ImageTable, Raster};
 use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::fonts::FontStore;
 use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 
@@ -176,10 +176,10 @@ impl KrillaCanvas {
             return Err(error);
         }
         if open_page.is_some() {
-            return Err(Error::InvalidCanvasState {
+            return Err(Error::from(ErrorKind::InvalidCanvasState {
                 operation: "finish",
                 state: "a page is still open",
-            });
+            }));
         }
         emit::render(info.as_ref(), &closed_pages, serialization)
     }
@@ -202,10 +202,10 @@ impl KrillaCanvas {
         self.ensure_ok()?;
         match self.open_page {
             Some(ref mut page) => Ok(page),
-            None => self.fail(Error::InvalidCanvasState {
+            None => self.fail(Error::from(ErrorKind::InvalidCanvasState {
                 operation,
                 state: "no page is open",
-            }),
+            })),
         }
     }
 }
@@ -220,10 +220,10 @@ impl Canvas for KrillaCanvas {
     fn start_page(&mut self, size: Size) -> Result<()> {
         self.ensure_ok()?;
         if self.open_page.is_some() {
-            return self.fail(Error::InvalidCanvasState {
+            return self.fail(Error::from(ErrorKind::InvalidCanvasState {
                 operation: "start_page",
                 state: "a page is already open",
-            });
+            }));
         }
         self.open_page = Some(OpenPage {
             size,
@@ -236,10 +236,10 @@ impl Canvas for KrillaCanvas {
     fn finish_page(&mut self) -> Result<()> {
         self.ensure_ok()?;
         let Some(open) = self.open_page.take() else {
-            return self.fail(Error::InvalidCanvasState {
+            return self.fail(Error::from(ErrorKind::InvalidCanvasState {
                 operation: "finish_page",
                 state: "no page is open",
-            });
+            }));
         };
         self.closed_pages.push(PagePlan {
             size: open.size,
@@ -273,9 +273,9 @@ impl Canvas for KrillaCanvas {
         let raster = match self.images.get(image.id) {
             Some(raster) => raster.clone(),
             None => {
-                return self.fail(Error::UnknownImage {
+                return self.fail(Error::from(ErrorKind::UnknownImage {
                     id: image.id.as_u32(),
-                });
+                }));
             }
         };
         let page = self.open_page_mut("draw_image")?;

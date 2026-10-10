@@ -6,7 +6,7 @@ use super::*;
 pub enum Track {
     /// A length in points. Validated when the table is assembled.
     Fixed(f32),
-    /// A positive finite weight. Rejected at conversion with [`Error::ColumnWidths`].
+    /// A positive finite weight. Rejected at conversion with [`ErrorKind::ColumnWidths`].
     Ratio(f32),
     /// Remaining width after Fixed tracks. At most one Auto per set of tracks.
     Auto,
@@ -185,9 +185,9 @@ impl Table {
         let widths = match self.tracks {
             Some(tracks) => {
                 if tracks.len() != cols {
-                    return Err(Error::ColumnWidths {
-                        reason: "column-count",
-                    });
+                    return Err(Error::from(ErrorKind::ColumnWidths {
+                        reason: ColumnWidthsReason::ColumnCount,
+                    }));
                 }
                 tracks
                     .into_iter()
@@ -295,7 +295,7 @@ impl<'a> Cell<'a> {
     /// A one-by-one cell holding one paragraph. The closure runs immediately.
     ///
     /// Content taller than the cell's inner full frame is
-    /// [`Error::UnsplittableTallerThanFrame`].
+    /// [`ErrorKind::UnsplittableTallerThanFrame`].
     pub fn paragraph(f: impl FnOnce(&mut Paragraph)) -> Self {
         let mut paragraph = Paragraph::default();
         f(&mut paragraph);
@@ -308,7 +308,7 @@ impl<'a> Cell<'a> {
     /// locals that live until that `row` or `header` call returns.
     ///
     /// Content taller than the cell's inner full frame is
-    /// [`Error::UnsplittableTallerThanFrame`].
+    /// [`ErrorKind::UnsplittableTallerThanFrame`].
     pub fn ul(f: impl FnOnce(&mut List) + 'a) -> Self {
         Self::bare(CellContent::List(DeferredList::Bullet(Box::new(f))))
     }
@@ -319,7 +319,7 @@ impl<'a> Cell<'a> {
     /// locals that live until that `row` or `header` call returns.
     ///
     /// Content taller than the cell's inner full frame is
-    /// [`Error::UnsplittableTallerThanFrame`].
+    /// [`ErrorKind::UnsplittableTallerThanFrame`].
     pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'a) -> Self {
         Self::bare(CellContent::List(DeferredList::Ordered(
             numbering,
@@ -344,7 +344,7 @@ impl<'a> Cell<'a> {
     /// A one-by-one cell holding vertical space that paints nothing.
     ///
     /// Height may be zero. Taller than the cell's inner full frame is
-    /// [`Error::UnsplittableTallerThanFrame`]. Unlike [`Flow::spacer`], the blank
+    /// [`ErrorKind::UnsplittableTallerThanFrame`]. Unlike [`Flow::spacer`], the blank
     /// does not split across pages inside the cell.
     pub fn spacer(height: impl IntoNonNegative) -> Self {
         match height.into_non_negative() {

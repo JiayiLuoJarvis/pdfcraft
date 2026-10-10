@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 
 use crate::canvas::Canvas;
-use crate::error::{Error, Result};
+use crate::error::{Error, GeometryKind, Region, Result};
 use crate::geom::{Margins, Point, Size};
 use crate::layout::decorate::{measure_bands, Decorations, PageBands};
 use crate::layout::flow::{draw_fragment, FlowNode, Frame, LayoutCtx, PlacedFragment, Split};
@@ -34,7 +34,11 @@ impl PaginateConfig {
         let w = self.body_width();
         let h = self.body_height();
         if !w.is_finite() || w <= 0.0 || !h.is_finite() || h <= 0.0 {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::BodyFrame {
+                width: w,
+                height: h,
+            }
+            .into());
         }
         Ok(())
     }
@@ -97,13 +101,17 @@ pub(crate) fn paginate_sections(
 ) -> Result<()> {
     let mut pages = Vec::new();
     let mut spans = Vec::with_capacity(jobs.len());
-    for job in jobs {
-        let planned = plan_pages(job.root, ctx, job.config)?;
+    for (section, job) in jobs.into_iter().enumerate() {
+        let start = pages.len();
+        let planned = plan_pages(job.root, ctx, job.config, start)
+            .map_err(|error| error.in_section(section))?;
         let len = u32::try_from(planned.len())
             .ok()
             .and_then(NonZeroU32::new)
-            .ok_or(Error::InvalidGeometry)?;
-        let start = pages.len();
+            .ok_or(GeometryKind::PageCount {
+                pages: planned.len(),
+            })
+            .map_err(|kind| Error::from(kind).in_section(section))?;
         pages.extend(planned);
         spans.push(SectionSpan {
             start,
@@ -117,10 +125,12 @@ pub(crate) fn paginate_sections(
     paint_pages(&pages, &bands, canvas)
 }
 
+/// `first_page` is the zero-based index of this section's first page in the document.
 fn plan_pages(
     root: FlowNode,
     ctx: &mut LayoutCtx<'_>,
     config: PaginateConfig,
+    first_page: usize,
 ) -> Result<Vec<PagePlan>> {
     config.validate()?;
     let mut nodes = match root {
@@ -151,7 +161,12 @@ fn plan_pages(
                     height: (body_h - y).max(0.0),
                     full_height: body_h,
                 };
-                match node.split(ctx, avail)? {
+                let split = node.split(ctx, avail).map_err(|error| {
+                    error
+                        .in_region(Region::Body)
+                        .on_page_index(first_page + pages.len())
+                })?;
+                match split {
                     Split::Fit { height, fragment } => {
                         let page = current.as_mut().expect("content page open");
                         let origin =
@@ -186,7 +201,11 @@ fn plan_pages(
                     }
                     Split::MoveToNextPage(tail) => {
                         if y == 0.0 {
-                            return Err(Error::UnsplittableTallerThanFrame);
+                            return Err(Error::from(GeometryKind::StalledOnFreshPage {
+                                height: body_h,
+                            })
+                            .in_region(Region::Body)
+                            .on_page_index(first_page + pages.len()));
                         }
                         commit_page(&mut pages, &mut current);
                         nodes.insert(0, tail);
@@ -264,25 +283,30 @@ fn finalize_eof(
 }
 
 fn paint_pages(pages: &[PagePlan], bands: &[PageBands], canvas: &mut dyn Canvas) -> Result<()> {
-    for (page, bands) in pages.iter().zip(bands) {
-        canvas.start_page(page.size)?;
-        let stacked = (bands.behind.iter())
-            .chain(&bands.header)
-            .chain(&page.placed)
-            .chain(&bands.footer)
-            .chain(&bands.front);
-        for placed in stacked {
-            draw_fragment(&placed.fragment, canvas, placed.origin)?;
-        }
-        canvas.finish_page()?;
+    for (index, (page, bands)) in pages.iter().zip(bands).enumerate() {
+        paint_page(page, bands, canvas).map_err(|error| error.on_page_index(index))?;
     }
     Ok(())
+}
+
+fn paint_page(page: &PagePlan, bands: &PageBands, canvas: &mut dyn Canvas) -> Result<()> {
+    canvas.start_page(page.size)?;
+    let stacked = (bands.behind.iter())
+        .chain(&bands.header)
+        .chain(&page.placed)
+        .chain(&bands.footer)
+        .chain(&bands.front);
+    for placed in stacked {
+        draw_fragment(&placed.fragment, canvas, placed.origin)?;
+    }
+    canvas.finish_page()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::canvas::{CanvasCommand, RecordedPage, RecordingCanvas};
+    use crate::error::ErrorKind;
     use crate::fonts::{fixture_bytes, FontSource, FontStore};
     use crate::geom::{Color, NonNegative, Positive, A4};
     use crate::layout::flow::{KeepTogetherNode, SpacerNode};
@@ -675,7 +699,16 @@ mod tests {
             &mut rec,
         )
         .unwrap_err();
-        assert!(matches!(err, Error::UnsplittableTallerThanFrame));
+        assert_eq!(
+            err,
+            Error::from(ErrorKind::UnsplittableTallerThanFrame {
+                height: line_h * 2.0,
+                avail: line_h + 1.0,
+            })
+            .in_region(Region::Body)
+            .on_page_index(0)
+            .in_section(0)
+        );
         assert!(rec.commands().is_empty());
     }
 

@@ -73,9 +73,9 @@ pub(crate) fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Result<()> {
     let auto = widths.iter().any(|w| matches!(w, ColumnWidth::Auto));
     let ratio = widths.iter().any(|w| matches!(w, ColumnWidth::Ratio(_)));
     if auto && ratio {
-        Err(Error::ColumnWidths {
-            reason: "auto-with-ratio",
-        })
+        Err(Error::from(ErrorKind::ColumnWidths {
+            reason: ColumnWidthsReason::AutoWithRatio,
+        }))
     } else {
         Ok(())
     }

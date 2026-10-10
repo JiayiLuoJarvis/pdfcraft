@@ -86,9 +86,9 @@ impl ImageBox {
             return Err(error);
         }
         if image.doc != doc {
-            return Err(Error::UnknownImage {
+            return Err(Error::from(ErrorKind::UnknownImage {
                 id: image.decoded.id.as_u32(),
-            });
+            }));
         }
         ImageNode::new(image.decoded, self.width, self.height, self.align).map(FlowNode::Image)
     }

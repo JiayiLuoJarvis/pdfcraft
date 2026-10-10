@@ -13,12 +13,19 @@ while remaining `0.x`.
 - Header and footer slots span the full page width. `Band::inset` is the only way to pull them in from the page edges.
 - `Paragraph::center` and `Paragraph::end` set line alignment. The default stays start.
 - `Table::tracks`, `Table::cell_padding`, and `Table::border` reach the layout engine. Defaults stay equal-ratio columns with no stroke.
-- `Columns::gap`, `col_fixed`, `col_ratio`, and `col_auto` set track widths. Mixing Auto with Ratio fails with `Error::ColumnWidths { reason: "auto-with-ratio" }`.
+- `Columns::gap`, `col_fixed`, `col_ratio`, and `col_auto` set track widths. Mixing Auto with Ratio fails with `ErrorKind::ColumnWidths { reason: ColumnWidthsReason::AutoWithRatio }`.
 - `List::start`, `List::marker_width`, and `List::nest_indent` set list numbering and the marker column.
 - `Cell::ul` and `Cell::ol` run when the row is written, so they can borrow locals from the table closure.
 
 ### Changed
 
+- **Breaking.** `Error` is now a struct: `kind: ErrorKind` says what failed and `at: Option<Location>` says where (section index, page number, page region, table cell). Match on `error.kind` where you matched on `Error` variants before. `Error`, `ErrorKind`, `Location`, `Region`, `CellIndex`, `GeometryKind`, `ColumnWidthsReason`, and `CellSpanReason` are exported from the crate root.
+- `ErrorKind::InvalidGeometry` carries a `GeometryKind` with the rejected values. `ErrorKind::InvalidCellSpan` carries a `CellSpanReason`, and the slot is in `at.cell`. `ErrorKind::ColumnWidths` carries a `ColumnWidthsReason` instead of a string. `ErrorKind::UnsplittableTallerThanFrame` carries the measured `height` and the frame `avail`. `ErrorKind::Backend` is a struct variant with `message`.
+- `ErrorKind::DecorationTallerThanMargin.height` is the measured band content height. It was the page height when the content was taller than the page.
+- Bold text without a registered bold face fails with `ErrorKind::BoldFaceRequired` instead of `UnknownFont { id: 1 }`.
+- `ErrorKind::MissingGlyph.font` is the raw `u32` font id.
+- Font parse failures and PDF serialization failures keep the skrifa or krilla error as `Error::source()`. Equality compares `kind` and `at` only.
+- `UnsupportedCanvasOperation` is removed. Nothing produced it.
 - `layout` and `text` are crate-private. Empty `layout/dump.rs` is gone.
 
 ### Added

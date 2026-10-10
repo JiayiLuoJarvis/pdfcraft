@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, GeometryKind, Result};
 use crate::text::break_class::{allows, BreakClass, PairClass};
 use crate::text::cluster::{Cluster, ClusterCursor, ClusteredText};
 
@@ -108,12 +108,10 @@ impl LineBudget {
     }
 
     fn validate(self) -> Result<()> {
-        if !self.first.is_finite()
-            || self.first <= 0.0
-            || !self.rest.is_finite()
-            || self.rest <= 0.0
-        {
-            return Err(Error::InvalidGeometry);
+        for width in [self.first, self.rest] {
+            if !width.is_finite() || width <= 0.0 {
+                return Err(GeometryKind::LineWidth { width }.into());
+            }
         }
         Ok(())
     }
@@ -173,7 +171,7 @@ pub(crate) fn break_spans<T: Copy>(
         )
     }) {
         if pos + 1 != spans.len() {
-            return Err(Error::RunAfterFillBlank);
+            return Err(Error::from(ErrorKind::RunAfterFillBlank));
         }
     }
 
@@ -204,7 +202,7 @@ fn project_atoms<T: Copy>(
                         BreakClass::Pair(pair) => {
                             let width = width_of(group, cluster);
                             if !width.is_finite() || width < 0.0 {
-                                return Err(Error::InvalidGeometry);
+                                return Err(GeometryKind::AdvanceWidth { width }.into());
                             }
                             atoms.push(Atom::Ink {
                                 pair,
@@ -220,7 +218,7 @@ fn project_atoms<T: Copy>(
                 let width = match advance {
                     Advance::Fixed(width) => {
                         if !width.is_finite() || width < 0.0 {
-                            return Err(Error::InvalidGeometry);
+                            return Err(GeometryKind::AdvanceWidth { width }.into());
                         }
                         width
                     }
@@ -302,10 +300,10 @@ fn pack_lines<T: Copy>(
                         line_width = 0.0;
                     }
                     None => {
-                        return Err(Error::UnbreakableWiderThanFrame {
+                        return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                             width: line_width + width,
                             avail,
-                        });
+                        }));
                     }
                 }
             }
@@ -581,10 +579,10 @@ mod tests {
         let err = break_owned("hello", 4.0).unwrap_err();
         assert_eq!(
             err,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 5.0,
                 avail: 4.0
-            }
+            })
         );
     }
 
@@ -614,10 +612,10 @@ mod tests {
         let err = break_owned("字。", 1.0).unwrap_err();
         assert_eq!(
             err,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 2.0,
                 avail: 1.0
-            }
+            })
         );
     }
 
@@ -664,10 +662,10 @@ mod tests {
         let err = break_owned("e\u{0301}", 1.0).unwrap_err();
         assert_eq!(
             err,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 2.0,
                 avail: 1.0
-            }
+            })
         );
     }
 
@@ -676,10 +674,10 @@ mod tests {
         let err = break_owned("\u{FF21}\u{FF22}", 1.0).unwrap_err();
         assert_eq!(
             err,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 2.0,
                 avail: 1.0
-            }
+            })
         );
     }
 
@@ -700,10 +698,13 @@ mod tests {
 
     #[test]
     fn invalid_avail() {
-        assert!(matches!(break_owned("A", 0.0), Err(Error::InvalidGeometry)));
+        assert_eq!(
+            break_owned("A", 0.0).unwrap_err(),
+            GeometryKind::LineWidth { width: 0.0 }.into()
+        );
         assert!(matches!(
-            break_owned("A", f32::NAN),
-            Err(Error::InvalidGeometry)
+            break_owned("A", f32::NAN).unwrap_err().kind,
+            ErrorKind::InvalidGeometry(GeometryKind::LineWidth { width }) if width.is_nan()
         ));
     }
 
@@ -760,10 +761,10 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 1.0,
                 avail: 0.5,
-            }
+            })
         );
     }
 
@@ -872,10 +873,10 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 4.0,
                 avail: 2.0,
-            }
+            })
         );
     }
 

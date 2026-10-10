@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, GeometryKind, Result};
 use crate::fonts::{FontId, FontStore};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
@@ -161,13 +161,13 @@ impl ParagraphNode {
         width: f32,
     ) -> Result<Self> {
         if !width.is_finite() || width <= 0.0 {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::LineWidth { width }.into());
         }
 
         let indent = style.first_line_indent.as_pt();
         let first_width = width - indent;
         if !first_width.is_finite() || first_width <= 0.0 {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::FirstLineIndent { indent, width }.into());
         }
         let font_size = style.font_size.as_pt();
         let prepared = prepare_inline(fonts, items, style)?;
@@ -217,7 +217,11 @@ impl ParagraphNode {
     /// Lines were wrapped at `self.width`; a narrower frame would overflow silently.
     pub(crate) fn split(self, avail: Frame) -> Result<Split> {
         if self.width > avail.width {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::LaidOutWiderThanFrame {
+                width: self.width,
+                avail: avail.width,
+            }
+            .into());
         }
         if self.lines.is_empty() {
             return Ok(Split::Fit {
@@ -226,7 +230,11 @@ impl ParagraphNode {
             });
         }
         if self.line_height > avail.full_height {
-            return Err(Error::UnsplittableTallerThanFrame);
+            return Err(ErrorKind::UnsplittableTallerThanFrame {
+                height: self.line_height,
+                avail: avail.full_height,
+            }
+            .into());
         }
         if avail.height < self.line_height {
             return Ok(Split::MoveToNextPage(FlowNode::Paragraph(self)));
@@ -272,10 +280,10 @@ pub(crate) fn single_line_run(
     let measured = measure_text(fonts, style.font, clustered.glyph_text())?;
     let width = measured.advance_norm * style.font_size.as_pt();
     if width > max_width {
-        return Err(Error::UnbreakableWiderThanFrame {
+        return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
             width,
             avail: max_width,
-        });
+        }));
     }
     let face = fonts.metrics(style.font)?;
     let metrics = line_metrics(face, style.font_size, style.line_height_factor)?;
@@ -442,7 +450,7 @@ fn blank_advance(width: BlankWidth, font_size: f32) -> Result<Advance> {
         BlankWidth::Em(ems) => {
             let points = f32::from(ems) * font_size;
             if !points.is_finite() || points < 0.0 {
-                return Err(Error::InvalidGeometry);
+                return Err(GeometryKind::AdvanceWidth { width: points }.into());
             }
             Ok(Advance::Fixed(points))
         }
@@ -544,7 +552,7 @@ fn measure_inline(fonts: &mut FontStore, runs: &[TextRun], body: FontId) -> Resu
         .iter()
         .map(|face| match face {
             Face::Body => Ok(body),
-            Face::Bold => bold.ok_or(Error::UnknownFont { id: 1 }),
+            Face::Bold => bold.ok_or(ErrorKind::BoldFaceRequired.into()),
         })
         .collect::<Result<_>>()?;
     let glyph_text = text.clustered().glyph_text();

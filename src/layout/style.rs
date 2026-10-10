@@ -35,7 +35,10 @@ impl Style {
         align: TextAlign,
     ) -> crate::error::Result<Self> {
         if !line_height_factor.is_finite() || line_height_factor <= 0.0 {
-            return Err(crate::error::Error::InvalidGeometry);
+            return Err(crate::error::GeometryKind::LineHeightFactor {
+                factor: line_height_factor,
+            }
+            .into());
         }
         Ok(Self {
             font,

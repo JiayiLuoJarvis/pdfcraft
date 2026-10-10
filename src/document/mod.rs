@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use crate::canvas::{Canvas, DecodedImage, ImageFormat, LinkTarget, RecordedPage, RecordingCanvas};
-use crate::error::{Error, Result};
+use crate::error::{ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
 use crate::geom::{
     Color, Ink, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length, Margins, NonNegative,

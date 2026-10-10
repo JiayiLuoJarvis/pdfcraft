@@ -4,10 +4,10 @@
 
 use std::num::NonZeroU32;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, GeometryKind, Region, Result};
 use crate::geom::{Ink, Margins, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::{
-    FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
+    stacked_height, FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
 };
 use crate::layout::lower::{check_content, Container};
 use crate::layout::paragraph::single_line_run;
@@ -107,17 +107,18 @@ pub(crate) fn measure_bands(
     let mut covered = 0usize;
     for span in spans {
         if span.start != covered {
-            return Err(Error::InvalidGeometry);
+            return Err(GeometryKind::SectionSpans.into());
         }
-        covered = covered
-            .checked_add(usize::try_from(span.len.get()).map_err(|_| Error::InvalidGeometry)?)
-            .ok_or(Error::InvalidGeometry)?;
+        covered = usize::try_from(span.len.get())
+            .ok()
+            .and_then(|len| covered.checked_add(len))
+            .ok_or(GeometryKind::SectionSpans)?;
     }
     if covered != sizes.len() {
-        return Err(Error::InvalidGeometry);
+        return Err(GeometryKind::SectionSpans.into());
     }
     let mut bands = Vec::with_capacity(sizes.len());
-    for span in spans {
+    for (section, span) in spans.iter().enumerate() {
         let section_count = PageCount(span.len);
         let margins = span.margins;
         let decorations = span.decorations;
@@ -125,8 +126,11 @@ pub(crate) fn measure_bands(
             let index = span
                 .start
                 .checked_add(offset as usize)
-                .ok_or(Error::InvalidGeometry)?;
-            let size = sizes.get(index).copied().ok_or(Error::InvalidGeometry)?;
+                .ok_or(GeometryKind::SectionSpans)?;
+            let size = sizes
+                .get(index)
+                .copied()
+                .ok_or(GeometryKind::SectionSpans)?;
             let page = PageInfo {
                 number: PageNumber(page_index(index)?),
                 count,
@@ -138,6 +142,14 @@ pub(crate) fn measure_bands(
             let top = margins.top().as_pt();
             let bottom = margins.bottom().as_pt();
             let page_h = size.height().as_pt();
+            let at = |region| {
+                move |error: Error| {
+                    error
+                        .in_region(region)
+                        .on_page_index(index)
+                        .in_section(section)
+                }
+            };
             let mut band = |content: &Option<BandContent<'_>>, y: f32, margin: f32| -> Result<_> {
                 let Some(content) = content else {
                     return Ok(None);
@@ -152,13 +164,16 @@ pub(crate) fn measure_bands(
                     })
                     .transpose()
             };
-            let header = band(&decorations.header, 0.0, top)?;
-            let footer = band(&decorations.footer, page_h - bottom, bottom)?;
+            let header = band(&decorations.header, 0.0, top).map_err(at(Region::Header))?;
+            let footer =
+                band(&decorations.footer, page_h - bottom, bottom).map_err(at(Region::Footer))?;
             bands.push(PageBands {
-                behind: measure_layer(ctx, decorations.behind.as_ref(), &page)?,
+                behind: measure_layer(ctx, decorations.behind.as_ref(), &page)
+                    .map_err(at(Region::Behind))?,
                 header,
                 footer,
-                front: measure_layer(ctx, decorations.front.as_ref(), &page)?,
+                front: measure_layer(ctx, decorations.front.as_ref(), &page)
+                    .map_err(at(Region::Front))?,
             });
         }
     }
@@ -170,7 +185,7 @@ fn page_count(len: usize) -> Result<PageCount> {
         .ok()
         .and_then(NonZeroU32::new)
         .map(PageCount)
-        .ok_or(Error::InvalidGeometry)
+        .ok_or(GeometryKind::PageCount { pages: len }.into())
 }
 
 /// `index` is zero-based. The result is the one-based page number.
@@ -179,7 +194,12 @@ fn page_index(index: usize) -> Result<NonZeroU32> {
         .ok()
         .and_then(|value| value.checked_add(1))
         .and_then(NonZeroU32::new)
-        .ok_or(Error::InvalidGeometry)
+        .ok_or(
+            GeometryKind::PageCount {
+                pages: index.saturating_add(1),
+            }
+            .into(),
+        )
 }
 
 fn measure_layer(
@@ -261,15 +281,22 @@ fn measure_band(
         height: page_h,
         full_height: page_h,
     };
-    let taller = |height| Error::DecorationTallerThanMargin { height, margin };
+    let taller = |height| Error::from(ErrorKind::DecorationTallerThanMargin { height, margin });
     match FlowNode::Stack(nodes).split(ctx, frame) {
         Ok(Split::Fit { height, fragment }) if height <= margin => Ok(Some(fragment)),
-        Ok(Split::Fit { height, .. }) => Err(taller(height)),
-        Ok(Split::Partial { .. } | Split::MoveToNextPage(_))
-        | Err(Error::UnsplittableTallerThanFrame) => Err(taller(page_h)),
-        Err(Error::UnbreakableWiderThanFrame { width, avail }) => {
-            Err(Error::DecorationWiderThanFrame { width, avail })
-        }
+        Ok(Split::Fit { height, .. })
+        | Err(Error {
+            kind: ErrorKind::UnsplittableTallerThanFrame { height, .. },
+            ..
+        }) => Err(taller(height)),
+        Ok(split) => Err(taller(stacked_height(split, ctx, frame)?)),
+        Err(Error {
+            kind: ErrorKind::UnbreakableWiderThanFrame { width, avail },
+            ..
+        }) => Err(Error::from(ErrorKind::DecorationWiderThanFrame {
+            width,
+            avail,
+        })),
         Err(other) => Err(other),
     }
 }
@@ -399,12 +426,35 @@ mod tests {
         );
         assert_eq!(
             result,
-            Err(Error::DecorationTallerThanMargin {
+            Err(Error::from(ErrorKind::DecorationTallerThanMargin {
                 height: line,
                 margin: 0.0
             })
+            .in_region(Region::Header)
+            .on_page_index(0)
+            .in_section(0))
         );
         assert!(rec.commands().is_empty());
+    }
+
+    #[test]
+    fn header_taller_than_the_page_reports_its_full_height() {
+        let (mut fonts, style) = fonts_and_style();
+        let line = metrics(&fonts, &style).line_height;
+        let body = text("A", &style);
+        let lines = vec!["H"; 40].join("\n");
+        let decorations = Decorations {
+            header: Some(Box::new(move |_: &PageInfo| Ok(vec![text(&lines, &style)]))),
+            ..Decorations::none()
+        };
+        let (result, _) = render(body, &mut fonts, margins(30.0, 0.0, 0.0), &decorations);
+        let ErrorKind::DecorationTallerThanMargin { height, margin } = result.unwrap_err().kind
+        else {
+            panic!("expected DecorationTallerThanMargin");
+        };
+        assert!(height > 400.0);
+        assert!((height - line * 40.0).abs() < 1e-3, "{height}");
+        assert_eq!(margin.to_bits(), 30.0f32.to_bits());
     }
 
     #[test]
@@ -420,10 +470,13 @@ mod tests {
         let (result, rec) = render(text("A", &style), &mut fonts, config, &decorations);
         assert_eq!(
             result,
-            Err(Error::DecorationTallerThanMargin {
+            Err(Error::from(ErrorKind::DecorationTallerThanMargin {
                 height: line * 2.0,
                 margin: line + 1.0
             })
+            .in_region(Region::Footer)
+            .on_page_index(0)
+            .in_section(0))
         );
         assert!(rec.commands().is_empty());
     }
@@ -443,7 +496,7 @@ mod tests {
             &decorations,
         );
         assert!(
-            matches!(result, Err(Error::DecorationWiderThanFrame { avail, .. }) if avail.to_bits() == 200.0f32.to_bits())
+            matches!(result.map_err(|error| error.kind), Err(ErrorKind::DecorationWiderThanFrame { avail, .. }) if avail.to_bits() == 200.0f32.to_bits())
         );
         assert!(rec.commands().is_empty());
     }
@@ -476,10 +529,13 @@ mod tests {
         );
         assert_eq!(
             result,
-            Err(Error::InvalidCellContent {
+            Err(Error::from(ErrorKind::InvalidCellContent {
                 container: "header/footer band",
                 node: "image"
             })
+            .in_region(Region::Header)
+            .on_page_index(0)
+            .in_section(0))
         );
         assert!(rec.commands().is_empty());
     }
@@ -504,10 +560,13 @@ mod tests {
         );
         assert_eq!(
             result,
-            Err(Error::InvalidCellContent {
+            Err(Error::from(ErrorKind::InvalidCellContent {
                 container: "header/footer band",
                 node: "table"
             })
+            .in_region(Region::Header)
+            .on_page_index(0)
+            .in_section(0))
         );
     }
 
@@ -571,10 +630,13 @@ mod tests {
         );
         assert_eq!(
             result,
-            Err(Error::InvalidCellContent {
+            Err(Error::from(ErrorKind::InvalidCellContent {
                 container: "header/footer band",
                 node: "table"
             })
+            .in_region(Region::Header)
+            .on_page_index(0)
+            .in_section(0))
         );
         assert!(rec.commands().is_empty());
     }
@@ -661,8 +723,8 @@ mod tests {
             &decorations,
         );
         assert!(matches!(
-            result,
-            Err(Error::MissingGlyph {
+            result.map_err(|error| error.kind),
+            Err(ErrorKind::MissingGlyph {
                 scalar: '\u{6f22}',
                 ..
             })
@@ -754,7 +816,9 @@ mod tests {
     fn band_error_returns_before_any_page_starts() {
         let (mut fonts, style) = fonts_and_style();
         let decorations = Decorations {
-            header: Some(Box::new(|_: &PageInfo| Err(Error::EmptyLink))),
+            header: Some(Box::new(|_: &PageInfo| {
+                Err(Error::from(ErrorKind::EmptyLink))
+            })),
             ..Decorations::none()
         };
         let (result, rec) = render(
@@ -763,7 +827,13 @@ mod tests {
             page(200.0, 400.0),
             &decorations,
         );
-        assert_eq!(result, Err(Error::EmptyLink));
+        assert_eq!(
+            result,
+            Err(Error::from(ErrorKind::EmptyLink)
+                .in_region(Region::Header)
+                .on_page_index(0)
+                .in_section(0))
+        );
         assert!(rec.commands().is_empty());
     }
 }

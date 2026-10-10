@@ -8,7 +8,7 @@ use krilla::image::Image;
 use krilla::Data;
 
 use crate::canvas::{DecodedImage, ImageFormat, ImageId};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 
 /// Encoded bytes above this are rejected before krilla sees them.
 ///
@@ -52,30 +52,32 @@ impl ImageTable {
     /// A failure leaves the table unchanged.
     pub(crate) fn register(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<DecodedImage> {
         if bytes.is_empty() {
-            return Err(Error::Image {
+            return Err(Error::from(ErrorKind::Image {
                 message: "bytes are empty".to_owned(),
-            });
+            }));
         }
         if bytes.len() > MAX_IMAGE_BYTES {
-            return Err(Error::Image {
+            return Err(Error::from(ErrorKind::Image {
                 message: format!("{} bytes; max is {MAX_IMAGE_BYTES}", bytes.len()),
-            });
+            }));
         }
         let image = decode(bytes, format)?;
         let (width, height) = image.size();
         if width == 0 || height == 0 {
-            return Err(Error::Image {
+            return Err(Error::from(ErrorKind::Image {
                 message: "has an empty side".to_owned(),
-            });
+            }));
         }
         let pixels = u64::from(width) * u64::from(height);
         if pixels > MAX_IMAGE_PIXELS {
-            return Err(Error::Image {
+            return Err(Error::from(ErrorKind::Image {
                 message: format!("{pixels} pixels; max is {MAX_IMAGE_PIXELS}"),
-            });
+            }));
         }
-        let id = u32::try_from(self.rasters.len()).map_err(|_| Error::Image {
-            message: "table is full".to_owned(),
+        let id = u32::try_from(self.rasters.len()).map_err(|_| {
+            Error::from(ErrorKind::Image {
+                message: "table is full".to_owned(),
+            })
         })?;
         self.rasters.push(Raster(image));
         Ok(DecodedImage {
@@ -98,7 +100,11 @@ fn decode(bytes: Vec<u8>, format: ImageFormat) -> Result<Image> {
         ImageFormat::Gif => Image::from_gif(data, INTERPOLATE),
         ImageFormat::Webp => Image::from_webp(data, INTERPOLATE),
     };
-    image.map_err(|message| Error::Image { message })
+    image.map_err(|message| {
+        Error::from(ErrorKind::Image {
+            message: format!("{format:?} decode failed: {message}"),
+        })
+    })
 }
 
 #[cfg(test)]
@@ -117,12 +123,12 @@ mod tests {
     fn empty_and_garbage_leave_the_table_empty() {
         let mut table = ImageTable::default();
         let empty = table.register(Vec::new(), ImageFormat::Png).unwrap_err();
-        assert!(matches!(empty, Error::Image { .. }));
+        assert!(matches!(empty.kind, ErrorKind::Image { .. }));
         let garbage = table
             .register(b"not a png".to_vec(), ImageFormat::Png)
             .unwrap_err();
-        assert!(matches!(garbage, Error::Image { .. }));
-        assert!(!matches!(garbage, Error::Backend(_)));
+        assert!(matches!(garbage.kind, ErrorKind::Image { .. }));
+        assert!(!matches!(garbage.kind, ErrorKind::Backend { .. }));
 
         let decoded = table
             .register(one_pixel_png().to_vec(), ImageFormat::Png)
@@ -141,14 +147,14 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            Error::Image {
+            Error::from(ErrorKind::Image {
                 message: format!("{} bytes; max is {MAX_IMAGE_BYTES}", MAX_IMAGE_BYTES + 1),
-            }
+            })
         );
         let decoded = table
             .register(one_pixel_png().to_vec(), ImageFormat::Jpeg)
             .unwrap_err();
-        assert!(matches!(decoded, Error::Image { .. }));
+        assert!(matches!(decoded.kind, ErrorKind::Image { .. }));
         let png = table
             .register(one_pixel_png().to_vec(), ImageFormat::Png)
             .unwrap();

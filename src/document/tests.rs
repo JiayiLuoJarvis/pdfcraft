@@ -1,5 +1,6 @@
 #![allow(clippy::wildcard_imports)]
 use super::*;
+use crate::error::{Location, Region};
 use crate::fonts::fixture_bytes;
 use crate::geom::{PageSize, Rect};
 
@@ -133,7 +134,10 @@ fn fill_blank_coalesces_text_before_it_and_rejects_a_later_run() {
         let Sections::Implicit(section) = &doc.body else {
             panic!("paragraph stays on the implicit section");
         };
-        assert_eq!(section.flow.error, Some(Error::RunAfterFillBlank));
+        assert_eq!(
+            section.flow.error,
+            Some(Error::from(ErrorKind::RunAfterFillBlank))
+        );
         assert!(section.flow.nodes.is_empty());
     }
 }
@@ -146,7 +150,10 @@ fn run_after_fill_blank_paints_nothing() {
         p.blank_to_end();
         p.text("x");
     });
-    assert_fails_with_empty_canvas(doc, &Error::RunAfterFillBlank);
+    assert_fails_with_empty_canvas(
+        doc,
+        &Error::from(ErrorKind::RunAfterFillBlank).in_section(0),
+    );
 }
 
 #[test]
@@ -161,7 +168,11 @@ fn fixed_blank_wider_than_the_indented_line_fails_before_any_page() {
     let Err(error) = doc.paint(&mut rec) else {
         panic!("expected the blank to be wider than the indented line");
     };
-    let Error::UnbreakableWiderThanFrame { width, avail } = error else {
+    let Error {
+        kind: ErrorKind::UnbreakableWiderThanFrame { width, avail },
+        ..
+    } = error
+    else {
         panic!("{error:?}");
     };
     assert!(crate::canvas::pt_near(width, 80.0), "{width}");
@@ -174,16 +185,24 @@ fn bold_font_requires_body_and_rebinds_to_the_latest_face() {
     let mut doc = Document::new(PageSize::A4);
     assert_eq!(
         doc.bold_font(fixture_bytes().to_vec()).unwrap_err(),
-        Error::Font {
+        Error::from(ErrorKind::Font {
             index: 0,
             message: "body font is not registered".to_owned(),
-        }
+        })
     );
     doc.font(fixture_bytes().to_vec()).unwrap();
     doc.bold_font(fixture_bytes().to_vec()).unwrap();
     assert_eq!(doc.fonts.bold().unwrap(), FontId::from_raw(1));
     doc.bold_font(fixture_bytes().to_vec()).unwrap();
     assert_eq!(doc.fonts.bold().unwrap(), FontId::from_raw(2));
+}
+
+fn on_first_page(error: impl Into<Error>, region: Region) -> Error {
+    error
+        .into()
+        .in_region(region)
+        .on_page_index(0)
+        .in_section(0)
 }
 
 fn assert_fails_with_empty_canvas(doc: Document<'_>, expected: &Error) {
@@ -254,7 +273,7 @@ fn empty_uri_does_not_run_the_link_closure() {
         p.link("", |_| ran = true);
     });
     assert!(!ran);
-    assert_fails_with_empty_canvas(doc, &Error::EmptyLink);
+    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::EmptyLink).in_section(0));
 }
 
 #[test]
@@ -266,7 +285,7 @@ fn empty_band_uri_paints_nothing() {
         h.right_link("https://example.com", "Later");
     });
     doc.paragraph(|p| p.text("A"));
-    assert_fails_with_empty_canvas(doc, &Error::EmptyLink);
+    assert_fails_with_empty_canvas(doc, &on_first_page(ErrorKind::EmptyLink, Region::Header));
 }
 
 const MISSING: char = '\u{6f22}';
@@ -275,17 +294,23 @@ const MISSING: char = '\u{6f22}';
 fn bold_and_indent_failures_happen_before_any_page() {
     let mut missing_bold = doc_with_font();
     missing_bold.paragraph(|p| p.bold("A"));
-    assert_fails_with_empty_canvas(missing_bold, &Error::UnknownFont { id: 1 });
+    assert_fails_with_empty_canvas(
+        missing_bold,
+        &on_first_page(ErrorKind::BoldFaceRequired, Region::Body),
+    );
 
     let mut missing_glyph = doc_with_font();
     missing_glyph.bold_font(fixture_bytes().to_vec()).unwrap();
     missing_glyph.paragraph(|p| p.bold(MISSING.to_string()));
     assert_fails_with_empty_canvas(
         missing_glyph,
-        &Error::MissingGlyph {
-            font: FontId::from_raw(1),
-            scalar: MISSING,
-        },
+        &on_first_page(
+            ErrorKind::MissingGlyph {
+                font: 1,
+                scalar: MISSING,
+            },
+            Region::Body,
+        ),
     );
 
     let mut invalid_indent = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
@@ -294,7 +319,16 @@ fn bold_and_indent_failures_happen_before_any_page() {
         p.first_line_indent(NonNegative::pt(24.0).unwrap());
         p.text("A");
     });
-    assert_fails_with_empty_canvas(invalid_indent, &Error::InvalidGeometry);
+    assert_fails_with_empty_canvas(
+        invalid_indent,
+        &on_first_page(
+            GeometryKind::FirstLineIndent {
+                indent: 24.0,
+                width: 24.0,
+            },
+            Region::Body,
+        ),
+    );
 
     let mut overwide = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
     overwide.font(fixture_bytes().to_vec()).unwrap();
@@ -305,9 +339,7 @@ fn bold_and_indent_failures_happen_before_any_page() {
     let mut rec = RecordingCanvas::new();
     let error = overwide.paint(&mut rec).err().unwrap();
     assert!(
-        matches!(
-            error,
-            Error::UnbreakableWiderThanFrame { avail, .. }
+        matches!(error.kind, ErrorKind::UnbreakableWiderThanFrame { avail, .. }
                 if crate::canvas::pt_near(avail, 12.0)
         ),
         "{error:?}"
@@ -323,10 +355,13 @@ fn missing_glyph_in_header_fails_before_any_page() {
     doc.paragraph(|p| p.text("A"));
     assert_fails_with_empty_canvas(
         doc,
-        &Error::MissingGlyph {
-            font: FontId::from_raw(0),
-            scalar: MISSING,
-        },
+        &on_first_page(
+            ErrorKind::MissingGlyph {
+                font: 0,
+                scalar: MISSING,
+            },
+            Region::Header,
+        ),
     );
 }
 
@@ -342,7 +377,10 @@ fn degenerate_layer_line_fails_before_any_page() {
             Ink::Fill(Color::rgb(0, 0, 0)),
         );
     });
-    assert_fails_with_empty_canvas(doc, &Error::InvalidGeometry);
+    assert_fails_with_empty_canvas(
+        doc,
+        &on_first_page(GeometryKind::ZeroLengthSegment, Region::Behind),
+    );
 }
 
 #[test]
@@ -354,7 +392,10 @@ fn non_finite_rotation_does_not_draw() {
     doc.behind(|layer| {
         layer.rotated(f32::NAN, Point::ZERO, |_| ran.set(true));
     });
-    assert_fails_with_empty_canvas(doc, &Error::InvalidGeometry);
+    assert!(matches!(
+        doc.paint(&mut RecordingCanvas::new()).err().map(|error| error.kind),
+        Some(ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees })) if degrees.is_nan()
+    ));
     assert!(!ran.get());
 }
 
@@ -369,10 +410,13 @@ fn missing_glyph_in_front_fails_before_any_page() {
     });
     assert_fails_with_empty_canvas(
         doc,
-        &Error::MissingGlyph {
-            font: FontId::from_raw(0),
-            scalar: MISSING,
-        },
+        &on_first_page(
+            ErrorKind::MissingGlyph {
+                font: 0,
+                scalar: MISSING,
+            },
+            Region::Front,
+        ),
     );
 }
 
@@ -383,10 +427,9 @@ fn header_without_margin_fails_before_any_page() {
     doc.paragraph(|p| p.text("A"));
     let mut rec = RecordingCanvas::new();
     let result = doc.paint(&mut rec);
-    assert!(matches!(
-        result,
-        Err(Error::DecorationTallerThanMargin { margin, .. }) if margin == 0.0
-    ));
+    assert!(
+        matches!(result.map_err(|error| error.kind), Err(ErrorKind::DecorationTallerThanMargin { margin, .. }) if margin == 0.0)
+    );
     assert!(rec.commands().is_empty());
 }
 
@@ -398,7 +441,27 @@ fn keep_together_taller_than_the_page_fails_before_any_page() {
             g.paragraph(|p| p.text("line"));
         }
     });
-    assert_fails_with_empty_canvas(doc, &Error::UnsplittableTallerThanFrame);
+    let mut rec = RecordingCanvas::new();
+    let error = doc.paint(&mut rec).err().unwrap();
+    let page_h = PageSize::A4.resolve().height().as_pt();
+    assert!(
+        matches!(
+            error.kind,
+            ErrorKind::UnsplittableTallerThanFrame { height, avail }
+                if height > 2.0 * page_h && avail.to_bits() == page_h.to_bits()
+        ),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.at,
+        Some(Location {
+            section: Some(0),
+            page: Some(1),
+            region: Some(Region::Body),
+            cell: None,
+        })
+    );
+    assert!(rec.commands().is_empty());
 }
 
 #[test]
@@ -411,12 +474,12 @@ fn section_after_paragraph_fails_before_any_page() {
             Ok(())
         })
         .unwrap_err();
-    assert_eq!(err, Error::ContentOutsideSection);
+    assert_eq!(err, Error::from(ErrorKind::ContentOutsideSection));
     assert_eq!(
         err.to_string(),
         "body or decorations written both on the document and in sections"
     );
-    assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }
 
 #[test]
@@ -428,7 +491,7 @@ fn paragraph_after_section_fails_before_any_page() {
     })
     .unwrap();
     doc.paragraph(|p| p.text("B"));
-    assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }
 
 #[test]
@@ -440,7 +503,7 @@ fn add_after_section_fails_before_any_page() {
     })
     .unwrap();
     doc.add(Paragraph::build(|p| p.text("B")));
-    assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }
 
 #[test]
@@ -475,5 +538,5 @@ fn margins_after_section_fail_before_any_page() {
     })
     .unwrap();
     doc.margins(Margins::uniform(NonNegative::pt(12.0).unwrap()));
-    assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }

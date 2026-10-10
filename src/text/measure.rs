@@ -7,10 +7,10 @@
 use std::ops::Range;
 
 use skrifa::instance::{LocationRef, Size};
-use skrifa::{FontRef, MetadataProvider};
+use skrifa::MetadataProvider;
 
-use crate::error::{Error, Result};
-use crate::fonts::{FaceMetrics, FontId, FontStore};
+use crate::error::{Error, ErrorKind, GeometryKind, Result};
+use crate::fonts::{parse_face, FaceMetrics, FontId, FontStore};
 use crate::geom::{Length, Positive};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,10 +51,7 @@ pub(crate) fn measure_text(
             face.metrics.units_per_em,
         )
     };
-    let font_ref = FontRef::from_index(bytes.as_slice(), index).map_err(|error| Error::Font {
-        index,
-        message: error.to_string(),
-    })?;
+    let font_ref = parse_face(bytes.as_slice(), index)?;
     let charmap = font_ref.charmap();
     let glyph_metrics = font_ref.glyph_metrics(Size::unscaled(), LocationRef::default());
 
@@ -62,7 +59,11 @@ pub(crate) fn measure_text(
     let mut total_norm = 0.0;
     for (start, scalar) in text.char_indices() {
         let Some(gid) = charmap.map(scalar) else {
-            return Err(Error::MissingGlyph { font, scalar });
+            return Err(ErrorKind::MissingGlyph {
+                font: font.as_u32(),
+                scalar,
+            }
+            .into());
         };
         let glyph_id = gid.to_u32();
         let advance_font_units = {
@@ -70,10 +71,13 @@ pub(crate) fn measure_text(
             if let Some(&cached) = face.advances.get(&glyph_id) {
                 cached
             } else {
-                let width = glyph_metrics.advance_width(gid).ok_or(Error::Font {
-                    index,
-                    message: format!("no unscaled advance for glyph {glyph_id}"),
-                })?;
+                let width =
+                    glyph_metrics
+                        .advance_width(gid)
+                        .ok_or(Error::from(ErrorKind::Font {
+                            index,
+                            message: format!("no unscaled advance for glyph {glyph_id}"),
+                        }))?;
                 face.advances.insert(glyph_id, width);
                 width
             }
@@ -103,7 +107,7 @@ pub(crate) fn line_metrics(
     factor: f32,
 ) -> Result<LineMetrics> {
     if !factor.is_finite() || factor <= 0.0 {
-        return Err(Error::InvalidGeometry);
+        return Err(GeometryKind::LineHeightFactor { factor }.into());
     }
     let size = font_size.as_pt();
     let scale = size / face.units_per_em;
@@ -141,12 +145,10 @@ mod tests {
     fn unmapped_scalar_is_missing_glyph() {
         let (mut fonts, id) = loaded();
         let err = measure_text(&mut fonts, id, "\u{FFFF}").unwrap_err();
-        assert!(matches!(
-            err,
-            Error::MissingGlyph {
+        assert!(matches!(err.kind, ErrorKind::MissingGlyph {
                 font,
                 scalar: '\u{FFFF}'
-            } if font == id
+            } if font == id.as_u32()
         ));
     }
 
@@ -196,13 +198,13 @@ mod tests {
             leading: 0.0,
         };
         let size = Positive::pt(12.0).unwrap();
+        assert_eq!(
+            line_metrics(&face, size, 0.0).unwrap_err(),
+            GeometryKind::LineHeightFactor { factor: 0.0 }.into()
+        );
         assert!(matches!(
-            line_metrics(&face, size, 0.0),
-            Err(Error::InvalidGeometry)
-        ));
-        assert!(matches!(
-            line_metrics(&face, size, f32::NAN),
-            Err(Error::InvalidGeometry)
+            line_metrics(&face, size, f32::NAN).unwrap_err().kind,
+            ErrorKind::InvalidGeometry(GeometryKind::LineHeightFactor { factor }) if factor.is_nan()
         ));
     }
 }

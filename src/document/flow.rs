@@ -43,7 +43,7 @@ impl Flow {
             return;
         }
         if self.reject_pushes {
-            self.error = Some(Error::ContentOutsideSection);
+            self.error = Some(Error::from(ErrorKind::ContentOutsideSection));
             return;
         }
         match node {

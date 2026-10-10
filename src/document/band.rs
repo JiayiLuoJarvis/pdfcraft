@@ -59,14 +59,14 @@ impl Band {
 
     /// Sets the start-aligned slot to `text` linked to `uri`.
     ///
-    /// An empty `uri` is stored as [`Error::EmptyLink`] and leaves the slot unchanged.
+    /// An empty `uri` is stored as [`ErrorKind::EmptyLink`] and leaves the slot unchanged.
     pub fn left_link(&mut self, uri: impl AsRef<str>, text: impl AsRef<str>) {
         self.set_link(true, uri.as_ref(), text.as_ref());
     }
 
     /// Sets the end-aligned slot to `text` linked to `uri`.
     ///
-    /// An empty `uri` is stored as [`Error::EmptyLink`] and leaves the slot unchanged.
+    /// An empty `uri` is stored as [`ErrorKind::EmptyLink`] and leaves the slot unchanged.
     pub fn right_link(&mut self, uri: impl AsRef<str>, text: impl AsRef<str>) {
         self.set_link(false, uri.as_ref(), text.as_ref());
     }

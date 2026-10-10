@@ -9,7 +9,7 @@ use krilla::geom::{PathBuilder, Point as KPoint, Rect as KRect, Size as KSize};
 use krilla::num::NormalizedF32;
 use krilla::paint::{Fill, FillRule, Stroke as KStroke};
 
-use crate::error::{Error, Result};
+use crate::error::{GeometryKind, Result};
 use crate::geom::{Paint, Path, PathVerb, Point, Rect, Size, Stroke};
 
 /// Identity point mapping.
@@ -32,7 +32,7 @@ pub(crate) fn to_krilla_rect(rect: Rect) -> Option<KRect> {
     )
 }
 
-/// Builds a krilla path. A lone `MoveTo` that krilla rejects is [`Error::InvalidGeometry`].
+/// Builds a krilla path. A lone `MoveTo` that krilla rejects is [`GeometryKind::DegeneratePath`].
 pub(crate) fn to_krilla_path(path: &Path) -> Result<krilla::geom::Path> {
     let mut builder = PathBuilder::new();
     for verb in path.verbs() {
@@ -56,30 +56,32 @@ pub(crate) fn to_krilla_path(path: &Path) -> Result<krilla::geom::Path> {
             PathVerb::Close => builder.close(),
         }
     }
-    builder.finish().ok_or(Error::InvalidGeometry)
+    builder.finish().ok_or(GeometryKind::DegeneratePath.into())
 }
 
 /// Solid fill from a crate paint.
-pub(crate) fn to_fill(paint: Paint) -> Result<Fill> {
+pub(crate) fn to_fill(paint: Paint) -> Fill {
     let (r, g, b, a) = paint.color().channels();
-    let opacity = NormalizedF32::new(f32::from(a) / 255.0).ok_or(Error::InvalidGeometry)?;
-    Ok(Fill {
+    Fill {
         paint: rgb::Color::new(r, g, b).into(),
-        opacity,
+        opacity: opacity(a),
         rule: FillRule::NonZero,
-    })
+    }
+}
+
+fn opacity(alpha: u8) -> NormalizedF32 {
+    NormalizedF32::new(f32::from(alpha) / 255.0).expect("a u8 over 255 is within 0..=1")
 }
 
 /// Stroke that keeps krilla defaults for cap, join, miter, and dash.
-pub(crate) fn to_stroke(paint: Paint, stroke: Stroke) -> Result<KStroke> {
+pub(crate) fn to_stroke(paint: Paint, stroke: Stroke) -> KStroke {
     let (r, g, b, a) = paint.color().channels();
-    let opacity = NormalizedF32::new(f32::from(a) / 255.0).ok_or(Error::InvalidGeometry)?;
-    Ok(KStroke {
+    KStroke {
         paint: rgb::Color::new(r, g, b).into(),
         width: stroke.width().as_pt(),
-        opacity,
+        opacity: opacity(a),
         ..KStroke::default()
-    })
+    }
 }
 
 #[cfg(test)]
@@ -116,7 +118,10 @@ mod tests {
     #[test]
     fn lone_move_to_path_is_invalid_geometry() {
         let path = Path::begin(Point::try_pt(5.0, 5.0).unwrap()).finish();
-        assert!(matches!(to_krilla_path(&path), Err(Error::InvalidGeometry)));
+        assert_eq!(
+            to_krilla_path(&path).err(),
+            Some(GeometryKind::DegeneratePath.into())
+        );
     }
 
     #[test]
@@ -129,7 +134,7 @@ mod tests {
     fn stroke_width_comes_from_branded_stroke() {
         let paint = Paint::solid(crate::geom::Color::rgb(0, 0, 0));
         let stroke = Stroke::new(Positive::pt(2.5).unwrap());
-        let got = to_stroke(paint, stroke).unwrap();
+        let got = to_stroke(paint, stroke);
         assert_eq!(got.width.to_bits(), 2.5f32.to_bits());
     }
 }

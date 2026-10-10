@@ -1,7 +1,7 @@
 //! Atomic raster block. Size is resolved at build time. Split only places it.
 
 use crate::canvas::DecodedImage;
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::geom::{Length, Positive, Rect, Size};
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
@@ -30,13 +30,17 @@ impl ImageNode {
         let width = self.size.width().as_pt();
         let height = self.size.height().as_pt();
         if width > avail.width {
-            return Err(Error::UnbreakableWiderThanFrame {
+            return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width,
                 avail: avail.width,
-            });
+            }));
         }
         if height > avail.full_height {
-            return Err(Error::UnsplittableTallerThanFrame);
+            return Err(ErrorKind::UnsplittableTallerThanFrame {
+                height,
+                avail: avail.full_height,
+            }
+            .into());
         }
         if height > avail.height {
             return Ok(Split::MoveToNextPage(FlowNode::Image(self)));
@@ -200,10 +204,10 @@ mod tests {
         let err = wide.split(frame(300.0, 100.0, 100.0)).unwrap_err();
         assert_eq!(
             err,
-            Error::UnbreakableWiderThanFrame {
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 width: 400.0,
                 avail: 300.0,
-            }
+            })
         );
 
         let tall = ImageNode::new(
@@ -215,7 +219,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             tall.split(frame(300.0, 100.0, 100.0)).unwrap_err(),
-            Error::UnsplittableTallerThanFrame
+            Error::from(ErrorKind::UnsplittableTallerThanFrame {
+                height: 150.0,
+                avail: 100.0,
+            })
         );
 
         let moved = ImageNode::new(

@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::num::NonZeroU16;
 use std::ops::Range;
 
-use crate::error::{Error, Result};
+use crate::error::{CellSpanReason, ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
 use crate::layout::columns::{resolve_column_widths, ColumnWidth};
 use crate::layout::flow::{
@@ -133,9 +133,9 @@ impl TableNode {
     pub(crate) fn new(spec: TableSpec) -> Result<Self> {
         let cols = spec.widths.len();
         if cols == 0 {
-            return Err(Error::ColumnWidths {
-                reason: "column-count",
-            });
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::ColumnCount,
+            }));
         }
         let header_rows = spec.header.len();
         let rows = header_rows + spec.body.len();
@@ -151,12 +151,20 @@ impl TableNode {
                 let col_span = usize::from(cell.col_span.get());
                 let row_span = usize::from(cell.row_span.get());
                 if col + col_span > cols || row + row_span > row_limit {
-                    return Err(Error::InvalidCellSpan);
+                    let reason = if col + col_span <= cols && row + row_span <= rows {
+                        CellSpanReason::CrossesHeader
+                    } else {
+                        CellSpanReason::OutOfGrid
+                    };
+                    return Err(Error::from(ErrorKind::InvalidCellSpan(reason)).in_cell(row, col));
                 }
-                for slots in &mut taken[row..row + row_span] {
-                    for slot in &mut slots[col..col + col_span] {
+                for (r, slots) in taken[row..row + row_span].iter_mut().enumerate() {
+                    for (c, slot) in slots[col..col + col_span].iter_mut().enumerate() {
                         if *slot {
-                            return Err(Error::InvalidCellSpan);
+                            return Err(Error::from(ErrorKind::InvalidCellSpan(
+                                CellSpanReason::Overlap,
+                            ))
+                            .in_cell(row + r, col + c));
                         }
                         *slot = true;
                     }
@@ -174,8 +182,13 @@ impl TableNode {
                 col += col_span;
             }
         }
-        if taken.iter().flatten().any(|slot| !slot) {
-            return Err(Error::InvalidCellSpan);
+        for (row, slots) in taken.iter().enumerate() {
+            if let Some(col) = slots.iter().position(|slot| !slot) {
+                return Err(
+                    Error::from(ErrorKind::InvalidCellSpan(CellSpanReason::EmptySlot))
+                        .in_cell(row, col),
+                );
+            }
         }
         Ok(Self(TableState::Open(GridTable {
             widths: spec.widths,
@@ -211,7 +224,11 @@ fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Mea
     let inset = border / 2.0 + grid.padding;
     let inner_full = avail.full_height - 2.0 * inset;
     if inner_full <= 0.0 {
-        return Err(Error::UnsplittableTallerThanFrame);
+        return Err(ErrorKind::UnsplittableTallerThanFrame {
+            height: 2.0 * inset,
+            avail: avail.full_height,
+        }
+        .into());
     }
 
     let mut laid = Vec::with_capacity(grid.cells.len());
@@ -224,16 +241,18 @@ fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Mea
     {
         let inner_w = xs[cell.col + cell.cols] - xs[cell.col] - 2.0 * inset;
         if inner_w <= 0.0 {
-            return Err(Error::ColumnWidths {
-                reason: "content-width",
-            });
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::ContentWidth,
+            })
+            .in_cell(cell.row, cell.col));
         }
         let frame = Frame {
             width: inner_w,
             height: inner_full,
             full_height: inner_full,
         };
-        let (h, content) = natural_height(body.into_node(), ctx, frame)?;
+        let (h, content) = natural_height(body.into_node(), ctx, frame)
+            .map_err(|error| error.in_cell(cell.row, cell.col))?;
         let cell_h = h + 2.0 * inset;
         if cell.rows == 1 {
             row_h[cell.row] = row_h[cell.row].max(cell_h);
@@ -269,11 +288,19 @@ fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Mea
         let with_header = index == 0 || grid.repeat_header;
         let need = block.height + if with_header { header_h } else { 0.0 };
         if need > avail.full_height {
-            return Err(Error::UnsplittableTallerThanFrame);
+            return Err(ErrorKind::UnsplittableTallerThanFrame {
+                height: need,
+                avail: avail.full_height,
+            }
+            .into());
         }
     }
     if header_h > avail.full_height {
-        return Err(Error::UnsplittableTallerThanFrame);
+        return Err(ErrorKind::UnsplittableTallerThanFrame {
+            height: header_h,
+            avail: avail.full_height,
+        }
+        .into());
     }
     Ok(MeasuredTable {
         width: avail.width,
@@ -389,7 +416,11 @@ fn row_groups(laid: &[LaidCell], header_rows: usize, rows: usize) -> Vec<Range<u
 
 fn split_measured(mut table: MeasuredTable, avail: Frame) -> Result<Split> {
     if table.width > avail.width {
-        return Err(Error::InvalidGeometry);
+        return Err(GeometryKind::LaidOutWiderThanFrame {
+            width: table.width,
+            avail: avail.width,
+        }
+        .into());
     }
     let mut y = 0.0f32;
     let mut commands = Vec::new();
@@ -599,7 +630,12 @@ mod tests {
             config,
             &Decorations::none(),
         );
-        assert!(matches!(result, Err(Error::UnsplittableTallerThanFrame)));
+        let ErrorKind::UnsplittableTallerThanFrame { height, avail } = result.unwrap_err().kind
+        else {
+            panic!("expected UnsplittableTallerThanFrame");
+        };
+        assert!((height - m.line_height * 3.0).abs() < 1e-3, "{height}");
+        assert_eq!(avail.to_bits(), (m.line_height * 2.0 + 1.0).to_bits());
         assert!(rec.commands().is_empty());
     }
 
@@ -702,10 +738,10 @@ mod tests {
         for (node, name) in rejected {
             assert_eq!(
                 Cell::new(vec![node]).unwrap_err(),
-                Error::InvalidCellContent {
+                Error::from(ErrorKind::InvalidCellContent {
                     container: "table cell",
                     node: name
-                }
+                })
             );
         }
     }
@@ -780,7 +816,25 @@ mod tests {
             vec![cell("S", &style).with_span(c1, r2), cell("b", &style)],
             vec![cell("c", &style), cell("d", &style)],
         ];
-        assert_eq!(TableNode::new(spec).unwrap_err(), Error::InvalidCellSpan);
+        assert_eq!(
+            TableNode::new(spec).unwrap_err(),
+            span_error(CellSpanReason::OutOfGrid, 1, 2)
+        );
+
+        let (c2, r1) = span(2, 1);
+        let mut cross = TableSpec::new(halves());
+        cross.body = vec![
+            vec![cell("a", &style), cell("B", &style).with_span(c1, r2)],
+            vec![cell("C", &style).with_span(c2, r1)],
+        ];
+        assert_eq!(
+            TableNode::new(cross).unwrap_err(),
+            span_error(CellSpanReason::Overlap, 1, 1)
+        );
+    }
+
+    fn span_error(reason: CellSpanReason, row: usize, col: usize) -> Error {
+        Error::from(ErrorKind::InvalidCellSpan(reason)).in_cell(row, col)
     }
 
     #[test]
@@ -789,16 +843,25 @@ mod tests {
         let (c3, r1) = span(3, 1);
         let mut wide = TableSpec::new(halves());
         wide.body = vec![vec![cell("W", &style).with_span(c3, r1)]];
-        assert_eq!(TableNode::new(wide).unwrap_err(), Error::InvalidCellSpan);
+        assert_eq!(
+            TableNode::new(wide).unwrap_err(),
+            span_error(CellSpanReason::OutOfGrid, 0, 0)
+        );
 
         let (c1, r2) = span(1, 2);
         let mut leak = TableSpec::new(halves());
         leak.header = vec![vec![cell("H", &style).with_span(c1, r2), cell("k", &style)]];
         leak.body = vec![vec![cell("b", &style)]];
-        assert_eq!(TableNode::new(leak).unwrap_err(), Error::InvalidCellSpan);
+        assert_eq!(
+            TableNode::new(leak).unwrap_err(),
+            span_error(CellSpanReason::CrossesHeader, 0, 0)
+        );
 
         let mut gap = TableSpec::new(halves());
         gap.body = vec![vec![cell("only", &style)]];
-        assert_eq!(TableNode::new(gap).unwrap_err(), Error::InvalidCellSpan);
+        assert_eq!(
+            TableNode::new(gap).unwrap_err(),
+            span_error(CellSpanReason::EmptySlot, 0, 1)
+        );
     }
 }

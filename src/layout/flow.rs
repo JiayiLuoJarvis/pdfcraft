@@ -5,7 +5,7 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
-use crate::error::{Error, Result};
+use crate::error::{ErrorKind, GeometryKind, Result};
 use crate::fonts::FontStore;
 use crate::geom::{Length, NonNegative, Paint, Path, Point, Rect, Stroke};
 use crate::layout::columns::ColumnsNode;
@@ -30,16 +30,21 @@ pub(crate) struct Frame {
 
 impl Frame {
     pub(crate) fn validate(&self) -> Result<()> {
-        if !self.width.is_finite() || self.width <= 0.0 {
-            return Err(Error::InvalidGeometry);
+        let positive = |value: f32| value.is_finite() && value > 0.0;
+        if positive(self.width)
+            && self.height.is_finite()
+            && self.height >= 0.0
+            && positive(self.full_height)
+        {
+            Ok(())
+        } else {
+            Err(GeometryKind::LayoutFrame {
+                width: self.width,
+                height: self.height,
+                full_height: self.full_height,
+            }
+            .into())
         }
-        if !self.height.is_finite() || self.height < 0.0 {
-            return Err(Error::InvalidGeometry);
-        }
-        if !self.full_height.is_finite() || self.full_height <= 0.0 {
-            return Err(Error::InvalidGeometry);
-        }
-        Ok(())
     }
 }
 
@@ -161,7 +166,7 @@ impl FlowNode {
     pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
         avail.validate()?;
         match self {
-            FlowNode::PageBreak => Err(Error::InvalidGeometry),
+            FlowNode::PageBreak => Err(GeometryKind::NestedPageBreak.into()),
             FlowNode::Paragraph(node) => node.split(avail),
             FlowNode::Text(node) => node.split(ctx, avail),
             FlowNode::Spacer(node) => node.split(avail),
@@ -245,7 +250,11 @@ fn split_keep_together(
             KeepTogetherNode::Prepared(prepared),
         )))
     } else {
-        Err(Error::UnsplittableTallerThanFrame)
+        Err(ErrorKind::UnsplittableTallerThanFrame {
+            height: prepared.height,
+            avail: avail.full_height,
+        }
+        .into())
     }
 }
 
@@ -338,7 +347,7 @@ fn split_stack(
     })
 }
 
-/// Full-frame natural height. Non-Fit splits become [`Error::UnsplittableTallerThanFrame`].
+/// Full-frame natural height. Non-Fit splits become [`ErrorKind::UnsplittableTallerThanFrame`].
 pub(crate) fn natural_height(
     node: FlowNode,
     ctx: &mut LayoutCtx<'_>,
@@ -346,7 +355,38 @@ pub(crate) fn natural_height(
 ) -> Result<(f32, Fragment)> {
     match node.split(ctx, full)? {
         Split::Fit { height, fragment } => Ok((height, fragment)),
-        Split::Partial { .. } | Split::MoveToNextPage(_) => Err(Error::UnsplittableTallerThanFrame),
+        split => Err(ErrorKind::UnsplittableTallerThanFrame {
+            height: stacked_height(split, ctx, full)?,
+            avail: full.full_height,
+        }
+        .into()),
+    }
+}
+
+/// Height of `split` plus every later piece laid out in fresh `full` frames.
+///
+/// Stops early when a fresh frame places nothing, so the sum never loops.
+pub(crate) fn stacked_height(
+    mut split: Split,
+    ctx: &mut LayoutCtx<'_>,
+    full: Frame,
+) -> Result<f32> {
+    let fresh = Frame {
+        height: full.full_height,
+        ..full
+    };
+    let mut total = 0.0f32;
+    loop {
+        match split {
+            Split::Fit { height, .. } => return Ok(total + height),
+            Split::Partial {
+                head_height, tail, ..
+            } if head_height > 0.0 => {
+                total += head_height;
+                split = tail.split(ctx, fresh)?;
+            }
+            Split::Partial { .. } | Split::MoveToNextPage(_) => return Ok(total),
+        }
     }
 }
 

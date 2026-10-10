@@ -2,7 +2,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::error::{Error, Result};
+use crate::error::{ColumnWidthsReason, Error, ErrorKind, Result};
 use crate::geom::{Length, NonNegative, Positive};
 use crate::layout::flow::{FlowNode, Fragment, Frame, LayoutCtx, Split};
 use crate::layout::lower::{check_content, Container};
@@ -22,14 +22,14 @@ pub(crate) struct Ratio(f32);
 impl Ratio {
     pub(crate) fn new(weight: f32) -> Result<Self> {
         if !weight.is_finite() {
-            return Err(Error::ColumnWidths {
-                reason: "non-finite",
-            });
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::NonFiniteRatio,
+            }));
         }
         if weight <= 0.0 {
-            return Err(Error::ColumnWidths {
-                reason: "non-positive-ratio",
-            });
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::NonPositiveRatio,
+            }));
         }
         Ok(Self(weight))
     }
@@ -37,16 +37,16 @@ impl Ratio {
 
 /// `inner` is frame width minus gaps. Auto takes all of `rest`. Auto and Ratio together fail.
 pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result<Vec<f32>> {
-    let fail = |reason| Err(Error::ColumnWidths { reason });
+    let fail = |reason| Err(Error::from(ErrorKind::ColumnWidths { reason }));
     if specs.is_empty() {
-        return fail("column-count");
+        return fail(ColumnWidthsReason::ColumnCount);
     }
     let autos = specs
         .iter()
         .filter(|s| matches!(s, ColumnWidth::Auto))
         .count();
     if autos > 1 {
-        return fail("more-than-one-auto");
+        return fail(ColumnWidthsReason::MoreThanOneAuto);
     }
     let mut fixed = 0.0f32;
     let mut weights = 0.0f32;
@@ -58,15 +58,15 @@ pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result
         }
     }
     if autos > 0 && weights > 0.0 {
-        return fail("auto-with-ratio");
+        return fail(ColumnWidthsReason::AutoWithRatio);
     }
     if fixed > inner {
-        return fail("fixed-sum-exceeds");
+        return fail(ColumnWidthsReason::FixedSumExceeds);
     }
     let rest = inner - fixed;
     let flexible = weights > 0.0 || autos > 0;
     if flexible && rest <= 0.0 {
-        return fail("no-remaining-width");
+        return fail(ColumnWidthsReason::NoRemainingWidth);
     }
     let widths: Vec<f32> = specs
         .iter()
@@ -77,7 +77,7 @@ pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result
         })
         .collect();
     if widths.iter().any(|w| !w.is_finite() || *w <= 0.0) {
-        return fail("no-remaining-width");
+        return fail(ColumnWidthsReason::NoRemainingWidth);
     }
     Ok(widths)
 }
@@ -99,9 +99,9 @@ impl ColumnsNode {
         columns: Vec<(ColumnWidth, Vec<FlowNode>)>,
     ) -> Result<Self> {
         if columns.len() < 2 {
-            return Err(Error::ColumnWidths {
-                reason: "column-count",
-            });
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::ColumnCount,
+            }));
         }
         let mut widths = Vec::with_capacity(columns.len());
         let mut stacks = Vec::with_capacity(columns.len());
@@ -125,7 +125,9 @@ impl ColumnsNode {
         let gaps: f32 = self.columns.iter().skip(1).map(|_| self.gap).sum();
         let inner = avail.width - gaps;
         if inner <= 0.0 {
-            return Err(Error::ColumnWidths { reason: "gap" });
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::Gap,
+            }));
         }
         let widths = resolve_column_widths(&self.widths, inner)?;
 
@@ -193,6 +195,7 @@ impl ColumnsNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::GeometryKind;
     use crate::layout::decorate::Decorations;
     use crate::layout::flow::KeepTogetherNode;
     use crate::layout::paragraph::ParagraphNode;
@@ -208,9 +211,12 @@ mod tests {
         ColumnWidth::Ratio(Ratio::new(w).unwrap())
     }
 
-    fn reason(result: Result<impl std::fmt::Debug>) -> &'static str {
+    fn reason(result: Result<impl std::fmt::Debug>) -> ColumnWidthsReason {
         match result {
-            Err(Error::ColumnWidths { reason }) => reason,
+            Err(Error {
+                kind: ErrorKind::ColumnWidths { reason },
+                ..
+            }) => reason,
             other => panic!("expected ColumnWidths, got {other:?}"),
         }
     }
@@ -232,7 +238,7 @@ mod tests {
         let specs = [fixed(10.0), ratio(1.0), ColumnWidth::Auto];
         assert_eq!(
             reason(resolve_column_widths(&specs, 110.0)),
-            "auto-with-ratio"
+            ColumnWidthsReason::AutoWithRatio
         );
     }
 
@@ -249,7 +255,7 @@ mod tests {
         let specs = [ColumnWidth::Auto, ColumnWidth::Auto];
         assert_eq!(
             reason(resolve_column_widths(&specs, 100.0)),
-            "more-than-one-auto"
+            ColumnWidthsReason::MoreThanOneAuto
         );
     }
 
@@ -258,7 +264,7 @@ mod tests {
         let specs = [fixed(150.0), fixed(60.0)];
         assert_eq!(
             reason(resolve_column_widths(&specs, 200.0)),
-            "fixed-sum-exceeds"
+            ColumnWidthsReason::FixedSumExceeds
         );
     }
 
@@ -267,14 +273,20 @@ mod tests {
         let specs = [fixed(100.0), ColumnWidth::Auto];
         assert_eq!(
             reason(resolve_column_widths(&specs, 100.0)),
-            "no-remaining-width"
+            ColumnWidthsReason::NoRemainingWidth
         );
     }
 
     #[test]
     fn column_widths_bad_ratio() {
-        assert_eq!(reason(Ratio::new(0.0)), "non-positive-ratio");
-        assert_eq!(reason(Ratio::new(f32::NAN)), "non-finite");
+        assert_eq!(
+            reason(Ratio::new(0.0)),
+            ColumnWidthsReason::NonPositiveRatio
+        );
+        assert_eq!(
+            reason(Ratio::new(f32::NAN)),
+            ColumnWidthsReason::NonFiniteRatio
+        );
     }
 
     #[test]
@@ -284,7 +296,7 @@ mod tests {
             default_column_gap(),
             vec![(fixed(10.0), vec![text("A", &style)])],
         );
-        assert_eq!(reason(one), "column-count");
+        assert_eq!(reason(one), ColumnWidthsReason::ColumnCount);
     }
 
     #[test]
@@ -304,7 +316,7 @@ mod tests {
             page(200.0, 400.0),
             &Decorations::none(),
         );
-        assert_eq!(reason(result), "gap");
+        assert_eq!(reason(result), ColumnWidthsReason::Gap);
         assert!(rec.commands().is_empty());
     }
 
@@ -437,7 +449,11 @@ mod tests {
             config,
             &Decorations::none(),
         );
-        assert!(matches!(result, Err(Error::UnsplittableTallerThanFrame)));
+        assert!(matches!(
+            result.unwrap_err().kind,
+            ErrorKind::UnsplittableTallerThanFrame { height, avail }
+                if height > avail && avail.to_bits() == (m.line_height * 2.0 + 1.0).to_bits()
+        ));
         assert!(rec.commands().is_empty());
     }
 
@@ -459,6 +475,12 @@ mod tests {
             page(200.0, 400.0),
             &Decorations::none(),
         );
-        assert!(matches!(result, Err(Error::InvalidGeometry)));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::InvalidGeometry(GeometryKind::LaidOutWiderThanFrame {
+                width: 200.0,
+                avail: 80.0,
+            })
+        );
     }
 }
