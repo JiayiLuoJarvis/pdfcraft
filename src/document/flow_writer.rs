@@ -5,14 +5,17 @@ mod seal {
     pub trait Sealed {}
 }
 
-/// Types that [`FlowWriter::add`] accepts.
+/// Value [`FlowWriter::add`] accepts.
 ///
-/// Implementors are crate-provided element values. Everyday callers use the
-/// sugar methods on [`FlowWriter`] instead of building these by hand.
+/// This is the public admission trait. Each impl lowers the element and pushes
+/// the node onto `flow`, so the crate-private node type stays out of the
+/// signature. Paragraphs use `flow`'s style as the parent style. A table,
+/// columns block, or list keeps the style of the flow it was built on.
+///
+/// The trait is sealed. Callers pass [`Paragraph`], [`Table`], [`Columns`],
+/// [`HLine`], or [`PlacedImage`].
 pub trait IntoFlowItem: seal::Sealed {
     /// Lowers `self` and appends it to `flow`.
-    ///
-    /// Prefer [`FlowWriter::add`] or the sugar methods.
     fn add_to(self, flow: &mut Flow);
 }
 
@@ -103,7 +106,9 @@ pub trait FlowWriter {
     /// Appends a pre-built flow item.
     ///
     /// Advanced path for factories that return an element. Everyday code should
-    /// call the sugar methods instead.
+    /// call the sugar methods instead. [`Self::stack`] and
+    /// [`Self::keep_together`] do not build a value for this method. They write
+    /// through [`Self::flow_mut`].
     fn add(&mut self, item: impl IntoFlowItem) {
         item.add_to(self.flow_mut());
     }

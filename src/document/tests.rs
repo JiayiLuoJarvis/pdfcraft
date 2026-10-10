@@ -444,20 +444,26 @@ fn add_after_section_fails_before_any_page() {
 }
 
 #[test]
-fn add_paragraph_factory_matches_sugar() {
-    let mut via_sugar = doc_with_font();
-    via_sugar.paragraph(|p| p.text("A B"));
+fn add_places_a_built_paragraph_and_table() {
     let mut via_add = doc_with_font();
-    via_add.add(Paragraph::build(|p| p.text("A B")));
-    let sugar_nodes = match &via_sugar.body {
-        Sections::Implicit(section) => section.flow.nodes.clone(),
-        Sections::Explicit { .. } => panic!("expected implicit section"),
+    via_add.add(Paragraph::build(|p| p.text("Risk")));
+    via_add.add(Table::build(|t| t.row(["cell"])));
+
+    let mut via_sugar = doc_with_font();
+    via_sugar.paragraph(|p| p.text("Risk"));
+    via_sugar.table(|t| t.row(["cell"]));
+
+    let Sections::Implicit(added) = &via_add.body else {
+        panic!("add stays on the implicit section");
     };
-    let add_nodes = match &via_add.body {
-        Sections::Implicit(section) => section.flow.nodes.clone(),
-        Sections::Explicit { .. } => panic!("expected implicit section"),
+    let Sections::Implicit(sugar) = &via_sugar.body else {
+        panic!("sugar stays on the implicit section");
     };
-    assert_eq!(sugar_nodes, add_nodes);
+    assert!(matches!(
+        added.flow.nodes.first(),
+        Some(FlowNode::Text(text)) if *text == TextNode::new("Risk", default_style())
+    ));
+    assert_eq!(added.flow.nodes, sugar.flow.nodes);
 }
 
 #[test]

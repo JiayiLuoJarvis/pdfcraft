@@ -77,11 +77,11 @@ impl Table {
         table
     }
 
-    /// Builds a table against a detached parent style.
+    /// Builds a table on a detached flow that uses the default text style.
     ///
-    /// Prefer [`FlowWriter::table`] when writing into a live flow so nested
-    /// content sees that flow's style. Use this when a helper returns a table
-    /// for [`FlowWriter::add`].
+    /// Nested content keeps that build-time style. Prefer [`FlowWriter::table`]
+    /// when writing into a live flow so nested content sees that flow's style.
+    /// Use this when a helper returns a table for [`FlowWriter::add`].
     pub fn build(f: impl FnOnce(&mut Self)) -> Self {
         Self::build_on(&Flow::new(default_style(), DocToken::next()), f)
     }
