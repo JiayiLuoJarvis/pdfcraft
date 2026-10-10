@@ -5,9 +5,9 @@ use std::num::NonZeroU16;
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::Paper;
 use quire_pdf::{
-    document, pt_near, CanvasCommand, Cell, Color, Error, Flow, ImageFormat, Ink, Margins,
-    NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect,
-    Rendered, Result, Size, Stroke, A4,
+    document, pt_near, CanvasCommand, Cell, Color, Error, Flow, ImageFormat, Ink, MarginPreset,
+    Margins, NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage,
+    Rect, Rendered, Result, Size, Stroke, A4,
 };
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
@@ -2310,6 +2310,50 @@ fn cell_list_narrower_than_marker_is_invalid_geometry() {
                     list.item(|item| item.paragraph(|p| p.text("A")));
                 })]);
             });
+            Ok(())
+        },
+    );
+    assert_eq!(result.err(), Some(Error::InvalidGeometry));
+}
+
+#[test]
+fn margin_presets_match_uniform_insets() {
+    let origin = |margins: Margins| {
+        let pages = document(PageSize::A4, |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.margins(margins);
+            doc.paragraph(|p| p.text("Body"));
+            Ok(())
+        })
+        .unwrap()
+        .pages();
+        let body = glyph(&pages[0], "Body");
+        (body.x, body.y)
+    };
+
+    let inch = origin(MarginPreset::Inch.into());
+    let inch_uniform = origin(Margins::uniform(NonNegative::pt(72.0).unwrap()));
+    assert!(pt_near(inch.0, 72.0));
+    assert!(pt_near(inch.1, 72.0 + BASELINE));
+    assert!(pt_near(inch.0, inch_uniform.0));
+    assert!(pt_near(inch.1, inch_uniform.1));
+
+    let half = origin(MarginPreset::HalfInch.into());
+    let half_uniform = origin(Margins::uniform(NonNegative::pt(36.0).unwrap()));
+    assert!(pt_near(half.0, 36.0));
+    assert!(pt_near(half.1, 36.0 + BASELINE));
+    assert!(pt_near(half.0, half_uniform.0));
+    assert!(pt_near(half.1, half_uniform.1));
+}
+
+#[test]
+fn inch_preset_on_a_narrow_page_is_invalid_geometry() {
+    let result = document(
+        PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.margins(MarginPreset::Inch.into());
+            doc.paragraph(|p| p.text("A"));
             Ok(())
         },
     );
