@@ -1,0 +1,10 @@
+ts	phase	decision	why	evidence	result
+2026-10-10T02:30:44Z	start	knives 16-19 overnight run on feat/text-uri-link tip	operator handed remaining settled product items with exit predicate	handoff .audit/handoff/knives-done.md; tip 16749da	open
+2026-10-10T02:30:44Z	knife-16-frame	layout CellBody already allows Spacer; gap is public Cell DSL	proposal 2.13 and 2.6 already allow cell spacer; lower.rs allows FlowNode::Spacer in TableCell	src/layout/lower.rs:32-36	confirmed
+2026-10-10T02:40:34Z	knife-16-how	three explorers done; explainer synthesizing how.md	DSL gap confirmed; layout allowlist and natural_height Partial rejection documented	.audit/knife-16/how/; Task 892e1f68	explainer running
+2026-10-10T02:41:37Z	knife-16-how	how.md synthesized	DSL-only gap; natural_height blocks cell spacer Partial	.audit/knife-16/how.md	ready for arena
+2026-10-10T02:42:02Z	knife-16-arena	fan out 4 design candidates	Feature how done; arena mandatory for shape	.audit/knife-16/arena/frame.md	candidates running
+2026-10-10T02:49:20Z	knife-16-arena	parent pick base candidate-3; synthesis drafted	four designs converge on Cell::spacer; c3 has fixture-tight tests	.audit/knife-16/arena/synthesis/design.md	awaiting cross-judge
+2026-10-10T02:50:36Z	knife-16-arena	base candidate-2; graft c3 alone-no-ops and c1 rustdoc note	cross-judge preferred c2 over parent lean c3; API identical	.audit/knife-16/arena/cross-judge.md; synthesis/	synthesis locked
+2026-10-10T02:51:18Z	knife-16-impl	implementer started on feat/cell-spacer	synthesis locked on c2+grafts	Task d48d12f3	running
+2026-10-10T02:59:45Z	knife-16-gates	parent re-ran fmt clippy test on 1d343c3	Prove It Works; do not trust implementer self-report alone	cargo test: 198 lib + 69 document	green

@@ -1,8 +1,8 @@
-# Handoff: knives 7–14
+# Handoff: knives 7–16
 
 **Date:** 2026-10-10  
 **Repo:** /mnt/data/demo/quire  
-**Exit predicate:** knife 14 green locally (no remote/PR; `gh` token invalid, no `git remote`).
+**Exit predicate (tonight):** knives 16–19 green locally (no remote/PR; `gh` token invalid, no `git remote`).
 
 | Knife | Branch | Tip (feature) |
 | --- | --- | --- |
@@ -14,20 +14,23 @@
 | 12 flow hline | feat/hline | c89f2c4 |
 | 13 style / bold / first-line indent | feat/style-builders | 5deb0df (feature tip aaf14bf) |
 | 14 §2.2 fill-in underscore | feat/inline-blank | b83712e |
+| 15 §8 text URI link | feat/text-uri-link | 16749da |
+| 16 Cell::spacer | feat/cell-spacer | c9c2af7 (status 1d343c3) |
 
-Knife 14 stacks on `feat/style-builders` @ `5deb0df`. Feature tip `b83712e`. Design trail under `.audit/knife-14/` (how / arena / synthesis / implement-status). Full branch tip is `git rev-parse feat/inline-blank` after the tip-hash note commit.
+Knife 16 stacks on `feat/text-uri-link` @ `16749da`. Feature tip `c9c2af7`. Status commit `1d343c3`. Design trail under `.audit/knife-16/` (how / arena / synthesis / implement-status).
 
-## What callers get (knife 14)
+## What callers get (knife 16)
 
-`Paragraph::blank(width)`, `blank_em(n)`, and `blank_to_end()` return a short-lived `Blank` for optional `thickness` / `color` / `baseline_offset`. Defaults are 1 pt thick, 1 pt below baseline, and the paragraph text color. Fixed blanks are unbreakable atoms; if the visual-line budget cannot hold them, layout returns `UnbreakableWiderThanFrame` (first line uses `W'`). Fill blanks resolve to `avail - line_width` in the breaker and must be the last non-empty run, or assembly fails with `RunAfterFillBlank` before `start_page`. Blanks do not enter glyph measurement. Each positive-width blank paints one horizontal `Stroke`. Line height stays the body face metrics. Cell, Band, and Layer stay without blank APIs.
+`Cell::spacer(height: Length<NonNegative>)` stores one spacer payload. `Table::lower` emits `FlowNode::Spacer`. Zero height is legal. The cell paints nothing. A spacer taller than the cell inner full frame fails with `UnsplittableTallerThanFrame` (unlike body `Flow::spacer`, which can split across pages). Still one payload per public cell. No cell paragraph or list yet.
 
 ## Gates (parent re-verified 2026-10-10)
 
-On `feat/inline-blank` @ `b83712e`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (183 lib + 1 ignored, 49 `tests/document.rs`). `backend-krilla` is a default feature; same suite. `inline_blank_writes_a_pdf` asserts `%PDF`.
+On `feat/cell-spacer` @ `1d343c3`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (198 lib + 1 ignored, 69 `tests/document.rs`).
 
 ## Next
 
-- §8 external URI links on text
-- `Cell::spacer` (flow `spacer` already exists)
+- Knife 17: cell paragraph (blank/link if same pipeline) and cell list (§2.6); still forbid columns / pageBreak / keep_together / nested table
+- Knife 18: §7 margin presets (optional sugar; default still 0)
+- Knife 19: crate name `quire-pdf` (Cargo.toml already `quire-pdf`; verify remaining rename gaps) + small A-series gaps if any
 - Named styles / flow canvas still out
-- Open PR when remote and token are available (`feat/inline-blank` → stack base as desired)
+- Open PR when remote and token are available

@@ -2,8 +2,10 @@
 
 **Branch.** `feat/cell-spacer`
 **Baseline.** `16749da` (`16749da0474b091e18d9c19a14833e8f779afe18`)
-**Implementation tip.** `c9c2af7` (`c9c2af7b6dee17c0a6f745c8e6589f81be1b664e`)
-**Date.** 2026-10-10
+**Implementation tip.** `c9c2af7` (`c9c2af7b6dee17c0a6f745c8e6589f81be1b664e`)  
+**Status / branch tip.** `1d343c3` (this file) plus later audit commits if any.  
+**Date.** 2026-10-10  
+**Parent re-verify.** Gates re-run on `1d343c3` after implementer return. Exit 0.
 
 ## Commits
 
@@ -13,7 +15,7 @@
 
 ## Gates
 
-Run on the working tree that became `c9c2af7`, before this status commit. Each command exited 0.
+First run on the tree that became `c9c2af7`. Parent re-ran the same three on `1d343c3`. Each command exited 0.
 
 - `cargo fmt --all`
 - `cargo clippy --all-targets -- -D warnings`
