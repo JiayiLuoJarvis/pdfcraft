@@ -707,6 +707,25 @@ impl Flow {
         FlowNode::Text(TextNode::new(text, self.style.clone()))
     }
 
+    /// Runs `body` with a temporary parent text style. Children inherit unless they override.
+    ///
+    /// Like pdfmake's `stack` carrying `fontSize` / `color`: unset fields keep the outer style,
+    /// and the previous parent style is restored when `body` returns.
+    pub fn stack(&mut self, style: impl FnOnce(&mut TextProps), body: impl FnOnce(&mut Flow)) {
+        let saved = self.style.clone();
+        let mut props = TextProps::default();
+        style(&mut props);
+        if let Err(error) = props.apply(&mut self.style) {
+            if self.error.is_none() {
+                self.error = Some(error);
+            }
+            self.style = saved;
+            return;
+        }
+        body(self);
+        self.style = saved;
+    }
+
     /// Appends an image that moves to the next page whole instead of splitting.
     ///
     /// Wider than the frame, or taller than the page body, is an error. The image never shrinks.
@@ -817,6 +836,12 @@ fn lower_paragraph(paragraph: Paragraph, parent: &Style) -> Result<FlowNode> {
     let mut style = parent.clone();
     style.first_line_indent = paragraph.first_line_indent;
     style.align = paragraph.align;
+    if let Some(color) = paragraph.color {
+        style.color = color;
+    }
+    if let Some(font_size) = paragraph.font_size {
+        style.font_size = font_size;
+    }
     Ok(FlowNode::Text(TextNode::from_items(paragraph.items, style)))
 }
 
@@ -856,6 +881,8 @@ pub struct Paragraph {
     items: Vec<InlineItem>,
     first_line_indent: Length<NonNegative>,
     align: TextAlign,
+    color: Option<Color>,
+    font_size: Option<Length<Positive>>,
     active_link: Option<LinkTarget>,
     error: Option<Error>,
 }
@@ -866,6 +893,8 @@ impl Default for Paragraph {
             items: Vec::new(),
             first_line_indent: NonNegative::ZERO,
             align: TextAlign::Start,
+            color: None,
+            font_size: None,
             active_link: None,
             error: None,
         }
@@ -873,6 +902,19 @@ impl Default for Paragraph {
 }
 
 impl Paragraph {
+    /// Sets this paragraph's text color. Overrides the parent flow color.
+    pub fn color(&mut self, color: Color) {
+        self.color = Some(color);
+    }
+
+    /// Sets this paragraph's font size. Overrides the parent flow size.
+    pub fn font_size(&mut self, size: impl IntoPositive) {
+        match size.into_positive() {
+            Ok(size) => self.font_size = Some(size),
+            Err(error) => self.note(error),
+        }
+    }
+
     /// Appends `s` to the paragraph.
     pub fn text(&mut self, s: impl AsRef<str>) {
         self.append(Face::Body, s.as_ref());
@@ -1156,6 +1198,7 @@ struct StoredCell {
     content: StoredContent,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
+    fill: Option<Color>,
 }
 
 enum StoredContent {
@@ -1216,6 +1259,7 @@ impl Table {
             content,
             col_span: cell.col_span,
             row_span: cell.row_span,
+            fill: cell.fill,
         }
     }
 
@@ -1297,7 +1341,9 @@ impl Table {
                                     vec![FlowNode::Spacer(SpacerNode { height })]
                                 }
                             };
-                            Ok(table::Cell::new(content)?.with_span(cell.col_span, cell.row_span))
+                            Ok(table::Cell::new(content)?
+                                .with_span(cell.col_span, cell.row_span)
+                                .with_fill(cell.fill))
                         })
                         .collect()
                 })
@@ -1325,6 +1371,7 @@ pub struct Cell<'a> {
     content: CellContent<'a>,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
+    fill: Option<Color>,
     error: Option<Error>,
 }
 
@@ -1360,6 +1407,7 @@ impl<'a> Cell<'a> {
             content,
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
+            fill: None,
             error: None,
         }
     }
@@ -1445,6 +1493,14 @@ impl<'a> Cell<'a> {
     pub fn row_span(self, n: NonZeroU16) -> Self {
         Self {
             row_span: n,
+            ..self
+        }
+    }
+
+    /// Solid background behind the cell content. Drawn under text and under the grid stroke.
+    pub fn fill(self, color: Color) -> Self {
+        Self {
+            fill: Some(color),
             ..self
         }
     }
@@ -1779,20 +1835,45 @@ impl Layer {
         self.page.is_last()
     }
 
+    /// Runs `body` with a temporary parent text style. [`Layer::text_at`] inherits unless overridden.
+    ///
+    /// Like pdfmake's `stack` carrying `fontSize` / `color`. The previous parent style is restored
+    /// when `body` returns.
+    pub fn stack(&mut self, style: impl FnOnce(&mut TextProps), body: impl FnOnce(&mut Layer)) {
+        let saved = self.style.clone();
+        let mut props = TextProps::default();
+        style(&mut props);
+        if let Err(error) = props.apply(&mut self.style) {
+            self.note(error);
+            self.style = saved;
+            return;
+        }
+        body(self);
+        self.style = saved;
+    }
+
     /// Draws `s` on one line with the top-left of its line box at `at`. It is not wrapped or clipped.
-    pub fn text_at(&mut self, s: impl AsRef<str>, at: impl IntoPoint) {
+    ///
+    /// Inherits the layer's current parent style (document defaults, or the enclosing
+    /// [`Layer::stack`]). Chain [`TextAt::font_size`] / [`TextAt::color`] to override this call only.
+    pub fn text_at(&mut self, s: impl AsRef<str>, at: impl IntoPoint) -> TextAt<'_> {
         let at = match at.into_point() {
             Ok(at) => at,
             Err(error) => {
                 self.note(error);
-                return;
+                return TextAt {
+                    layer: self,
+                    index: usize::MAX,
+                };
             }
         };
+        let index = self.items.len();
         self.items.push(LayerItem::Text(LayerText {
             text: s.as_ref().to_owned(),
             at,
             style: self.style.clone(),
         }));
+        TextAt { layer: self, index }
     }
 
     /// Draws `image` stretched into `rect`, in page coordinates.
@@ -1904,6 +1985,75 @@ impl Layer {
                 }
             }
         }
+    }
+}
+
+/// Parent text style patch for [`Flow::stack`] / [`Layer::stack`]. Unset fields inherit.
+#[derive(Debug, Default)]
+pub struct TextProps {
+    font_size: Option<Length<Positive>>,
+    color: Option<Color>,
+    error: Option<Error>,
+}
+
+impl TextProps {
+    /// Parent font size for content inside the stack.
+    pub fn font_size(&mut self, size: impl IntoPositive) {
+        match size.into_positive() {
+            Ok(size) => self.font_size = Some(size),
+            Err(error) => {
+                if self.error.is_none() {
+                    self.error = Some(error);
+                }
+            }
+        }
+    }
+
+    /// Parent text color for content inside the stack.
+    pub fn color(&mut self, color: Color) {
+        self.color = Some(color);
+    }
+
+    fn apply(self, style: &mut Style) -> Result<()> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        if let Some(font_size) = self.font_size {
+            style.font_size = font_size;
+        }
+        if let Some(color) = self.color {
+            style.color = color;
+        }
+        Ok(())
+    }
+}
+
+/// Per-call style overrides for [`Layer::text_at`]. Inherits the layer parent style by default.
+pub struct TextAt<'a> {
+    layer: &'a mut Layer,
+    index: usize,
+}
+
+impl TextAt<'_> {
+    /// Overrides font size for this text only.
+    pub fn font_size(&mut self, size: impl IntoPositive) -> &mut Self {
+        match size.into_positive() {
+            Ok(size) => {
+                if let Some(LayerItem::Text(item)) = self.layer.items.get_mut(self.index) {
+                    item.style.font_size = size;
+                }
+            }
+            Err(error) => self.layer.note(error),
+        }
+        self
+    }
+
+    /// Overrides text color for this text only.
+    pub fn color(&mut self, color: Color) -> &mut Self {
+        if let Some(LayerItem::Text(item)) = self.layer.items.get_mut(self.index) {
+            item.style.color = color;
+        }
+        self
     }
 }
 

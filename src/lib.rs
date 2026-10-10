@@ -21,7 +21,7 @@ pub mod fonts;
 
 pub use document::{
     document, Band, Blank, Border, Cell, Columns, Document, Flow, HLine, Image, ImageBox, Layer,
-    List, Numbering, Page, Paragraph, Rendered, Section, Shapes, Table, Track,
+    List, Numbering, Page, Paragraph, Rendered, Section, Shapes, Table, TextAt, TextProps, Track,
 };
 
 pub use canvas::{

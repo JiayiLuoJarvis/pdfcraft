@@ -4,7 +4,7 @@
 //! cargo run --example hello
 //! ```
 //!
-//! Writes `hello.pdf` in the current directory. Pass another path as argv[1].
+//! Writes `out/hello.pdf` (gitignored). Pass another path as argv[1].
 //! The bundled fixture maps printable ASCII, U+2022, and 第 / 页 / 共. Other
 //! missing glyphs fail the document.
 
@@ -14,8 +14,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::path::PathBuf;
 
 use quire_pdf::{
-    document, Cell, Color, Document, Flow, Image, ImageFormat, Ink, Margins, Numbering, PageSize,
-    Pen, Track,
+    document, Cell, Color, Document, Flow, Image, ImageFormat, Margins, Numbering, PageSize, Track,
 };
 
 const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
@@ -24,13 +23,16 @@ const PIXEL: &[u8] = include_bytes!("../tests/fixtures/one-pixel.png");
 fn main() -> quire_pdf::Result<()> {
     let out = env::args()
         .nth(1)
-        .map_or_else(|| PathBuf::from("hello.pdf"), PathBuf::from);
+        .map_or_else(|| PathBuf::from("out/hello.pdf"), PathBuf::from);
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent).expect("create output dir");
+    }
 
     let pdf = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.bold_font(FONT.to_vec())?;
         let logo = doc.load_image(PIXEL.to_vec(), ImageFormat::Png)?;
-        decorate_pages(doc, logo)?;
+        decorate_pages(doc)?;
         write_title(doc, &logo);
         write_lists(doc);
         write_table(doc, &logo);
@@ -45,7 +47,7 @@ fn main() -> quire_pdf::Result<()> {
     Ok(())
 }
 
-fn decorate_pages(doc: &mut Document<'_>, seal: Image) -> quire_pdf::Result<()> {
+fn decorate_pages(doc: &mut Document<'_>) -> quire_pdf::Result<()> {
     doc.margins(Margins::try_uniform(48.0)?);
     doc.header(|h| {
         let m = h.page().margins;
@@ -62,37 +64,6 @@ fn decorate_pages(doc: &mut Document<'_>, seal: Image) -> quire_pdf::Result<()> 
         f.inset(m.left(), m.right());
         f.left("layout smoke");
         f.right_link("https://example.test/footer", "footer link");
-    });
-    let faint = Pen::new(Color::rgba(180, 180, 180, 80), 0.6)?;
-    let box_pen = Pen::new(Color::rgba(0, 0, 0, 40), 0.5)?;
-    let seal_pen = Pen::new(Color::rgba(200, 40, 40, 50), 1.0)?;
-    doc.behind(move |layer| {
-        let page = layer.page();
-        let cx = page.size.width().as_pt() * 0.5;
-        let cy = page.size.height().as_pt() * 0.45;
-        layer.text_at("DRAFT", (cx - 40.0, cy));
-        layer.line(
-            (72.0, 120.0),
-            (page.size.width().as_pt() - 72.0, 120.0),
-            faint,
-        );
-        layer.rect((60.0, 200.0, 40.0, 28.0), Ink::Stroke(box_pen));
-        layer.ellipse(
-            (cx - 36.0, cy - 24.0, 72.0, 48.0),
-            Ink::FillStroke(Color::rgba(200, 40, 40, 18), seal_pen),
-        );
-        layer.rotated(18.0, (cx, cy), |shapes| {
-            shapes.rect(
-                (cx - 50.0, cy - 8.0, 100.0, 16.0),
-                Ink::Fill(Color::rgba(0, 0, 255, 12)),
-            );
-        });
-    });
-    doc.front(move |layer| {
-        if layer.is_last() {
-            layer.image_at(&seal, (430.0, 680.0, 72.0, 72.0));
-            layer.text_at("SEAL", (448.0, 710.0));
-        }
     });
     Ok(())
 }
@@ -121,7 +92,7 @@ fn write_title(flow: &mut Flow, logo: &Image) {
         p.text(", ");
         p.link("https://example.test/docs", |p| p.text("links"));
         p.text(", blanks, lists, columns, tables, images, keep-together,");
-        p.text(" page breaks, and page-time layers.");
+        p.text(" and page breaks.");
     });
     flow.paragraph(|p| {
         p.text("Signed: ");
@@ -191,7 +162,28 @@ fn write_table(flow: &mut Flow, logo: &Image) {
             Track::Ratio(1.0),
             Track::Fixed(48.0),
         ]);
-        t.header(["Code", "Item", "Notes", "Qty"]);
+        t.header([
+            Cell::paragraph(|p| {
+                p.color(Color::rgb(255, 255, 255));
+                p.bold("Code");
+            })
+            .fill(Color::rgb(40, 40, 40)),
+            Cell::paragraph(|p| {
+                p.color(Color::rgb(255, 255, 255));
+                p.bold("Item");
+            })
+            .fill(Color::rgb(40, 40, 40)),
+            Cell::paragraph(|p| {
+                p.color(Color::rgb(255, 255, 255));
+                p.bold("Notes");
+            })
+            .fill(Color::rgb(40, 40, 40)),
+            Cell::paragraph(|p| {
+                p.color(Color::rgb(255, 255, 255));
+                p.bold("Qty");
+            })
+            .fill(Color::rgb(40, 40, 40)),
+        ]);
         t.header([Cell::new("group A").col_span(NonZeroU16::new(4).unwrap())]);
         t.row([
             Cell::new("A1").row_span(NonZeroU16::new(2).unwrap()),
@@ -283,6 +275,6 @@ fn write_closing(flow: &mut Flow) {
     flow.spacer(16.0);
     flow.paragraph(|p| {
         p.center();
-        p.text("End of tour. Seal draws on the last page via front.");
+        p.text("End of tour.");
     });
 }

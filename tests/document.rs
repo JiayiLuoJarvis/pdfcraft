@@ -155,7 +155,9 @@ fn full_template(c: &Contract, company: &str) -> Result<Rendered> {
             row.col(|col| col.paragraph(|p| p.text(&c.party_a)));
             row.col(|col| col.paragraph(|p| p.text(&c.party_b)));
         });
-        doc.behind(|page| page.text_at("DRAFT", Point::try_pt(180.0, 400.0).unwrap()));
+        doc.behind(|page| {
+            page.text_at("DRAFT", Point::try_pt(180.0, 400.0).unwrap());
+        });
         doc.front(|page| {
             if page.is_last() {
                 page.text_at("SEAL", Point::try_pt(430.0, 680.0).unwrap());
@@ -243,6 +245,83 @@ fn text_at_places_the_top_left_of_the_line_box() {
     let seal = runs(&pages[1]).pop().unwrap();
     assert!(pt_near(seal.x, 430.0));
     assert!(pt_near(seal.y, 680.0 + BASELINE));
+}
+
+#[test]
+fn stack_style_is_inherited_and_text_at_can_override() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.stack(
+            |s| {
+                s.font_size(18.0);
+                s.color(Color::rgb(10, 20, 30));
+            },
+            |flow| {
+                flow.paragraph(|p| p.text("AA"));
+                flow.paragraph(|p| {
+                    p.font_size(10.0);
+                    p.text("BB");
+                });
+            },
+        );
+        doc.behind(|layer| {
+            layer.stack(
+                |s| {
+                    s.font_size(14.0);
+                    s.color(Color::rgb(1, 2, 3));
+                },
+                |layer| {
+                    layer.text_at("CC", Point::try_pt(8.0, 8.0).unwrap());
+                    layer
+                        .text_at("DD", Point::try_pt(8.0, 28.0).unwrap())
+                        .font_size(9.0)
+                        .color(Color::rgb(9, 8, 7));
+                },
+            );
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    assert_eq!(texts(page), ["CC", "DD", "AA", "BB"]);
+    let glyph_runs: Vec<_> = page
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(glyph_runs[0].font_size.as_pt().to_bits(), 14.0f32.to_bits());
+    assert_eq!(glyph_runs[0].color, Color::rgb(1, 2, 3));
+    assert_eq!(glyph_runs[1].font_size.as_pt().to_bits(), 9.0f32.to_bits());
+    assert_eq!(glyph_runs[1].color, Color::rgb(9, 8, 7));
+    assert_eq!(glyph_runs[2].font_size.as_pt().to_bits(), 18.0f32.to_bits());
+    assert_eq!(glyph_runs[2].color, Color::rgb(10, 20, 30));
+    assert_eq!(glyph_runs[3].font_size.as_pt().to_bits(), 10.0f32.to_bits());
+    assert_eq!(glyph_runs[3].color, Color::rgb(10, 20, 30));
+}
+
+#[test]
+fn table_cell_fill_is_painted() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.border(0.5, Color::rgb(0, 0, 0));
+            t.header([Cell::new("H").fill(Color::rgb(0x19, 0x2d, 0x74))]);
+            t.row(["b"]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let fills: Vec<_> = pages[0]
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, CanvasCommand::FillPath { .. }))
+        .collect();
+    assert_eq!(fills.len(), 1);
 }
 
 #[test]
@@ -2138,7 +2217,9 @@ fn cell_and_layer_text_do_not_annotate() {
         doc.table(|table| {
             table.row(["cell"]);
         });
-        doc.behind(|layer| layer.text_at("mark", Point::try_pt(10.0, 10.0).unwrap()));
+        doc.behind(|layer| {
+            layer.text_at("mark", Point::try_pt(10.0, 10.0).unwrap());
+        });
         doc.paragraph(|p| p.link("https://example.com/only", |p| p.text("Go")));
         Ok(())
     })

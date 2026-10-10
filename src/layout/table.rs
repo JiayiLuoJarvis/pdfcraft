@@ -52,6 +52,7 @@ pub(crate) struct Cell {
     body: CellBody,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
+    fill: Option<Color>,
 }
 
 impl Cell {
@@ -60,6 +61,7 @@ impl Cell {
             body: CellBody::new(content)?,
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
+            fill: None,
         })
     }
 
@@ -69,6 +71,10 @@ impl Cell {
             row_span: rows,
             ..self
         }
+    }
+
+    pub(crate) fn with_fill(self, fill: Option<Color>) -> Self {
+        Self { fill, ..self }
     }
 }
 
@@ -104,12 +110,14 @@ struct Span {
 struct PlacedCell {
     span: Span,
     body: CellBody,
+    fill: Option<Color>,
 }
 
 struct LaidCell {
     span: Span,
     height: f32,
     content: Fragment,
+    fill: Option<Color>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +169,7 @@ impl TableNode {
                         rows: row_span,
                     },
                     body: cell.body,
+                    fill: cell.fill,
                 });
                 col += col_span;
             }
@@ -207,7 +216,12 @@ fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Mea
 
     let mut laid = Vec::with_capacity(grid.cells.len());
     let mut row_h = vec![0.0f32; grid.rows];
-    for PlacedCell { span: cell, body } in grid.cells {
+    for PlacedCell {
+        span: cell,
+        body,
+        fill,
+    } in grid.cells
+    {
         let inner_w = xs[cell.col + cell.cols] - xs[cell.col] - 2.0 * inset;
         if inner_w <= 0.0 {
             return Err(Error::ColumnWidths {
@@ -228,45 +242,21 @@ fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Mea
             span: cell,
             height: cell_h,
             content,
+            fill,
         });
     }
     let row_y = row_offsets(row_h, &laid);
     let groups = row_groups(&laid, grid.header_rows, grid.rows);
-
-    let stroke = Positive::pt(border).ok().map(Stroke::new);
-    let paint = Paint::solid(grid.border.color);
-    let mut fragments: Vec<Fragment> = groups
-        .iter()
-        .map(|rows| Fragment {
-            height: row_y[rows.end] - row_y[rows.start],
-            spacing_after: 0.0,
-            commands: Vec::new(),
-        })
-        .collect();
-    for LaidCell {
-        span: cell,
-        content,
-        ..
-    } in laid
-    {
-        let group = groups
-            .iter()
-            .position(|rows| rows.contains(&cell.row))
-            .expect("every row belongs to a group");
-        let x = xs[cell.col];
-        let y = row_y[cell.row] - row_y[groups[group].start];
-        let commands = &mut fragments[group].commands;
-        commands.extend(content.with_offset(x + inset, y + inset)?.commands);
-        if let Some(stroke) = stroke {
-            let w = xs[cell.col + cell.cols] - x;
-            let h = row_y[cell.row + cell.rows] - row_y[cell.row];
-            commands.push(FragmentCommand::Stroke {
-                path: rect_path(x, y, w, h)?,
-                paint,
-                stroke,
-            });
-        }
+    let fragments = GridPaint {
+        col_x: &xs,
+        row_y: &row_y,
+        groups: &groups,
+        content_inset: inset,
+        border: Positive::pt(border)
+            .ok()
+            .map(|width| (Stroke::new(width), Paint::solid(grid.border.color))),
     }
+    .paint(laid)?;
 
     let mut fragments = VecDeque::from(fragments);
     let header = if grid.header_rows > 0 {
@@ -292,6 +282,66 @@ fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Mea
         repeat_header: grid.repeat_header,
         draw_header_next: true,
     })
+}
+
+/// Shared grid geometry used while turning measured cells into draw commands.
+struct GridPaint<'a> {
+    col_x: &'a [f32],
+    row_y: &'a [f32],
+    groups: &'a [Range<usize>],
+    content_inset: f32,
+    border: Option<(Stroke, Paint)>,
+}
+
+impl GridPaint<'_> {
+    fn paint(self, laid: Vec<LaidCell>) -> Result<Vec<Fragment>> {
+        let mut fragments: Vec<Fragment> = self
+            .groups
+            .iter()
+            .map(|rows| Fragment {
+                height: self.row_y[rows.end] - self.row_y[rows.start],
+                spacing_after: 0.0,
+                commands: Vec::new(),
+            })
+            .collect();
+        for LaidCell {
+            span: cell,
+            content,
+            fill,
+            ..
+        } in laid
+        {
+            let group = self
+                .groups
+                .iter()
+                .position(|rows| rows.contains(&cell.row))
+                .expect("every row belongs to a group");
+            let x = self.col_x[cell.col];
+            let y = self.row_y[cell.row] - self.row_y[self.groups[group].start];
+            let w = self.col_x[cell.col + cell.cols] - x;
+            let h = self.row_y[cell.row + cell.rows] - self.row_y[cell.row];
+            let commands = &mut fragments[group].commands;
+            if let Some(color) = fill {
+                commands.push(FragmentCommand::Fill {
+                    path: rect_path(x, y, w, h)?,
+                    paint: Paint::solid(color),
+                });
+            }
+            commands.extend(
+                content
+                    .with_offset(x + self.content_inset, y + self.content_inset)?
+                    .commands,
+            );
+            if let Some((stroke, paint)) = self.border {
+                commands.push(FragmentCommand::Stroke {
+                    path: rect_path(x, y, w, h)?,
+                    paint,
+                    stroke,
+                });
+            }
+        }
+        Ok(fragments)
+    }
 }
 
 fn row_offsets(mut row_h: Vec<f32>, laid: &[LaidCell]) -> Vec<f32> {
@@ -408,11 +458,15 @@ mod tests {
     use crate::layout::paginate::PaginateConfig;
     use crate::layout::style::Style;
     use crate::layout::test_util::{
-        bits, fonts_and_style, metrics, page, pt, render, runs, strokes, text, texts,
+        bits, fills, fonts_and_style, metrics, page, pt, render, runs, strokes, text, texts,
     };
 
     fn cell(s: &str, style: &Style) -> Cell {
         Cell::new(vec![text(s, style)]).unwrap()
+    }
+
+    fn filled(s: &str, style: &Style, color: Color) -> Cell {
+        cell(s, style).with_fill(Some(color))
     }
 
     fn span(cols: u16, rows: u16) -> (NonZeroU16, NonZeroU16) {
@@ -654,6 +708,46 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn cell_fill_paints_behind_content_and_border() {
+        let (mut fonts, style) = fonts_and_style();
+        let navy = Color::rgb(0x19, 0x2d, 0x74);
+        let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(40.0).unwrap())]);
+        spec.border = Border {
+            width: NonNegative::pt(1.0).unwrap(),
+            color: Color::rgb(0, 0, 0),
+        };
+        spec.header = vec![vec![filled("H", &style, navy)]];
+        spec.body = vec![vec![cell("b", &style)]];
+        let table = TableNode::new(spec).unwrap();
+        let (result, rec) = render(
+            FlowNode::Table(table),
+            &mut fonts,
+            page(40.0, 200.0),
+            &Decorations::none(),
+        );
+        result.unwrap();
+        let page = &rec.pages()[0];
+        assert_eq!(fills(page).len(), 1);
+        assert_eq!(strokes(page).len(), 2);
+        assert_eq!(texts(page), ["H", "b"]);
+        let ops = page.ops();
+        let fill_at = ops
+            .iter()
+            .position(|op| matches!(op, crate::canvas::CanvasCommand::FillPath { .. }))
+            .unwrap();
+        let first_glyphs = ops
+            .iter()
+            .position(|op| matches!(op, crate::canvas::CanvasCommand::DrawGlyphRun { .. }))
+            .unwrap();
+        let first_stroke = ops
+            .iter()
+            .position(|op| matches!(op, crate::canvas::CanvasCommand::StrokePath { .. }))
+            .unwrap();
+        assert!(fill_at < first_glyphs);
+        assert!(first_glyphs < first_stroke);
     }
 
     #[test]
