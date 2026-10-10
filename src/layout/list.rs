@@ -260,7 +260,8 @@ fn first_baseline(fragment: &Fragment) -> Option<f32> {
         FragmentCommand::Glyphs(run) => Some(run.origin.y().as_pt()),
         FragmentCommand::Fill { .. }
         | FragmentCommand::Stroke { .. }
-        | FragmentCommand::Image { .. } => None,
+        | FragmentCommand::Image { .. }
+        | FragmentCommand::Link { .. } => None,
     })
 }
 

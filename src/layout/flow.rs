@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use crate::canvas::{Canvas, DecodedImage, GlyphRun};
+use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
 use crate::error::{Error, Result};
 use crate::fonts::FontStore;
 use crate::geom::{Length, NonNegative, Paint, Path, Point, Rect, Stroke};
@@ -70,7 +70,9 @@ impl Fragment {
                 FragmentCommand::Fill { path, .. } | FragmentCommand::Stroke { path, .. } => {
                     *path = path.translated(dx, dy)?;
                 }
-                FragmentCommand::Image { rect, .. } => *rect = rect.translated(dx, dy)?,
+                FragmentCommand::Image { rect, .. } | FragmentCommand::Link { rect, .. } => {
+                    *rect = rect.translated(dx, dy)?;
+                }
             }
         }
         Ok(self)
@@ -92,6 +94,10 @@ pub(crate) enum FragmentCommand {
     Image {
         image: DecodedImage,
         rect: Rect,
+    },
+    Link {
+        rect: Rect,
+        target: LinkTarget,
     },
 }
 
@@ -369,6 +375,9 @@ pub(crate) fn draw_fragment(
             } => canvas.stroke_path(&path.translated(ox, oy)?, paint, stroke)?,
             FragmentCommand::Image { image, rect } => {
                 canvas.draw_image(image, rect.translated(ox, oy)?)?;
+            }
+            FragmentCommand::Link { rect, target } => {
+                canvas.annotate_link(rect.translated(ox, oy)?, target.clone())?;
             }
         }
     }

@@ -749,4 +749,16 @@ mod tests {
         assert_eq!(ellipse_center_radii(filled), Some((30.0, 30.0, 20.0, 10.0)));
         assert_eq!(fills(&pages[0]).len(), 1);
     }
+
+    #[test]
+    fn band_error_returns_before_any_page_starts() {
+        let (mut fonts, style) = fonts_and_style();
+        let decorations = Decorations {
+            header: Some(Box::new(|_: &PageInfo| Err(Error::EmptyLink))),
+            ..Decorations::none()
+        };
+        let (result, rec) = render(text("A", &style), &mut fonts, page(200.0, 400.0), &decorations);
+        assert_eq!(result, Err(Error::EmptyLink));
+        assert!(rec.commands().is_empty());
+    }
 }
