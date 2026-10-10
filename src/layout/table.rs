@@ -670,6 +670,14 @@ mod tests {
     }
 
     #[test]
+    fn cell_allows_spacer() {
+        Cell::new(vec![FlowNode::Spacer(crate::layout::flow::SpacerNode {
+            height: pt(8.0),
+        })])
+        .unwrap();
+    }
+
+    #[test]
     fn overlapping_spans_are_rejected() {
         let (_, style) = fonts_and_style();
         let (c1, r2) = span(1, 2);
