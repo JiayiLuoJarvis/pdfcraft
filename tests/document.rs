@@ -1244,6 +1244,77 @@ fn hline_writes_a_pdf() {
     assert!(pdf.starts_with(b"%PDF"));
 }
 
+#[test]
+fn cell_spacer_shifts_the_following_row() {
+    let y_of_b = |height: f32| {
+        let pages = document(PageSize::A4, |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.row([Cell::spacer(NonNegative::pt(height).unwrap())]);
+                t.row(["B"]);
+            });
+            Ok(())
+        })
+        .unwrap()
+        .pages();
+        assert_eq!(pages.len(), 1);
+        let page = &pages[0];
+        assert!(page
+            .ops()
+            .iter()
+            .all(|op| matches!(op, CanvasCommand::DrawGlyphRun { .. })));
+        assert_eq!(texts(page), ["B"]);
+        let glyphs = runs(page);
+        assert_eq!(glyphs.len(), 1);
+        glyphs[0].y
+    };
+    assert!(pt_near(y_of_b(30.0) - y_of_b(0.0), 30.0));
+}
+
+#[test]
+fn cell_spacer_alone_records_no_ops() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.table(|t| {
+            t.row([Cell::spacer(NonNegative::pt(24.0).unwrap())]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    assert!(pages[0].ops().is_empty());
+}
+
+#[test]
+fn cell_spacer_taller_than_body_fails_before_any_page() {
+    let result = document(
+        PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
+        |doc| {
+            doc.table(|t| {
+                t.row([Cell::spacer(NonNegative::pt(21.0).unwrap())]);
+            });
+            Ok(())
+        },
+    );
+    assert_eq!(result.err(), Some(Error::UnsplittableTallerThanFrame));
+}
+
+#[test]
+fn short_cell_spacer_does_not_grow_a_text_row() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.row([Cell::new("A"), Cell::spacer(NonNegative::pt(8.0).unwrap())]);
+            t.row([Cell::new("B"), Cell::new("C")]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    assert!(pt_near(glyph(&pages[0], "B").y, LINE + BASELINE));
+}
+
 struct StrokeSample {
     x0: f32,
     y0: f32,
