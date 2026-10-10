@@ -1,0 +1,9 @@
+ts	phase	decision	why	evidence	result
+2026-09-30T10:11:49Z	start	autonomous knives 3-8 from canvas baseline	operator grant; exit = knives 3-8 each one branch one commit four gates green	branch feat/backend-krilla @ 20d1dca	open
+2026-09-30T10:11:49Z	knife3	exit predicate for whole run	knives 3-8 done; each slice one branch/commit; fmt clippy test rustdoc green; no remote PR required	user query	open
+2026-09-30T10:15:40Z	knife3-how	grounded Canvas+adapter plan	RecordingCanvas shipped; self-ref Document/Page/Surface is the hard fork; design geom snippets outdated vs branded Length	.audit/backend-krilla/arena/FRAME.md + how agent db9c80ee	open
+2026-09-30T10:19:26Z	knife3-arena	candidate-2 sketch landed	typed PagePlan buffer; lexical finish replay; UnsupportedCanvasOperation poisons build; no CanvasCommand replay	.audit/backend-krilla/arena/candidate-2/SKETCH.md	waiting on c1/c3
+2026-09-30T10:24:42Z	knife3-arena	candidate-1 sketch landed	Plan owns no Document; convert at Canvas call; UnknownFont/UnknownImage without poison; default features stay empty	.audit/backend-krilla/arena/candidate-1/SKETCH.md	waiting on c3
+2026-09-30T10:32:38Z	knife3-arena	picked candidate-2 as base	cross-judge 29/30; grafts InvalidGeometry+dump lever from c1 and emit split from c3; reject Ok-silent deferred	.audit/backend-krilla/arena/synthesis/SYNTHESIS.md	open
+2026-10-08T05:37:32Z	knife3	implemented buffered KrillaCanvas + emit	C2 base; identity convert; observed path ops stay API-space with cm; Annot Rect transformed; UnsupportedCanvasOperation poisons	src/backend/* gates green	tests green
+2026-10-08T05:38:05Z	knife3	committed f082ab5; handoff written	context large; knife 4 branch feat/fonts-skrifa from tip	.audit/handoff/knives-3-8.md	knife3 done

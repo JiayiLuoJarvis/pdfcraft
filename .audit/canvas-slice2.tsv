@@ -1,0 +1,11 @@
+ts	phase	decision	why	evidence	result
+2026-09-30T09:20:00Z	start	slice2 canvas+RecordingCanvas Feature playbook	user poteto-mode brief step 2	user query	open
+2026-09-30T09:22:00Z	how	parent-owned simple how; canvas.rs stub + design Canvas section	how simple path; stubs only	.audit/canvas-slice2/how.md	complete
+2026-09-30T09:25:00Z	arena	fan-out 4 architect runners to isolated dirs	exhaust design space; architect Phase B	FRAME.md + Task ids	waiting
+2026-09-30T09:23:00Z	arena	candidate-1 design package landed	LinkTarget + CanvasCommand + RecordingPhase	.audit/canvas-slice2/arena/candidate-1/	waiting on 2-4
+2026-09-30T09:25:00Z	arena	candidate-2 design package landed	single-method CanvasCommand sink	.audit/canvas-slice2/arena/candidate-2/	waiting on 3-4
+2026-09-30T09:35:00Z	arena	candidate-4 design package landed	scoped PageCanvas + dual-view recorder	.audit/canvas-slice2/arena/candidate-4/	waiting on 3
+2026-09-30T09:42:00Z	arena	candidate-3 design package landed	PagePaint guard + nested records; draw returns ()	.audit/canvas-slice2/arena/candidate-3/	complete fan-out
+2026-09-30T09:45:00Z	pick	base=C1; graft C2 DocumentInfo+EmptyLink-only; C3 DocumentInfo-in-canvas; C4 derived pages(); drop phase errors	cross-judge agree + parent	.audit/canvas-slice2/arena/synthesis/	picked
+2026-09-30T09:55:00Z	implement	canvas landed 20d1dca; parent re-ran four gates green; 15 tests	prove-it-works	.audit/canvas-slice2/gates.txt	complete
+2026-09-30T09:56:00Z	pr	cannot open PR: no git remote; gh token invalid for JiayiLuoJarvis	Opening a PR blocked on forge auth	gh auth status	blocked

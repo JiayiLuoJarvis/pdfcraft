@@ -39,7 +39,7 @@ Measured on `feat/margin-presets` tip after knife 18:
 
 ## Gates (parent re-verified 2026-10-10)
 
-On `feat/crate-rename` @ `7c59481` (includes knife 18 feature tip 3c9e3da): `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (200 lib + 1 ignored, 78 `tests/document.rs`).
+On `feat/crate-rename` @ `fefd346` (includes knife 18 feature tip `3c9e3da`): `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (200 lib + 1 ignored, 78 `tests/document.rs`). Code-changing tip for callers is still `3c9e3da`; later commits are audit only.
 
 ## Next
 

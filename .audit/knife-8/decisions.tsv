@@ -1,0 +1,8 @@
+ts	phase	decision	why	evidence	result
+2026-10-08T10:43:22Z	start	knife 8 from 6dbf40c; handoff written	exit: knife 8 one commit four gates x2	.audit/handoff/knives-8.md	open
+2026-10-08T10:43:22Z	arena	fan-out DSL cand1 builder vs cand2 AST	exhaust design space	.audit/knife-8/frame.md	open
+2026-10-08T10:49:27Z	arena	cand1 design landed	builder lowers live to FlowNode; Decorations + lifetime	.audit/knife-8/arena/candidate-1/design.md	open
+2026-10-08T11:02:56Z	arena	cand2 landed; start cross-judge	AST Block + one lower; no Decorations lifetime churn	.audit/knife-8/arena/candidate-2/design.md	open
+2026-10-08T11:06:04Z	arena	pick C1; graft C2 tests + recursive band Columns	cross-judge 24 vs 22; §1 borrow + behind/front	.audit/knife-8/arena/synthesis/design.md	open
+2026-10-08T11:06:27Z	implement	spawn knife8 implementer	synthesis C1 + grafts; header slots inset by margins	agent Implement knife 8 document DSL	open
+2026-10-09T00:32:29Z	commit	knife 8 committed 7cbe823 after Sicko cleanup	exit predicate knives 7-8 met locally	git log -1	tests green

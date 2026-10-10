@@ -1,0 +1,10 @@
+phase	decision	rationale	reversal
+pickup	next knife = image	operator chose image after knife-8 green tip	operator names another knife
+frame	draft frame at .audit/knife-9/arena/frame.md before how returns	blocking checkpoint; refine after how	n/a
+checkpoint	one owner after arena; no parallel code writers	FlowNode/Error/ImageStore are shared writes	split only if synthesis isolates a pure decode crate-internal API with no enum edits
+pr	skip Opening a PR	handoff: no remote / gh token	operator asks for PR when remote ready
+how	how.md landed via synthesizer 15d1372e	three explorers reconciled + krilla registry facts	n/a
+arena	fan-out C1 glyph-analogue + C2 parallel-store	exhaust design space; frame updated with how defaults	n/a
+pick	base=C1 glyph-analogue	cross-judge 27>24 + parent agree; smaller emit surface + DocToken	operator overrides
+graft	no public Align; C2 tests; empty-bytes reject	from C2 into synthesis/design.md	n/a
+impl	poteto-agent 0cf090d4 on feat/image	sequence backend→layout→DSL→gates→commit	n/a

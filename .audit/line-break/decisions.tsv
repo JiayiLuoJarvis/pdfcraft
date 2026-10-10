@@ -1,0 +1,17 @@
+ts	phase	decision	why	evidence	result
+2026-10-08T07:10:00Z	start	autonomous knives 5-8 from feat/fonts-skrifa@9392f85; knife 5 first	handoff says implement decided PR7 not redesign	.audit/handoff/knives-4-8.md	open
+2026-10-08T07:10:30Z	exit-predicate	knives 5-8 each one branch one commit four gates green both feature configs; no remote required	user exit condition	user query	open
+2026-10-08T07:11:00Z	k5-authority	re-read 确认总表; §3 line break confirmed; no invent DSL	handoff principle do not trust summary alone	docs/提案书.md:632-642	confirmed
+2026-10-08T07:12:00Z	k5-how	spawned how explainer gpt-5.6-sol-high on text stubs+PR7	Feature step1; simple path	Task d2842389	running
+2026-10-08T07:13:30Z	k5-how	how.md landed; stubs only; measure per-scalar; need UnbreakableWiderThanFrame; monospace stub for break tests	Feature grounding complete	.audit/line-break/how.md	done
+2026-10-08T07:14:00Z	k5-arena	spawned 4 architect runners composer/gpt/grok/gemini into candidate-1..4	Feature architect Phase B; exhaust design space on data shape only	.audit/line-break/arena/frame.md	running
+2026-10-08T07:14:10Z	k5-checkpoint	blocking=pin+Error; indep=n/a serial owner; shared=n/a pure; decomp=one worker	Feature throughput checkpoint	.audit/line-break/decisions.tsv	set
+2026-10-08T07:15:30Z	k5-arena	candidate-1 design landed (BreakTape+precomputed seams)	await remaining three	.audit/line-break/arena/candidate-1/design.md	partial
+2026-10-08T07:18:30Z	k5-arena	candidate-2 design landed	await 3 and 4	.audit/line-break/arena/candidate-2/design.md	partial
+2026-10-08T07:20:30Z	k5-arena	candidate-4 design landed (immutable clusters + const pair table + LineSpan)	await candidate-3	.audit/line-break/arena/candidate-4/design.md	partial
+2026-10-08T07:40:00Z	k5-arena	all 4 candidates landed; parent base=cand4 grafts BK-free scalars+OP/CL tables; cross-judge running	exhaust design space then pick	.audit/line-break/arena/synthesis/design.md	pending-judge
+2026-10-08T07:41:00Z	k5-block	branch feat/line-break; pinned unicode-segmentation=1.13.3; added UnbreakableWiderThanFrame	consensus across all arena candidates	Cargo.toml,src/error.rs	partial
+2026-10-08T07:43:00Z	k5-arena	reconciled: BASE cand2 after cross-judge; parent dropped cand4; graft cand3 PairClass+tests	judge found cand4 measured/stub defects	.audit/line-break/arena/synthesis/cross-judge.md	picked
+2026-10-08T07:44:00Z	k5-impl	spawned poteto-agent grok-4.7-high to implement cand2+grafts on feat/line-break	Feature Phase D	Task 5acd3ebb	running
+2026-10-08T07:50:00Z	k5-done	knife 5 committed on feat/line-break; all gates green both features	autonomous exit unit for knife 5	b9de080	tests green
+2026-10-08T07:51:00Z	handoff	wrote knives-5-8.md; recommend new chat for knife 6+	context long after arena+impl	.audit/handoff/knives-5-8.md	knife5 green; 6-8 open

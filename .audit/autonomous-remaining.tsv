@@ -1,0 +1,2 @@
+2026-09-30T10:09:00Z	start	autonomous run slices 3-8; user declines per-slice new-chat babysit	Never Block + Guard overridden by operator	user message	open
+2026-09-30T10:09:00Z	frame	exit: slices 3-8 local commits + four gates green each; PR optional if remote absent	autonomous-run step 1	user ask implement	open

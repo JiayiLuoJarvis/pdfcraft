@@ -1,4 +1,11 @@
 # Examples
 
-Public DSL examples go here after `docs/提案书.md` §2 is settled and
-`document` builders exist. Keep each example compiling under MSRV 1.92.
+## hello
+
+Minimal `document` → `to_pdf` path. Default feature includes krilla.
+
+```bash
+cargo run --example hello
+```
+
+Writes `hello.pdf` in the current directory. Glyphs must exist in the registered font. The fixture used here is Latin-only. Chinese or other missing cmap entries fail the whole document.

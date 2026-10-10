@@ -1,0 +1,10 @@
+ts	phase	decision	why	evidence	result
+2026-10-08T05:58:10Z	start	knife 4 fonts/skrifa autonomous run	predicate: knives 4-8 each one branch one commit four gates green both feature configs; this unit is knife 4 only until green	handoff .audit/handoff/knives-3-8.md; branch feat/fonts-skrifa @ f082ab5	open
+2026-10-08T05:58:10Z	classify	route knife 4 as Feature then architect/arena	handoff names Feature; types cross fonts measure backend	playbooks/feature.md playbooks/autonomous-run.md	open
+2026-10-08T06:00:38Z	how	wrote .audit/fonts-skrifa/how.md from src+design+krilla 0.8.2 APIs	layered FontStore outside backend; emit draws glyphs; two skrifa copies	how.md; krilla font.rs Font::new; canvas GlyphRun	grounded
+2026-10-08T06:06:40Z	arena	base candidate-2 Mark::Glyphs carries Arc bytes; c1/c3 dropout	emit stays store-free; fonts.rs never uses krilla; empty FontStore default grafted so path tests keep new()	.audit/fonts-skrifa/arena/synthesis/SYNTHESIS.md	picked
+2026-10-08T06:27:41Z	gates	four gates green both feature configs	fmt clippy test doc; A advance 707; TJ -250	cargo test --features backend-krilla	tests green
+2026-10-08T06:27:41Z	pick	kept C2 Mark::Glyphs; grafted C1 emit Font cache; rejected InvalidGlyphRun	self-contained plan; fonts never use krilla	.audit/fonts-skrifa/arena/synthesis/SYNTHESIS.md	shipped
+2026-10-08T06:29:21Z	commit	landed knife 4 at debb997 on feat/fonts-skrifa	four gates green both configs; OFL fixture committed	git log -1 debb997	predicate knife4 met
+2026-10-08T06:29:21Z	handoff	wrote knives-4-8.md; stop for new chat before knife 5	context length; autonomous run continues in next session	.audit/handoff/knives-4-8.md	open knives 5-8
+2026-10-08T06:34:00Z	follow-up	kept late implementer cleanup as 9392f85	C2 no Font cache; TJ parse; oversize test; gates green	git log -1 9392f85	knife4 tip updated

@@ -1,0 +1,3 @@
+ Documenting quire-pdf v0.0.0 (/mnt/data/demo/quire)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.54s
+   Generated /mnt/data/demo/quire/target/doc/quire_pdf/index.html
