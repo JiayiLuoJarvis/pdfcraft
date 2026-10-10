@@ -369,7 +369,7 @@ mod tests {
             default_column_gap(),
             vec![
                 (ratio(1.0), vec![text("A\nB\nC", &style)]),
-                (ColumnWidth::Auto, vec![text("X", &style)]),
+                (ratio(1.0), vec![text("X", &style)]),
             ],
         )
         .unwrap();
@@ -402,7 +402,7 @@ mod tests {
             default_column_gap(),
             vec![
                 (ratio(1.0), vec![text("A", &narrow)]),
-                (ColumnWidth::Auto, vec![text("B", &wide)]),
+                (ratio(1.0), vec![text("B", &wide)]),
             ],
         )
         .unwrap();
@@ -426,7 +426,7 @@ mod tests {
                         "A\nB\nC", &style,
                     )]))],
                 ),
-                (ColumnWidth::Auto, vec![text("X", &style)]),
+                (ratio(1.0), vec![text("X", &style)]),
             ],
         )
         .unwrap();
