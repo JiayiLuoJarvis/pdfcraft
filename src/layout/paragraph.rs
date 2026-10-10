@@ -833,7 +833,10 @@ mod tests {
         );
         let glyphs = glyph_spans(&fragment);
         assert_eq!(
-            glyphs.iter().map(|(text, _, _)| text.as_str()).collect::<Vec<_>>(),
+            glyphs
+                .iter()
+                .map(|(text, _, _)| text.as_str())
+                .collect::<Vec<_>>(),
             ["A", "BC", "D"]
         );
         let links = hits(&fragment);
@@ -851,7 +854,11 @@ mod tests {
         let (mut fonts, style) = fonts_and_style();
         let line = body_line(&fonts, &style);
         let fragment = fit(
-            vec![text_item("第第", Face::Body, Some("https://example.com/wrap"))],
+            vec![text_item(
+                "第第",
+                Face::Body,
+                Some("https://example.com/wrap"),
+            )],
             &style,
             &mut fonts,
             12.0,
@@ -859,7 +866,9 @@ mod tests {
         );
         let links = hits(&fragment);
         assert_eq!(links.len(), 2);
-        assert!(links.iter().all(|hit| hit.target == "https://example.com/wrap"));
+        assert!(links
+            .iter()
+            .all(|hit| hit.target == "https://example.com/wrap"));
         assert_eq!(links[0].x.to_bits(), 0.0f32.to_bits());
         assert_eq!(links[0].y.to_bits(), 0.0f32.to_bits());
         assert_eq!(links[0].width.to_bits(), 12.0f32.to_bits());
@@ -921,7 +930,10 @@ mod tests {
         let glyphs = glyph_spans(&fragment);
         let links = hits(&fragment);
         assert_eq!(
-            links.iter().map(|hit| hit.target.as_str()).collect::<Vec<_>>(),
+            links
+                .iter()
+                .map(|hit| hit.target.as_str())
+                .collect::<Vec<_>>(),
             ["a", "b", "a"]
         );
         assert!(pt_near(links[0].x, glyphs[0].1));
@@ -973,16 +985,11 @@ mod tests {
         );
         let links = hits(&fragment);
         assert_eq!(links.len(), 2);
-        assert!(
-            fragment
-                .commands
-                .iter()
-                .any(|command| matches!(command, FragmentCommand::Stroke { .. }))
-        );
-        assert!(pt_near(
-            links[1].x - (links[0].x + links[0].width),
-            30.0
-        ));
+        assert!(fragment
+            .commands
+            .iter()
+            .any(|command| matches!(command, FragmentCommand::Stroke { .. })));
+        assert!(pt_near(links[1].x - (links[0].x + links[0].width), 30.0));
     }
 
     #[test]

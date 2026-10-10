@@ -757,7 +757,12 @@ mod tests {
             header: Some(Box::new(|_: &PageInfo| Err(Error::EmptyLink))),
             ..Decorations::none()
         };
-        let (result, rec) = render(text("A", &style), &mut fonts, page(200.0, 400.0), &decorations);
+        let (result, rec) = render(
+            text("A", &style),
+            &mut fonts,
+            page(200.0, 400.0),
+            &decorations,
+        );
         assert_eq!(result, Err(Error::EmptyLink));
         assert!(rec.commands().is_empty());
     }
