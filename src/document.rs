@@ -761,6 +761,7 @@ fn lower_paragraph(paragraph: Paragraph, parent: &Style) -> Result<FlowNode> {
     }
     let mut style = parent.clone();
     style.first_line_indent = paragraph.first_line_indent;
+    style.align = paragraph.align;
     Ok(FlowNode::Text(TextNode::from_items(paragraph.items, style)))
 }
 
@@ -788,6 +789,7 @@ fn assemble_list(parent: Flow, kind: ListKind, f: impl FnOnce(&mut List)) -> Res
 pub struct Paragraph {
     items: Vec<InlineItem>,
     first_line_indent: Length<NonNegative>,
+    align: TextAlign,
     active_link: Option<LinkTarget>,
     error: Option<Error>,
 }
@@ -797,6 +799,7 @@ impl Default for Paragraph {
         Self {
             items: Vec::new(),
             first_line_indent: NonNegative::ZERO,
+            align: TextAlign::Start,
             active_link: None,
             error: None,
         }
@@ -834,6 +837,16 @@ impl Paragraph {
     /// Sets the horizontal inset of the first visual line.
     pub fn first_line_indent(&mut self, indent: Length<NonNegative>) {
         self.first_line_indent = indent;
+    }
+
+    /// Centers each visual line in the current frame.
+    pub fn center(&mut self) {
+        self.align = TextAlign::Center;
+    }
+
+    /// Places each visual line at the end of the current frame.
+    pub fn end(&mut self) {
+        self.align = TextAlign::End;
     }
 
     /// Appends the text and bold calls inside `f` as one link to `uri`.

@@ -2375,6 +2375,42 @@ fn margin_presets_match_uniform_insets() {
 }
 
 #[test]
+fn paragraph_center_and_end_align_each_visual_line() {
+    let page_w = 120.0;
+    let pages = document(
+        PageSize::custom(Size::try_pt(page_w, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| p.text("A"));
+            doc.paragraph(|p| {
+                p.center();
+                p.text("B");
+            });
+            doc.paragraph(|p| {
+                p.end();
+                p.text("C");
+            });
+            doc.paragraph(|p| {
+                p.center();
+                p.end();
+                p.text("D");
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let a = glyph(&pages[0], "A");
+    let b = glyph(&pages[0], "B");
+    let c = glyph(&pages[0], "C");
+    let d = glyph(&pages[0], "D");
+    assert!(pt_near(a.x, 0.0));
+    assert!(pt_near(b.x, (page_w - b.width) / 2.0));
+    assert!(pt_near(c.x + c.width, page_w));
+    assert!(pt_near(d.x + d.width, page_w));
+}
+
+#[test]
 fn inch_preset_on_a_narrow_page_is_invalid_geometry() {
     let result = document(
         PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
