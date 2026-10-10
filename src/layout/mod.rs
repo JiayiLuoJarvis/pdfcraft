@@ -3,6 +3,7 @@
 pub mod columns;
 pub mod decorate;
 pub mod flow;
+pub mod frame;
 pub mod hline;
 pub mod image;
 pub mod list;

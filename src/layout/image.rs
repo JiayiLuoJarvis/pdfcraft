@@ -3,7 +3,7 @@
 use crate::canvas::DecodedImage;
 use crate::error::{Error, ErrorKind, Result};
 use crate::geom::{Length, Positive, Rect, Size};
-use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, Split};
+use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
 
 /// An image in the flow. `size` is resolved when the node is built.
@@ -26,7 +26,7 @@ impl ImageNode {
         Ok(Self { image, size, align })
     }
 
-    pub(crate) fn split(self, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
         let width = self.size.width().as_pt();
         let height = self.size.height().as_pt();
         if width > avail.width {
@@ -43,7 +43,7 @@ impl ImageNode {
             .into());
         }
         if height > avail.height {
-            return Ok(Split::MoveToNextPage(FlowNode::Image(self)));
+            return Ok(Split::MoveToNextPage(self));
         }
         let x = match self.align {
             TextAlign::Start => 0.0,
@@ -100,6 +100,7 @@ mod tests {
     use crate::fonts::FontStore;
     use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
     use crate::layout::decorate::Decorations;
+    use crate::layout::flow::FlowNode;
     use crate::layout::test_util::{page, render};
 
     fn pixels(width: u32, height: u32) -> DecodedImage {
@@ -234,7 +235,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             moved.split(frame(300.0, 10.0, 100.0)).unwrap(),
-            Split::MoveToNextPage(FlowNode::Image(_))
+            Split::MoveToNextPage(_)
         ));
     }
 

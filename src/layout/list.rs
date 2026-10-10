@@ -7,7 +7,7 @@ use std::num::NonZeroU32;
 
 use crate::error::{GeometryKind, Result};
 use crate::geom::{Length, Point, Positive};
-use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
+use crate::layout::frame::{Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::nesting::ItemBody;
 use crate::layout::paragraph::single_line_run;
 use crate::layout::style::Style;
@@ -88,29 +88,29 @@ impl ListKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ListSpec {
+pub(crate) struct ListSpec<N> {
     pub(crate) kind: ListKind,
     pub(crate) marker_width: Length<Positive>,
     pub(crate) nest_indent: Option<Length<Positive>>,
     pub(crate) marker_style: Style,
-    pub(crate) items: Vec<ListItem>,
+    pub(crate) items: Vec<ListItem<N>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ListItem {
+pub(crate) struct ListItem<N> {
     marker: Option<String>,
-    body: ItemBody,
+    body: ItemBody<N>,
 }
 
-impl ListItem {
-    pub(crate) fn new(content: Vec<FlowNode>) -> Result<Self> {
+impl<N: Flowable> ListItem<N> {
+    pub(crate) fn new(content: Vec<N>) -> Result<Self> {
         Ok(Self {
             marker: None,
             body: ItemBody::new(content)?,
         })
     }
 
-    pub(crate) fn custom(marker: impl Into<String>, content: Vec<FlowNode>) -> Result<Self> {
+    pub(crate) fn custom(marker: impl Into<String>, content: Vec<N>) -> Result<Self> {
         let marker = marker.into();
         if marker.is_empty() {
             return Err(GeometryKind::EmptyListMarker.into());
@@ -123,21 +123,21 @@ impl ListItem {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct PendingItem {
+struct PendingItem<N> {
     pending_marker: Option<String>,
-    body: FlowNode,
+    body: N,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ListNode {
+pub(crate) struct ListNode<N> {
     marker_width: f32,
     indent: f32,
     marker_style: Style,
-    items: VecDeque<PendingItem>,
+    items: VecDeque<PendingItem<N>>,
 }
 
-impl ListNode {
-    pub(crate) fn new(spec: ListSpec) -> Result<Self> {
+impl<N: Flowable> ListNode<N> {
+    pub(crate) fn new(spec: ListSpec<N>) -> Result<Self> {
         let marker_width = spec.marker_width.as_pt();
         let indent = spec.nest_indent.map_or(marker_width, Length::as_pt);
         if indent < marker_width {
@@ -169,7 +169,11 @@ impl ListNode {
         })
     }
 
-    pub(crate) fn split(mut self, ctx: &mut LayoutCtx<'_>, mut avail: Frame) -> Result<Split> {
+    pub(crate) fn split(
+        mut self,
+        ctx: &mut LayoutCtx<'_>,
+        mut avail: Frame,
+    ) -> Result<Split<Self>> {
         let body_w = avail.width - self.indent;
         if body_w <= 0.0 || self.marker_width >= avail.width {
             return Err(GeometryKind::ListIndentWiderThanFrame {
@@ -202,7 +206,7 @@ impl ListNode {
                         body: node,
                     });
                     if !placed_any {
-                        return Ok(Split::MoveToNextPage(FlowNode::List(self)));
+                        return Ok(Split::MoveToNextPage(self));
                     }
                     return Ok(partial(commands, y, self));
                 }
@@ -247,7 +251,7 @@ impl ListNode {
     }
 }
 
-fn partial(commands: Vec<FragmentCommand>, y: f32, rest: ListNode) -> Split {
+fn partial<N>(commands: Vec<FragmentCommand>, y: f32, rest: ListNode<N>) -> Split<ListNode<N>> {
     Split::Partial {
         head_height: y,
         head: Fragment {
@@ -255,7 +259,7 @@ fn partial(commands: Vec<FragmentCommand>, y: f32, rest: ListNode) -> Split {
             spacing_after: 0.0,
             commands,
         },
-        tail: FlowNode::List(rest),
+        tail: rest,
     }
 }
 
@@ -276,12 +280,18 @@ mod tests {
     use crate::geom::{Color, NonNegative};
     use crate::layout::columns::ColumnWidth;
     use crate::layout::decorate::Decorations;
+    use crate::layout::flow::FlowNode;
     use crate::layout::table::{TableNode, TableSpec};
     use crate::layout::test_util::{
         bits, fonts_and_style, metrics, page, render, runs, text, texts,
     };
 
-    fn spec(kind: ListKind, marker_width: f32, style: &Style, items: Vec<ListItem>) -> ListSpec {
+    fn spec(
+        kind: ListKind,
+        marker_width: f32,
+        style: &Style,
+        items: Vec<ListItem<FlowNode>>,
+    ) -> ListSpec<FlowNode> {
         ListSpec {
             kind,
             marker_width: Positive::pt(marker_width).unwrap(),
@@ -298,7 +308,7 @@ mod tests {
         }
     }
 
-    fn item(s: &str, style: &Style) -> ListItem {
+    fn item(s: &str, style: &Style) -> ListItem<FlowNode> {
         ListItem::new(vec![text(s, style)]).unwrap()
     }
 

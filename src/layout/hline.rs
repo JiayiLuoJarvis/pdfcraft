@@ -2,7 +2,7 @@
 
 use crate::error::{Error, ErrorKind, Result};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
-use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, Split};
+use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
 
 /// A solid horizontal line in the flow.
@@ -40,7 +40,7 @@ impl HLineNode {
         self.space_before.as_pt() + self.thickness.as_pt() + self.space_after.as_pt()
     }
 
-    pub(crate) fn split(self, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
         let width = self.width.map_or(avail.width, Length::as_pt);
         let height = self.height();
         if width > avail.width {
@@ -57,7 +57,7 @@ impl HLineNode {
             .into());
         }
         if height > avail.height {
-            return Ok(Split::MoveToNextPage(FlowNode::HLine(self)));
+            return Ok(Split::MoveToNextPage(self));
         }
         let x = match self.align {
             TextAlign::Start => 0.0,
@@ -88,6 +88,7 @@ mod tests {
     use crate::fonts::FontStore;
     use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
     use crate::layout::decorate::Decorations;
+    use crate::layout::flow::FlowNode;
     use crate::layout::test_util::{page, render, strokes};
 
     fn frame(width: f32, height: f32, full: f32) -> Frame {
@@ -195,7 +196,7 @@ mod tests {
         let moved = node(None, TextAlign::Center, 1.0, 20.0, 20.0);
         assert!(matches!(
             moved.split(frame(300.0, 10.0, 100.0)).unwrap(),
-            Split::MoveToNextPage(FlowNode::HLine(_))
+            Split::MoveToNextPage(_)
         ));
     }
 

@@ -19,7 +19,7 @@ pub enum Numbering {
 /// Items being added to a list. Markers hang in an 18 pt column by default.
 pub struct List {
     pub(crate) parent: Flow,
-    pub(crate) items: Vec<Result<ListItem>>,
+    pub(crate) items: Vec<Result<ListItem<FlowNode>>>,
     pub(crate) start: NonZeroU32,
     pub(crate) marker_width: Length<Positive>,
     pub(crate) nest_indent: Option<Length<Positive>>,

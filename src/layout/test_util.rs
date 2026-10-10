@@ -5,7 +5,8 @@ use crate::error::Result;
 use crate::fonts::{fixture_bytes, FontSource, FontStore};
 use crate::geom::{Color, Margins, NonNegative, Path, PathVerb, Positive, Size};
 use crate::layout::decorate::Decorations;
-use crate::layout::flow::{FlowNode, LayoutCtx};
+use crate::layout::flow::FlowNode;
+use crate::layout::frame::LayoutCtx;
 use crate::layout::paginate::{paginate_root, PaginateConfig};
 use crate::layout::paragraph::TextNode;
 use crate::layout::style::{Style, TextAlign};
@@ -48,6 +49,14 @@ pub(crate) fn page(width: f32, height: f32) -> PaginateConfig {
     PaginateConfig {
         page_size: Size::try_pt(width, height).unwrap(),
         margins: Margins::default(),
+    }
+}
+
+/// A 200 x 400 pt page with equal side margins.
+pub(crate) fn margins(top: f32, side: f32, bottom: f32) -> PaginateConfig {
+    PaginateConfig {
+        page_size: Size::try_pt(200.0, 400.0).unwrap(),
+        margins: Margins::new(pt(top), pt(side), pt(bottom), pt(side)),
     }
 }
 

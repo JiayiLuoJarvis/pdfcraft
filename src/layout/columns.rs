@@ -4,7 +4,7 @@
 
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Result};
 use crate::geom::{Length, NonNegative, Positive};
-use crate::layout::flow::{FlowNode, Fragment, Frame, LayoutCtx, Split};
+use crate::layout::frame::{Flowable, Fragment, Frame, LayoutCtx, Split};
 use crate::layout::nesting::{check_content, Container};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,16 +87,16 @@ pub(crate) fn default_column_gap() -> Length<NonNegative> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ColumnsNode {
+pub(crate) struct ColumnsNode<N> {
     widths: Vec<ColumnWidth>,
     gap: f32,
-    columns: Vec<FlowNode>,
+    columns: Vec<N>,
 }
 
-impl ColumnsNode {
+impl<N: Flowable> ColumnsNode<N> {
     pub(crate) fn new(
         gap: Length<NonNegative>,
-        columns: Vec<(ColumnWidth, Vec<FlowNode>)>,
+        columns: Vec<(ColumnWidth, Vec<N>)>,
     ) -> Result<Self> {
         if columns.len() < 2 {
             return Err(Error::from(ErrorKind::ColumnWidths {
@@ -108,7 +108,7 @@ impl ColumnsNode {
         for (width, kids) in columns {
             check_content(Container::Column, &kids)?;
             widths.push(width);
-            stacks.push(FlowNode::Stack(kids));
+            stacks.push(N::stack(kids));
         }
         Ok(Self {
             widths,
@@ -117,11 +117,11 @@ impl ColumnsNode {
         })
     }
 
-    pub(crate) fn column_stacks(&self) -> &[FlowNode] {
+    pub(crate) fn column_stacks(&self) -> &[N] {
         &self.columns
     }
 
-    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split<Self>> {
         let gaps: f32 = self.columns.iter().skip(1).map(|_| self.gap).sum();
         let inner = avail.width - gaps;
         if inner <= 0.0 {
@@ -158,15 +158,15 @@ impl ColumnsNode {
             height = height.max(placed);
             spacing_after = spacing_after.max(fragment.spacing_after);
             commands.extend(fragment.with_offset(x, 0.0)?.commands);
-            rest.push(tail.unwrap_or(FlowNode::Stack(Vec::new())));
+            rest.push(tail.unwrap_or_else(|| N::stack(Vec::new())));
             x += width + self.gap;
         }
 
-        let tail = FlowNode::Columns(ColumnsNode {
+        let tail = ColumnsNode {
             widths: self.widths,
             gap: self.gap,
             columns: rest,
-        });
+        };
         if !unfinished {
             return Ok(Split::Fit {
                 height,
@@ -197,7 +197,7 @@ mod tests {
     use super::*;
     use crate::error::GeometryKind;
     use crate::layout::decorate::Decorations;
-    use crate::layout::flow::KeepTogetherNode;
+    use crate::layout::flow::{FlowNode, KeepTogetherNode};
     use crate::layout::paragraph::ParagraphNode;
     use crate::layout::test_util::{
         bits, fonts_and_style, metrics, page, render, runs, text, texts,

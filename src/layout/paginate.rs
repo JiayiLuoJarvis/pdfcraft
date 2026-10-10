@@ -7,8 +7,9 @@ use std::num::NonZeroU32;
 use crate::canvas::Canvas;
 use crate::error::{Error, GeometryKind, Region, Result};
 use crate::geom::{Margins, Point, Size};
-use crate::layout::decorate::{measure_bands, Decorations, PageBands};
-use crate::layout::flow::{draw_fragment, FlowNode, Frame, LayoutCtx, PlacedFragment, Split};
+use crate::layout::decorate::{measure_bands, Decorations, PageBands, SectionSpan};
+use crate::layout::flow::FlowNode;
+use crate::layout::frame::{draw_fragment, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
 
 /// Page geometry for pagination. Header and footer bands sit inside the margins.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,14 +62,6 @@ struct PagePlan {
 pub(crate) struct SectionJob<'a> {
     pub(crate) config: PaginateConfig,
     pub(crate) root: FlowNode,
-    pub(crate) decorations: &'a Decorations<'a>,
-}
-
-/// Pages `[start, start + len)` share one section's margins and decorations.
-pub(crate) struct SectionSpan<'a> {
-    pub(crate) start: usize,
-    pub(crate) len: NonZeroU32,
-    pub(crate) margins: Margins,
     pub(crate) decorations: &'a Decorations<'a>,
 }
 

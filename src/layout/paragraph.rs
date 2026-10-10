@@ -6,7 +6,7 @@ use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
 use crate::error::{Error, ErrorKind, GeometryKind, Result};
 use crate::fonts::{FontId, FontStore};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
-use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
+use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
 use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
 use crate::text::line_break::{break_spans, Advance, LineBudget, Seg, Span, SpanLine};
@@ -125,7 +125,11 @@ impl TextNode {
     }
 
     /// Every outcome hands back a laid-out `Paragraph`, so a page move never wraps twice.
-    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(
+        self,
+        ctx: &mut LayoutCtx<'_>,
+        avail: Frame,
+    ) -> Result<Split<ParagraphNode>> {
         ParagraphNode::layout_runs(ctx.fonts, &self.items, &self.style, avail.width)?.split(avail)
     }
 }
@@ -215,7 +219,7 @@ impl ParagraphNode {
     }
 
     /// Lines were wrapped at `self.width`; a narrower frame would overflow silently.
-    pub(crate) fn split(self, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
         if self.width > avail.width {
             return Err(GeometryKind::LaidOutWiderThanFrame {
                 width: self.width,
@@ -237,12 +241,12 @@ impl ParagraphNode {
             .into());
         }
         if avail.height < self.line_height {
-            return Ok(Split::MoveToNextPage(FlowNode::Paragraph(self)));
+            return Ok(Split::MoveToNextPage(self));
         }
 
         let max_lines = lines_fitting(avail.height, self.line_height).min(self.lines.len());
         if max_lines == 0 {
-            return Ok(Split::MoveToNextPage(FlowNode::Paragraph(self)));
+            return Ok(Split::MoveToNextPage(self));
         }
 
         if max_lines >= self.lines.len() {
@@ -264,7 +268,7 @@ impl ParagraphNode {
         Ok(Split::Partial {
             head_height: height,
             head,
-            tail: FlowNode::Paragraph(tail),
+            tail,
         })
     }
 }
@@ -696,7 +700,7 @@ mod tests {
     use crate::canvas::{CanvasCommand, LinkTarget, RecordingCanvas};
     use crate::fonts::{fixture_bytes, FontSource};
     use crate::geom::NonNegative;
-    use crate::layout::flow::{draw_fragment, Frame};
+    use crate::layout::frame::draw_fragment;
     use crate::layout::style::TextAlign;
     use crate::layout::test_util::fonts_and_style;
     use crate::text::measure::line_metrics;

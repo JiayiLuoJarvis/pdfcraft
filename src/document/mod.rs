@@ -22,7 +22,8 @@ use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio
 use crate::layout::decorate::{
     BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
 };
-use crate::layout::flow::{FlowNode, KeepTogetherNode, LayoutCtx, SpacerNode};
+use crate::layout::flow::{FlowNode, KeepTogetherNode, SpacerNode};
+use crate::layout::frame::LayoutCtx;
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};

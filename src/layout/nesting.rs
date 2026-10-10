@@ -5,7 +5,7 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use crate::error::{Error, ErrorKind, Result};
-use crate::layout::flow::{FlowNode, KeepTogetherNode};
+use crate::layout::frame::{Flowable, NodeKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Container {
@@ -27,87 +27,85 @@ impl Container {
 }
 
 /// Rejects nodes `container` may not hold, recursing into stacks and keep-together groups.
-pub(crate) fn check_content(container: Container, nodes: &[FlowNode]) -> Result<()> {
+pub(crate) fn check_content<N: Flowable>(container: Container, nodes: &[N]) -> Result<()> {
     for node in nodes {
-        let allowed = match node {
-            FlowNode::Text(_)
-            | FlowNode::Paragraph(_)
-            | FlowNode::Spacer(_)
-            | FlowNode::HLine(_) => true,
-            FlowNode::Stack(kids) => {
-                check_content(container, kids)?;
+        let kind = node.kind();
+        let allowed = match kind {
+            NodeKind::Paragraph | NodeKind::Spacer | NodeKind::HLine => true,
+            NodeKind::Stack => {
+                check_content(container, node.nested())?;
                 true
             }
-            FlowNode::KeepTogether(group) => {
-                if let (Container::Column, KeepTogetherNode::Open(kids)) = (container, group) {
-                    check_content(container, kids)?;
+            NodeKind::KeepTogether => {
+                if container == Container::Column {
+                    check_content(container, node.nested())?;
                 }
                 container == Container::Column
             }
-            FlowNode::Columns(columns) => match container {
+            NodeKind::Columns => match container {
                 Container::Column => true,
                 Container::Band => {
-                    check_content(container, columns.column_stacks())?;
+                    check_content(container, node.nested())?;
                     true
                 }
                 Container::TableCell | Container::ListItem => false,
             },
-            FlowNode::Table(_) => container == Container::Column,
-            FlowNode::List(_) => container != Container::Band,
-            FlowNode::Image(_) => matches!(container, Container::Column | Container::TableCell),
-            FlowNode::PageBreak => false,
+            NodeKind::Table => container == Container::Column,
+            NodeKind::List => container != Container::Band,
+            NodeKind::Image => matches!(container, Container::Column | Container::TableCell),
+            NodeKind::PageBreak => false,
         };
         if !allowed {
             return Err(Error::from(ErrorKind::InvalidCellContent {
                 container: container.name(),
-                node: node_name(node),
+                node: kind_name(kind),
             }));
         }
     }
     Ok(())
 }
 
-fn node_name(node: &FlowNode) -> &'static str {
-    match node {
-        FlowNode::Paragraph(_) | FlowNode::Text(_) => "paragraph",
-        FlowNode::Spacer(_) => "spacer",
-        FlowNode::PageBreak => "page break",
-        FlowNode::KeepTogether(_) => "keep together",
-        FlowNode::Stack(_) => "stack",
-        FlowNode::Columns(_) => "columns",
-        FlowNode::Table(_) => "table",
-        FlowNode::List(_) => "list",
-        FlowNode::Image(_) => "image",
-        FlowNode::HLine(_) => "horizontal line",
+fn kind_name(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Paragraph => "paragraph",
+        NodeKind::Spacer => "spacer",
+        NodeKind::PageBreak => "page break",
+        NodeKind::KeepTogether => "keep together",
+        NodeKind::Stack => "stack",
+        NodeKind::Columns => "columns",
+        NodeKind::Table => "table",
+        NodeKind::List => "list",
+        NodeKind::Image => "image",
+        NodeKind::HLine => "horizontal line",
     }
 }
 
 /// Table cell content that passed [`check_content`].
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CellBody(Vec<FlowNode>);
+pub(crate) struct CellBody<N>(Vec<N>);
 
-impl CellBody {
-    pub(crate) fn new(nodes: Vec<FlowNode>) -> Result<Self> {
+impl<N: Flowable> CellBody<N> {
+    pub(crate) fn new(nodes: Vec<N>) -> Result<Self> {
         check_content(Container::TableCell, &nodes)?;
         Ok(Self(nodes))
     }
 
-    pub(crate) fn into_node(self) -> FlowNode {
-        FlowNode::Stack(self.0)
+    pub(crate) fn into_node(self) -> N {
+        N::stack(self.0)
     }
 }
 
 /// List item content that passed [`check_content`].
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ItemBody(Vec<FlowNode>);
+pub(crate) struct ItemBody<N>(Vec<N>);
 
-impl ItemBody {
-    pub(crate) fn new(nodes: Vec<FlowNode>) -> Result<Self> {
+impl<N: Flowable> ItemBody<N> {
+    pub(crate) fn new(nodes: Vec<N>) -> Result<Self> {
         check_content(Container::ListItem, &nodes)?;
         Ok(Self(nodes))
     }
 
-    pub(crate) fn into_node(self) -> FlowNode {
-        FlowNode::Stack(self.0)
+    pub(crate) fn into_node(self) -> N {
+        N::stack(self.0)
     }
 }

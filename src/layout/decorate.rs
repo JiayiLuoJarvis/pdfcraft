@@ -6,8 +6,9 @@ use std::num::NonZeroU32;
 
 use crate::error::{Error, ErrorKind, GeometryKind, Region, Result};
 use crate::geom::{Ink, Margins, Paint, Path, Point, Size, Stroke};
-use crate::layout::flow::{
-    stacked_height, FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
+use crate::layout::flow::FlowNode;
+use crate::layout::frame::{
+    stacked_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
 };
 use crate::layout::nesting::{check_content, Container};
 use crate::layout::paragraph::single_line_run;
@@ -86,6 +87,14 @@ impl Decorations<'_> {
     }
 }
 
+/// Pages `[start, start + len)` share one section's margins and decorations.
+pub(crate) struct SectionSpan<'a> {
+    pub(crate) start: usize,
+    pub(crate) len: NonZeroU32,
+    pub(crate) margins: Margins,
+    pub(crate) decorations: &'a Decorations<'a>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct PageBands {
     pub(crate) behind: Option<PlacedFragment>,
@@ -100,7 +109,7 @@ pub(crate) struct PageBands {
 /// decorations, and section page counters. `number` and `count` stay document-wide.
 pub(crate) fn measure_bands(
     sizes: &[Size],
-    spans: &[crate::layout::paginate::SectionSpan<'_>],
+    spans: &[SectionSpan<'_>],
     ctx: &mut LayoutCtx<'_>,
 ) -> Result<Vec<PageBands>> {
     let count = page_count(sizes.len())?;
@@ -307,11 +316,10 @@ mod tests {
     use crate::canvas::CanvasCommand;
     use crate::geom::{Color, Ink, NonNegative, Path, Pen, Rect};
     use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
-    use crate::layout::paginate::PaginateConfig;
     use crate::layout::table::{TableNode, TableSpec};
     use crate::layout::test_util::{
-        bits, ellipse_center_radii, fills, fonts_and_style, metrics, page, pt, render, runs, text,
-        texts,
+        bits, ellipse_center_radii, fills, fonts_and_style, margins, metrics, page, render, runs,
+        text, texts,
     };
 
     fn band(label: &'static str, style: &Style) -> BandContent<'static> {
@@ -325,13 +333,6 @@ mod tests {
             let label = format!("Page {} / {}", page.number.get(), page.count.get());
             Ok(vec![text(&label, &style)])
         })
-    }
-
-    fn margins(top: f32, side: f32, bottom: f32) -> PaginateConfig {
-        PaginateConfig {
-            page_size: Size::try_pt(200.0, 400.0).unwrap(),
-            margins: Margins::new(pt(top), pt(side), pt(bottom), pt(side)),
-        }
     }
 
     fn three_pages_with_blank(style: &Style) -> FlowNode {

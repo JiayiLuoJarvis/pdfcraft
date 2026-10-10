@@ -9,8 +9,8 @@ use std::ops::Range;
 use crate::error::{CellSpanReason, ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
 use crate::layout::columns::{resolve_column_widths, ColumnWidth};
-use crate::layout::flow::{
-    natural_height, FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split,
+use crate::layout::frame::{
+    natural_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split,
 };
 use crate::layout::nesting::CellBody;
 
@@ -22,16 +22,16 @@ pub(crate) struct Border {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TableSpec {
+pub(crate) struct TableSpec<N> {
     pub(crate) widths: Vec<ColumnWidth>,
-    pub(crate) header: Vec<Vec<Cell>>,
-    pub(crate) body: Vec<Vec<Cell>>,
+    pub(crate) header: Vec<Vec<Cell<N>>>,
+    pub(crate) body: Vec<Vec<Cell<N>>>,
     pub(crate) repeat_header: bool,
     pub(crate) padding: Length<NonNegative>,
     pub(crate) border: Border,
 }
 
-impl TableSpec {
+impl<N> TableSpec<N> {
     pub(crate) fn new(widths: Vec<ColumnWidth>) -> Self {
         Self {
             widths,
@@ -48,15 +48,15 @@ impl TableSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Cell {
-    body: CellBody,
+pub(crate) struct Cell<N> {
+    body: CellBody<N>,
     col_span: NonZeroU16,
     row_span: NonZeroU16,
     fill: Option<Color>,
 }
 
-impl Cell {
-    pub(crate) fn new(content: Vec<FlowNode>) -> Result<Self> {
+impl<N: Flowable> Cell<N> {
+    pub(crate) fn new(content: Vec<N>) -> Result<Self> {
         Ok(Self {
             body: CellBody::new(content)?,
             col_span: NonZeroU16::MIN,
@@ -79,22 +79,22 @@ impl Cell {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TableNode(TableState);
+pub(crate) struct TableNode<N>(TableState<N>);
 
 #[derive(Debug, Clone, PartialEq)]
-enum TableState {
-    Open(GridTable),
+enum TableState<N> {
+    Open(GridTable<N>),
     Measured(MeasuredTable),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct GridTable {
+struct GridTable<N> {
     widths: Vec<ColumnWidth>,
     padding: f32,
     border: Border,
     header_rows: usize,
     rows: usize,
-    cells: Vec<PlacedCell>,
+    cells: Vec<PlacedCell<N>>,
     repeat_header: bool,
 }
 
@@ -107,9 +107,9 @@ struct Span {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct PlacedCell {
+struct PlacedCell<N> {
     span: Span,
-    body: CellBody,
+    body: CellBody<N>,
     fill: Option<Color>,
 }
 
@@ -129,8 +129,8 @@ struct MeasuredTable {
     draw_header_next: bool,
 }
 
-impl TableNode {
-    pub(crate) fn new(spec: TableSpec) -> Result<Self> {
+impl<N: Flowable> TableNode<N> {
+    pub(crate) fn new(spec: TableSpec<N>) -> Result<Self> {
         let cols = spec.widths.len();
         if cols == 0 {
             return Err(Error::from(ErrorKind::ColumnWidths {
@@ -201,7 +201,7 @@ impl TableNode {
         })))
     }
 
-    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split<Self>> {
         let table = match self.0 {
             TableState::Open(grid) => measure(grid, ctx, avail)?,
             TableState::Measured(table) => table,
@@ -210,7 +210,11 @@ impl TableNode {
     }
 }
 
-fn measure(grid: GridTable, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<MeasuredTable> {
+fn measure<N: Flowable>(
+    grid: GridTable<N>,
+    ctx: &mut LayoutCtx<'_>,
+    avail: Frame,
+) -> Result<MeasuredTable> {
     let widths = resolve_column_widths(&grid.widths, avail.width)?;
     let mut xs = Vec::with_capacity(widths.len() + 1);
     let mut x = 0.0f32;
@@ -414,7 +418,7 @@ fn row_groups(laid: &[LaidCell], header_rows: usize, rows: usize) -> Vec<Range<u
     groups
 }
 
-fn split_measured(mut table: MeasuredTable, avail: Frame) -> Result<Split> {
+fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<TableNode<N>>> {
     if table.width > avail.width {
         return Err(GeometryKind::LaidOutWiderThanFrame {
             width: table.width,
@@ -428,8 +432,8 @@ fn split_measured(mut table: MeasuredTable, avail: Frame) -> Result<Split> {
         if let Some(header) = &table.header {
             let first = table.body.front().map_or(0.0, |b| b.height);
             if header.height + first > avail.height {
-                return Ok(Split::MoveToNextPage(FlowNode::Table(TableNode(
-                    TableState::Measured(table),
+                return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
+                    table,
                 ))));
             }
             commands.extend(header.commands.iter().cloned());
@@ -459,15 +463,15 @@ fn split_measured(mut table: MeasuredTable, avail: Frame) -> Result<Split> {
         });
     }
     if placed == 0 {
-        return Ok(Split::MoveToNextPage(FlowNode::Table(TableNode(
-            TableState::Measured(table),
+        return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
+            table,
         ))));
     }
     table.draw_header_next = table.repeat_header && table.header.is_some();
     Ok(Split::Partial {
         head_height: y,
         head,
-        tail: FlowNode::Table(TableNode(TableState::Measured(table))),
+        tail: TableNode(TableState::Measured(table)),
     })
 }
 
@@ -485,18 +489,18 @@ mod tests {
     use crate::geom::{Margins, Size};
     use crate::layout::columns::{default_column_gap, ColumnsNode, Ratio};
     use crate::layout::decorate::Decorations;
-    use crate::layout::flow::KeepTogetherNode;
+    use crate::layout::flow::{FlowNode, KeepTogetherNode};
     use crate::layout::paginate::PaginateConfig;
     use crate::layout::style::Style;
     use crate::layout::test_util::{
         bits, fills, fonts_and_style, metrics, page, pt, render, runs, strokes, text, texts,
     };
 
-    fn cell(s: &str, style: &Style) -> Cell {
+    fn cell(s: &str, style: &Style) -> Cell<FlowNode> {
         Cell::new(vec![text(s, style)]).unwrap()
     }
 
-    fn filled(s: &str, style: &Style, color: Color) -> Cell {
+    fn filled(s: &str, style: &Style, color: Color) -> Cell<FlowNode> {
         cell(s, style).with_fill(Some(color))
     }
 
@@ -514,7 +518,7 @@ mod tests {
         ]
     }
 
-    fn numbered_rows(style: &Style, n: usize) -> Vec<Vec<Cell>> {
+    fn numbered_rows(style: &Style, n: usize) -> Vec<Vec<Cell<FlowNode>>> {
         (0..n)
             .map(|i| vec![cell(&format!("r{i}"), style), cell("1", style)])
             .collect()

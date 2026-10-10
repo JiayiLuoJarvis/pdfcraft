@@ -1,133 +1,18 @@
-//! Internal flow nodes: consume-self `split` and fragment `draw`.
+//! The concrete flow node enum and its split dispatch.
 //!
 //! Not part of the public API. Callers never implement this protocol.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
 use crate::error::{ErrorKind, GeometryKind, Result};
-use crate::fonts::FontStore;
-use crate::geom::{Length, NonNegative, Paint, Path, Point, Rect, Stroke};
+use crate::geom::{Length, NonNegative};
 use crate::layout::columns::ColumnsNode;
+use crate::layout::frame::{natural_height, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split};
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::ListNode;
 use crate::layout::paragraph::{ParagraphNode, TextNode};
 use crate::layout::table::TableNode;
-
-/// Fonts available while splitting.
-pub(crate) struct LayoutCtx<'a> {
-    pub(crate) fonts: &'a mut FontStore,
-}
-
-/// Remaining layout region. `height` may be zero; `width` and `full_height` stay positive.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Frame {
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) full_height: f32,
-}
-
-impl Frame {
-    pub(crate) fn validate(&self) -> Result<()> {
-        let positive = |value: f32| value.is_finite() && value > 0.0;
-        if positive(self.width)
-            && self.height.is_finite()
-            && self.height >= 0.0
-            && positive(self.full_height)
-        {
-            Ok(())
-        } else {
-            Err(GeometryKind::LayoutFrame {
-                width: self.width,
-                height: self.height,
-                full_height: self.full_height,
-            }
-            .into())
-        }
-    }
-}
-
-/// One placed piece of content. Coordinates are relative to the fragment origin.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Fragment {
-    pub(crate) height: f32,
-    pub(crate) spacing_after: f32,
-    pub(crate) commands: Vec<FragmentCommand>,
-}
-
-impl Fragment {
-    pub(crate) fn empty() -> Self {
-        Self {
-            height: 0.0,
-            spacing_after: 0.0,
-            commands: Vec::new(),
-        }
-    }
-
-    pub(crate) fn with_offset(mut self, dx: f32, dy: f32) -> Result<Self> {
-        for command in &mut self.commands {
-            match command {
-                FragmentCommand::Glyphs(run) => {
-                    run.origin =
-                        Point::try_pt(run.origin.x().as_pt() + dx, run.origin.y().as_pt() + dy)?;
-                }
-                FragmentCommand::Fill { path, .. } | FragmentCommand::Stroke { path, .. } => {
-                    *path = path.translated(dx, dy)?;
-                }
-                FragmentCommand::Image { rect, .. } | FragmentCommand::Link { rect, .. } => {
-                    *rect = rect.translated(dx, dy)?;
-                }
-            }
-        }
-        Ok(self)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum FragmentCommand {
-    Glyphs(GlyphRun),
-    Fill {
-        path: Path,
-        paint: Paint,
-    },
-    Stroke {
-        path: Path,
-        paint: Paint,
-        stroke: Stroke,
-    },
-    Image {
-        image: DecodedImage,
-        rect: Rect,
-    },
-    Link {
-        rect: Rect,
-        target: LinkTarget,
-    },
-}
-
-/// A fragment pinned to page coordinates.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PlacedFragment {
-    pub(crate) origin: Point,
-    pub(crate) fragment: Fragment,
-}
-
-/// Result of consuming a [`FlowNode`] against a frame.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Split {
-    Fit {
-        height: f32,
-        fragment: Fragment,
-    },
-    /// Head fits this frame; only `tail` continues on later frames.
-    Partial {
-        head_height: f32,
-        head: Fragment,
-        tail: FlowNode,
-    },
-    MoveToNextPage(FlowNode),
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpacerNode {
@@ -155,34 +40,61 @@ pub(crate) enum FlowNode {
     PageBreak,
     KeepTogether(KeepTogetherNode),
     Stack(Vec<FlowNode>),
-    Columns(ColumnsNode),
-    Table(TableNode),
-    List(ListNode),
+    Columns(ColumnsNode<FlowNode>),
+    Table(TableNode<FlowNode>),
+    List(ListNode<FlowNode>),
     Image(ImageNode),
     HLine(HLineNode),
 }
 
-impl FlowNode {
-    pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
+impl Flowable for FlowNode {
+    fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split<Self>> {
         avail.validate()?;
+        Ok(match self {
+            FlowNode::PageBreak => return Err(GeometryKind::NestedPageBreak.into()),
+            FlowNode::Paragraph(node) => node.split(avail)?.map(FlowNode::Paragraph),
+            FlowNode::Text(node) => node.split(ctx, avail)?.map(FlowNode::Paragraph),
+            FlowNode::Spacer(node) => node.split(avail)?.map(FlowNode::Spacer),
+            FlowNode::KeepTogether(node) => split_keep_together(ctx, avail, node)?,
+            FlowNode::Stack(kids) => split_stack(ctx, avail, kids)?,
+            FlowNode::Columns(node) => node.split(ctx, avail)?.map(FlowNode::Columns),
+            FlowNode::Table(node) => node.split(ctx, avail)?.map(FlowNode::Table),
+            FlowNode::List(node) => node.split(ctx, avail)?.map(FlowNode::List),
+            FlowNode::Image(node) => node.split(avail)?.map(FlowNode::Image),
+            FlowNode::HLine(node) => node.split(avail)?.map(FlowNode::HLine),
+        })
+    }
+
+    fn stack(nodes: Vec<Self>) -> Self {
+        FlowNode::Stack(nodes)
+    }
+
+    fn kind(&self) -> NodeKind {
         match self {
-            FlowNode::PageBreak => Err(GeometryKind::NestedPageBreak.into()),
-            FlowNode::Paragraph(node) => node.split(avail),
-            FlowNode::Text(node) => node.split(ctx, avail),
-            FlowNode::Spacer(node) => node.split(avail),
-            FlowNode::KeepTogether(node) => split_keep_together(ctx, avail, node),
-            FlowNode::Stack(kids) => split_stack(ctx, avail, kids),
-            FlowNode::Columns(node) => node.split(ctx, avail),
-            FlowNode::Table(node) => node.split(ctx, avail),
-            FlowNode::List(node) => node.split(ctx, avail),
-            FlowNode::Image(node) => node.split(avail),
-            FlowNode::HLine(node) => node.split(avail),
+            FlowNode::Paragraph(_) | FlowNode::Text(_) => NodeKind::Paragraph,
+            FlowNode::Spacer(_) => NodeKind::Spacer,
+            FlowNode::PageBreak => NodeKind::PageBreak,
+            FlowNode::KeepTogether(_) => NodeKind::KeepTogether,
+            FlowNode::Stack(_) => NodeKind::Stack,
+            FlowNode::Columns(_) => NodeKind::Columns,
+            FlowNode::Table(_) => NodeKind::Table,
+            FlowNode::List(_) => NodeKind::List,
+            FlowNode::Image(_) => NodeKind::Image,
+            FlowNode::HLine(_) => NodeKind::HLine,
+        }
+    }
+
+    fn nested(&self) -> &[Self] {
+        match self {
+            FlowNode::Stack(kids) | FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => kids,
+            FlowNode::Columns(columns) => columns.column_stacks(),
+            _ => &[],
         }
     }
 }
 
 impl SpacerNode {
-    pub(crate) fn split(self, avail: Frame) -> Result<Split> {
+    pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
         let h = self.height.as_pt();
         if h == 0.0 {
             return Ok(Split::Fit {
@@ -206,9 +118,9 @@ impl SpacerNode {
             Ok(Split::Partial {
                 head_height: take,
                 head,
-                tail: FlowNode::Spacer(SpacerNode {
+                tail: SpacerNode {
                     height: NonNegative::pt(rest)?,
-                }),
+                },
             })
         }
     }
@@ -218,7 +130,7 @@ fn split_keep_together(
     ctx: &mut LayoutCtx<'_>,
     avail: Frame,
     node: KeepTogetherNode,
-) -> Result<Split> {
+) -> Result<Split<FlowNode>> {
     let prepared = match node {
         KeepTogetherNode::Prepared(prepared) => prepared,
         KeepTogetherNode::Open(kids) => {
@@ -262,7 +174,7 @@ fn split_stack(
     ctx: &mut LayoutCtx<'_>,
     mut avail: Frame,
     mut kids: Vec<FlowNode>,
-) -> Result<Split> {
+) -> Result<Split<FlowNode>> {
     if kids.is_empty() {
         return Ok(Split::Fit {
             height: 0.0,
@@ -345,81 +257,4 @@ fn split_stack(
             commands,
         },
     })
-}
-
-/// Full-frame natural height. Non-Fit splits become [`ErrorKind::UnsplittableTallerThanFrame`].
-pub(crate) fn natural_height(
-    node: FlowNode,
-    ctx: &mut LayoutCtx<'_>,
-    full: Frame,
-) -> Result<(f32, Fragment)> {
-    match node.split(ctx, full)? {
-        Split::Fit { height, fragment } => Ok((height, fragment)),
-        split => Err(ErrorKind::UnsplittableTallerThanFrame {
-            height: stacked_height(split, ctx, full)?,
-            avail: full.full_height,
-        }
-        .into()),
-    }
-}
-
-/// Height of `split` plus every later piece laid out in fresh `full` frames.
-///
-/// Stops early when a fresh frame places nothing, so the sum never loops.
-pub(crate) fn stacked_height(
-    mut split: Split,
-    ctx: &mut LayoutCtx<'_>,
-    full: Frame,
-) -> Result<f32> {
-    let fresh = Frame {
-        height: full.full_height,
-        ..full
-    };
-    let mut total = 0.0f32;
-    loop {
-        match split {
-            Split::Fit { height, .. } => return Ok(total + height),
-            Split::Partial {
-                head_height, tail, ..
-            } if head_height > 0.0 => {
-                total += head_height;
-                split = tail.split(ctx, fresh)?;
-            }
-            Split::Partial { .. } | Split::MoveToNextPage(_) => return Ok(total),
-        }
-    }
-}
-
-pub(crate) fn draw_fragment(
-    fragment: &Fragment,
-    canvas: &mut dyn Canvas,
-    origin: Point,
-) -> Result<()> {
-    let ox = origin.x().as_pt();
-    let oy = origin.y().as_pt();
-    for command in &fragment.commands {
-        match command {
-            FragmentCommand::Glyphs(run) => {
-                let mut placed = run.clone();
-                placed.origin =
-                    Point::try_pt(ox + run.origin.x().as_pt(), oy + run.origin.y().as_pt())?;
-                canvas.draw_glyph_run(&placed)?;
-            }
-            FragmentCommand::Fill { path, paint } => {
-                canvas.fill_path(&path.translated(ox, oy)?, paint)?;
-            }
-            FragmentCommand::Stroke {
-                path,
-                paint,
-                stroke,
-            } => canvas.stroke_path(&path.translated(ox, oy)?, paint, stroke)?,
-            FragmentCommand::Image { image, rect } => {
-                canvas.draw_image(image, rect.translated(ox, oy)?)?;
-            }
-            FragmentCommand::Link { rect, target } => {
-                canvas.annotate_link(rect.translated(ox, oy)?, target.clone())?;
-            }
-        }
-    }
-    Ok(())
 }

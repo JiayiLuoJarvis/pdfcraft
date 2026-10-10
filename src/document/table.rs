@@ -197,7 +197,7 @@ impl Table {
             None => vec![even; cols],
         };
         reject_auto_with_ratio(&widths)?;
-        let lower_rows = |rows: Vec<Vec<StoredCell>>| -> Result<Vec<Vec<layout_table::Cell>>> {
+        let lower_rows = |rows: Vec<Vec<StoredCell>>| -> Result<Vec<Vec<layout_table::Cell<_>>>> {
             rows.into_iter()
                 .map(|row| {
                     row.into_iter()
