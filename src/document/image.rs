@@ -26,7 +26,8 @@ impl Image {
 /// Display size and placement of a flow or cell image.
 ///
 /// Both sides stretch the image. One side derives the other from the pixel aspect.
-/// Neither side uses 1 px = 1 pt. The default placement is the start of the frame.
+/// When neither side is set, size is **1 px = 1 pt** (提案书 §2.7). The default
+/// placement is the start of the frame.
 #[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct ImageBox {
