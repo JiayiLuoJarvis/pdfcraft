@@ -33,27 +33,19 @@ impl TextRun {
     }
 }
 
-/// One inline item in source order. A blank separates the text on either side.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum InlineItem {
-    /// A measured text run.
     Text(TextRun),
-    /// A gap and a stroke. It never enters the glyph tape.
     Blank(InlineBlank),
 }
 
-/// Width of an [`InlineBlank`]. Fixed and fill-to-end cannot both be set.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum BlankWidth {
-    /// A length already in points.
     Fixed(Length<NonNegative>),
-    /// `n` times the paragraph font size, resolved at layout.
-    Em(u32),
-    /// The remainder of the visual line that holds this blank.
+    Em(u16),
     ToEndOfLine,
 }
 
-/// Stroke for one inline blank. `color` falls back to the paragraph color at placement.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InlineBlank {
     pub(crate) width: BlankWidth,
@@ -79,12 +71,9 @@ pub(crate) struct LineBox {
     pub(crate) pieces: Vec<LinePiece>,
 }
 
-/// A glyph run or a blank stroke, in pen order.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LinePiece {
-    /// Glyphs placed at a line-local origin.
     Glyphs(GlyphRun),
-    /// A horizontal stroke. `y` is the baseline plus the blank's offset.
     Stroke(InlineStroke),
 }
 
@@ -424,11 +413,7 @@ fn blank_advance(width: BlankWidth, font_size: f32) -> Result<Advance> {
     match width {
         BlankWidth::Fixed(length) => Ok(Advance::Fixed(length.as_pt())),
         BlankWidth::Em(ems) => {
-            #[allow(
-                clippy::cast_precision_loss,
-                reason = "an em count scales the font size; it is not a glyph index"
-            )]
-            let points = ems as f32 * font_size;
+            let points = f32::from(ems) * font_size;
             if !points.is_finite() || points < 0.0 {
                 return Err(Error::InvalidGeometry);
             }

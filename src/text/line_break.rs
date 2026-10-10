@@ -8,35 +8,29 @@ use crate::error::{Error, Result};
 use crate::text::break_class::{allows, BreakClass, PairClass};
 use crate::text::cluster::{Cluster, ClusterCursor, ClusteredText};
 
-/// How wide a blank atom is before it is packed onto a line.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Advance {
-    /// Already resolved to points.
     Fixed(f32),
-    /// Remainder of the visual line, resolved in [`break_spans`].
     Fill,
 }
 
-/// One measured text group or one blank, in source order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Span<T> {
-    /// Index into the `groups` slice passed to [`break_spans`].
     Group(usize),
-    /// A non-glyph advance. `payload` is copied onto the line segment.
     Blank { advance: Advance, payload: T },
 }
 
-/// A piece of one broken line. Glyph cursors are local to `group`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Seg<T> {
-    /// Consecutive clusters from one group.
     Glyphs {
         group: usize,
         start: ClusterCursor,
         end: ClusterCursor,
     },
-    /// A blank whose width is already in points. Zero omits a stroke later.
-    Blank { width: f32, payload: T },
+    Blank {
+        width: f32,
+        payload: T,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,7 +73,6 @@ pub(crate) struct BrokenLine<'a> {
     record: &'a LineRecord,
 }
 
-/// Lines produced by [`break_spans`].
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BrokenSpans<T> {
     lines: Box<[SpanLine<T>]>,
@@ -163,7 +156,6 @@ pub(crate) fn break_lines(
     Ok(BrokenLines { text, records })
 }
 
-/// Break groups and blanks. `width_of` is `(group index, cluster)`.
 pub(crate) fn break_spans<T: Copy>(
     groups: &[&ClusteredText],
     spans: &[Span<T>],
@@ -357,8 +349,6 @@ enum LeftInk {
     LineStart,
 }
 
-/// Pair class of the nearest ink at or after `line_start` and before `k`.
-/// Blanks are transparent. A blank run that reaches `line_start` is [`LeftInk::LineStart`].
 fn left_ink<T>(atoms: &[Atom<T>], line_start: usize, k: usize) -> LeftInk {
     let mut index = k;
     while index > line_start {

@@ -809,7 +809,7 @@ impl Paragraph {
     }
 
     /// Appends a blank `ems` times the paragraph font size wide.
-    pub fn blank_em(&mut self, ems: u32) -> Blank<'_> {
+    pub fn blank_em(&mut self, ems: u16) -> Blank<'_> {
         self.push_blank(BlankWidth::Em(ems))
     }
 
