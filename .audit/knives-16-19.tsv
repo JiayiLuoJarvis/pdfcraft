@@ -8,3 +8,11 @@ ts	phase	decision	why	evidence	result
 2026-10-10T02:50:36Z	knife-16-arena	base candidate-2; graft c3 alone-no-ops and c1 rustdoc note	cross-judge preferred c2 over parent lean c3; API identical	.audit/knife-16/arena/cross-judge.md; synthesis/	synthesis locked
 2026-10-10T02:51:18Z	knife-16-impl	implementer started on feat/cell-spacer	synthesis locked on c2+grafts	Task d48d12f3	running
 2026-10-10T02:59:45Z	knife-16-gates	parent re-ran fmt clippy test on 1d343c3	Prove It Works; do not trust implementer self-report alone	cargo test: 198 lib + 69 document	green
+2026-10-10T03:00:00Z	knife-16-done	knife 16 green; handoff updated; tip a5ba3fb	parent re-verified gates; Cell::spacer shipped	feat/cell-spacer @a5ba3fb5ae701cb2047a0207b9001a504c194f3f	done
+2026-10-10T03:00:00Z	knife-17-frame	start knife 17 cell paragraph and list	proposal 2.6 phased cell kids; layout allowlist already permits Text Paragraph List	docs/提案书.md:377-381,454; lower.rs	open
+2026-10-10T03:09:05Z	knife-17-how	three explorers done; explainer synthesizing	paragraph reuses Paragraph; list needs Flow at item time	.audit/knife-17/how/	explainer running
+2026-10-10T03:17:35Z	knife-17-arena	fan out 4 design candidates	how.md ready; list Flow seam is the contested fork	.audit/knife-17/arena/frame.md	candidates running
+2026-10-10T03:28:27Z	knife-17-arena	four candidates done; cross-judge running; parent lean c3 static defer	Table lifetime from c2 is heavier for same move-capture call sites	.audit/knife-17/arena/; Task 961dc7cd	awaiting judge
+2026-10-10T03:30:22Z	knife-17-arena	base candidate-3; synthesis locked; start implement	cross-judge 30/30; static FnOnce defer; two commits	.audit/knife-17/arena/cross-judge.md	implementing
+2026-10-10T03:30:33Z	knife-17-impl	implementer on feat/cell-rich	synthesis c3 locked	Task 6b123606	running
+2026-10-10T03:47:55Z	knife-17-gates	parent re-ran fmt clippy test on c3035df	Prove It Works	cargo test: 198 lib + 76 document	green

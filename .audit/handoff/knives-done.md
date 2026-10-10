@@ -1,8 +1,8 @@
-# Handoff: knives 7–16
+# Handoff: knives 7–17
 
 **Date:** 2026-10-10  
 **Repo:** /mnt/data/demo/quire  
-**Exit predicate (tonight):** knives 16–19 green locally (no remote/PR; `gh` token invalid, no `git remote`).
+**Exit predicate (tonight):** knives 16–19 green locally (no remote/PR).
 
 | Knife | Branch | Tip (feature) |
 | --- | --- | --- |
@@ -15,22 +15,26 @@
 | 13 style / bold / first-line indent | feat/style-builders | 5deb0df (feature tip aaf14bf) |
 | 14 §2.2 fill-in underscore | feat/inline-blank | b83712e |
 | 15 §8 text URI link | feat/text-uri-link | 16749da |
-| 16 Cell::spacer | feat/cell-spacer | c9c2af7 (status 1d343c3) |
+| 16 Cell::spacer | feat/cell-spacer | c9c2af7 (status/audit a5ba3fb) |
+| 17 cell paragraph + list | feat/cell-rich | c3035df |
 
-Knife 16 stacks on `feat/text-uri-link` @ `16749da`. Feature tip `c9c2af7`. Status commit `1d343c3`. Design trail under `.audit/knife-16/` (how / arena / synthesis / implement-status).
+Knife 17 stacks on `feat/cell-spacer` @ `a5ba3fb`. Feature tip `c3035df`. Design trail under `.audit/knife-17/`.
 
-## What callers get (knife 16)
+## What callers get (knife 17)
 
-`Cell::spacer(height: Length<NonNegative>)` stores one spacer payload. `Table::lower` emits `FlowNode::Spacer`. Zero height is legal. The cell paints nothing. A spacer taller than the cell inner full frame fails with `UnsplittableTallerThanFrame` (unlike body `Flow::spacer`, which can split across pages). Still one payload per public cell. No cell paragraph or list yet.
+`Cell::paragraph(|p| …)` runs immediately and reuses body `Paragraph` (text/bold/blank/link). Shared `lower_paragraph` emits unwrapped `FlowNode::Text` so wrap width is the cell inner width.
+
+`Cell::ul` / `Cell::ol` store a `'static` `FnOnce` and run it at `Table::lower` with `flow.child()`. Nested item lists work. Move owned data into the closure.
+
+`Cell` no longer implements `Clone` / `PartialEq` / `Eq` (keeps `Debug`). Tall cell content still fails with `UnsplittableTallerThanFrame`. Forbidden kids unchanged.
 
 ## Gates (parent re-verified 2026-10-10)
 
-On `feat/cell-spacer` @ `1d343c3`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (198 lib + 1 ignored, 69 `tests/document.rs`).
+On `feat/cell-rich` @ `c3035df`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (198 lib + 1 ignored, 76 `tests/document.rs`).
 
 ## Next
 
-- Knife 17: cell paragraph (blank/link if same pipeline) and cell list (§2.6); still forbid columns / pageBreak / keep_together / nested table
 - Knife 18: §7 margin presets (optional sugar; default still 0)
-- Knife 19: crate name `quire-pdf` (Cargo.toml already `quire-pdf`; verify remaining rename gaps) + small A-series gaps if any
+- Knife 19: confirm `quire-pdf` naming leftovers; A-series gaps only if small
 - Named styles / flow canvas still out
 - Open PR when remote and token are available
