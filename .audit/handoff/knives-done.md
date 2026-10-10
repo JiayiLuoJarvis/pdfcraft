@@ -18,7 +18,7 @@
 | 16 Cell::spacer | feat/cell-spacer | c9c2af7 (audit a5ba3fb) |
 | 17 cell paragraph + list | feat/cell-rich | c3035df (audit 9b939b8) |
 | 18 §7 margin presets | feat/margin-presets | 3c9e3da |
-| 19 crate name / paper | feat/crate-rename | 7c594813c114fe1d9484dd496a27c33bebf0faca (verify-only) |
+| 19 crate name / paper | feat/crate-rename | fefd346 (verify-only; stack tip) |
 
 ## What callers get (knives 16–18)
 
