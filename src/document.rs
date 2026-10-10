@@ -9,7 +9,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::canvas::{Canvas, DecodedImage, ImageFormat, RecordedPage, RecordingCanvas};
+use crate::canvas::{Canvas, DecodedImage, ImageFormat, LinkTarget, RecordedPage, RecordingCanvas};
 use crate::error::{Error, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
 use crate::geom::{
@@ -779,6 +779,7 @@ impl Flow {
 pub struct Paragraph {
     items: Vec<InlineItem>,
     first_line_indent: Length<NonNegative>,
+    active_link: Option<LinkTarget>,
     error: Option<Error>,
 }
 
@@ -787,6 +788,7 @@ impl Default for Paragraph {
         Self {
             items: Vec::new(),
             first_line_indent: NonNegative::ZERO,
+            active_link: None,
             error: None,
         }
     }
@@ -825,26 +827,45 @@ impl Paragraph {
         self.first_line_indent = indent;
     }
 
+    /// Appends the text and bold calls inside `f` as one link to `uri`.
+    ///
+    /// `f` returns `()` because it runs inside [`Flow::paragraph`], which cannot
+    /// use `?`. An empty `uri` is stored as [`Error::EmptyLink`] and `f` does not run.
+    pub fn link(&mut self, uri: impl AsRef<str>, f: impl FnOnce(&mut Paragraph)) {
+        let target = match LinkTarget::uri(uri.as_ref()) {
+            Ok(target) => target,
+            Err(error) => {
+                self.note(error);
+                return;
+            }
+        };
+        let previous = self.active_link.replace(target);
+        f(self);
+        self.active_link = previous;
+    }
+
     fn append(&mut self, face: Face, text: &str) {
         if text.is_empty() {
             return;
         }
         if self.sealed() {
-            self.note_run_after_fill();
+            self.note(Error::RunAfterFillBlank);
             return;
         }
         if let Some(InlineItem::Text(last)) = self.items.last_mut() {
-            if last.face == face {
+            if last.face == face && last.link == self.active_link {
                 last.text.push_str(text);
                 return;
             }
         }
-        self.items.push(InlineItem::Text(TextRun::new(text, face)));
+        self.items.push(InlineItem::Text(
+            TextRun::new(text, face).with_link(self.active_link.clone()),
+        ));
     }
 
     fn push_blank(&mut self, width: BlankWidth) -> Blank<'_> {
         if self.sealed() {
-            self.note_run_after_fill();
+            self.note(Error::RunAfterFillBlank);
             return Blank {
                 paragraph: self,
                 index: usize::MAX,
@@ -865,9 +886,9 @@ impl Paragraph {
         )
     }
 
-    fn note_run_after_fill(&mut self) {
+    fn note(&mut self, error: Error) {
         if self.error.is_none() {
-            self.error = Some(Error::RunAfterFillBlank);
+            self.error = Some(error);
         }
     }
 }
@@ -1181,6 +1202,11 @@ impl From<&PageInfo> for Page {
     }
 }
 
+struct BandSlot {
+    text: String,
+    link: Option<LinkTarget>,
+}
+
 /// One page's header or footer band.
 ///
 /// The band is as tall as its margin. Slots inset by the left and right
@@ -1188,8 +1214,9 @@ impl From<&PageInfo> for Page {
 /// error.
 pub struct Band {
     page: Page,
-    left: Option<String>,
-    right: Option<String>,
+    left: Option<BandSlot>,
+    right: Option<BandSlot>,
+    error: Option<Error>,
 }
 
 impl Band {
@@ -1201,26 +1228,82 @@ impl Band {
 
     /// Sets the start-aligned text.
     pub fn left(&mut self, s: impl AsRef<str>) {
-        self.left = Some(s.as_ref().to_owned());
+        self.left = Some(BandSlot {
+            text: s.as_ref().to_owned(),
+            link: None,
+        });
     }
 
     /// Sets the end-aligned text.
     pub fn right(&mut self, s: impl AsRef<str>) {
-        self.right = Some(s.as_ref().to_owned());
+        self.right = Some(BandSlot {
+            text: s.as_ref().to_owned(),
+            link: None,
+        });
+    }
+
+    /// Sets the start-aligned slot to `text` linked to `uri`.
+    ///
+    /// An empty `uri` is stored as [`Error::EmptyLink`] and leaves the slot unchanged.
+    pub fn left_link(&mut self, uri: impl AsRef<str>, text: impl AsRef<str>) {
+        self.set_link(true, uri.as_ref(), text.as_ref());
+    }
+
+    /// Sets the end-aligned slot to `text` linked to `uri`.
+    ///
+    /// An empty `uri` is stored as [`Error::EmptyLink`] and leaves the slot unchanged.
+    pub fn right_link(&mut self, uri: impl AsRef<str>, text: impl AsRef<str>) {
+        self.set_link(false, uri.as_ref(), text.as_ref());
+    }
+
+    fn set_link(&mut self, left: bool, uri: &str, text: &str) {
+        let target = match LinkTarget::uri(uri) {
+            Ok(target) => target,
+            Err(error) => {
+                self.note(error);
+                return;
+            }
+        };
+        let slot = Some(BandSlot {
+            text: text.to_owned(),
+            link: Some(target),
+        });
+        if left {
+            self.left = slot;
+        } else {
+            self.right = slot;
+        }
+    }
+
+    fn note(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
     }
 
     fn lower(self, style: &Style) -> Result<Vec<FlowNode>> {
-        let slot = |text: String, align: TextAlign| {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        let column = |slot: BandSlot, align: TextAlign| {
             let style = Style {
                 align,
                 ..style.clone()
             };
-            vec![FlowNode::Text(TextNode::new(text, style))]
+            let node = if slot.text.is_empty() {
+                TextNode::from_items(Vec::new(), style)
+            } else {
+                TextNode::from_runs(
+                    vec![TextRun::new(slot.text, Face::Body).with_link(slot.link)],
+                    style,
+                )
+            };
+            vec![FlowNode::Text(node)]
         };
         let even = ColumnWidth::Ratio(Ratio::new(1.0)?);
         let slots: Vec<_> = [(self.left, TextAlign::Start), (self.right, TextAlign::End)]
             .into_iter()
-            .filter_map(|(text, align)| text.map(|text| (even, slot(text, align))))
+            .filter_map(|(text, align)| text.map(|text| (even, column(text, align))))
             .collect();
         if slots.is_empty() {
             return Ok(Vec::new());
@@ -1254,6 +1337,7 @@ fn band_content(hook: BandHook<'_>, style: Style) -> BandContent<'_> {
             page: Page::from(info),
             left: None,
             right: None,
+            error: None,
         };
         hook(&mut band);
         band.lower(&style)
@@ -1641,6 +1725,83 @@ mod tests {
         let result = doc.paint(&mut rec);
         assert_eq!(result.err().as_ref(), Some(expected));
         assert!(rec.commands().is_empty());
+    }
+
+    #[test]
+    fn link_coalesces_on_face_and_uri_and_restores_the_outer_target() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| {
+            p.link("https://a", |p| {
+                p.text("A");
+                p.text("B");
+                p.bold("C");
+                p.link("https://b", |p| p.text("D"));
+                p.text("E");
+            });
+            p.text("F");
+        });
+        let a = Some(LinkTarget::uri("https://a").unwrap());
+        let b = Some(LinkTarget::uri("https://b").unwrap());
+        let expected = TextNode::from_runs(
+            vec![
+                TextRun::new("AB", Face::Body).with_link(a.clone()),
+                TextRun::new("C", Face::Bold).with_link(a),
+                TextRun::new("D", Face::Body).with_link(b),
+                TextRun::new("E", Face::Body)
+                    .with_link(Some(LinkTarget::uri("https://a").unwrap())),
+                TextRun::new("F", Face::Body),
+            ],
+            default_style(),
+        );
+        assert_eq!(flow_text(&doc), expected);
+    }
+
+    #[test]
+    fn blank_inside_a_link_stays_unlinked() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| {
+            p.link("u", |p| {
+                p.text("A");
+                p.blank(NonNegative::pt(10.0).unwrap());
+                p.text("B");
+            });
+        });
+        let link = Some(LinkTarget::uri("u").unwrap());
+        let expected = TextNode::from_items(
+            vec![
+                InlineItem::Text(TextRun::new("A", Face::Body).with_link(link.clone())),
+                InlineItem::Blank(InlineBlank::new(BlankWidth::Fixed(
+                    NonNegative::pt(10.0).unwrap(),
+                ))),
+                InlineItem::Text(TextRun::new("B", Face::Body).with_link(link)),
+            ],
+            default_style(),
+        );
+        assert_eq!(flow_text(&doc), expected);
+    }
+
+    #[test]
+    fn empty_uri_does_not_run_the_link_closure() {
+        let mut doc = doc_with_font();
+        let mut ran = false;
+        doc.paragraph(|p| {
+            p.text("A");
+            p.link("", |_| ran = true);
+        });
+        assert!(!ran);
+        assert_fails_with_empty_canvas(doc, &Error::EmptyLink);
+    }
+
+    #[test]
+    fn empty_band_uri_paints_nothing() {
+        let mut doc = doc_with_font();
+        doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
+        doc.header(|h| {
+            h.left_link("", "Home");
+            h.right_link("https://example.com", "Later");
+        });
+        doc.paragraph(|p| p.text("A"));
+        assert_fails_with_empty_canvas(doc, &Error::EmptyLink);
     }
 
     const MISSING: char = '\u{6f22}';
