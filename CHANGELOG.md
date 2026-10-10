@@ -28,6 +28,7 @@ while remaining `0.x`.
 - Font parse failures and PDF serialization failures keep the skrifa or krilla error as `Error::source()`. Equality compares `kind` and `at` only.
 - `UnsupportedCanvasOperation` is removed. Nothing produced it.
 - `layout` and `text` are crate-private. Empty `layout/dump.rs` is gone.
+- **Breaking.** `Rendered::to_pdf()` is now the free function `quire_pdf::to_pdf(rendered)`, still behind feature `backend-krilla`. `document` lives only at the crate root; the `quire_pdf::document::document` path is gone.
 
 ### Added
 

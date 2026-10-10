@@ -14,8 +14,8 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::path::PathBuf;
 
 use quire_pdf::{
-    document, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, Numbering, PageSize,
-    Track,
+    document, to_pdf, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, Numbering,
+    PageSize, Track,
 };
 
 const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
@@ -29,7 +29,7 @@ fn main() -> quire_pdf::Result<()> {
         fs::create_dir_all(parent).expect("create output dir");
     }
 
-    let pdf = document(PageSize::A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.bold_font(FONT.to_vec())?;
         let logo = doc.load_image(PIXEL.to_vec(), ImageFormat::Png)?;
@@ -40,8 +40,8 @@ fn main() -> quire_pdf::Result<()> {
         doc.page_break();
         write_closing(doc);
         Ok(())
-    })?
-    .to_pdf()?;
+    })?;
+    let pdf = to_pdf(rendered)?;
 
     fs::write(&out, &pdf).expect("write PDF");
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());

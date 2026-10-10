@@ -7,7 +7,7 @@ use std::fmt;
 use krilla::image::Image;
 use krilla::Data;
 
-use crate::canvas::{DecodedImage, ImageFormat, ImageId};
+use crate::canvas::{DecodedImage, ImageFormat, ImageId, ImageRegistry};
 use crate::error::{Error, ErrorKind, Result};
 
 /// Encoded bytes above this are rejected before krilla sees them.
@@ -46,11 +46,8 @@ pub(crate) struct ImageTable {
     rasters: Vec<Raster>,
 }
 
-impl ImageTable {
-    /// Checks limits, decodes, and returns the id plus pixel size layout will use.
-    ///
-    /// A failure leaves the table unchanged.
-    pub(crate) fn register(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<DecodedImage> {
+impl ImageRegistry for ImageTable {
+    fn register(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<DecodedImage> {
         if bytes.is_empty() {
             return Err(Error::from(ErrorKind::Image {
                 message: "bytes are empty".to_owned(),
@@ -86,7 +83,9 @@ impl ImageTable {
             pixel_height: height,
         })
     }
+}
 
+impl ImageTable {
     pub(super) fn get(&self, id: ImageId) -> Option<&Raster> {
         self.rasters.get(id.as_u32() as usize)
     }

@@ -46,11 +46,13 @@
 | 粗体未注册 | `ErrorKind::BoldFaceRequired`（随错误刀 1） |
 | `ImageBox` 默认尺寸 | rustdoc 已对齐 1 px = 1 pt；行为未改 |
 
-### 7. 组织与依赖 — **方向已确认**
+### 7. 组织与依赖 — **已落地**
 
 现象摘要：`lower` 名实不符；`document` → `backend`；`error`↔`fonts`、`flow`↔节点等环；巨石 `document.rs`（**已因拆模块缓解**）。
 
 **硬规则：** 禁止循环依赖；单向 DAG 见 [`AGENTS.md`](../AGENTS.md) 与 [`module-dependency.md`](module-dependency.md)。
+
+**落地：** 下表各项均已实现，形态见 [`module-dependency.md`](module-dependency.md)「落地记录」。仅剩节点单元测试里的测试期反向边。
 
 **已确认：**
 
@@ -80,7 +82,7 @@
 
 | 维度 | 判断 |
 | --- | --- |
-| 模块组织 | 目标 DAG 与禁环已确认（[`module-dependency.md`](module-dependency.md)）。拆环与 document↔backend 解耦待落地 |
+| 模块组织 | 目标 DAG 已落地（[`module-dependency.md`](module-dependency.md)）：生产代码无环，document 不再依赖 backend |
 | 风格 | 机械层统一。API 三种形态 0.x 可接受，1.0 前宜收敛 |
 | 报错 / 批跑 | 刀 1–3 已落地（定位 + `source()`）。多错收集仍开 |
 | 对照官方 Rust | `Error` 已是 kind+location+source。正文入流为 `FlowWriter` |
@@ -96,12 +98,12 @@
 **维护者。**
 
 - 依赖只许沿 [`module-dependency.md`](module-dependency.md) 的 DAG 向下；禁止环。
-- DSL→节点转换在 `document/*`；`layout/nesting`（原 lower）只做嵌套内容规则（组织刀落地后）。
+- DSL→节点转换在 `document/*`；`layout/nesting`（原 lower）只做嵌套内容规则。
 - 补错误上下文：组装与 layout 的 `Location` 钩子；动 `decorate` 时注意它会改写下层错误语义。
 
 ## 讨论顺序建议
 
 1. 报错可诊断性——**刀 1–3 已落地**；刀 4 另开。
 2. 公开面清理——**已落地**。
-3. 组织与依赖——**方向已确认**，见 [`module-dependency.md`](module-dependency.md)；落地中。
+3. 组织与依赖——**已落地**，见 [`module-dependency.md`](module-dependency.md)「落地记录」。
 4. `Deref` 到 `Flow`——**已落地**。

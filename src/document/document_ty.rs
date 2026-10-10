@@ -1,30 +1,6 @@
 #![allow(clippy::wildcard_imports)]
 use super::*;
 
-/// Lays out a document whose default paper is `page_size`.
-///
-/// `build` runs once. Builder mistakes are deferred: the first one is
-/// returned from here, before any page is drawn. A missing glyph anywhere,
-/// including headers and layers, also fails the whole document.
-///
-/// Text uses the first font passed to [`Document::font`] at 12 pt with line
-/// height 1.2, black, start-aligned. Margins default to zero.
-pub fn document<'a>(
-    page_size: PageSize,
-    build: impl FnOnce(&mut Document<'a>) -> Result<()>,
-) -> Result<Rendered> {
-    let mut doc = Document::new(page_size);
-    build(&mut doc)?;
-    let mut recording = RecordingCanvas::new();
-    let painted = doc.paint(&mut recording)?;
-    Ok(Rendered {
-        recording,
-        fonts: painted.fonts,
-        #[cfg(feature = "backend-krilla")]
-        images: painted.images,
-    })
-}
-
 /// Document settings and page-time closures. Body methods come from [`FlowWriter`].
 pub struct Document<'a> {
     pub(crate) page_size: PageSize,
@@ -33,8 +9,7 @@ pub struct Document<'a> {
     pub(crate) body: Sections<'a>,
     /// First [`ErrorKind::ContentOutsideSection`], or the error from a section closure.
     pub(crate) error: Option<Error>,
-    #[cfg(feature = "backend-krilla")]
-    pub(crate) images: ImageTable,
+    pub(crate) images: Box<dyn ImageRegistry>,
 }
 
 impl<'a> Document<'a> {
@@ -46,8 +21,7 @@ impl<'a> Document<'a> {
             fonts: FontStore::new(),
             body: Sections::Implicit(Section::new(default_style(), doc)),
             error: None,
-            #[cfg(feature = "backend-krilla")]
-            images: ImageTable::default(),
+            images: Box::new(RejectingImageRegistry),
         }
     }
 
@@ -55,21 +29,11 @@ impl<'a> Document<'a> {
     ///
     /// Fails now on oversized, unparsable, or empty images. Without `backend-krilla` every call fails.
     pub fn load_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<Image> {
-        #[cfg(feature = "backend-krilla")]
-        {
-            let decoded = self.images.register(bytes, format)?;
-            Ok(Image {
-                decoded,
-                doc: self.doc,
-            })
-        }
-        #[cfg(not(feature = "backend-krilla"))]
-        {
-            let _ = (self.doc, bytes, format);
-            Err(Error::from(ErrorKind::Image {
-                message: "decoding needs feature `backend-krilla`".to_owned(),
-            }))
-        }
+        let decoded = self.images.register(bytes, format)?;
+        Ok(Image {
+            decoded,
+            doc: self.doc,
+        })
     }
 
     /// Registers a font from its file bytes. The first font is the one text uses.
@@ -201,7 +165,6 @@ impl<'a> Document<'a> {
             mut fonts,
             body,
             error,
-            #[cfg(feature = "backend-krilla")]
             images,
         } = self;
         if let Some(error) = error {
@@ -237,18 +200,24 @@ impl<'a> Document<'a> {
             .collect();
         let mut ctx = LayoutCtx { fonts: &mut fonts };
         paginate_sections(jobs, &mut ctx, canvas)?;
-        Ok(Painted {
-            fonts,
-            #[cfg(feature = "backend-krilla")]
-            images,
+        Ok(Painted { fonts, images })
+    }
+
+    /// Paints into a recording. The caller has already run the build closure.
+    pub(crate) fn render(self) -> Result<Rendered> {
+        let mut recording = RecordingCanvas::new();
+        let painted = self.paint(&mut recording)?;
+        Ok(Rendered {
+            recording,
+            fonts: painted.fonts,
+            images: painted.images,
         })
     }
 }
 
 pub(crate) struct Painted {
     pub(crate) fonts: FontStore,
-    #[cfg(feature = "backend-krilla")]
-    pub(crate) images: ImageTable,
+    pub(crate) images: Box<dyn ImageRegistry>,
 }
 
 pub(crate) fn default_style() -> Style {
@@ -268,8 +237,8 @@ pub struct Rendered {
     pub(crate) recording: RecordingCanvas,
     #[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
     pub(crate) fonts: FontStore,
-    #[cfg(feature = "backend-krilla")]
-    pub(crate) images: ImageTable,
+    #[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
+    pub(crate) images: Box<dyn ImageRegistry>,
 }
 
 impl Rendered {
@@ -277,14 +246,5 @@ impl Rendered {
     #[must_use]
     pub fn pages(&self) -> Vec<RecordedPage> {
         self.recording.pages()
-    }
-
-    /// Writes the pages as PDF bytes.
-    #[cfg(feature = "backend-krilla")]
-    pub fn to_pdf(self) -> Result<Vec<u8>> {
-        let mut pdf =
-            crate::backend::KrillaCanvas::new_with_resources(Arc::new(self.fonts), self.images);
-        crate::canvas::replay(&self.recording, &mut pdf)?;
-        pdf.finish()
     }
 }

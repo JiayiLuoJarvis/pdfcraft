@@ -3,6 +3,7 @@
 //! Layout draws through [`Canvas`]. Tests read [`RecordingCanvas::commands`].
 //! Coordinates match [`crate::geom`]: top-left origin, y downward, PDF points.
 
+use std::any::Any;
 use std::ops::Range;
 
 use crate::error::{Error, ErrorKind, Result};
@@ -94,6 +95,25 @@ pub struct DecodedImage {
     pub pixel_width: u32,
     /// Height in pixels.
     pub pixel_height: u32,
+}
+
+/// Decodes one document's images and keeps whatever the PDF writer needs later.
+pub(crate) trait ImageRegistry: Any + Send + Sync {
+    /// Checks limits, decodes, and returns the id plus pixel size layout will use.
+    ///
+    /// A failure leaves earlier registrations unchanged.
+    fn register(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<DecodedImage>;
+}
+
+/// Registry for builds without a decoder. Every image fails.
+pub(crate) struct RejectingImageRegistry;
+
+impl ImageRegistry for RejectingImageRegistry {
+    fn register(&mut self, _bytes: Vec<u8>, _format: ImageFormat) -> Result<DecodedImage> {
+        Err(Error::from(ErrorKind::Image {
+            message: "decoding needs feature `backend-krilla`".to_owned(),
+        }))
+    }
 }
 
 /// One glyph in a [`GlyphRun`].
@@ -397,11 +417,24 @@ pub fn pt_near(a: f32, b: f32) -> bool {
 mod tests {
     use super::{
         pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun,
-        ImageId, LinkTarget, RecordingCanvas,
+        ImageFormat, ImageId, ImageRegistry, LinkTarget, RecordingCanvas, RejectingImageRegistry,
     };
-    use crate::error::{ErrorKind, Result};
+    use crate::error::{Error, ErrorKind, Result};
     use crate::fonts::FontId;
     use crate::geom::{Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4};
+
+    #[test]
+    fn rejecting_registry_refuses_every_image() {
+        let err = RejectingImageRegistry
+            .register(vec![0; 8], ImageFormat::Png)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::from(ErrorKind::Image {
+                message: "decoding needs feature `backend-krilla`".to_owned(),
+            })
+        );
+    }
 
     #[test]
     fn records_draw_order_advances_and_one_page() -> Result<()> {

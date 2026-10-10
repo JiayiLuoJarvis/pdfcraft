@@ -2,14 +2,14 @@
 
 use std::num::{NonZeroU16, NonZeroU32};
 
-#[cfg(feature = "backend-krilla")]
-use quire_pdf::Paper;
 use quire_pdf::{
     document, pt_near, CanvasCommand, Cell, Color, ColumnWidthsReason, Error, ErrorKind, Flow,
     FlowWriter, GeometryKind, ImageFormat, Ink, MarginPreset, Margins, NonNegative, Numbering,
     PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect, Region, Rendered, Result,
     Size, Stroke, Track, A4,
 };
+#[cfg(feature = "backend-krilla")]
+use quire_pdf::{to_pdf, Paper};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
@@ -718,7 +718,7 @@ fn bold_and_indent_configuration_errors_are_specific() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn mixed_bold_and_indent_write_a_pdf() {
-    let pdf = document(PageSize::A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.bold_font(FONT.to_vec())?;
         doc.paragraph(|p| {
@@ -728,9 +728,8 @@ fn mixed_bold_and_indent_write_a_pdf() {
         });
         Ok(())
     })
-    .unwrap()
-    .to_pdf()
     .unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 
@@ -795,7 +794,7 @@ fn image_only_document_needs_no_font() {
     assert_eq!(images[0].2, 1);
     let expected = Rect::try_pt(80.0, 0.0, 40.0, 40.0).unwrap();
     assert_eq!(rect_bits(images[0].3), rect_bits(expected));
-    assert!(rendered.to_pdf().unwrap().starts_with(b"%PDF"));
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -840,7 +839,7 @@ fn cell_image_and_last_page_seal_share_coordinates() {
 #[test]
 fn three_pages_of_one_image_share_one_xobject() {
     let page = Size::try_pt(120.0, 40.0).unwrap();
-    let pdf = document(PageSize::custom(page), |doc| {
+    let rendered = document(PageSize::custom(page), |doc| {
         let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         doc.image(&seal, |_| {});
         doc.page_break();
@@ -849,9 +848,8 @@ fn three_pages_of_one_image_share_one_xobject() {
         doc.image(&seal, |_| {});
         Ok(())
     })
-    .unwrap()
-    .to_pdf()
     .unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     let text = String::from_utf8_lossy(&pdf);
     let count = text.matches("/Subtype /Image").count() + text.matches("/Subtype/Image").count();
@@ -939,7 +937,7 @@ fn damaged_pixels_fail_at_pdf_time() {
         Ok(())
     })
     .unwrap();
-    let err = rendered.to_pdf().unwrap_err();
+    let err = to_pdf(rendered).unwrap_err();
     assert!(matches!(err.kind, ErrorKind::Backend { .. }), "{err:?}");
     assert!(std::error::Error::source(&err).is_some(), "{err:?}");
 }
@@ -947,10 +945,8 @@ fn damaged_pixels_fail_at_pdf_time() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn to_pdf_writes_a_pdf() {
-    let pdf = full_template(&contract(Kind::A), "ACME")
-        .unwrap()
-        .to_pdf()
-        .unwrap();
+    let rendered = full_template(&contract(Kind::A), "ACME").unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 
@@ -1096,7 +1092,7 @@ fn two_sections_on_different_paper_write_a_pdf() {
     assert_eq!(pages.len(), 2);
     assert_eq!(pages[0].size(), A4);
     assert_eq!(pages[1].size(), Paper::Letter.landscape().resolve());
-    assert!(rendered.to_pdf().unwrap().starts_with(b"%PDF"));
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 /// `(cx, cy, rx, ry)` from a four-cubic ellipse's endpoints.
@@ -1296,7 +1292,7 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn layer_paths_write_a_pdf() {
-    let pdf = document(PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()), |doc| {
+    let rendered = document(PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()), |doc| {
         doc.behind(|layer| {
             layer.rect(
                 Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
@@ -1309,9 +1305,8 @@ fn layer_paths_write_a_pdf() {
         });
         Ok(())
     })
-    .unwrap()
-    .to_pdf()
     .unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 
@@ -1429,13 +1424,12 @@ fn hline_in_list_item_and_cell() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn hline_writes_a_pdf() {
-    let pdf = document(PageSize::A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         doc.hline(|_| {});
         Ok(())
     })
-    .unwrap()
-    .to_pdf()
     .unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 
@@ -1802,7 +1796,7 @@ fn blank_stays_on_its_line_when_the_paragraph_splits() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn inline_blank_writes_a_pdf() {
-    let pdf = document(PageSize::A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.paragraph(|p| {
             p.text("A");
@@ -1810,9 +1804,8 @@ fn inline_blank_writes_a_pdf() {
         });
         Ok(())
     })
-    .unwrap()
-    .to_pdf()
     .unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 
@@ -2288,14 +2281,13 @@ fn cell_and_layer_text_do_not_annotate() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn text_link_writes_a_pdf() {
-    let pdf = document(PageSize::A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.paragraph(|p| p.link("https://example.com", |p| p.text("Go")));
         Ok(())
     })
-    .unwrap()
-    .to_pdf()
     .unwrap();
+    let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 

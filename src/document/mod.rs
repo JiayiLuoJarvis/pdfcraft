@@ -1,6 +1,6 @@
 //! Public document construction surface (Rust DSL).
 //!
-//! [`document`] runs the caller's closure once to assemble the body flow.
+//! [`document()`](crate::document()) runs the caller's closure once to assemble the body flow.
 //! Header, footer, behind, and front closures run again on every page after
 //! pagination, so only they see page numbers.
 
@@ -11,7 +11,10 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::canvas::{Canvas, DecodedImage, ImageFormat, LinkTarget, RecordedPage, RecordingCanvas};
+use crate::canvas::{
+    Canvas, DecodedImage, ImageFormat, ImageRegistry, LinkTarget, RecordedPage, RecordingCanvas,
+    RejectingImageRegistry,
+};
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
 use crate::fonts::{FontId, FontSource, FontStore};
 use crate::geom::{
@@ -32,9 +35,6 @@ use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNo
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table as layout_table;
 use crate::layout::table::{TableNode, TableSpec};
-
-#[cfg(feature = "backend-krilla")]
-use crate::backend::ImageTable;
 
 mod band;
 mod columns;
@@ -57,7 +57,7 @@ mod tests;
 
 pub use band::Band;
 pub use columns::Columns;
-pub use document_ty::{document, Document, Rendered};
+pub use document_ty::{Document, Rendered};
 pub use flow::Flow;
 pub use flow_writer::{FlowWriter, IntoFlowItem, PlacedImage};
 pub use hline::HLine;

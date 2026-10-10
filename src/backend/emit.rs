@@ -216,6 +216,7 @@ fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
 mod tests {
     use super::*;
     use crate::backend::KrillaCanvas;
+    use crate::canvas::ImageRegistry;
     use crate::canvas::{Canvas, GlyphPlacement, GlyphRun, ImageId, LinkTarget};
     use crate::fonts::{fixture_bytes, FontId, FontSource, FontStore};
     use crate::geom::{Color, Paint, Path, Point, Positive, Rect, Size, Stroke, A4, LETTER};

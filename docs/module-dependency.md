@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-10 |
-| 状态 | **方向已确认。** 硬规则见 [`AGENTS.md`](../AGENTS.md)；本文是目标 DAG 与拆环刀序 |
+| 状态 | **方向已确认，组织刀已落地。** 硬规则见 [`AGENTS.md`](../AGENTS.md)；本文是目标 DAG、拆环刀序与落地记录 |
 | 相关 | [`code-quality-assessment.md`](code-quality-assessment.md) §7 |
 
 ## 硬规则
@@ -25,7 +25,7 @@ text           → fonts, error, geom
 layout         → text, fonts, canvas, error, geom
 document       → layout, canvas, fonts, error, geom
 backend        → canvas, fonts, error, geom, krilla
-lib / 薄 glue  → document, backend（仅组装 to_pdf 等，不引入新业务环）
+lib / 薄 glue  → document, backend（仅组装 document() 入口与 to_pdf，不引入新业务环）
 ```
 
 **禁止：**
@@ -73,6 +73,20 @@ layout/paginate       → decorate, flow, …
 | `document` → `backend` | Image 注册缝 + `to_pdf` 进 backend | **独立刀**（评估 §7-B） |
 | `lower` 名实 | 改名 `nesting` | 小刀，可并组织刀 |
 | 巨石 `document.rs` | 已拆模块 | **已缓解**，仅更新评估表述 |
+
+## 落地记录
+
+全部拆环刀已落地，生产代码里没有反向边：
+
+| 项 | 落地形态 |
+| --- | --- |
+| `error` ↔ `fonts` | 错误刀 1 已解；`ErrorKind::MissingGlyph.font` 是 `u32` |
+| `lower` 名实 | 改名 `layout/nesting`；规则矩阵按 `NodeKind` 判断，不依赖 `FlowNode` |
+| `flow` ↔ 各节点 | `layout/frame` 持有 `Frame`、`Split<T>`、`Fragment`、`FragmentCommand`、`PlacedFragment`、`LayoutCtx`、`natural_height`、`stacked_height`、`draw_fragment`，以及库内 trait `Flowable`（split / stack / kind / nested）。叶子节点返回 `Split<Self>`；容器（栏、表、列表）对子节点类型泛型 `N: Flowable`。`flow` 持有 `FlowNode` 枚举，把各节点的 tail 映射回 `FlowNode`。静态分发，没有 trait 对象 |
+| `decorate` → `paginate` | `SectionSpan` 归 `decorate`；`decorate` 测试的页面夹具挪进 `layout/test_util` |
+| `document` → `backend` | `canvas::ImageRegistry`（`Any + Send + Sync`）是注册缝，`canvas::RejectingImageRegistry` 是无后端实现。`backend::ImageTable` 实现它；`backend::write_pdf` 把录制回放成 PDF。`lib.rs` 的 `document()` 在开 `backend-krilla` 时换上 `ImageTable`；`quire_pdf::to_pdf(rendered)` 调 `backend::write_pdf` |
+
+**未清项：** 各节点模块的单元测试（`#[cfg(test)]`）仍 `use crate::layout::flow::FlowNode`，并经 `test_util` 走 `paginate`。这些是只在测试里出现的反向边，与上文硬规则 3 不符；整体挪到 `flow` / `paginate` 测试或集成测试是单独一刀。
 
 ## 明确不做
 

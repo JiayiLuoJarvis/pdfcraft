@@ -14,7 +14,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use quire_pdf::{
-    document, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, PageSize, Track,
+    document, to_pdf, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, PageSize,
+    Track,
 };
 
 const NAVY: Color = Color::rgb(0x19, 0x2d, 0x74);
@@ -48,7 +49,7 @@ fn main() -> quire_pdf::Result<()> {
         ],
     )?;
 
-    let pdf = document(PageSize::A4, |doc| {
+    let rendered = document(PageSize::A4, |doc| {
         doc.font(body_font)?;
         doc.bold_font(bold_font)?;
         let logo = doc.load_image(LOGO.to_vec(), ImageFormat::Png)?;
@@ -59,8 +60,8 @@ fn main() -> quire_pdf::Result<()> {
         write_body(doc, &diamond);
         write_company_block(doc);
         Ok(())
-    })?
-    .to_pdf()?;
+    })?;
+    let pdf = to_pdf(rendered)?;
 
     fs::write(&out, &pdf).expect("write PDF");
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());
