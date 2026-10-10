@@ -10,6 +10,19 @@ while remaining `0.x`.
 
 ### Added
 
+- Header and footer slots span the full page width. `Band::inset` is the only way to pull them in from the page edges.
+- `Paragraph::center` and `Paragraph::end` set line alignment. The default stays start.
+- `Table::tracks`, `Table::cell_padding`, and `Table::border` reach the layout engine. Defaults stay equal-ratio columns with no stroke.
+- `Columns::gap`, `col_fixed`, `col_ratio`, and `col_auto` set track widths. Mixing Auto with Ratio fails with `Error::ColumnWidths { reason: "auto-with-ratio" }`.
+- `List::start`, `List::marker_width`, and `List::nest_indent` set list numbering and the marker column.
+- `Cell::ul` and `Cell::ol` run when the row is written, so they can borrow locals from the table closure.
+
+### Changed
+
+- `layout` and `text` are crate-private. Empty `layout/dump.rs` is gone.
+
+### Added
+
 - Paragraphs support mixed body and bold font runs plus a typed first-line indent.
 - `FontStore` measures nominal glyph advances with skrifa 0.47.0. Missing cmap entries fail the document. The krilla adapter draws the same glyph ids through `draw_glyphs`.
 - `Canvas` and `RecordingCanvas`, with an ordered `CanvasCommand` log so layout tests can assert coordinates without PDF bytes.
