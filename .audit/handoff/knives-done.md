@@ -15,7 +15,7 @@
 | 13 style / bold / first-line indent | feat/style-builders | 5deb0df (feature tip aaf14bf) |
 | 14 §2.2 fill-in underscore | feat/inline-blank | b83712e |
 
-Knife 14 stacks on `feat/style-builders` @ `5deb0df`. Design trail under `.audit/knife-14/` (how / arena / synthesis / implement-status).
+Knife 14 stacks on `feat/style-builders` @ `5deb0df`. Feature tip `b83712e`. Design trail under `.audit/knife-14/` (how / arena / synthesis / implement-status). Full branch tip is `git rev-parse feat/inline-blank` after the tip-hash note commit.
 
 ## What callers get (knife 14)
 
