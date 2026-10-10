@@ -1010,6 +1010,9 @@ impl Table {
                                     vec![image_box.lower(&image, flow.doc)?]
                                 }
                                 CellContent::HLine(line) => vec![line.lower()],
+                                CellContent::Spacer(height) => {
+                                    vec![FlowNode::Spacer(SpacerNode { height })]
+                                }
                             };
                             Ok(table::Cell::new(content)?.with_span(cell.col_span, cell.row_span))
                         })
@@ -1041,6 +1044,7 @@ enum CellContent {
     Text(String),
     Image(Image, ImageBox),
     HLine(HLine),
+    Spacer(Length<NonNegative>),
 }
 
 impl Cell {
@@ -1070,6 +1074,19 @@ impl Cell {
         f(&mut line);
         Self {
             content: CellContent::HLine(line),
+            col_span: NonZeroU16::MIN,
+            row_span: NonZeroU16::MIN,
+        }
+    }
+
+    /// A one-by-one cell holding vertical space that paints nothing.
+    ///
+    /// Height may be zero. Taller than the cell's inner full frame is
+    /// [`Error::UnsplittableTallerThanFrame`]. Unlike [`Flow::spacer`], the blank
+    /// does not split across pages inside the cell.
+    pub fn spacer(height: Length<NonNegative>) -> Self {
+        Self {
+            content: CellContent::Spacer(height),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
         }
