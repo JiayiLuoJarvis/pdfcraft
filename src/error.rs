@@ -72,11 +72,13 @@ pub enum Error {
     },
     /// Content that cannot break or shrink is wider than the available frame width.
     UnbreakableWiderThanFrame {
-        /// Width from the current line start through the overflowing cluster.
+        /// Width from the current line start through the overflowing atom.
         width: f32,
         /// Available width that was exceeded.
         avail: f32,
     },
+    /// A fill-to-end blank is followed by another inline run.
+    RunAfterFillBlank,
     /// A node that cannot split is taller than the full body frame.
     UnsplittableTallerThanFrame,
     /// Column or table track widths cannot be resolved inside the frame.
@@ -158,6 +160,7 @@ impl fmt::Display for Error {
                 f,
                 "unbreakable content width {width} exceeds available width {avail}"
             ),
+            Self::RunAfterFillBlank => f.write_str("a fill-to-end blank must be the last run"),
             Self::UnsplittableTallerThanFrame => {
                 f.write_str("unsplittable content is taller than the body frame")
             }

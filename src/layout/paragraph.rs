@@ -5,7 +5,7 @@
 use crate::canvas::{GlyphPlacement, GlyphRun};
 use crate::error::{Error, Result};
 use crate::fonts::{FontId, FontStore};
-use crate::geom::Point;
+use crate::geom::{Color, Length, NonNegative, Point, Positive};
 use crate::layout::flow::{FlowNode, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
 use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
@@ -33,6 +33,46 @@ impl TextRun {
     }
 }
 
+/// One inline item in source order. A blank separates the text on either side.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum InlineItem {
+    /// A measured text run.
+    Text(TextRun),
+    /// A gap and a stroke. It never enters the glyph tape.
+    Blank(InlineBlank),
+}
+
+/// Width of an [`InlineBlank`]. Fixed and fill-to-end cannot both be set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BlankWidth {
+    /// A length already in points.
+    Fixed(Length<NonNegative>),
+    /// `n` times the paragraph font size, resolved at layout.
+    Em(u32),
+    /// The remainder of the visual line that holds this blank.
+    ToEndOfLine,
+}
+
+/// Stroke for one inline blank. `color` falls back to the paragraph color at placement.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InlineBlank {
+    pub(crate) width: BlankWidth,
+    pub(crate) thickness: Length<Positive>,
+    pub(crate) color: Option<Color>,
+    pub(crate) baseline_offset: Length<NonNegative>,
+}
+
+impl InlineBlank {
+    pub(crate) fn new(width: BlankWidth) -> Self {
+        Self {
+            width,
+            thickness: Positive::pt(1.0).expect("1 pt is positive"),
+            color: None,
+            baseline_offset: NonNegative::pt(1.0).expect("1 pt is non-negative"),
+        }
+    }
+}
+
 /// One laid-out line, coordinates relative to the paragraph fragment origin.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LineBox {
@@ -42,28 +82,32 @@ pub(crate) struct LineBox {
 /// Unwrapped text. Wraps at the width of the first frame it is split against.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TextNode {
-    runs: Vec<TextRun>,
+    items: Vec<InlineItem>,
     style: Style,
 }
 
 impl TextNode {
     pub(crate) fn new(text: impl Into<String>, style: Style) -> Self {
         let text = text.into();
-        let runs = if text.is_empty() {
+        let items = if text.is_empty() {
             Vec::new()
         } else {
-            vec![TextRun::new(text, Face::Body)]
+            vec![InlineItem::Text(TextRun::new(text, Face::Body))]
         };
-        Self { runs, style }
+        Self { items, style }
     }
 
     pub(crate) fn from_runs(runs: Vec<TextRun>, style: Style) -> Self {
-        Self { runs, style }
+        Self::from_items(runs.into_iter().map(InlineItem::Text).collect(), style)
+    }
+
+    pub(crate) fn from_items(items: Vec<InlineItem>, style: Style) -> Self {
+        Self { items, style }
     }
 
     /// Every outcome hands back a laid-out `Paragraph`, so a page move never wraps twice.
     pub(crate) fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split> {
-        ParagraphNode::layout_runs(ctx.fonts, &self.runs, &self.style, avail.width)?.split(avail)
+        ParagraphNode::layout_runs(ctx.fonts, &self.items, &self.style, avail.width)?.split(avail)
     }
 }
 
@@ -83,20 +127,21 @@ impl ParagraphNode {
         style: &Style,
         width: f32,
     ) -> Result<Self> {
-        let runs = if text.is_empty() {
+        let items = if text.is_empty() {
             Vec::new()
         } else {
-            vec![TextRun::new(text, Face::Body)]
+            vec![InlineItem::Text(TextRun::new(text, Face::Body))]
         };
-        Self::layout_runs(fonts, &runs, style, width)
+        Self::layout_runs(fonts, &items, style, width)
     }
 
     fn layout_runs(
         fonts: &mut FontStore,
-        runs: &[TextRun],
+        items: &[InlineItem],
         style: &Style,
         width: f32,
     ) -> Result<Self> {
+        let runs = text_only(items)?;
         if !width.is_finite() || width <= 0.0 {
             return Err(Error::InvalidGeometry);
         }
@@ -106,7 +151,7 @@ impl ParagraphNode {
         if !first_width.is_finite() || first_width <= 0.0 {
             return Err(Error::InvalidGeometry);
         }
-        let measured = measure_inline(fonts, runs, style.font)?;
+        let measured = measure_inline(fonts, &runs, style.font)?;
         let font_size = style.font_size.as_pt();
         let broken = break_lines(
             measured.text.clustered(),
@@ -279,6 +324,17 @@ struct InlineGlyph {
     glyph_id: u32,
     advance_norm: f32,
     byte_range: std::ops::Range<usize>,
+}
+
+fn text_only(items: &[InlineItem]) -> Result<Vec<TextRun>> {
+    let mut runs = Vec::new();
+    for item in items {
+        match item {
+            InlineItem::Text(run) => runs.push(run.clone()),
+            InlineItem::Blank(_) => return Err(Error::InvalidGeometry),
+        }
+    }
+    Ok(runs)
 }
 
 fn measure_inline(fonts: &mut FontStore, runs: &[TextRun], body: FontId) -> Result<MeasuredInline> {

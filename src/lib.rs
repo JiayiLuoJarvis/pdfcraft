@@ -19,8 +19,8 @@ pub mod document;
 pub mod fonts;
 
 pub use document::{
-    document, Band, Cell, Columns, Document, Flow, HLine, Image, ImageBox, Layer, List, Numbering,
-    Page, Paragraph, Rendered, Section, Shapes, Table,
+    document, Band, Blank, Cell, Columns, Document, Flow, HLine, Image, ImageBox, Layer, List,
+    Numbering, Page, Paragraph, Rendered, Section, Shapes, Table,
 };
 
 pub use canvas::{

@@ -24,7 +24,7 @@ use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
 use crate::layout::paginate::{paginate_sections, PaginateConfig, SectionJob};
-use crate::layout::paragraph::{Face, TextNode, TextRun};
+use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun};
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table::{self, TableNode, TableSpec};
 
@@ -679,9 +679,13 @@ impl Flow {
     pub fn paragraph(&mut self, f: impl FnOnce(&mut Paragraph)) {
         let mut paragraph = Paragraph::default();
         f(&mut paragraph);
+        if let Some(error) = paragraph.error {
+            self.push(Err(error));
+            return;
+        }
         let mut style = self.style.clone();
         style.first_line_indent = paragraph.first_line_indent;
-        let node = FlowNode::Text(TextNode::from_runs(paragraph.runs, style));
+        let node = FlowNode::Text(TextNode::from_items(paragraph.items, style));
         self.push(Ok(node));
     }
 
@@ -773,15 +777,17 @@ impl Flow {
 
 /// Text and paragraph-level settings for one paragraph.
 pub struct Paragraph {
-    runs: Vec<TextRun>,
+    items: Vec<InlineItem>,
     first_line_indent: Length<NonNegative>,
+    error: Option<Error>,
 }
 
 impl Default for Paragraph {
     fn default() -> Self {
         Self {
-            runs: Vec::new(),
+            items: Vec::new(),
             first_line_indent: NonNegative::ZERO,
+            error: None,
         }
     }
 }
@@ -797,6 +803,23 @@ impl Paragraph {
         self.append(Face::Bold, s.as_ref());
     }
 
+    /// Appends a fixed-width blank. Stroke settings keep their defaults when the result is ignored.
+    pub fn blank(&mut self, width: Length<NonNegative>) -> Blank<'_> {
+        self.push_blank(BlankWidth::Fixed(width))
+    }
+
+    /// Appends a blank `ems` times the paragraph font size wide.
+    pub fn blank_em(&mut self, ems: u32) -> Blank<'_> {
+        self.push_blank(BlankWidth::Em(ems))
+    }
+
+    /// Appends a blank that fills the rest of its visual line.
+    ///
+    /// A later non-empty run fails assembly with [`Error::RunAfterFillBlank`].
+    pub fn blank_to_end(&mut self) -> Blank<'_> {
+        self.push_blank(BlankWidth::ToEndOfLine)
+    }
+
     /// Sets the horizontal inset of the first visual line.
     pub fn first_line_indent(&mut self, indent: Length<NonNegative>) {
         self.first_line_indent = indent;
@@ -806,13 +829,85 @@ impl Paragraph {
         if text.is_empty() {
             return;
         }
-        if let Some(last) = self.runs.last_mut() {
+        if self.sealed() {
+            self.note_run_after_fill();
+            return;
+        }
+        if let Some(InlineItem::Text(last)) = self.items.last_mut() {
             if last.face == face {
                 last.text.push_str(text);
                 return;
             }
         }
-        self.runs.push(TextRun::new(text, face));
+        self.items.push(InlineItem::Text(TextRun::new(text, face)));
+    }
+
+    fn push_blank(&mut self, width: BlankWidth) -> Blank<'_> {
+        if self.sealed() {
+            self.note_run_after_fill();
+            return Blank {
+                paragraph: self,
+                index: usize::MAX,
+            };
+        }
+        self.items.push(InlineItem::Blank(InlineBlank::new(width)));
+        let index = self.items.len() - 1;
+        Blank {
+            paragraph: self,
+            index,
+        }
+    }
+
+    fn sealed(&self) -> bool {
+        matches!(
+            self.items.last(),
+            Some(InlineItem::Blank(blank)) if matches!(blank.width, BlankWidth::ToEndOfLine)
+        )
+    }
+
+    fn note_run_after_fill(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(Error::RunAfterFillBlank);
+        }
+    }
+}
+
+/// Stroke settings for the blank just appended to a [`Paragraph`].
+pub struct Blank<'a> {
+    paragraph: &'a mut Paragraph,
+    index: usize,
+}
+
+impl Blank<'_> {
+    /// Sets the stroke thickness. The default is 1 pt.
+    pub fn thickness(&mut self, thickness: Length<Positive>) -> &mut Self {
+        if let Some(blank) = self.blank_mut() {
+            blank.thickness = thickness;
+        }
+        self
+    }
+
+    /// Sets the stroke color. The default is the paragraph text color.
+    pub fn color(&mut self, color: Color) -> &mut Self {
+        if let Some(blank) = self.blank_mut() {
+            blank.color = Some(color);
+        }
+        self
+    }
+
+    /// Sets the distance from the baseline down to the stroke. The default is 1 pt.
+    pub fn baseline_offset(&mut self, offset: Length<NonNegative>) -> &mut Self {
+        if let Some(blank) = self.blank_mut() {
+            blank.baseline_offset = offset;
+        }
+        self
+    }
+
+    fn blank_mut(&mut self) -> Option<&mut InlineBlank> {
+        match self.paragraph.items.get_mut(self.index) {
+            Some(InlineItem::Blank(blank)) => Some(blank),
+            _ => None,
+        }
     }
 }
 
@@ -1404,6 +1499,104 @@ mod tests {
             section.flow.nodes.as_slice(),
             [FlowNode::Text(text)] if *text == expected
         ));
+    }
+
+    fn flow_text(doc: &Document<'_>) -> TextNode {
+        let Sections::Implicit(section) = &doc.body else {
+            panic!("paragraph stays on the implicit section");
+        };
+        match section.flow.nodes.as_slice() {
+            [FlowNode::Text(text)] => text.clone(),
+            other => panic!("expected one text node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blank_breaks_text_coalescing() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| {
+            p.text("A");
+            p.blank(NonNegative::pt(10.0).unwrap())
+                .thickness(Positive::pt(0.5).unwrap())
+                .color(Color::rgb(1, 2, 3))
+                .baseline_offset(NonNegative::pt(2.0).unwrap());
+            p.text("B");
+        });
+        let mut blank = InlineBlank::new(BlankWidth::Fixed(NonNegative::pt(10.0).unwrap()));
+        blank.thickness = Positive::pt(0.5).unwrap();
+        blank.color = Some(Color::rgb(1, 2, 3));
+        blank.baseline_offset = NonNegative::pt(2.0).unwrap();
+        let expected = TextNode::from_items(
+            vec![
+                InlineItem::Text(TextRun::new("A", Face::Body)),
+                InlineItem::Blank(blank),
+                InlineItem::Text(TextRun::new("B", Face::Body)),
+            ],
+            default_style(),
+        );
+        assert_eq!(flow_text(&doc), expected);
+    }
+
+    #[test]
+    fn fill_blank_coalesces_text_before_it_and_rejects_a_later_run() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| {
+            p.text("A");
+            p.text("B");
+            p.blank_to_end();
+            p.text("");
+            p.bold("");
+        });
+        let expected = TextNode::from_items(
+            vec![
+                InlineItem::Text(TextRun::new("AB", Face::Body)),
+                InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
+            ],
+            default_style(),
+        );
+        assert_eq!(flow_text(&doc), expected);
+
+        for build in [
+            |p: &mut Paragraph| {
+                p.blank_to_end();
+                p.text("x");
+            },
+            |p: &mut Paragraph| {
+                p.blank_to_end();
+                p.bold("x");
+            },
+            |p: &mut Paragraph| {
+                p.blank_to_end();
+                p.blank(NonNegative::ZERO);
+            },
+            |p: &mut Paragraph| {
+                p.blank_to_end();
+                p.blank_em(1);
+            },
+            |p: &mut Paragraph| {
+                p.blank_to_end();
+                p.blank_to_end();
+            },
+        ] {
+            let mut doc = doc_with_font();
+            doc.paragraph(build);
+            let Sections::Implicit(section) = &doc.body else {
+                panic!("paragraph stays on the implicit section");
+            };
+            assert_eq!(section.flow.error, Some(Error::RunAfterFillBlank));
+            assert!(section.flow.nodes.is_empty());
+        }
+    }
+
+    #[test]
+    fn run_after_fill_blank_paints_nothing() {
+        let mut doc = doc_with_font();
+        doc.paragraph(|p| {
+            p.text("A");
+            p.blank_to_end();
+            p.text("x");
+        });
+        assert_fails_with_empty_canvas(doc, &Error::RunAfterFillBlank);
     }
 
     #[test]
