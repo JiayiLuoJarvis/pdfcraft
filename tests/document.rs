@@ -5,9 +5,9 @@ use std::num::{NonZeroU16, NonZeroU32};
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::Paper;
 use quire_pdf::{
-    document, pt_near, CanvasCommand, Cell, Color, Error, Flow, ImageFormat, Ink, MarginPreset,
-    Margins, NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage,
-    Rect, Rendered, Result, Size, Stroke, Track, A4,
+    document, pt_near, CanvasCommand, Cell, Color, Error, Flow, FlowWriter, ImageFormat, Ink,
+    MarginPreset, Margins, NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive,
+    RecordedPage, Rect, Rendered, Result, Size, Stroke, Track, A4,
 };
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");

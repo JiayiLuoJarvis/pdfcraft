@@ -33,6 +33,13 @@ impl Default for HLine {
 }
 
 impl HLine {
+    /// Runs `f` on a default line. Pass the result to [`FlowWriter::add`].
+    pub fn build(f: impl FnOnce(&mut Self)) -> Self {
+        let mut line = Self::default();
+        f(&mut line);
+        line
+    }
+
     /// Sets the line length. Longer than the frame is an error when laid out.
     pub fn width(&mut self, width: impl IntoPositive) {
         match width.into_positive() {

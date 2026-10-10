@@ -20,8 +20,9 @@ pub mod document;
 pub mod fonts;
 
 pub use document::{
-    document, Band, Blank, Border, Cell, Columns, Document, Flow, HLine, Image, ImageBox, Layer,
-    List, Numbering, Page, Paragraph, Rendered, Section, Shapes, Table, TextAt, TextProps, Track,
+    document, Band, Blank, Border, Cell, Columns, Document, Flow, FlowWriter, HLine, Image,
+    ImageBox, IntoFlowItem, Layer, List, Numbering, Page, Paragraph, PlacedImage, Rendered,
+    Section, Shapes, Table, TextAt, TextProps, Track,
 };
 
 pub use canvas::{

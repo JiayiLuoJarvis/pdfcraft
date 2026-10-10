@@ -27,6 +27,19 @@ pub struct List {
 }
 
 impl List {
+    pub(crate) fn build_on(parent: &Flow, f: impl FnOnce(&mut Self)) -> Self {
+        let mut list = Self {
+            parent: parent.child(),
+            items: Vec::new(),
+            start: NonZeroU32::MIN,
+            marker_width: Positive::pt(18.0).expect("18 pt is positive"),
+            nest_indent: None,
+            error: None,
+        };
+        f(&mut list);
+        list
+    }
+
     /// First number of an ordered list. Default 1.
     ///
     /// Ignored on a bulleted list.

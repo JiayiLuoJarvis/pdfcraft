@@ -14,7 +14,8 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::path::PathBuf;
 
 use quire_pdf::{
-    document, Cell, Color, Document, Flow, Image, ImageFormat, Margins, Numbering, PageSize, Track,
+    document, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, Numbering, PageSize,
+    Track,
 };
 
 const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
@@ -68,7 +69,7 @@ fn decorate_pages(doc: &mut Document<'_>) -> quire_pdf::Result<()> {
     Ok(())
 }
 
-fn write_title(flow: &mut Flow, logo: &Image) {
+fn write_title(flow: &mut impl FlowWriter, logo: &Image) {
     flow.paragraph(|p| {
         p.center();
         p.bold("Quire layout tour");
@@ -108,7 +109,7 @@ fn write_title(flow: &mut Flow, logo: &Image) {
     });
 }
 
-fn write_lists(flow: &mut Flow) {
+fn write_lists(flow: &mut impl FlowWriter) {
     flow.columns(|row| {
         row.gap(16.0);
         row.col(|col| {
@@ -150,7 +151,7 @@ fn write_lists(flow: &mut Flow) {
     });
 }
 
-fn write_table(flow: &mut Flow, logo: &Image) {
+fn write_table(flow: &mut impl FlowWriter, logo: &Image) {
     flow.paragraph(|p| p.bold("Shipment table"));
     flow.table(|t| {
         t.repeat_header(true);
@@ -231,7 +232,7 @@ fn write_table(flow: &mut Flow, logo: &Image) {
     });
 }
 
-fn write_closing(flow: &mut Flow) {
+fn write_closing(flow: &mut impl FlowWriter) {
     flow.keep_together(|g| {
         g.paragraph(|p| {
             p.center();

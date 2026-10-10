@@ -9,6 +9,16 @@ pub struct Columns {
 }
 
 impl Columns {
+    pub(crate) fn build_on(parent: &Flow, f: impl FnOnce(&mut Self)) -> Self {
+        let mut columns = Self {
+            parent: parent.child(),
+            cols: Vec::new(),
+            gap: default_column_gap(),
+        };
+        f(&mut columns);
+        columns
+    }
+
     /// Space between columns. Default 12 pt.
     pub fn gap(&mut self, gap: impl IntoNonNegative) {
         match gap.into_non_negative() {

@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use quire_pdf::{
-    document, Cell, Color, Document, Flow, Image, ImageFormat, Margins, PageSize, Track,
+    document, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, PageSize, Track,
 };
 
 const NAVY: Color = Color::rgb(0x19, 0x2d, 0x74);
@@ -84,7 +84,7 @@ fn decorate_pages(doc: &mut Document<'_>) {
     });
 }
 
-fn write_letterhead(flow: &mut Flow, logo: &Image, mark: &Image) {
+fn write_letterhead(flow: &mut impl FlowWriter, logo: &Image, mark: &Image) {
     flow.columns(|row| {
         row.gap(12.0);
         row.col(|col| {
@@ -118,14 +118,14 @@ fn write_letterhead(flow: &mut Flow, logo: &Image, mark: &Image) {
     flow.spacer(16.0);
 }
 
-fn write_body(flow: &mut Flow, diamond: &Image) {
+fn write_body(flow: &mut impl FlowWriter, diamond: &Image) {
     write_bill_to(flow);
     write_service_table(flow);
     write_payment(flow, diamond);
     write_cheque_notes(flow);
 }
 
-fn write_bill_to(flow: &mut Flow) {
+fn write_bill_to(flow: &mut impl FlowWriter) {
     flow.stack(
         |s| {
             s.font_size(16.0);
@@ -172,7 +172,7 @@ fn write_bill_to(flow: &mut Flow) {
     flow.spacer(16.0);
 }
 
-fn write_service_table(flow: &mut Flow) {
+fn write_service_table(flow: &mut impl FlowWriter) {
     flow.columns(|row| {
         row.col(|col| {
             col.stack(
@@ -255,7 +255,7 @@ fn write_service_table(flow: &mut Flow) {
     flow.spacer(16.0);
 }
 
-fn write_payment(flow: &mut Flow, diamond: &Image) {
+fn write_payment(flow: &mut impl FlowWriter, diamond: &Image) {
     let rows = [
         (
             "Beneficiary Bank Name：Hang Seng Bank Ltd",
@@ -312,7 +312,7 @@ fn write_payment(flow: &mut Flow, diamond: &Image) {
     });
 }
 
-fn write_cheque_notes(flow: &mut Flow) {
+fn write_cheque_notes(flow: &mut impl FlowWriter) {
     flow.spacer(12.0);
     flow.stack(
         |s| {
@@ -343,7 +343,7 @@ fn write_cheque_notes(flow: &mut Flow) {
     );
 }
 
-fn write_company_block(flow: &mut Flow) {
+fn write_company_block(flow: &mut impl FlowWriter) {
     flow.spacer(20.0);
     flow.hline(|h| {
         h.thickness(0.75);

@@ -28,6 +28,13 @@ impl Default for Paragraph {
 }
 
 impl Paragraph {
+    /// Runs `f` on a default paragraph. Pass the result to [`FlowWriter::add`].
+    pub fn build(f: impl FnOnce(&mut Self)) -> Self {
+        let mut paragraph = Self::default();
+        f(&mut paragraph);
+        paragraph
+    }
+
     /// Sets this paragraph's text color. Overrides the parent flow color.
     pub fn color(&mut self, color: Color) {
         self.color = Some(color);

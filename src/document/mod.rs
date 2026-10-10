@@ -8,7 +8,6 @@
 #![allow(clippy::wildcard_imports)]
 
 use std::num::{NonZeroU16, NonZeroU32};
-use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -40,6 +39,7 @@ mod band;
 mod columns;
 mod document_ty;
 mod flow;
+mod flow_writer;
 mod hline;
 mod image;
 mod layer;
@@ -58,6 +58,7 @@ pub use band::Band;
 pub use columns::Columns;
 pub use document_ty::{document, Document, Rendered};
 pub use flow::Flow;
+pub use flow_writer::{FlowWriter, IntoFlowItem, PlacedImage};
 pub use hline::HLine;
 pub use image::{Image, ImageBox};
 pub use layer::{Layer, Shapes, TextAt};
@@ -70,10 +71,8 @@ pub use table::{Border, Cell, Table, Track};
 
 pub(crate) use band::band_content;
 pub(crate) use columns::reject_auto_with_ratio;
+pub(crate) use document_ty::default_style;
 pub(crate) use flow::{assemble_list, lower_paragraph, numbering_kind};
 pub(crate) use layer::layer_content;
 pub(crate) use section::{BandHook, LayerHook, Sections};
 pub(crate) use token::DocToken;
-
-#[cfg(test)]
-pub(crate) use document_ty::default_style;

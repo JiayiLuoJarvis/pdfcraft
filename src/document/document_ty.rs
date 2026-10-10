@@ -25,7 +25,7 @@ pub fn document<'a>(
     })
 }
 
-/// Document settings and page-time closures. Body methods come from [`Flow`].
+/// Document settings and page-time closures. Body methods come from [`FlowWriter`].
 pub struct Document<'a> {
     pub(crate) page_size: PageSize,
     pub(crate) doc: DocToken,
@@ -242,25 +242,6 @@ pub(crate) struct Painted {
     pub(crate) fonts: FontStore,
     #[cfg(feature = "backend-krilla")]
     pub(crate) images: ImageTable,
-}
-impl Deref for Document<'_> {
-    type Target = Flow;
-
-    fn deref(&self) -> &Flow {
-        match &self.body {
-            Sections::Implicit(section) => &section.flow,
-            Sections::Explicit { closed, .. } => closed,
-        }
-    }
-}
-
-impl DerefMut for Document<'_> {
-    fn deref_mut(&mut self) -> &mut Flow {
-        match &mut self.body {
-            Sections::Implicit(section) => &mut section.flow,
-            Sections::Explicit { closed, .. } => closed,
-        }
-    }
 }
 
 pub(crate) fn default_style() -> Style {

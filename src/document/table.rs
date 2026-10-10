@@ -58,6 +58,34 @@ pub(crate) enum StoredContent {
 }
 
 impl Table {
+    /// Builds a table using `parent`'s style and document token.
+    pub(crate) fn build_on(parent: &Flow, f: impl FnOnce(&mut Self)) -> Self {
+        let mut table = Self {
+            parent: parent.child(),
+            header: Vec::new(),
+            body: Vec::new(),
+            repeat_header: true,
+            tracks: None,
+            padding: NonNegative::ZERO,
+            border: Border {
+                width: NonNegative::ZERO,
+                color: Color::rgb(0, 0, 0),
+            },
+            error: None,
+        };
+        f(&mut table);
+        table
+    }
+
+    /// Builds a table against a detached parent style.
+    ///
+    /// Prefer [`FlowWriter::table`] when writing into a live flow so nested
+    /// content sees that flow's style. Use this when a helper returns a table
+    /// for [`FlowWriter::add`].
+    pub fn build(f: impl FnOnce(&mut Self)) -> Self {
+        Self::build_on(&Flow::new(default_style(), DocToken::next()), f)
+    }
+
     /// Adds a header row. Several calls make a multi-row header.
     pub fn header<'c, I>(&mut self, cells: I)
     where

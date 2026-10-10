@@ -432,6 +432,35 @@ fn paragraph_after_section_fails_before_any_page() {
 }
 
 #[test]
+fn add_after_section_fails_before_any_page() {
+    let mut doc = doc_with_font();
+    doc.section(|section| {
+        section.paragraph(|p| p.text("A"));
+        Ok(())
+    })
+    .unwrap();
+    doc.add(Paragraph::build(|p| p.text("B")));
+    assert_fails_with_empty_canvas(doc, &Error::ContentOutsideSection);
+}
+
+#[test]
+fn add_paragraph_factory_matches_sugar() {
+    let mut via_sugar = doc_with_font();
+    via_sugar.paragraph(|p| p.text("A B"));
+    let mut via_add = doc_with_font();
+    via_add.add(Paragraph::build(|p| p.text("A B")));
+    let sugar_nodes = match &via_sugar.body {
+        Sections::Implicit(section) => section.flow.nodes.clone(),
+        Sections::Explicit { .. } => panic!("expected implicit section"),
+    };
+    let add_nodes = match &via_add.body {
+        Sections::Implicit(section) => section.flow.nodes.clone(),
+        Sections::Explicit { .. } => panic!("expected implicit section"),
+    };
+    assert_eq!(sugar_nodes, add_nodes);
+}
+
+#[test]
 fn margins_after_section_fail_before_any_page() {
     let mut doc = doc_with_font();
     doc.section(|section| {

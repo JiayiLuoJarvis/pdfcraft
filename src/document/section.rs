@@ -114,17 +114,3 @@ impl<'a> Section<'a> {
         Ok((config, root, decorations))
     }
 }
-
-impl Deref for Section<'_> {
-    type Target = Flow;
-
-    fn deref(&self) -> &Flow {
-        &self.flow
-    }
-}
-
-impl DerefMut for Section<'_> {
-    fn deref_mut(&mut self) -> &mut Flow {
-        &mut self.flow
-    }
-}
