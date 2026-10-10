@@ -1,8 +1,7 @@
-//! Recreate the sample HC service bill (`00000955-…账单-….pdf`).
+//! HC service bill example — brand colors kept, layout is flow-first.
 //!
-//! Brand color is `#192d74`. Chinese face defaults to Source Han Serif HK via
-//! `.fonts/body.ttf` / `.fonts/bold.ttf`, or override with `QUIRE_CJK_FONT` /
-//! `QUIRE_CJK_BOLD_FONT`.
+//! Chinese face defaults to Source Han Serif HK via `.fonts/body.ttf` /
+//! `.fonts/bold.ttf`, or override with `QUIRE_CJK_FONT` / `QUIRE_CJK_BOLD_FONT`.
 //!
 //! ```text
 //! cargo run --example bill
@@ -15,23 +14,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use quire_pdf::{
-    document, Cell, Color, Flow, Image, ImageFormat, Ink, Layer, Margins, PageSize, Size, Track,
+    document, Cell, Color, Document, Flow, Image, ImageFormat, Margins, PageSize, Track,
 };
 
 const NAVY: Color = Color::rgb(0x19, 0x2d, 0x74);
 const GRAY: Color = Color::rgb(0xc5, 0xc5, 0xc5);
-const ORANGE: Color = Color::rgb(0xff, 0x55, 0x20);
-const WHITE: Color = Color::rgb(0xff, 0xff, 0xff);
 const BLACK: Color = Color::rgb(0x00, 0x00, 0x00);
 
 const LOGO: &[u8] = include_bytes!("assets/logo.png");
 const MARK: &[u8] = include_bytes!("assets/mark.png");
 const DIAMOND: &[u8] = include_bytes!("assets/diamond.png");
-
-const PAGE_W: f32 = 594.96;
-const CONTENT_L: f32 = 33.08;
-const CONTENT_R: f32 = 562.42;
-const CONTENT_W: f32 = CONTENT_R - CONTENT_L;
 
 fn main() -> quire_pdf::Result<()> {
     let out = env::args()
@@ -56,16 +48,16 @@ fn main() -> quire_pdf::Result<()> {
         ],
     )?;
 
-    let page = PageSize::custom(Size::try_pt(PAGE_W, 841.92)?);
-    let pdf = document(page, |doc| {
+    let pdf = document(PageSize::A4, |doc| {
         doc.font(body_font)?;
         doc.bold_font(bold_font)?;
         let logo = doc.load_image(LOGO.to_vec(), ImageFormat::Png)?;
         let mark = doc.load_image(MARK.to_vec(), ImageFormat::Png)?;
         let diamond = doc.load_image(DIAMOND.to_vec(), ImageFormat::Png)?;
-        doc.margins(Margins::try_new(90.0, 32.54, 50.0, 33.08)?);
-        doc.behind(move |layer| paint_chrome(layer, &logo, &mark));
+        decorate_pages(doc);
+        write_letterhead(doc, &logo, &mark);
         write_body(doc, &diamond);
+        write_company_block(doc);
         Ok(())
     })?
     .to_pdf()?;
@@ -75,32 +67,55 @@ fn main() -> quire_pdf::Result<()> {
     Ok(())
 }
 
-fn paint_chrome(layer: &mut Layer, logo: &Image, mark: &Image) {
-    layer.image_at(logo, (CONTENT_L, 33.08, 109.18, 13.90));
-    layer
-        .text_at("商 業 理 想 同 行 者", (471.8, 34.6))
-        .font_size(7.9)
-        .color(NAVY);
-    layer.image_at(mark, (509.48, 72.78, 52.93, 52.93));
-    layer.rect((CONTENT_L, 52.27, CONTENT_W, 0.66), Ink::Fill(NAVY));
+fn decorate_pages(doc: &mut Document<'_>) {
+    // Top/bottom margins are also the header/footer band heights.
+    doc.margins(Margins::try_new(28.0, 40.0, 28.0, 40.0).expect("margins"));
+    doc.header(|h| {
+        let m = h.page().margins;
+        h.inset(m.left(), m.right());
+        h.left("恒誠商務有限公司");
+        h.right(format!("第 {} / {} 頁", h.page().number, h.page().count));
+    });
+    doc.footer(|f| {
+        let m = f.page().margins;
+        f.inset(m.left(), m.right());
+        f.left("Tel.: 00852 - 2668 1868");
+        f.right("Web.: www.hc.biz");
+    });
+}
 
-    layer.rect((0.0, 797.97, PAGE_W, 4.63), Ink::Fill(ORANGE));
-    layer.rect((0.0, 802.60, PAGE_W, 39.70), Ink::Fill(NAVY));
-    layer.stack(
-        |s| {
-            s.font_size(7.9);
-            s.color(WHITE);
-        },
-        |layer| {
-            layer.text_at("恒誠商務有限公司", (57.2, 810.7));
-            layer.text_at(
-                "Add.: 香港九龍尖沙咀漆咸道南45-51號其士大廈801室",
-                (144.5, 810.7),
+fn write_letterhead(flow: &mut Flow, logo: &Image, mark: &Image) {
+    flow.columns(|row| {
+        row.gap(12.0);
+        row.col(|col| {
+            col.image(logo, |image| {
+                image.width(120.0);
+            });
+            col.spacer(6.0);
+            col.stack(
+                |s| {
+                    s.font_size(9.0);
+                    s.color(NAVY);
+                },
+                |col| {
+                    col.paragraph(|p| p.text("商 業 理 想 同 行 者"));
+                },
             );
-            layer.text_at("Tel.: 00852 - 2668 1868", (361.2, 810.7));
-            layer.text_at("Web.: www.hc.biz", (472.5, 810.7));
-        },
-    );
+            col.hline(|h| {
+                h.thickness(0.75);
+                h.color(NAVY);
+                h.space_before(8.0);
+                h.space_after(4.0);
+            });
+        });
+        row.col_fixed(56.0, |col| {
+            col.image(mark, |image| {
+                image.width(52.0);
+                image.end();
+            });
+        });
+    });
+    flow.spacer(16.0);
 }
 
 fn write_body(flow: &mut Flow, diamond: &Image) {
@@ -111,42 +126,41 @@ fn write_body(flow: &mut Flow, diamond: &Image) {
 }
 
 fn write_bill_to(flow: &mut Flow) {
-    flow.spacer(40.0);
     flow.stack(
         |s| {
-            s.font_size(16.5);
+            s.font_size(16.0);
             s.color(NAVY);
         },
         |flow| {
             flow.paragraph(|p| p.text("Service Bill 服務賬單"));
         },
     );
-    flow.spacer(24.0);
+    flow.spacer(18.0);
     flow.stack(
         |s| {
-            s.font_size(12.6);
+            s.font_size(12.0);
             s.color(NAVY);
         },
         |flow| {
             flow.paragraph(|p| p.text("Bill To 計入客欠"));
         },
     );
-    flow.spacer(4.0);
     flow.hline(|h| {
-        h.width(92.63);
-        h.thickness(0.66);
+        h.width(96.0);
+        h.thickness(0.75);
         h.color(NAVY);
-        h.space_after(8.0);
+        h.space_before(4.0);
+        h.space_after(4.0);
     });
     flow.hline(|h| {
         h.end();
-        h.thickness(3.31);
+        h.thickness(2.5);
         h.color(NAVY);
         h.space_after(10.0);
     });
     flow.stack(
         |s| {
-            s.font_size(11.2);
+            s.font_size(11.0);
             s.color(BLACK);
         },
         |flow| {
@@ -159,27 +173,33 @@ fn write_bill_to(flow: &mut Flow) {
 }
 
 fn write_service_table(flow: &mut Flow) {
-    flow.stack(
-        |s| {
-            s.font_size(12.6);
-            s.color(NAVY);
-        },
-        |flow| {
-            flow.paragraph(|p| p.text("Service Summary 服務概要"));
-        },
-    );
-    flow.stack(
-        |s| {
-            s.font_size(9.3);
-            s.color(NAVY);
-        },
-        |flow| {
-            flow.paragraph(|p| {
-                p.end();
-                p.text("日期：2025年10月28日");
-            });
-        },
-    );
+    flow.columns(|row| {
+        row.col(|col| {
+            col.stack(
+                |s| {
+                    s.font_size(12.0);
+                    s.color(NAVY);
+                },
+                |col| {
+                    col.paragraph(|p| p.text("Service Summary 服務概要"));
+                },
+            );
+        });
+        row.col(|col| {
+            col.stack(
+                |s| {
+                    s.font_size(9.0);
+                    s.color(NAVY);
+                },
+                |col| {
+                    col.paragraph(|p| {
+                        p.end();
+                        p.text("日期：2025年10月28日");
+                    });
+                },
+            );
+        });
+    });
     flow.spacer(8.0);
     flow.table(|t| {
         t.cell_padding(8.0);
@@ -187,25 +207,25 @@ fn write_service_table(flow: &mut Flow) {
         t.tracks([Track::Ratio(2.2), Track::Ratio(1.0)]);
         t.header([
             Cell::paragraph(|p| {
-                p.color(WHITE);
-                p.font_size(11.2);
+                p.color(Color::rgb(0xff, 0xff, 0xff));
+                p.font_size(11.0);
                 p.text("Key item (s) / outlay (s) 主要項目/代支");
             })
             .fill(NAVY),
             Cell::paragraph(|p| {
-                p.color(WHITE);
-                p.font_size(10.6);
+                p.color(Color::rgb(0xff, 0xff, 0xff));
+                p.font_size(10.5);
                 p.text("Amt. 金額");
             })
             .fill(NAVY),
         ]);
         t.row([
             Cell::paragraph(|p| {
-                p.font_size(11.2);
+                p.font_size(11.0);
                 p.text("綜合服務費用（含代支）");
             }),
             Cell::paragraph(|p| {
-                p.font_size(10.6);
+                p.font_size(10.5);
                 p.text("505.00 HKD");
             }),
         ]);
@@ -216,13 +236,13 @@ fn write_service_table(flow: &mut Flow) {
     flow.spacer(8.0);
     flow.hline(|h| {
         h.end();
-        h.thickness(3.31);
+        h.thickness(2.5);
         h.color(NAVY);
         h.space_after(8.0);
     });
     flow.stack(
         |s| {
-            s.font_size(14.6);
+            s.font_size(14.0);
             s.color(NAVY);
         },
         |flow| {
@@ -233,36 +253,6 @@ fn write_service_table(flow: &mut Flow) {
         },
     );
     flow.spacer(16.0);
-}
-
-fn write_cheque_notes(flow: &mut Flow) {
-    flow.spacer(12.0);
-    flow.stack(
-        |s| {
-            s.font_size(9.3);
-            s.color(NAVY);
-        },
-        |flow| {
-            flow.columns(|row| {
-                row.col(|col| {
-                    col.paragraph(|p| {
-                        p.text("Cheque made payable to \"HC BUSINESS LIMITED\"");
-                    });
-                    col.paragraph(|p| {
-                        p.text("支票付款請以 \"恒誠商務有限公司\" 抬頭");
-                    });
-                });
-                row.col(|col| {
-                    col.paragraph(|p| {
-                        p.text("FPS Unique ID: 3952652 (HK local bank transactions only)");
-                    });
-                    col.paragraph(|p| {
-                        p.text("快速支付編號: 3952652 (僅限香港本地銀行交易)");
-                    });
-                });
-            });
-        },
-    );
 }
 
 fn write_payment(flow: &mut Flow, diamond: &Image) {
@@ -290,14 +280,14 @@ fn write_payment(flow: &mut Flow, diamond: &Image) {
         t.header([
             Cell::spacer(1.0).fill(NAVY),
             Cell::paragraph(|p| {
-                p.color(WHITE);
-                p.font_size(7.9);
+                p.color(Color::rgb(0xff, 0xff, 0xff));
+                p.font_size(8.0);
                 p.text("Payment by bank transfer (T/T) and other info");
             })
             .fill(NAVY),
             Cell::paragraph(|p| {
-                p.color(WHITE);
-                p.font_size(7.9);
+                p.color(Color::rgb(0xff, 0xff, 0xff));
+                p.font_size(8.0);
                 p.text("以電匯付款及其他注意事項");
             })
             .fill(NAVY),
@@ -305,21 +295,73 @@ fn write_payment(flow: &mut Flow, diamond: &Image) {
         for (en, zh) in rows {
             t.row([
                 Cell::image(diamond, |image| {
-                    image.width(7.94);
+                    image.width(8.0);
                 }),
                 Cell::paragraph(|p| {
-                    p.font_size(7.9);
+                    p.font_size(8.0);
                     p.color(NAVY);
                     p.text(en);
                 }),
                 Cell::paragraph(|p| {
-                    p.font_size(7.9);
+                    p.font_size(8.0);
                     p.color(NAVY);
                     p.text(zh);
                 }),
             ]);
         }
     });
+}
+
+fn write_cheque_notes(flow: &mut Flow) {
+    flow.spacer(12.0);
+    flow.stack(
+        |s| {
+            s.font_size(9.0);
+            s.color(NAVY);
+        },
+        |flow| {
+            flow.columns(|row| {
+                row.gap(16.0);
+                row.col(|col| {
+                    col.paragraph(|p| {
+                        p.text("Cheque made payable to \"HC BUSINESS LIMITED\"");
+                    });
+                    col.paragraph(|p| {
+                        p.text("支票付款請以 \"恒誠商務有限公司\" 抬頭");
+                    });
+                });
+                row.col(|col| {
+                    col.paragraph(|p| {
+                        p.text("FPS Unique ID: 3952652 (HK local bank transactions only)");
+                    });
+                    col.paragraph(|p| {
+                        p.text("快速支付編號: 3952652 (僅限香港本地銀行交易)");
+                    });
+                });
+            });
+        },
+    );
+}
+
+fn write_company_block(flow: &mut Flow) {
+    flow.spacer(20.0);
+    flow.hline(|h| {
+        h.thickness(0.75);
+        h.color(NAVY);
+        h.space_after(8.0);
+    });
+    flow.stack(
+        |s| {
+            s.font_size(8.0);
+            s.color(NAVY);
+        },
+        |flow| {
+            flow.paragraph(|p| p.text("恒誠商務有限公司 · HC BUSINESS LIMITED"));
+            flow.paragraph(|p| {
+                p.text("Add.: 香港九龍尖沙咀漆咸道南45-51號其士大廈801室");
+            });
+        },
+    );
 }
 
 fn default_out_path() -> PathBuf {

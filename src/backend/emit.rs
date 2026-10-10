@@ -582,4 +582,32 @@ mod tests {
         let bytes = canvas.finish().unwrap();
         std::fs::write("probe.pdf", bytes).unwrap();
     }
+
+    #[test]
+    fn rgba_png_emits_smask() {
+        // 4x4 RGBA: transparent black outside, opaque red inside.
+        let png: &[u8] = &[
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 4, 0, 0, 0, 4,
+            8, 6, 0, 0, 0, 169, 241, 158, 126, 0, 0, 0, 21, 73, 68, 65, 84, 120, 218, 99, 96, 192,
+            6, 254, 3, 209, 127, 48, 133, 75, 0, 25, 0, 0, 15, 67, 7, 249, 150, 143, 128, 25, 0, 0,
+            0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+        ];
+        let mut table = crate::backend::images::ImageTable::default();
+        let image = table
+            .register(png.to_vec(), crate::canvas::ImageFormat::Png)
+            .unwrap();
+        let mut canvas =
+            KrillaCanvas::new_observable_with_resources(Arc::new(FontStore::new()), table);
+        canvas
+            .start_page(Size::try_pt(200.0, 200.0).unwrap())
+            .unwrap();
+        canvas
+            .draw_image(&image, Rect::try_pt(10.0, 10.0, 40.0, 40.0).unwrap())
+            .unwrap();
+        canvas.finish_page().unwrap();
+        let bytes = canvas.finish().unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("/SMask"), "expected soft mask, got:\n{text}");
+        assert_eq!(text.matches("/Subtype /Image").count(), 2, "{text}");
+    }
 }
