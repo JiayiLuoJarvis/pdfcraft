@@ -35,10 +35,7 @@ impl Ratio {
     }
 }
 
-/// Share of remaining width Auto takes when Ratio tracks are also present.
-const AUTO_WITH_RATIO_SHARE: f32 = 0.5;
-
-/// `inner` is frame width minus gaps. With Ratio and Auto, Auto gets half of `rest`.
+/// `inner` is frame width minus gaps. Auto takes all of `rest`. Auto and Ratio together fail.
 pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result<Vec<f32>> {
     let fail = |reason| Err(Error::ColumnWidths { reason });
     if specs.is_empty() {
@@ -60,6 +57,9 @@ pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result
             ColumnWidth::Auto => {}
         }
     }
+    if autos > 0 && weights > 0.0 {
+        return fail("auto-with-ratio");
+    }
     if fixed > inner {
         return fail("fixed-sum-exceeds");
     }
@@ -68,18 +68,12 @@ pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result
     if flexible && rest <= 0.0 {
         return fail("no-remaining-width");
     }
-    let auto_share = match (autos > 0, weights > 0.0) {
-        (true, true) => rest * AUTO_WITH_RATIO_SHARE,
-        (true, false) => rest,
-        (false, _) => 0.0,
-    };
-    let ratio_rest = rest - auto_share;
     let widths: Vec<f32> = specs
         .iter()
         .map(|spec| match spec {
             ColumnWidth::Fixed(w) => w.as_pt(),
-            ColumnWidth::Ratio(Ratio(w)) => ratio_rest * w / weights,
-            ColumnWidth::Auto => auto_share,
+            ColumnWidth::Ratio(Ratio(w)) => rest * w / weights,
+            ColumnWidth::Auto => rest,
         })
         .collect();
     if widths.iter().any(|w| !w.is_finite() || *w <= 0.0) {
@@ -234,11 +228,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_beside_ratio_takes_half_the_rest() {
+    fn auto_beside_ratio_is_rejected() {
         let specs = [fixed(10.0), ratio(1.0), ColumnWidth::Auto];
         assert_eq!(
-            resolve_column_widths(&specs, 110.0).unwrap(),
-            [10.0, 50.0, 50.0]
+            reason(resolve_column_widths(&specs, 110.0)),
+            "auto-with-ratio"
         );
     }
 

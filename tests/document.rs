@@ -2382,12 +2382,8 @@ fn table_tracks_fill_the_frame_and_keep_fixed_width() {
         |doc| {
             doc.font(FONT.to_vec())?;
             doc.table(|t| {
-                t.tracks([
-                    Track::Fixed(Positive::pt(40.0).unwrap()),
-                    Track::Ratio(1.0),
-                    Track::Auto,
-                ]);
-                t.row(["A", "B", "C"]);
+                t.tracks([Track::Fixed(Positive::pt(40.0).unwrap()), Track::Auto]);
+                t.row(["A", "B"]);
             });
             Ok(())
         },
@@ -2396,10 +2392,8 @@ fn table_tracks_fill_the_frame_and_keep_fixed_width() {
     .pages();
     let a = glyph(&pages[0], "A");
     let b = glyph(&pages[0], "B");
-    let c = glyph(&pages[0], "C");
     assert!(pt_near(a.x, 0.0));
     assert!(pt_near(b.x, 40.0));
-    assert!(pt_near(c.x, 120.0));
 }
 
 #[test]
@@ -2457,6 +2451,83 @@ fn table_zero_border_draws_no_stroke_and_a_positive_border_does() {
         .ops()
         .iter()
         .any(|op| matches!(op, CanvasCommand::StrokePath { .. })));
+}
+
+#[test]
+fn columns_fixed_plus_auto_gives_the_remainder_to_auto() {
+    let page_w = 200.0;
+    let pages = document(
+        PageSize::custom(Size::try_pt(page_w, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.columns(|c| {
+                c.gap(NonNegative::pt(10.0).unwrap());
+                c.col_fixed(Positive::pt(50.0).unwrap(), |f| {
+                    f.paragraph(|p| p.text("L"));
+                });
+                c.col_auto(|f| f.paragraph(|p| p.text("R")));
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert!(pt_near(glyph(&pages[0], "L").x, 0.0));
+    assert!(pt_near(glyph(&pages[0], "R").x, 60.0));
+}
+
+#[test]
+fn columns_gap_zero_places_the_second_column_against_the_first() {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.columns(|c| {
+                c.gap(NonNegative::ZERO);
+                c.col_fixed(Positive::pt(80.0).unwrap(), |f| {
+                    f.paragraph(|p| p.text("L"));
+                });
+                c.col_auto(|f| f.paragraph(|p| p.text("R")));
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert!(pt_near(glyph(&pages[0], "R").x, 80.0));
+}
+
+#[test]
+fn auto_with_ratio_fails_on_columns_and_table_tracks() {
+    let columns = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.columns(|c| {
+            c.col_auto(|f| f.paragraph(|p| p.text("A")));
+            c.col_ratio(1.0, |f| f.paragraph(|p| p.text("B")));
+        });
+        Ok(())
+    });
+    assert_eq!(
+        columns.err(),
+        Some(Error::ColumnWidths {
+            reason: "auto-with-ratio"
+        })
+    );
+
+    let table = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.tracks([Track::Auto, Track::Ratio(1.0)]);
+            t.row(["A", "B"]);
+        });
+        Ok(())
+    });
+    assert_eq!(
+        table.err(),
+        Some(Error::ColumnWidths {
+            reason: "auto-with-ratio"
+        })
+    );
 }
 
 #[test]

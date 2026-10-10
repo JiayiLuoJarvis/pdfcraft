@@ -425,7 +425,7 @@ mod tests {
     fn halves() -> Vec<ColumnWidth> {
         vec![
             ColumnWidth::Ratio(Ratio::new(1.0).unwrap()),
-            ColumnWidth::Auto,
+            ColumnWidth::Ratio(Ratio::new(1.0).unwrap()),
         ]
     }
 
