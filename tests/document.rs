@@ -1287,6 +1287,38 @@ fn glyph(page: &RecordedPage, text: &str) -> GlyphSample {
         .unwrap_or_else(|| panic!("missing glyph run {text}"))
 }
 
+struct LinkHit {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    target: String,
+}
+
+fn links(page: &RecordedPage) -> Vec<LinkHit> {
+    page.ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::AnnotateLink { rect, target } => Some(LinkHit {
+                x: rect.origin().x().as_pt(),
+                y: rect.origin().y().as_pt(),
+                width: rect.size().width().as_pt(),
+                height: rect.size().height().as_pt(),
+                target: target.as_str().to_owned(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn commands_without_links(page: &RecordedPage) -> Vec<CanvasCommand> {
+    page.ops()
+        .iter()
+        .filter(|op| !matches!(op, CanvasCommand::AnnotateLink { .. }))
+        .cloned()
+        .collect()
+}
+
 #[test]
 fn middle_blank_shifts_the_next_glyph_and_strokes_the_gap() {
     let gap = NonNegative::pt(30.0).unwrap();
@@ -1499,6 +1531,481 @@ fn inline_blank_writes_a_pdf() {
             p.text("A");
             p.blank(NonNegative::pt(12.0).unwrap());
         });
+        Ok(())
+    })
+    .unwrap()
+    .to_pdf()
+    .unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+}
+
+#[test]
+fn partial_link_rect_matches_the_linked_glyphs() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.text("A");
+            p.link("https://example.com/bc", |p| p.text("BC"));
+            p.text("D");
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let bc = glyph(page, "BC");
+    let hits = links(page);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].target, "https://example.com/bc");
+    assert!(pt_near(hits[0].x, bc.x));
+    assert!(pt_near(hits[0].width, bc.width));
+    assert!(pt_near(hits[0].y, 0.0));
+    assert!(pt_near(hits[0].height, LINE));
+    assert!(pt_near(bc.x, glyph(page, "A").width));
+}
+
+#[test]
+fn wrap_emits_one_link_rect_per_visual_line() {
+    let width = 0.707 * 12.0;
+    let pages = document(
+        PageSize::custom(Size::try_pt(width, 2.0 * LINE + 1.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                p.link("https://example.com/wrap", |p| p.text("A A"));
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    let hits = links(&pages[0]);
+    let glyphs = runs(&pages[0]);
+    assert_eq!(pages.len(), 1);
+    assert_eq!(
+        hits.len(),
+        2,
+        "{:?}",
+        glyphs.iter().map(|run| &run.text).collect::<Vec<_>>()
+    );
+    assert_eq!(glyphs.len(), 2);
+    assert!(hits
+        .iter()
+        .all(|hit| hit.target == "https://example.com/wrap"));
+    for (hit, run) in hits.iter().zip(glyphs.iter()) {
+        assert!(pt_near(hit.x, run.x));
+        assert!(pt_near(hit.width, run.width));
+        assert!(pt_near(hit.height, LINE));
+    }
+    assert!(pt_near(hits[0].y, 0.0));
+    assert!(pt_near(hits[1].y, LINE));
+}
+
+#[test]
+fn body_and_bold_share_one_link_rect() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.bold_font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.link("https://example.com/mix", |p| {
+                p.text("A");
+                p.bold("B");
+                p.text("C");
+            });
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let glyphs = runs(page);
+    assert_eq!(
+        glyphs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "B", "C"]
+    );
+    let hits = links(page);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].target, "https://example.com/mix");
+    assert!(pt_near(hits[0].x, glyphs[0].x));
+    assert!(pt_near(
+        hits[0].width,
+        glyphs.iter().map(|run| run.width).sum()
+    ));
+    assert!(pt_near(hits[0].y, 0.0));
+    assert!(pt_near(hits[0].height, LINE));
+}
+
+#[test]
+fn uri_boundaries_stay_distinct() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.link("https://a.example", |p| p.text("A"));
+            p.link("https://b.example", |p| p.text("B"));
+            p.text("C");
+            p.link("https://a.example", |p| p.text("D"));
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let hits = links(page);
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.target.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "https://a.example",
+            "https://b.example",
+            "https://a.example"
+        ]
+    );
+    for (hit, text) in hits.iter().zip(["A", "B", "D"]) {
+        let run = glyph(page, text);
+        assert!(pt_near(hit.x, run.x));
+        assert!(pt_near(hit.width, run.width));
+    }
+    assert!(hits[0].x + hits[0].width <= hits[1].x + f32::EPSILON);
+    assert!(hits[1].x + hits[1].width < hits[2].x);
+}
+
+#[test]
+fn repeated_same_uri_merges_across_calls_and_faces() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.bold_font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.link("https://example.com/u", |p| p.text("A"));
+            p.link("https://example.com/u", |p| p.text("B"));
+        });
+        doc.paragraph(|p| {
+            p.link("https://example.com/u", |p| {
+                p.text("C");
+                p.bold("D");
+            });
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let hits = links(page);
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|hit| hit.target == "https://example.com/u"));
+    let ab = glyph(page, "AB");
+    assert!(pt_near(hits[0].x, ab.x));
+    assert!(pt_near(hits[0].width, ab.width));
+    assert!(pt_near(hits[0].y, 0.0));
+    let c = glyph(page, "C");
+    let d = glyph(page, "D");
+    assert!(pt_near(hits[1].x, c.x));
+    assert!(pt_near(hits[1].width, c.width + d.width));
+    assert!(pt_near(hits[1].y, LINE));
+    assert!(pt_near(hits[1].height, LINE));
+}
+
+#[test]
+fn blank_inside_a_link_is_not_part_of_either_rect() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.link("https://example.com/gap", |p| {
+                p.text("A");
+                p.blank(NonNegative::pt(30.0).unwrap());
+                p.text("B");
+            });
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let hits = links(page);
+    assert_eq!(hits.len(), 2);
+    assert_eq!(stroke_samples(page).len(), 1);
+    assert!(pt_near(hits[1].x - (hits[0].x + hits[0].width), 30.0));
+    assert!(pt_near(hits[0].x, glyph(page, "A").x));
+    assert!(pt_near(hits[1].x, glyph(page, "B").x));
+    assert_eq!(hits[0].target, "https://example.com/gap");
+    assert_eq!(hits[1].target, hits[0].target);
+}
+
+#[test]
+fn link_rect_includes_indent_column_and_list_offset() {
+    let indented = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.first_line_indent(NonNegative::pt(10.0).unwrap());
+            p.link("https://example.com/indent", |p| p.text("A"));
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let indent_hit = &links(&indented[0])[0];
+    assert!(pt_near(indent_hit.x, 10.0));
+    assert!(pt_near(indent_hit.x, glyph(&indented[0], "A").x));
+
+    let columns = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.columns(|row| {
+            row.col(|col| col.paragraph(|p| p.text("L")));
+            row.col(|col| {
+                col.paragraph(|p| p.link("https://example.com/col", |p| p.text("R")));
+            });
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let right = glyph(&columns[0], "R");
+    let col_hit = &links(&columns[0])[0];
+    assert!(right.x > 0.0);
+    assert!(pt_near(col_hit.x, right.x));
+    assert!(pt_near(col_hit.width, right.width));
+    assert_eq!(col_hit.target, "https://example.com/col");
+
+    let listed = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.ul(|list| {
+            list.item(|item| {
+                item.paragraph(|p| p.link("https://example.com/item", |p| p.text("A")));
+            });
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let item = glyph(&listed[0], "A");
+    let list_hit = &links(&listed[0])[0];
+    assert!(pt_near(item.x, 18.0));
+    assert!(pt_near(list_hit.x, item.x));
+    assert!(pt_near(list_hit.width, item.width));
+    assert_eq!(links(&listed[0]).len(), 1);
+}
+
+#[test]
+fn link_across_pages_restarts_y_at_the_body_top() {
+    let top = 20.0;
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, top + LINE).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.margins(Margins::new(
+                NonNegative::pt(top).unwrap(),
+                NonNegative::ZERO,
+                NonNegative::ZERO,
+                NonNegative::ZERO,
+            ));
+            doc.paragraph(|p| {
+                p.link("https://example.com/page", |p| p.text("A\nA"));
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    for page in &pages {
+        let hits = links(page);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].target, "https://example.com/page");
+        assert!(pt_near(hits[0].y, top));
+        assert!(pt_near(hits[0].height, LINE));
+        assert!(pt_near(glyph(page, "A").y, top + BASELINE));
+    }
+}
+
+#[test]
+fn header_and_footer_slots_annotate_at_the_band_origin() {
+    let margin = 36.0;
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.margins(Margins::uniform(NonNegative::pt(margin).unwrap()));
+        doc.header(|band| {
+            band.left_link("https://example.com/left", "Left");
+            band.right_link("https://example.com/right", "Right");
+        });
+        doc.footer(|band| {
+            band.left_link("https://example.com/foot", "Foot");
+        });
+        doc.paragraph(|p| p.text("Body"));
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let hits = links(page);
+    assert_eq!(hits.len(), 3);
+    let left = glyph(page, "Left");
+    let right = glyph(page, "Right");
+    let foot = glyph(page, "Foot");
+    let left_hit = hits
+        .iter()
+        .find(|hit| hit.target == "https://example.com/left")
+        .unwrap();
+    let right_hit = hits
+        .iter()
+        .find(|hit| hit.target == "https://example.com/right")
+        .unwrap();
+    let foot_hit = hits
+        .iter()
+        .find(|hit| hit.target == "https://example.com/foot")
+        .unwrap();
+    assert!(pt_near(left.x, margin));
+    assert!(pt_near(left_hit.x, left.x));
+    assert!(pt_near(left_hit.width, left.width));
+    assert!(pt_near(left_hit.y, 0.0));
+    assert!(pt_near(left_hit.height, LINE));
+    assert!(pt_near(right.x + right.width, A4.width().as_pt() - margin));
+    assert!(pt_near(right_hit.x, right.x));
+    assert!(pt_near(right_hit.width, right.width));
+    assert!(pt_near(right_hit.y, 0.0));
+    assert!(pt_near(foot.x, margin));
+    assert!(pt_near(foot.y, A4.height().as_pt() - margin + BASELINE));
+    assert!(pt_near(foot_hit.x, foot.x));
+    assert!(pt_near(foot_hit.y, A4.height().as_pt() - margin));
+    assert!(pt_near(foot_hit.height, LINE));
+}
+
+#[test]
+fn header_uri_can_differ_per_page() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
+        doc.header(|band| {
+            band.left_link(
+                format!("https://example.com/{}", band.page().number),
+                "Home",
+            );
+        });
+        doc.paragraph(|p| p.text("A"));
+        doc.page_break();
+        doc.paragraph(|p| p.text("B"));
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(links(&pages[0]).len(), 1);
+    assert_eq!(links(&pages[1]).len(), 1);
+    assert_eq!(links(&pages[0])[0].target, "https://example.com/1");
+    assert_eq!(links(&pages[1])[0].target, "https://example.com/2");
+}
+
+#[test]
+fn empty_uri_fails_the_document() {
+    let body = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| p.link("", |p| p.text("x")));
+        Ok(())
+    });
+    assert!(matches!(body, Err(Error::EmptyLink)));
+
+    let band = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
+        doc.header(|h| h.right_link("", "Home"));
+        doc.paragraph(|p| p.text("A"));
+        Ok(())
+    });
+    assert!(matches!(band, Err(Error::EmptyLink)));
+}
+
+#[test]
+fn empty_linked_text_draws_no_annotation() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.link("https://example.com", |p| p.text(""));
+            p.text("A");
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert!(links(&pages[0]).is_empty());
+    assert_eq!(texts(&pages[0]), ["A"]);
+}
+
+#[test]
+fn link_does_not_change_glyphs_or_add_a_stroke() {
+    let paint = |linked: bool| {
+        document(PageSize::A4, |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.paragraph(|p| {
+                if linked {
+                    p.link("https://example.com/same", |p| p.text("ABC"));
+                } else {
+                    p.text("ABC");
+                }
+            });
+            Ok(())
+        })
+        .unwrap()
+        .pages()
+    };
+    let linked = paint(true);
+    let plain = paint(false);
+    assert_eq!(commands_without_links(&linked[0]), plain[0].ops().to_vec());
+    assert_eq!(links(&linked[0]).len(), 1);
+    assert!(links(&plain[0]).is_empty());
+    let run = glyph(&linked[0], "ABC");
+    assert_eq!(run.font, glyph(&plain[0], "ABC").font);
+    assert_eq!(run.text, "ABC");
+}
+
+#[test]
+fn uri_text_is_stored_as_given() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| {
+            p.link(" ", |p| p.text("A"));
+            p.link("mailto:a@b.c", |p| p.text("B"));
+            p.link("not a uri", |p| p.text("C"));
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let hits = links(&pages[0]);
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.target.as_str())
+            .collect::<Vec<_>>(),
+        [" ", "mailto:a@b.c", "not a uri"]
+    );
+}
+
+#[test]
+fn cell_and_layer_text_do_not_annotate() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|table| {
+            table.row(["cell"]);
+        });
+        doc.behind(|layer| layer.text_at("mark", Point::try_pt(10.0, 10.0).unwrap()));
+        doc.paragraph(|p| p.link("https://example.com/only", |p| p.text("Go")));
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    let hits = links(&pages[0]);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].target, "https://example.com/only");
+    assert_eq!(texts(&pages[0]), ["mark", "cell", "Go"]);
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn text_link_writes_a_pdf() {
+    let pdf = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| p.link("https://example.com", |p| p.text("Go")));
         Ok(())
     })
     .unwrap()
