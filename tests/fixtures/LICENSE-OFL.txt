@@ -9,6 +9,14 @@ and/or other countries.
 The original Font Software is licensed under the SIL Open Font License,
 Version 1.1. This subset is a Modified Version under that same license.
 
+This directory also includes `quire-letter.ttf`, a subset of Noto Sans SC
+Regular. The source file is NotoSansSC-Regular.otf from the Noto CJK
+repository path Sans/SubsetOTF/SC. Its name-table copyright is
+"© 2014-2021 Adobe (http://www.adobe.com/).".
+Noto is a trademark of Google Inc.
+This subset is a Modified Version under the same license.
+Its family name is QuireLetter.
+
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
 -----------------------------------------------------------
