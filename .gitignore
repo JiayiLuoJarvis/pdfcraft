@@ -11,5 +11,6 @@ Cargo.lock
 # Local scratch
 *.pdf
 !tests/fixtures/**/*.pdf
+!crates/**/tests/fixtures/**/*.pdf
 .fonts/
 /out/
