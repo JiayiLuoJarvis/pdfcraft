@@ -5,11 +5,12 @@
 use std::num::NonZeroU32;
 
 use crate::canvas::Canvas;
-use crate::error::{Error, Fallible as Result, GeometryKind, Location, Region};
+use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind, Location, Region};
 use crate::geom::{Margins, Point, Size};
 use crate::layout::decorate::{measure_bands, Decorations, PageBands, SectionSpan};
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{draw_fragment, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
+use crate::limits::{LimitKind, Limits};
 
 /// Page geometry for pagination. Header and footer bands sit inside the margins.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,13 +96,14 @@ pub(crate) struct LaidDocument {
 pub(crate) fn layout_pages(
     jobs: Vec<SectionJob<'_>>,
     ctx: &mut LayoutCtx<'_>,
+    max_pages: u32,
 ) -> Result<LaidDocument> {
     let mut pages = Vec::new();
     let mut spans = Vec::with_capacity(jobs.len());
     for (section, job) in jobs.into_iter().enumerate() {
         let start = pages.len();
         let planned = ctx.located(&Location::section(section), |ctx| {
-            plan_pages(job.root, ctx, job.config, start)
+            plan_pages(job.root, ctx, job.config, start, max_pages)
         })?;
         let len = u32::try_from(planned.len())
             .ok()
@@ -129,7 +131,7 @@ pub(crate) fn paginate_sections(
     ctx: &mut LayoutCtx<'_>,
     canvas: &mut dyn Canvas,
 ) -> Result<()> {
-    let laid = match layout_pages(jobs, ctx) {
+    let laid = match layout_pages(jobs, ctx, Limits::default().max_pages()) {
         Ok(laid) => laid,
         Err(hard) => {
             let bag = std::mem::take(ctx.errors);
@@ -154,6 +156,7 @@ fn plan_pages(
     ctx: &mut LayoutCtx<'_>,
     config: PaginateConfig,
     first_page: usize,
+    max_pages: u32,
 ) -> Result<Vec<PagePlan>> {
     config.validate()?;
     let mut nodes = match root {
@@ -174,7 +177,14 @@ fn plan_pages(
         let node = nodes.remove(0);
         match node {
             FlowNode::PageBreak => {
-                cursor = apply_page_break(cursor, &mut pages, &mut current, config);
+                cursor = apply_page_break(
+                    cursor,
+                    &mut pages,
+                    &mut current,
+                    config,
+                    first_page,
+                    max_pages,
+                )?;
                 y = 0.0;
             }
             node => {
@@ -216,7 +226,7 @@ fn plan_pages(
                             origin,
                             fragment: head,
                         });
-                        commit_page(&mut pages, &mut current);
+                        commit_page(&mut pages, &mut current, first_page, max_pages)?;
                         nodes.insert(0, tail);
                         y = 0.0;
                         cursor = PageCursor::Fresh;
@@ -229,7 +239,7 @@ fn plan_pages(
                             .in_region(Region::Body)
                             .on_page_index(first_page + pages.len()));
                         }
-                        commit_page(&mut pages, &mut current);
+                        commit_page(&mut pages, &mut current, first_page, max_pages)?;
                         nodes.insert(0, tail);
                         y = 0.0;
                         cursor = PageCursor::Fresh;
@@ -239,7 +249,14 @@ fn plan_pages(
         }
     }
 
-    finalize_eof(cursor, &mut pages, &mut current, config);
+    finalize_eof(
+        cursor,
+        &mut pages,
+        &mut current,
+        config,
+        first_page,
+        max_pages,
+    )?;
     Ok(pages)
 }
 
@@ -257,27 +274,60 @@ fn apply_page_break(
     pages: &mut Vec<PagePlan>,
     current: &mut Option<PagePlan>,
     config: PaginateConfig,
-) -> PageCursor {
-    match cursor {
+    first_page: usize,
+    max_pages: u32,
+) -> Result<PageCursor> {
+    Ok(match cursor {
         PageCursor::Fresh => PageCursor::Fresh,
         PageCursor::HasBody => {
-            commit_page(pages, current);
+            commit_page(pages, current, first_page, max_pages)?;
             PageCursor::PendingBlank
         }
         PageCursor::PendingBlank => {
-            pages.push(PagePlan {
-                size: config.page_size,
-                placed: Vec::new(),
-            });
+            push_page(
+                pages,
+                PagePlan {
+                    size: config.page_size,
+                    placed: Vec::new(),
+                },
+                first_page,
+                max_pages,
+            )?;
             PageCursor::PendingBlank
         }
-    }
+    })
 }
 
-fn commit_page(pages: &mut Vec<PagePlan>, current: &mut Option<PagePlan>) {
+fn commit_page(
+    pages: &mut Vec<PagePlan>,
+    current: &mut Option<PagePlan>,
+    first_page: usize,
+    max_pages: u32,
+) -> Result<()> {
     if let Some(page) = current.take() {
-        pages.push(page);
+        push_page(pages, page, first_page, max_pages)?;
     }
+    Ok(())
+}
+
+fn push_page(
+    pages: &mut Vec<PagePlan>,
+    page: PagePlan,
+    first_page: usize,
+    max_pages: u32,
+) -> Result<()> {
+    let next = first_page.saturating_add(pages.len()).saturating_add(1);
+    let next = u64::try_from(next).unwrap_or(u64::MAX);
+    let max = u64::from(max_pages);
+    if next > max {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::Pages,
+            value: next,
+            max,
+        }));
+    }
+    pages.push(page);
+    Ok(())
 }
 
 fn finalize_eof(
@@ -285,21 +335,28 @@ fn finalize_eof(
     pages: &mut Vec<PagePlan>,
     current: &mut Option<PagePlan>,
     config: PaginateConfig,
-) {
+    first_page: usize,
+    max_pages: u32,
+) -> Result<()> {
     match cursor {
         PageCursor::Fresh => {
             if pages.is_empty() {
-                pages.push(PagePlan {
-                    size: config.page_size,
-                    placed: Vec::new(),
-                });
+                push_page(
+                    pages,
+                    PagePlan {
+                        size: config.page_size,
+                        placed: Vec::new(),
+                    },
+                    first_page,
+                    max_pages,
+                )?;
             }
+            Ok(())
         }
-        PageCursor::HasBody => {
-            commit_page(pages, current);
-        }
+        PageCursor::HasBody => commit_page(pages, current, first_page, max_pages),
         PageCursor::PendingBlank => {
             current.take();
+            Ok(())
         }
     }
 }

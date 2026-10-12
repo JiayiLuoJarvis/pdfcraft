@@ -4,7 +4,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
+use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{Length, NonNegative};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::frame::{natural_height, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split};
@@ -13,6 +13,7 @@ use crate::layout::image::ImageNode;
 use crate::layout::list::ListNode;
 use crate::layout::paragraph::{ParagraphNode, TextNode};
 use crate::layout::table::TableNode;
+use crate::limits::{LimitKind, Limits};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpacerNode {
@@ -257,4 +258,95 @@ fn split_stack(
             commands,
         },
     })
+}
+
+/// Rejects a body tree over `limits`.
+///
+/// A stack is a container and is not a block. Text inside table cells, columns,
+/// lists, and keep-together groups counts. Header, footer, and layer hooks are
+/// not in `roots`. Paragraph bytes are the UTF-8 length of text runs.
+pub(crate) fn check_limits(roots: &[FlowNode], limits: &Limits) -> Result<()> {
+    let census = census(roots);
+    exceeded(
+        LimitKind::Blocks,
+        census.blocks,
+        u64::from(limits.max_blocks()),
+    )?;
+    exceeded(
+        LimitKind::TableCells,
+        census.cells,
+        u64::from(limits.max_table_cells()),
+    )?;
+    exceeded(
+        LimitKind::ParagraphBytes,
+        census.paragraph_bytes,
+        limits.max_paragraph_bytes() as u64,
+    )?;
+    Ok(())
+}
+
+fn exceeded(kind: LimitKind, value: u64, max: u64) -> Result<()> {
+    if value > max {
+        Err(Error::from(ErrorKind::LimitExceeded { kind, value, max }))
+    } else {
+        Ok(())
+    }
+}
+
+struct Census {
+    blocks: u64,
+    cells: u64,
+    paragraph_bytes: u64,
+}
+
+fn census(roots: &[FlowNode]) -> Census {
+    let mut census = Census {
+        blocks: 0,
+        cells: 0,
+        paragraph_bytes: 0,
+    };
+    let mut pending: Vec<&FlowNode> = Vec::new();
+    pending.extend(roots.iter().rev());
+    while let Some(node) = pending.pop() {
+        match node {
+            FlowNode::Stack(kids) => pending.extend(kids.iter().rev()),
+            FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => {
+                census.blocks = census.blocks.saturating_add(1);
+                pending.extend(kids.iter().rev());
+            }
+            FlowNode::KeepTogether(KeepTogetherNode::Prepared(_))
+            | FlowNode::Spacer(_)
+            | FlowNode::PageBreak
+            | FlowNode::Image(_)
+            | FlowNode::HLine(_) => {
+                census.blocks = census.blocks.saturating_add(1);
+            }
+            FlowNode::Paragraph(paragraph) => {
+                census.blocks = census.blocks.saturating_add(1);
+                census.paragraph_bytes = census
+                    .paragraph_bytes
+                    .saturating_add(paragraph.text_bytes() as u64);
+            }
+            FlowNode::Text(text) => {
+                census.blocks = census.blocks.saturating_add(1);
+                census.paragraph_bytes = census
+                    .paragraph_bytes
+                    .saturating_add(text.byte_len() as u64);
+            }
+            FlowNode::Columns(columns) => {
+                census.blocks = census.blocks.saturating_add(1);
+                pending.extend(columns.column_stacks().iter().rev());
+            }
+            FlowNode::Table(table) => {
+                census.blocks = census.blocks.saturating_add(1);
+                census.cells = census.cells.saturating_add(table.open_cell_count() as u64);
+                table.append_open_children(&mut pending);
+            }
+            FlowNode::List(list) => {
+                census.blocks = census.blocks.saturating_add(1);
+                list.append_bodies(&mut pending);
+            }
+        }
+    }
+    census
 }

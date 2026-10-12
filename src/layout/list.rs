@@ -175,6 +175,12 @@ impl<N: Flowable> ListNode<N> {
         })
     }
 
+    pub(crate) fn append_bodies<'a>(&'a self, out: &mut Vec<&'a N>) {
+        for item in &self.items {
+            out.push(&item.body);
+        }
+    }
+
     pub(crate) fn split(
         mut self,
         ctx: &mut LayoutCtx<'_>,

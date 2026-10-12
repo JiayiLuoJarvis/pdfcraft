@@ -9,6 +9,8 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::limits::LimitKind;
+
 /// A construction, layout, or drawing failure.
 ///
 /// Equality compares [`kind`](Self::kind) and [`at`](Self::at) only. The dependency
@@ -154,13 +156,14 @@ pub enum ErrorKind {
     },
     /// Geometry that brands allow but layout or the backend cannot use.
     InvalidGeometry(GeometryKind),
-    /// Font bytes could not be parsed or are unusable.
+    /// Font bytes could not be parsed, were empty, or are otherwise unusable.
     ///
     /// When a parser rejected the bytes, its error is the [`source`](StdError::source).
+    /// A file over the byte cap is [`ErrorKind::LimitExceeded`] with [`LimitKind::FontBytes`].
     Font {
         /// Collection index passed to the parser.
         index: u32,
-        /// What quire was doing, or which of its limits the font broke.
+        /// What quire was doing when the font failed.
         message: String,
     },
     /// `scalar` has no glyph in `font`. The document is not produced.
@@ -230,10 +233,24 @@ pub enum ErrorKind {
         /// Page width available to the band.
         avail: f32,
     },
-    /// Image bytes were rejected. Over a limit, unparsable, empty, or no decoder in this build.
+    /// Image bytes were empty, had a zero side, could not be decoded, or this build has no decoder.
+    ///
+    /// A byte, pixel, or edge cap is [`ErrorKind::LimitExceeded`].
     Image {
-        /// Which limit was broken, or the decoder's description of the failure.
+        /// Decoder text, or why the bytes were rejected before decode.
         message: String,
+    },
+    /// A [`Limits`](crate::Limits) cap was exceeded, or a setter rejected the requested cap.
+    ///
+    /// `value` is the measured size, or the rejected setting. `max` is the cap.
+    /// A setter given 0 reports `value: 0` and `max: 0`.
+    LimitExceeded {
+        /// Which cap failed.
+        kind: LimitKind,
+        /// Measured size, or the rejected setting.
+        value: u64,
+        /// Cap that rejected `value`. `0` when a setter rejected zero.
+        max: u64,
     },
     /// `id` is not registered in this document's image table.
     UnknownImage {
@@ -300,6 +317,13 @@ impl fmt::Display for ErrorKind {
                 write!(f, "decoration width {width} exceeds page width {avail}")
             }
             Self::Image { message } => write!(f, "image: {message}"),
+            Self::LimitExceeded { kind, value, max } => {
+                if *value == 0 {
+                    write!(f, "{kind} limit must be at least 1")
+                } else {
+                    write!(f, "{kind} {value} exceeds maximum {max}")
+                }
+            }
             Self::UnknownImage { id } => write!(f, "image {id} is not registered"),
             Self::ContentOutsideSection => {
                 f.write_str("body or decorations written both on the document and in sections")

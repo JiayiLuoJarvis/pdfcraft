@@ -9,6 +9,7 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 
 use crate::error::{Error, ErrorKind, Fallible as Result};
+use crate::limits::{LimitKind, Limits};
 
 /// Opaque font identifier stored on a [`crate::canvas::GlyphRun`].
 ///
@@ -29,8 +30,6 @@ impl FontId {
         self.0
     }
 }
-
-pub(crate) const MAX_FONT_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FontSource {
@@ -60,10 +59,21 @@ pub(crate) struct ResolvedFont {
     pub(crate) skrifa_units_per_em: f32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct FontStore {
     faces: Vec<FontFace>,
     bold: Option<FontId>,
+    max_bytes: usize,
+}
+
+impl Default for FontStore {
+    fn default() -> Self {
+        Self {
+            faces: Vec::new(),
+            bold: None,
+            max_bytes: Limits::default().max_font_bytes(),
+        }
+    }
 }
 
 /// Parses face `index` of `bytes`. skrifa's error stays reachable as the source.
@@ -82,6 +92,10 @@ impl FontStore {
         Self::default()
     }
 
+    pub(crate) fn set_max_bytes(&mut self, max_bytes: usize) {
+        self.max_bytes = max_bytes;
+    }
+
     /// Parses `source` and appends the face.
     ///
     /// The returned id is the face's index in this store. The first face is 0.
@@ -92,13 +106,11 @@ impl FontStore {
                 message: "font bytes are empty".to_owned(),
             }));
         }
-        if source.bytes.len() > MAX_FONT_BYTES {
-            return Err(Error::from(ErrorKind::Font {
-                index: source.index,
-                message: format!(
-                    "font is {} bytes; max is {MAX_FONT_BYTES}",
-                    source.bytes.len()
-                ),
+        if source.bytes.len() > self.max_bytes {
+            return Err(Error::from(ErrorKind::LimitExceeded {
+                kind: LimitKind::FontBytes,
+                value: source.bytes.len() as u64,
+                max: self.max_bytes as u64,
             }));
         }
 
@@ -220,15 +232,24 @@ mod tests {
     }
 
     #[test]
-    fn oversize_bytes_are_font_error() {
+    fn oversize_bytes_are_a_font_byte_limit() {
+        const MAX: usize = 32 * 1024 * 1024;
         let mut store = FontStore::new();
         let err = store
             .register(FontSource {
-                bytes: Arc::new(vec![0; MAX_FONT_BYTES + 1]),
+                bytes: Arc::new(vec![0; MAX + 1]),
                 index: 3,
             })
             .unwrap_err();
-        assert!(matches!(err.kind, ErrorKind::Font { index: 3, .. }));
+        assert_eq!(
+            err.kind,
+            ErrorKind::LimitExceeded {
+                kind: LimitKind::FontBytes,
+                value: (MAX + 1) as u64,
+                max: MAX as u64,
+            }
+        );
+        assert!(std::error::Error::source(&err).is_none());
     }
 
     #[test]

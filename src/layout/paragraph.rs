@@ -125,6 +125,16 @@ impl TextNode {
         Self { items, style }
     }
 
+    pub(crate) fn byte_len(&self) -> usize {
+        self.items
+            .iter()
+            .map(|item| match item {
+                InlineItem::Text(run) => run.text.len(),
+                InlineItem::Blank(_) => 0,
+            })
+            .sum()
+    }
+
     /// Every outcome hands back a laid-out `Paragraph`, so a page move never wraps twice.
     pub(crate) fn split(
         self,
@@ -233,6 +243,17 @@ impl ParagraphNode {
             spacing_after: style.paragraph_spacing.as_pt(),
             width,
         })
+    }
+
+    pub(crate) fn text_bytes(&self) -> usize {
+        self.lines
+            .iter()
+            .flat_map(|line| &line.pieces)
+            .map(|piece| match piece {
+                LinePiece::Glyphs(run) => run.text.len(),
+                LinePiece::Stroke(_) | LinePiece::Link { .. } => 0,
+            })
+            .sum()
     }
 
     /// Lines were wrapped at `self.width`; a narrower frame would overflow silently.

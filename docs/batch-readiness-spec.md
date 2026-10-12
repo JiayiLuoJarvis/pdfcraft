@@ -30,7 +30,7 @@
 全部满足才算「批量就绪」里程碑完结（性能刀可标为可选通过）：
 
 - [ ] 刀 A–C（正确性）行为符合下文契约，有回归测试。
-- [ ] 刀 D（限额）公共 `limits` 模块存在；超限返回结构化 `ErrorKind`；有单测；分页循环检查页数。
+- [x] 刀 D（限额）公共 `limits` 模块存在；超限返回结构化 `ErrorKind`；有单测；分页循环检查页数。
 - [ ] 刀 E（信件）`tests/letter_layout.rs`（或等价）+ 带真实 CJK 子集的字体夹具；`RecordingCanvas` 钉关键坐标；`to_pdf` 只冒烟 `%PDF`。
 - [ ] 刀 F（诊断与文档）错误片段 / rustdoc / 提案小项对齐完成。
 - [ ] `cargo fmt` / `clippy -D warnings` / `test`（含 `backend-krilla`）/ `doc --no-deps` 绿。
@@ -195,7 +195,7 @@ A 列表自定义标记编号
 | A 列表标记编号 | 完成 | 2026-10-12 | 自定义标记不消耗序号 |
 | B Table::build token | 完成 | 2026-10-12 | `add` 时重绑父 `DocToken`；样式仍是 build 时的默认样式 |
 | C single_line_run 换行 | 完成 | 2026-10-12 | `ErrorKind::UnexpectedLineBreakInSingleLine`；`text_at` 与自定义 marker 遇 BK 失败且不画 |
-| D limits | 待做 | | 默认数字： |
+| D limits | 完成 | 2026-10-12 | 默认 font bytes 与 image bytes 各 32 MiB，image pixels 40_000_000，image edge 8192，pages 10_000，blocks 100_000，table cells 50_000，paragraph bytes 1_000_000。setter 拒绝 0，也拒绝高于默认 4 倍的值。像素与边长在 krilla 解码出尺寸之后、句柄入库之前检查，krilla 没有只读头。块、单元格和段落字节在分页前统计正文流，堆叠容器不计块，页眉、页脚和 layer 不计入。页数在 `plan_pages` 提交每一页时检查。图片像素和边长并入 `LimitExceeded`，不另设 `ImageTooLarge`。 |
 | E letter fixture | 待做 | | |
 | F 诊断/文档 | 待做 | | |
 | F0 keep_together 间距 | 待做 | | 阻塞公开 paragraph_spacing |

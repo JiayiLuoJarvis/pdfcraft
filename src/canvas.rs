@@ -9,6 +9,7 @@ use std::ops::Range;
 use crate::error::{Error, ErrorKind};
 use crate::fonts::FontId;
 use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
+use crate::limits::Limits;
 
 /// Document metadata recorded by [`Canvas::set_document_info`].
 ///
@@ -99,6 +100,9 @@ pub struct DecodedImage {
 
 /// Decodes one document's images and keeps whatever the PDF writer needs later.
 pub(crate) trait ImageRegistry: Any + Send + Sync {
+    /// Copies resource caps used by [`Self::register`].
+    fn set_limits(&mut self, limits: &Limits);
+
     /// Checks limits, decodes, and returns the id plus pixel size layout will use.
     ///
     /// A failure leaves earlier registrations unchanged.
@@ -113,6 +117,8 @@ pub(crate) trait ImageRegistry: Any + Send + Sync {
 pub(crate) struct RejectingImageRegistry;
 
 impl ImageRegistry for RejectingImageRegistry {
+    fn set_limits(&mut self, _limits: &Limits) {}
+
     fn register(
         &mut self,
         _bytes: Vec<u8>,

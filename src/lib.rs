@@ -6,6 +6,7 @@
 
 pub mod error;
 pub mod geom;
+pub mod limits;
 
 pub use error::{
     CellIndex, CellSpanReason, ColumnWidthsReason, Error, ErrorKind, Errors, GeometryKind,
@@ -16,6 +17,7 @@ pub use geom::{
     MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path, PathBuilder,
     PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER, MM_TO_PT,
 };
+pub use limits::{LimitKind, Limits};
 
 pub mod canvas;
 pub mod document;

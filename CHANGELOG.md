@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Added
 
+- `Limits` caps font bytes, image bytes, image pixels, image edge, pages, blocks, table cells, and paragraph bytes. `Document::set_limits` installs a value. Exceeding a cap fails the document with `ErrorKind::LimitExceeded`. Setters reject 0 and any value above four times the default.
 - Header and footer slots span the full page width. `Band::inset` is the only way to pull them in from the page edges.
 - `Paragraph::center` and `Paragraph::end` set line alignment. The default stays start.
 - `Table::tracks`, `Table::cell_padding`, and `Table::border` reach the layout engine. Defaults stay equal-ratio columns with no stroke.
@@ -22,6 +23,7 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** A font or an image over its byte cap is `ErrorKind::LimitExceeded` with `LimitKind::FontBytes` or `LimitKind::ImageBytes`. Those failures were `ErrorKind::Font` and `ErrorKind::Image` strings.
 - **Breaking.** `Result<T>` is now `Result<T, Errors>`. `Errors` keeps one to 64 failures in discovery order (`first`, `as_slice`, `iter`, `truncated`). A single untruncated item displays like `Error`. Otherwise the items are numbered, and a truncated list ends with `further errors omitted`. Equality compares items only. `From<Error> for Errors`. Any error fails the document before paint. `Document::section` returns `()`. Geometry, canvas, `Document::font`, `bold_font`, and `load_image` still return one `Error`. `to_pdf` lifts a backend error into `Errors`.
 - **Breaking.** `pt_near` and `PT_ABS_TOLERANCE` are no longer on the default crate root. Enable feature `test-utils` to import them. The empty public `limits` module is removed until real limits land.
 - **Breaking.** `Error` is now a struct: `kind: ErrorKind` says what failed and `at: Option<Location>` says where (section index, page number, page region, table cell). Match on `error.kind` where you matched on `Error` variants before. `Error`, `ErrorKind`, `Location`, `Region`, `CellIndex`, `GeometryKind`, `ColumnWidthsReason`, and `CellSpanReason` are exported from the crate root.

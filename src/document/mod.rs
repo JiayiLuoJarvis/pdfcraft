@@ -38,6 +38,7 @@ use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNo
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table as layout_table;
 use crate::layout::table::{TableNode, TableSpec};
+use crate::limits::Limits;
 
 mod band;
 mod columns;

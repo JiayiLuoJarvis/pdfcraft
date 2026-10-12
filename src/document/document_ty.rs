@@ -12,6 +12,7 @@ pub struct Document<'a> {
     pub(crate) errors: ErrorBag,
     outside_reported: bool,
     pub(crate) images: Box<dyn ImageRegistry>,
+    limits: Limits,
 }
 
 impl<'a> Document<'a> {
@@ -25,12 +26,25 @@ impl<'a> Document<'a> {
             errors: ErrorBag::default(),
             outside_reported: false,
             images: Box::new(RejectingImageRegistry),
+            limits: Limits::default(),
         }
+    }
+
+    /// Installs caps for later [`Self::font`], [`Self::bold_font`], [`Self::load_image`], and layout.
+    ///
+    /// Fonts and images already registered stay registered. Lowering a cap does not recheck them.
+    pub fn set_limits(&mut self, limits: Limits) {
+        self.fonts.set_max_bytes(limits.max_font_bytes());
+        self.images.set_limits(&limits);
+        self.limits = limits;
     }
 
     /// Decodes `bytes` once and returns a handle for [`Flow::image`], cells, and [`Layer::image_at`].
     ///
-    /// Fails now on oversized, unparsable, or empty images. Without `backend-krilla` every call fails.
+    /// Fails now on empty bytes, a byte cap, a pixel or edge cap, or a decode error.
+    /// The byte cap runs before decode. Pixel and edge caps run after the decoder reports
+    /// a size, so a hostile image can still allocate during decode.
+    /// Without `backend-krilla` every call fails.
     pub fn load_image(
         &mut self,
         bytes: Vec<u8>,
@@ -182,6 +196,7 @@ impl<'a> Document<'a> {
             body,
             mut errors,
             images,
+            limits,
             outside_reported: _,
         } = self;
         let sections = match body {
@@ -203,6 +218,9 @@ impl<'a> Document<'a> {
             roots.push(root);
             decorations.push(deco);
         }
+        if let Err(hard) = crate::layout::flow::check_limits(&roots, &limits) {
+            return Err(errors.fail(hard));
+        }
         let jobs = configs
             .into_iter()
             .zip(roots)
@@ -218,7 +236,7 @@ impl<'a> Document<'a> {
                 fonts: &mut fonts,
                 errors: &mut errors,
             };
-            layout_pages(jobs, &mut ctx)
+            layout_pages(jobs, &mut ctx, limits.max_pages())
         };
         let laid = match laid {
             Ok(laid) => laid,

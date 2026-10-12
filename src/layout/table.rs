@@ -210,6 +210,21 @@ impl<N: Flowable> TableNode<N> {
         };
         split_measured(table, avail)
     }
+
+    pub(crate) fn open_cell_count(&self) -> usize {
+        match &self.0 {
+            TableState::Open(grid) => grid.cells.len(),
+            TableState::Measured(_) => 0,
+        }
+    }
+
+    pub(crate) fn append_open_children<'a>(&'a self, out: &mut Vec<&'a N>) {
+        if let TableState::Open(grid) = &self.0 {
+            for cell in &grid.cells {
+                out.extend(cell.body.nodes());
+            }
+        }
+    }
 }
 
 fn measure<N: Flowable>(

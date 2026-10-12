@@ -93,6 +93,10 @@ impl<N: Flowable> CellBody<N> {
     pub(crate) fn into_node(self) -> N {
         N::stack(self.0)
     }
+
+    pub(crate) fn nodes(&self) -> &[N] {
+        &self.0
+    }
 }
 
 /// List item content that passed [`check_content`].
