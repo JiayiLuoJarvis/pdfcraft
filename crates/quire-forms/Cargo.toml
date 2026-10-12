@@ -3,13 +3,14 @@ name = "quire-forms"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Fill AcroForm fields in existing PDFs (workspace shell; API not started)"
+description = "Fill AcroForm fields in an existing PDF and flatten the result"
 license.workspace = true
 publish.workspace = true
 keywords = ["pdf", "acroform", "forms"]
 categories = ["graphics"]
 
 [dependencies]
+lopdf = { version = "=0.34.0", default-features = false, features = ["nom_parser"] }
 
 [lints.rust]
 unsafe_code = "forbid"
