@@ -135,7 +135,7 @@ fn nest_indent_moves_the_body_column() {
 }
 
 #[test]
-fn upper_roman_counts_from_start_and_custom_marker_keeps_its_number() {
+fn upper_roman_custom_marker_does_not_consume_the_counter() {
     let (mut fonts, style) = fonts_and_style();
     let list = ListNode::new(spec(
         ordered(MarkerKind::UpperRoman, 4),
@@ -155,7 +155,55 @@ fn upper_roman_counts_from_start_and_custom_marker_keeps_its_number() {
         &Decorations::none(),
     );
     result.unwrap();
-    assert_eq!(texts(&rec.pages()[0]), ["IV.", "a", "(x)", "b", "VI.", "c"]);
+    assert_eq!(texts(&rec.pages()[0]), ["IV.", "a", "(x)", "b", "V.", "c"]);
+}
+
+#[test]
+fn decimal_custom_marker_between_autos_does_not_consume() {
+    let (mut fonts, style) = fonts_and_style();
+    let list = ListNode::new(spec(
+        ordered(MarkerKind::Decimal, 1),
+        20.0,
+        &style,
+        vec![
+            item("a", &style),
+            ListItem::custom("(x)", vec![text("b", &style)]).unwrap(),
+            item("c", &style),
+        ],
+    ))
+    .unwrap();
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    assert_eq!(texts(&rec.pages()[0]), ["1.", "a", "(x)", "b", "2.", "c"]);
+}
+
+#[test]
+fn leading_custom_marker_does_not_consume_the_first_number() {
+    let (mut fonts, style) = fonts_and_style();
+    let list = ListNode::new(spec(
+        ordered(MarkerKind::Decimal, 1),
+        20.0,
+        &style,
+        vec![
+            ListItem::custom("(x)", vec![text("a", &style)]).unwrap(),
+            item("b", &style),
+            item("c", &style),
+        ],
+    ))
+    .unwrap();
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    assert_eq!(texts(&rec.pages()[0]), ["(x)", "a", "1.", "b", "2.", "c"]);
 }
 
 #[test]
@@ -187,6 +235,20 @@ fn labels_past_z_or_3999_are_errors() {
     ));
     assert_eq!(
         err.unwrap_err(),
+        GeometryKind::MarkerOutOfRange { number: 27 }.into()
+    );
+    let sandwiched = ListNode::new(spec(
+        ordered(MarkerKind::LowerAlpha, 26),
+        20.0,
+        &style,
+        vec![
+            item("a", &style),
+            ListItem::custom("(x)", vec![text("b", &style)]).unwrap(),
+            item("c", &style),
+        ],
+    ));
+    assert_eq!(
+        sandwiched.unwrap_err(),
         GeometryKind::MarkerOutOfRange { number: 27 }.into()
     );
 }

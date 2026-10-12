@@ -41,3 +41,7 @@ while remaining `0.x`.
 - `Canvas` and `RecordingCanvas`, with an ordered `CanvasCommand` log so layout tests can assert coordinates without PDF bytes.
 - Branded lengths (`Length` with `Finite` / `NonNegative` / `Positive`), page geometry (`Point`, `Size`, `Rect`, `Margins`), paint (`Color`, `Paint`, `Stroke`), and non-empty `Path` / `PathBuilder` in `geom`, plus construction `Error` variants. Package name is `quire-pdf`.
 - Repository scaffold, module tree placeholders, and agent/contributor conventions.
+
+### Fixed
+
+- A custom marker on an ordered list no longer advances the counter. Only an automatic label consumes a number. The last automatic label in `examples/hello.rs` is `d.`. That item was `e.` when the custom marker still consumed a number. `GeometryKind::MarkerOutOfRange` carries the next automatic ordinal. LowerAlpha starting at 26, with an automatic item, a custom marker, and another automatic item, fails with number 27.

@@ -147,13 +147,19 @@ impl<N: Flowable> ListNode<N> {
             }
             .into());
         }
+        let mut next: u64 = match spec.kind {
+            ListKind::Ordered { start, .. } => u64::from(start.get()),
+            ListKind::Bullet => 0,
+        };
         let mut items = VecDeque::with_capacity(spec.items.len());
-        for (index, item) in spec.items.into_iter().enumerate() {
+        for item in spec.items {
             let label = match (item.marker, spec.kind) {
                 (Some(custom), _) => custom,
                 (None, ListKind::Bullet) => ListKind::BULLET_MARKER.to_owned(),
-                (None, ListKind::Ordered { style, start }) => {
-                    style.label(u64::from(start.get()) + index as u64)?
+                (None, ListKind::Ordered { style, .. }) => {
+                    let label = style.label(next)?;
+                    next += 1;
+                    label
                 }
             };
             items.push_back(PendingItem {

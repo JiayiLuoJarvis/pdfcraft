@@ -418,6 +418,25 @@ fn lists_number_bullet_and_custom_markers() {
 }
 
 #[test]
+fn custom_marker_between_decimal_items_does_not_advance_the_counter() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.ol(Numbering::Decimal, |l| {
+            l.item(|i| i.paragraph(|p| p.text("one")));
+            l.item_marked("(c)", |i| i.paragraph(|p| p.text("custom")));
+            l.item(|i| i.paragraph(|p| p.text("two")));
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert_eq!(
+        texts(&pages[0]),
+        ["1.", "one", "(c)", "custom", "2.", "two"]
+    );
+}
+
+#[test]
 fn ordered_list_start_numbers_from_the_given_value() {
     let pages = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
