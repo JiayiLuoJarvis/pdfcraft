@@ -120,28 +120,3 @@ pub(crate) fn numbering_kind(numbering: Numbering) -> MarkerKind {
         Numbering::LowerRoman => MarkerKind::LowerRoman,
     }
 }
-
-pub(crate) fn assemble_list(
-    parent: Flow,
-    kind: ListKind,
-    into: &mut ErrorBag,
-    f: impl FnOnce(&mut List),
-) -> Option<FlowNode> {
-    let mut list = List {
-        parent,
-        items: Vec::new(),
-        start: NonZeroU32::MIN,
-        marker_width: Positive::pt(18.0).expect("18 pt is positive"),
-        nest_indent: None,
-        errors: ErrorBag::default(),
-    };
-    f(&mut list);
-    let kind = match kind {
-        ListKind::Ordered { style, .. } => ListKind::Ordered {
-            style,
-            start: list.start,
-        },
-        ListKind::Bullet => ListKind::Bullet,
-    };
-    list.lower(kind, into)
-}

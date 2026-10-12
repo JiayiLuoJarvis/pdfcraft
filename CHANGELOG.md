@@ -16,6 +16,9 @@ while remaining `0.x`.
 - `Columns::gap`, `col_fixed`, `col_ratio`, and `col_auto` set track widths. Mixing Auto with Ratio fails with `ErrorKind::ColumnWidths { reason: ColumnWidthsReason::AutoWithRatio }`.
 - `List::start`, `List::marker_width`, and `List::nest_indent` set list numbering and the marker column.
 - `Cell::ul` and `Cell::ol` run when the row is written, so they can borrow locals from the table closure.
+- `Cell::empty` and `Cell::add` build a cell from the same values the body adds: `Paragraph`, `HLine`, `PlacedImage`, `Spacer`, and `ListBlock` (sealed `IntoCellItem`). A cell may hold several children, stacked top to bottom; it is still one row-high slot that does not split. An empty cell is a zero-height slot. `Table` and `Columns` cannot be added to a cell.
+- `Spacer` and `ListBlock` are public values. `FlowWriter::spacer`, `ul`, and `ol` now add them, and `FlowWriter::add` accepts them. Behavior of those sugars is unchanged.
+- The `Cell::paragraph` / `ul` / `ol` / `image` / `hline` / `spacer` sugars keep their signatures and are now `Cell::empty().add(…)` of the shared value. `Cell::new` and string cells still use the table's text style unchanged.
 
 ### Changed
 

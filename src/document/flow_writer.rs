@@ -13,7 +13,7 @@ mod seal {
 /// columns block, or list keeps the style of the flow it was built on.
 ///
 /// The trait is sealed. Callers pass [`Paragraph`], [`Table`], [`Columns`],
-/// [`HLine`], or [`PlacedImage`].
+/// [`HLine`], [`PlacedImage`], [`Spacer`], or [`ListBlock`].
 pub trait IntoFlowItem: seal::Sealed {
     /// Lowers `self` and appends it to `flow`.
     fn add_to(self, flow: &mut Flow);
@@ -83,22 +83,46 @@ impl IntoFlowItem for PlacedImage {
     }
 }
 
-struct BuiltList {
-    list: List,
-    kind: ListKind,
+/// Vertical space that paints nothing. Height may be zero.
+///
+/// A negative or non-finite height is reported when the spacer is added, and
+/// no space is inserted. In a body flow the part that does not fit continues on
+/// the next page. In a cell it does not split; taller than the cell's inner
+/// full frame is [`ErrorKind::UnsplittableTallerThanFrame`].
+#[derive(Debug)]
+#[must_use]
+pub struct Spacer {
+    height: Fallible<Length<NonNegative>>,
 }
 
-impl seal::Sealed for BuiltList {}
-impl IntoFlowItem for BuiltList {
+impl Spacer {
+    /// Space `height` tall.
+    pub fn new(height: impl IntoNonNegative) -> Self {
+        Self {
+            height: height.into_non_negative(),
+        }
+    }
+
+    pub(crate) fn into_result(self) -> Fallible<Length<NonNegative>> {
+        self.height
+    }
+}
+
+impl seal::Sealed for Spacer {}
+impl IntoFlowItem for Spacer {
     fn add_to(self, flow: &mut Flow) {
-        let kind = match self.kind {
-            ListKind::Ordered { style, .. } => ListKind::Ordered {
-                style,
-                start: self.list.start,
-            },
-            ListKind::Bullet => ListKind::Bullet,
-        };
-        if let Some(node) = self.list.lower(kind, &mut flow.errors) {
+        match self.into_result() {
+            Ok(height) => flow.push(FlowNode::Spacer(SpacerNode { height })),
+            Err(error) => flow.push_err(error),
+        }
+    }
+}
+
+impl seal::Sealed for ListBlock<'_> {}
+impl IntoFlowItem for ListBlock<'_> {
+    fn add_to(self, flow: &mut Flow) {
+        let built = self.build_on(flow);
+        if let Some(node) = built.lower(&mut flow.errors) {
             flow.push(node);
         }
     }
@@ -153,29 +177,12 @@ pub trait FlowWriter {
 
     /// Appends a bulleted list.
     fn ul(&mut self, f: impl FnOnce(&mut List)) {
-        let item = {
-            let flow = self.flow_mut();
-            BuiltList {
-                list: List::build_on(flow, f),
-                kind: ListKind::Bullet,
-            }
-        };
-        self.add(item);
+        self.add(ListBlock::bullet(f));
     }
 
     /// Appends a numbered list. Numbering starts at 1 unless [`List::start`] says otherwise.
     fn ol(&mut self, numbering: Numbering, f: impl FnOnce(&mut List)) {
-        let item = {
-            let flow = self.flow_mut();
-            BuiltList {
-                list: List::build_on(flow, f),
-                kind: ListKind::Ordered {
-                    style: numbering_kind(numbering),
-                    start: NonZeroU32::MIN,
-                },
-            }
-        };
-        self.add(item);
+        self.add(ListBlock::numbered(numbering, f));
     }
 
     /// Appends an image that moves to the next page whole instead of splitting.
@@ -194,12 +201,7 @@ pub trait FlowWriter {
 
     /// Appends vertical space. The part that does not fit continues on the next page.
     fn spacer(&mut self, height: impl IntoNonNegative) {
-        match height.into_non_negative() {
-            Ok(height) => self
-                .flow_mut()
-                .push(FlowNode::Spacer(SpacerNode { height })),
-            Err(error) => self.flow_mut().push_err(error),
-        }
+        self.add(Spacer::new(height));
     }
 
     /// Starts the next content on a new page. Only allowed in the body.

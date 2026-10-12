@@ -23,8 +23,8 @@ pub mod fonts;
 
 pub use document::{
     Band, Blank, Border, Cell, Columns, Document, Flow, FlowWriter, HLine, Image, ImageBox,
-    IntoFlowItem, Layer, List, Numbering, Page, Paragraph, PlacedImage, Rendered, Section, Shapes,
-    Table, TextAt, TextProps, Track,
+    IntoCellItem, IntoFlowItem, Layer, List, ListBlock, Numbering, Page, Paragraph, PlacedImage,
+    Rendered, Section, Shapes, Spacer, Table, TextAt, TextProps, Track,
 };
 
 #[cfg(feature = "test-utils")]

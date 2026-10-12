@@ -42,19 +42,35 @@ pub struct Table {
 }
 
 pub(crate) struct StoredCell {
-    pub(crate) content: StoredContent,
-    pub(crate) col_span: NonZeroU16,
-    pub(crate) row_span: NonZeroU16,
-    pub(crate) fill: Option<Color>,
+    pieces: Vec<Piece<Option<FlowNode>>>,
+    col_span: NonZeroU16,
+    row_span: NonZeroU16,
+    fill: Option<Color>,
 }
 
-pub(crate) enum StoredContent {
+/// One cell child. `L` is [`ListBlock`] on a [`Cell`] and the resolved list
+/// node once the cell is stored on a row.
+#[derive(Debug)]
+enum Piece<L> {
     Text(String),
     Paragraph(Paragraph),
-    Image(Image, ImageBox),
-    HLine(HLine),
-    Spacer(Length<NonNegative>),
-    List(Option<FlowNode>),
+    Line(HLine),
+    Image(PlacedImage),
+    Spacer(Spacer),
+    List(L),
+}
+
+impl<L> Piece<L> {
+    fn map_list<M>(self, f: impl FnOnce(L) -> M) -> Piece<M> {
+        match self {
+            Piece::Text(text) => Piece::Text(text),
+            Piece::Paragraph(paragraph) => Piece::Paragraph(paragraph),
+            Piece::Line(line) => Piece::Line(line),
+            Piece::Image(image) => Piece::Image(image),
+            Piece::Spacer(spacer) => Piece::Spacer(spacer),
+            Piece::List(list) => Piece::List(f(list)),
+        }
+    }
 }
 
 impl Table {
@@ -108,32 +124,14 @@ impl Table {
 
     fn store(&mut self, cell: Cell<'_>) -> StoredCell {
         self.errors.absorb(cell.errors);
-        let content = match cell.content {
-            CellContent::Text(text) => StoredContent::Text(text),
-            CellContent::Paragraph(paragraph) => StoredContent::Paragraph(paragraph),
-            CellContent::Image(image, image_box) => StoredContent::Image(image, image_box),
-            CellContent::HLine(line) => StoredContent::HLine(line),
-            CellContent::Spacer(height) => StoredContent::Spacer(height),
-            CellContent::List(DeferredList::Bullet(build)) => StoredContent::List(assemble_list(
-                self.parent.child(),
-                ListKind::Bullet,
-                &mut self.errors,
-                build,
-            )),
-            CellContent::List(DeferredList::Ordered(numbering, build)) => {
-                StoredContent::List(assemble_list(
-                    self.parent.child(),
-                    ListKind::Ordered {
-                        style: numbering_kind(numbering),
-                        start: NonZeroU32::MIN,
-                    },
-                    &mut self.errors,
-                    build,
-                ))
-            }
-        };
+        let parent = &self.parent;
+        let errors = &mut self.errors;
         StoredCell {
-            content,
+            pieces: cell
+                .pieces
+                .into_iter()
+                .map(|piece| piece.map_list(|block| block.build_on(parent).lower(errors)))
+                .collect(),
             col_span: cell.col_span,
             row_span: cell.row_span,
             fill: cell.fill,
@@ -269,21 +267,7 @@ fn lower_stored_rows(
             let span_col = cell.col_span;
             let span_row = cell.row_span;
             let fill = cell.fill;
-            let content = match cell.content {
-                StoredContent::Text(text) => Some(vec![flow.text(text)]),
-                StoredContent::Paragraph(paragraph) => {
-                    lower_paragraph(paragraph, &flow.style, into).map(|node| vec![node])
-                }
-                StoredContent::List(node) => node.map(|node| vec![node]),
-                StoredContent::Image(image, image_box) => image_box
-                    .lower(&image, flow.doc, into)
-                    .map(|node| vec![node]),
-                StoredContent::HLine(line) => line.lower(into).map(|node| vec![node]),
-                StoredContent::Spacer(height) => {
-                    Some(vec![FlowNode::Spacer(SpacerNode { height })])
-                }
-            };
-            match content {
+            match lower_pieces(flow, into, cell.pieces) {
                 Some(content) => match layout_table::Cell::new(content) {
                     Ok(built) => {
                         stored.push(built.with_span(span_col, span_row).with_fill(fill));
@@ -301,47 +285,115 @@ fn lower_stored_rows(
     ok.then_some(out)
 }
 
-/// One table cell.
-#[derive(Debug)]
-#[must_use]
-pub struct Cell<'a> {
-    pub(crate) content: CellContent<'a>,
-    pub(crate) col_span: NonZeroU16,
-    pub(crate) row_span: NonZeroU16,
-    pub(crate) fill: Option<Color>,
-    pub(crate) errors: ErrorBag,
-}
-
-#[derive(Debug)]
-pub(crate) enum CellContent<'a> {
-    Text(String),
-    Paragraph(Paragraph),
-    Image(Image, ImageBox),
-    HLine(HLine),
-    Spacer(Length<NonNegative>),
-    List(DeferredList<'a>),
-}
-
-pub(crate) enum DeferredList<'a> {
-    Bullet(Box<dyn FnOnce(&mut List) + 'a>),
-    Ordered(Numbering, Box<dyn FnOnce(&mut List) + 'a>),
-}
-
-impl std::fmt::Debug for DeferredList<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeferredList::Bullet(_) => f.debug_tuple("Bullet").finish(),
-            DeferredList::Ordered(numbering, _) => {
-                f.debug_tuple("Ordered").field(numbering).finish()
+/// Lowers every piece through the same [`IntoFlowItem`] path the body uses,
+/// so sibling errors are still recorded after one piece fails.
+fn lower_pieces(
+    parent: &Flow,
+    into: &mut ErrorBag,
+    pieces: Vec<Piece<Option<FlowNode>>>,
+) -> Option<Vec<FlowNode>> {
+    let mut flow = parent.child();
+    let mut ok = true;
+    for piece in pieces {
+        match piece {
+            Piece::Text(text) => {
+                let node = flow.text(text);
+                flow.push(node);
             }
+            Piece::Paragraph(paragraph) => paragraph.add_to(&mut flow),
+            Piece::Line(line) => line.add_to(&mut flow),
+            Piece::Image(image) => image.add_to(&mut flow),
+            Piece::Spacer(spacer) => spacer.add_to(&mut flow),
+            Piece::List(Some(node)) => flow.push(node),
+            Piece::List(None) => ok = false,
+        }
+    }
+    let (nodes, errors) = flow.into_parts();
+    ok &= errors.is_empty();
+    into.absorb(errors);
+    ok.then_some(nodes)
+}
+
+mod seal {
+    pub trait Sealed {}
+}
+
+/// Value [`Cell::add`] accepts.
+///
+/// Sealed. Implementors are [`Paragraph`], [`HLine`], [`PlacedImage`],
+/// [`Spacer`], and [`ListBlock`]. [`Table`] and [`Columns`] implement
+/// [`IntoFlowItem`] only, so they cannot go into a cell:
+///
+/// ```compile_fail
+/// use quire_pdf::{Cell, Table};
+/// let _ = Cell::empty().add(Table::build(|t| t.row(["a"])));
+/// ```
+///
+/// Adding stores the value. Paragraphs, lines, images, and spacers lower with
+/// the table's parent style and document token. A [`ListBlock`] runs when the
+/// cell is written into a row or header, on that same parent.
+pub trait IntoCellItem<'a>: seal::Sealed {
+    /// Appends `self` to `cell`.
+    fn add_to_cell(self, cell: &mut Cell<'a>);
+}
+
+impl seal::Sealed for Paragraph {}
+impl IntoCellItem<'_> for Paragraph {
+    fn add_to_cell(self, cell: &mut Cell<'_>) {
+        cell.pieces.push(Piece::Paragraph(self));
+    }
+}
+
+impl seal::Sealed for HLine {}
+impl IntoCellItem<'_> for HLine {
+    fn add_to_cell(self, cell: &mut Cell<'_>) {
+        cell.pieces.push(Piece::Line(self));
+    }
+}
+
+impl seal::Sealed for PlacedImage {}
+impl IntoCellItem<'_> for PlacedImage {
+    fn add_to_cell(self, cell: &mut Cell<'_>) {
+        cell.pieces.push(Piece::Image(self));
+    }
+}
+
+impl seal::Sealed for Spacer {}
+impl IntoCellItem<'_> for Spacer {
+    fn add_to_cell(self, cell: &mut Cell<'_>) {
+        match self.into_result() {
+            Ok(height) => cell.pieces.push(Piece::Spacer(Spacer::new(height))),
+            Err(error) => cell.errors.record(error),
         }
     }
 }
 
+impl seal::Sealed for ListBlock<'_> {}
+impl<'a> IntoCellItem<'a> for ListBlock<'a> {
+    fn add_to_cell(self, cell: &mut Cell<'a>) {
+        cell.pieces.push(Piece::List(self));
+    }
+}
+
+/// One table cell.
+///
+/// Children stack top to bottom in the order they were added. A cell with no
+/// children is a zero-height slot.
+#[derive(Debug)]
+#[must_use]
+pub struct Cell<'a> {
+    pieces: Vec<Piece<ListBlock<'a>>>,
+    col_span: NonZeroU16,
+    row_span: NonZeroU16,
+    fill: Option<Color>,
+    errors: ErrorBag,
+}
+
 impl<'a> Cell<'a> {
-    fn bare(content: CellContent<'a>) -> Self {
+    /// A one-by-one cell with no children.
+    pub fn empty() -> Self {
         Self {
-            content,
+            pieces: Vec::new(),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
             fill: None,
@@ -349,9 +401,22 @@ impl<'a> Cell<'a> {
         }
     }
 
-    /// A cell spanning one column and one row.
+    /// Appends one child below the earlier ones.
+    ///
+    /// Content taller than the cell's inner full frame is
+    /// [`ErrorKind::UnsplittableTallerThanFrame`].
+    // Same verb as `FlowWriter::add`; a cell is not an arithmetic operand.
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(mut self, item: impl IntoCellItem<'a>) -> Self {
+        item.add_to_cell(&mut self);
+        self
+    }
+
+    /// A one-by-one cell holding `text` in the table's text style.
     pub fn new(text: impl Into<String>) -> Self {
-        Self::bare(CellContent::Text(text.into()))
+        let mut cell = Self::empty();
+        cell.pieces.push(Piece::Text(text.into()));
+        cell
     }
 
     /// A one-by-one cell holding one paragraph. The closure runs immediately.
@@ -359,9 +424,7 @@ impl<'a> Cell<'a> {
     /// Content taller than the cell's inner full frame is
     /// [`ErrorKind::UnsplittableTallerThanFrame`].
     pub fn paragraph(f: impl FnOnce(&mut Paragraph)) -> Self {
-        let mut paragraph = Paragraph::default();
-        f(&mut paragraph);
-        Self::bare(CellContent::Paragraph(paragraph))
+        Self::empty().add(Paragraph::build(f))
     }
 
     /// A one-by-one cell holding a bulleted list.
@@ -372,7 +435,7 @@ impl<'a> Cell<'a> {
     /// Content taller than the cell's inner full frame is
     /// [`ErrorKind::UnsplittableTallerThanFrame`].
     pub fn ul(f: impl FnOnce(&mut List) + 'a) -> Self {
-        Self::bare(CellContent::List(DeferredList::Bullet(Box::new(f))))
+        Self::empty().add(ListBlock::bullet(f))
     }
 
     /// A one-by-one cell holding a numbered list starting at 1.
@@ -383,24 +446,17 @@ impl<'a> Cell<'a> {
     /// Content taller than the cell's inner full frame is
     /// [`ErrorKind::UnsplittableTallerThanFrame`].
     pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'a) -> Self {
-        Self::bare(CellContent::List(DeferredList::Ordered(
-            numbering,
-            Box::new(f),
-        )))
+        Self::empty().add(ListBlock::numbered(numbering, f))
     }
 
     /// A one-by-one cell holding `image`.
     pub fn image(image: &Image, f: impl FnOnce(&mut ImageBox)) -> Self {
-        let mut image_box = ImageBox::default();
-        f(&mut image_box);
-        Self::bare(CellContent::Image(*image, image_box))
+        Self::empty().add(PlacedImage::build(image, f))
     }
 
     /// A one-by-one cell holding a horizontal line as wide as the cell content.
     pub fn hline(f: impl FnOnce(&mut HLine)) -> Self {
-        let mut line = HLine::default();
-        f(&mut line);
-        Self::bare(CellContent::HLine(line))
+        Self::empty().add(HLine::build(f))
     }
 
     /// A one-by-one cell holding vertical space that paints nothing.
@@ -409,14 +465,7 @@ impl<'a> Cell<'a> {
     /// [`ErrorKind::UnsplittableTallerThanFrame`]. Unlike [`Flow::spacer`], the blank
     /// does not split across pages inside the cell.
     pub fn spacer(height: impl IntoNonNegative) -> Self {
-        match height.into_non_negative() {
-            Ok(height) => Self::bare(CellContent::Spacer(height)),
-            Err(error) => {
-                let mut cell = Self::bare(CellContent::Spacer(NonNegative::ZERO));
-                cell.errors.record(error);
-                cell
-            }
-        }
+        Self::empty().add(Spacer::new(height))
     }
 
     /// Spans `n` columns to the right.

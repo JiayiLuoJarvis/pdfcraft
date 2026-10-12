@@ -4,12 +4,14 @@ use std::num::{NonZeroU16, NonZeroU32};
 
 use quire_pdf::{
     document, pt_near, CanvasCommand, Cell, CellSpanReason, Color, ColumnWidthsReason, Error,
-    ErrorKind, Flow, FlowWriter, GeometryKind, ImageFormat, Ink, MarginPreset, Margins,
-    NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect,
-    Region, Rendered, Result, Size, Stroke, Track, A4,
+    ErrorKind, Flow, FlowWriter, GeometryKind, HLine, ImageFormat, Ink, List, ListBlock,
+    MarginPreset, Margins, NonNegative, Numbering, PageSize, Paragraph, Path, PathVerb, Pen, Point,
+    Positive, RecordedPage, Rect, Region, Rendered, Result, Size, Spacer, Stroke, Track, A4,
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::{to_pdf, Paper};
+#[cfg(feature = "backend-krilla")]
+use quire_pdf::{ImageBox, PlacedImage};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
@@ -2565,6 +2567,110 @@ fn cell_list_can_borrow_a_table_local() {
     .unwrap()
     .pages();
     assert!(texts(&pages[0]).iter().any(|s| s == "borrowed"));
+}
+
+fn one_cell_page(make: impl FnOnce() -> Cell<'static>) -> RecordedPage {
+    let pages = document(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| t.row([make()]));
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    pages[0].clone()
+}
+
+#[test]
+fn cell_add_matches_sugar() {
+    let paragraph = |p: &mut Paragraph| {
+        p.text("Fee 12");
+        p.font_size(Positive::pt(9.0).unwrap());
+    };
+    assert_eq!(
+        one_cell_page(|| Cell::paragraph(paragraph)),
+        one_cell_page(|| Cell::empty().add(Paragraph::build(paragraph))),
+    );
+    let line = |h: &mut HLine| h.color(Color::rgb(9, 9, 9));
+    assert_eq!(
+        one_cell_page(|| Cell::hline(line)),
+        one_cell_page(|| Cell::empty().add(HLine::build(line))),
+    );
+    let height = NonNegative::pt(12.0).unwrap();
+    assert_eq!(
+        one_cell_page(|| Cell::spacer(height)),
+        one_cell_page(|| Cell::empty().add(Spacer::new(height))),
+    );
+    let bullets = |list: &mut List| list.item(|item| item.paragraph(|p| p.text("a")));
+    assert_eq!(
+        one_cell_page(|| Cell::ul(bullets)),
+        one_cell_page(|| Cell::empty().add(ListBlock::bullet(bullets))),
+    );
+    let numbered = |list: &mut List| {
+        list.start(NonZeroU32::new(4).unwrap());
+        list.item(|item| item.paragraph(|p| p.text("a")));
+    };
+    let sugar = one_cell_page(|| Cell::ol(Numbering::UpperRoman, numbered));
+    assert_eq!(
+        sugar,
+        one_cell_page(|| Cell::empty().add(ListBlock::numbered(Numbering::UpperRoman, numbered))),
+    );
+    assert!(texts(&sugar).iter().any(|s| s == "IV."));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn cell_add_image_matches_sugar() {
+    let page = |by_add: bool| {
+        document(
+            PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+            |doc| {
+                let image = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
+                let size = |b: &mut ImageBox| b.width(Positive::pt(10.0).unwrap());
+                let cell = if by_add {
+                    Cell::empty().add(PlacedImage::build(&image, size))
+                } else {
+                    Cell::image(&image, size)
+                };
+                doc.table(|t| t.row([cell]));
+                Ok(())
+            },
+        )
+        .unwrap()
+        .pages()
+    };
+    assert_eq!(page(false), page(true));
+}
+
+#[test]
+fn cell_children_stack_in_add_order() {
+    let page = one_cell_page(|| {
+        Cell::empty()
+            .add(Paragraph::build(|p| p.text("A")))
+            .add(HLine::build(|_| {}))
+    });
+    let strokes = stroke_samples(&page);
+    assert_eq!(strokes.len(), 1);
+    assert!(pt_near(glyph(&page, "A").y, BASELINE));
+    assert!(pt_near(strokes[0].y0, LINE + 0.5));
+}
+
+#[test]
+fn empty_cell_is_a_zero_height_slot() {
+    let pages = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.row([Cell::empty()]);
+            t.row(["B"]);
+        });
+        Ok(())
+    })
+    .unwrap()
+    .pages();
+    assert!(pt_near(glyph(&pages[0], "B").y, BASELINE));
 }
 
 #[test]

@@ -127,3 +127,70 @@ impl List {
         }
     }
 }
+
+/// A list not yet tied to a parent flow.
+///
+/// [`FlowWriter::add`] runs the closure immediately on that flow.
+/// [`Cell::add`] stores it; the closure runs when the cell is written into a
+/// row or header, on the table's parent flow. Locals the closure borrows must
+/// live until that `add`, `row`, or `header` call returns.
+#[must_use]
+pub struct ListBlock<'a> {
+    kind: ListKind,
+    build: Box<dyn FnOnce(&mut List) + 'a>,
+}
+
+impl<'a> ListBlock<'a> {
+    /// A bulleted list.
+    pub fn bullet(f: impl FnOnce(&mut List) + 'a) -> Self {
+        Self {
+            kind: ListKind::Bullet,
+            build: Box::new(f),
+        }
+    }
+
+    /// A numbered list. Numbering starts at 1 unless [`List::start`] says otherwise.
+    pub fn numbered(numbering: Numbering, f: impl FnOnce(&mut List) + 'a) -> Self {
+        Self {
+            kind: ListKind::Ordered {
+                style: numbering_kind(numbering),
+                start: NonZeroU32::MIN,
+            },
+            build: Box::new(f),
+        }
+    }
+
+    pub(crate) fn build_on(self, parent: &Flow) -> BuiltList {
+        BuiltList {
+            list: List::build_on(parent, self.build),
+            kind: self.kind,
+        }
+    }
+}
+
+impl std::fmt::Debug for ListBlock<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ListBlock")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A list whose closure already ran on its parent flow.
+pub(crate) struct BuiltList {
+    list: List,
+    kind: ListKind,
+}
+
+impl BuiltList {
+    pub(crate) fn lower(self, into: &mut ErrorBag) -> Option<FlowNode> {
+        let kind = match self.kind {
+            ListKind::Ordered { style, .. } => ListKind::Ordered {
+                style,
+                start: self.list.start,
+            },
+            ListKind::Bullet => ListKind::Bullet,
+        };
+        self.list.lower(kind, into)
+    }
+}

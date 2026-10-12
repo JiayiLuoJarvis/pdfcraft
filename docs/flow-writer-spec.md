@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-10 |
-| 状态 | **已落地**（`FlowWriter` + 模块拆分；Cell 对齐仍属后续刀）。 |
+| 状态 | **已落地**（`FlowWriter` + 模块拆分；Cell 对齐已在后续刀落地，见 §3「明确后续刀」）。 |
 | 权威决策 | [`docs/deref-flow-api.md`](deref-flow-api.md) |
 | 提案书 | 不改 § 已确认产品语义；本刀是公开面建模与模块组织。勿提前把未钉签名写进提案书。 |
 | 现状代码 | 单体 `src/document.rs`（约 2600 行），`Document` / `Section` `Deref` → `Flow` |
@@ -97,7 +97,7 @@ src/document/
 
 ### 明确后续刀（本规格外）
 
-- Cell 入口与 `FlowWriter`/`add` 共享构建结果。
+- Cell 入口与 `FlowWriter`/`add` 共享构建结果。**已落地**：密封 `IntoCellItem`（`Paragraph`、`HLine`、`PlacedImage`、`Spacer`、`ListBlock`）+ `Cell::add` / `Cell::empty`；`Cell::*` 糖即 `empty().add(…)`；格内非列表子项经 `IntoFlowItem::add_to` 降低；正文 `ul` / `ol` / `spacer` 改走 `ListBlock` / `Spacer`。`Cell` 不实现 `FlowWriter`。
 - 若 `document/` 某文件仍过大，再拆（如 `table/cell.rs`）。
 
 ## 4. API 形状（实现可微调名，语义不可偏）

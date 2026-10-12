@@ -496,6 +496,20 @@ fn add_after_section_fails_before_any_page() {
 }
 
 #[test]
+fn bad_spacer_or_list_after_section_is_content_outside_section() {
+    let mut doc = doc_with_font();
+    doc.section(|section| {
+        section.paragraph(|p| p.text("A"));
+        Ok(())
+    });
+    doc.spacer(-1.0);
+    doc.ol(Numbering::Decimal, |list| {
+        list.item(|item| item.paragraph(|p| p.text("B")));
+    });
+    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
+}
+
+#[test]
 fn add_places_a_built_paragraph_and_table() {
     let mut via_add = doc_with_font();
     via_add.add(Paragraph::build(|p| p.text("Risk")));
