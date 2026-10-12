@@ -1,9 +1,17 @@
 //! Failures from constructing lengths, geometry, canvas ops, fonts, layout, and the PDF backend.
 //!
-//! An [`Error`] pairs what went wrong ([`ErrorKind`]) with where layout was when it
-//! happened ([`Location`]). Failures inside `skrifa` or `krilla` are translated into
-//! quire kinds; the dependency's own error, when it has one, is reachable through
-//! [`std::error::Error::source`].
+//! # Shape
+//!
+//! - [`Error`] — one failure: [`Error::kind`] + optional [`Error::at`] ([`Location`])
+//! - [`Errors`] — one to 64 failures in discovery order (`first`, `as_slice`,
+//!   `iter`, `truncated`)
+//! - [`Result<T>`](crate::Result) — `Result<T, Errors>` for layout / `to_pdf`
+//!
+//! Dependency failures from skrifa or krilla are exposed through
+//! [`std::error::Error::source`]. Equality compares `kind` and `at` only.
+//!
+//! Match on [`ErrorKind`] for recovery or tests; use [`Location`] / [`Region`] /
+//! [`CellIndex`] when the failure is tied to a section, page, band, or cell.
 
 use std::error::Error as StdError;
 use std::fmt;

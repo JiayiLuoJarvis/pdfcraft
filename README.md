@@ -10,27 +10,25 @@ Cargo workspace for PDF tools. Depend on the crate you need:
 
 ## quire-pdf
 
-You describe the document as a `DocumentSpec` (flow content + page-anchored marks) and lay it out with `layout_spec`.
-Put font bytes and encoded images on `Resources`. `Resources::add_image` returns an `ImageRef`. `DocumentSpec::limits` holds the caps. `layout_spec` returns `Rendered`, and `to_pdf` writes the PDF bytes.
-The library measures text, breaks lines and pages, lays out tables, then draws through
-an internal canvas. The only PDF backend is a private [krilla](https://crates.io/crates/krilla)
-adapter.
+Caller-facing docs live **with the crate** (same material crates.io / docs.rs show):
 
-**Status:** scaffolding. Public API is not frozen. See `docs/提案书.md`.
+| Doc | Role |
+| --- | --- |
+| [`crates/quire-pdf/README.md`](crates/quire-pdf/README.md) | Install, quick start, features |
+| [`crates/quire-pdf/docs/guide.md`](crates/quire-pdf/docs/guide.md) | Full usage guide |
+| `cargo doc -p quire-pdf --open` | API reference |
 
 ```bash
 cargo test -p quire-pdf --features test-utils
 cargo run -p quire-pdf --example hello
 ```
 
-## Docs
+**Status:** `0.x` — main path works; API not frozen; `publish = false` until the first release.
 
-| Document | Role |
-| --- | --- |
-| [`docs/提案书.md`](docs/提案书.md) | Confirmed product decisions (source of truth) |
-| [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md) | Workspace / crate boundaries |
-| [`docs/quire-design.md`](docs/quire-design.md) | Design draft; unconfirmed items do not bind |
-| [`AGENTS.md`](AGENTS.md) | Conventions for humans and coding agents |
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
+Internal product decisions for maintainers: [`docs/提案书.md`](docs/提案书.md).
 
 ## License
 

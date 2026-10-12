@@ -1,7 +1,17 @@
 //! Geometry and paint values for layout and canvas.
 //!
-//! Coordinates use the PDF point (1/72 inch). The origin is the top-left
-//! corner, x increases to the right, and y increases downward.
+//! # Coordinates
+//!
+//! - Unit: PDF point (`1/72` inch). See [`MM_TO_PT`] for millimeters.
+//! - Origin: top-left of the page.
+//! - Axes: `x` right, `y` **down**.
+//!
+//! # Lengths
+//!
+//! [`Length`] is branded with [`Finite`], [`NonNegative`], or [`Positive`] so
+//! invalid numbers fail at construction. Page setup uses [`PageSize`],
+//! [`Margins`], and optional [`MarginPreset`]. Drawing uses [`Color`],
+//! [`Paint`], [`Stroke`], [`Path`] / [`PathBuilder`].
 
 use std::cmp::Ordering;
 use std::marker::PhantomData;

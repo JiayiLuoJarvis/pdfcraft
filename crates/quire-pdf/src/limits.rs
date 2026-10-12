@@ -1,9 +1,10 @@
 //! Caps on caller-supplied bytes, decoded images, and document size.
 //!
-//! [`Limits::default`] matches the safety table in the design draft. A setter
-//! rejects `0` and any value above four times that default.
-//! [`DocumentSpec::limits`](crate::DocumentSpec::limits) supplies those caps
-//! when images are registered and when the document is laid out.
+//! Put a [`Limits`] value on [`DocumentSpec::limits`](crate::DocumentSpec::limits).
+//! Defaults (32 MiB fonts/images, 40M pixels, 8192 edge, 10 000 pages, 100 000
+//! blocks, 50 000 table cells, 1 000 000 paragraph bytes) suit batch generation.
+//! Setters reject `0` and any value above four times that default. Overflow is
+//! [`ErrorKind::LimitExceeded`] with a [`LimitKind`].
 
 use std::fmt;
 

@@ -8,6 +8,10 @@ while remaining `0.x`.
 
 ## [Unreleased]
 
+### Documentation
+
+- `quire-pdf` ships a self-contained crates.io-style README, `docs/guide.md` usage guide, crate/module rustdoc, dual license files in the package, and `package.metadata.docs.rs`. Caller docs do not require reading internal proposal notes.
+
 ### Added
 
 - Repository is a Cargo workspace: `crates/quire-pdf` (existing layout library), plus empty shells `quire-forms` and `quire-orgchart`. Boundaries are in `docs/workspace-crates-spec.md`. Callers depend on the crate they need; forms must not depend on `quire-pdf`.

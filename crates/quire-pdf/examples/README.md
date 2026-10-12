@@ -1,21 +1,28 @@
 # Examples
 
-## hello
-
-Smoke demo on `DocumentSpec` → `layout_spec` → `to_pdf`. Default feature includes krilla.
+Companion programs for the [crate README](../README.md) and
+[usage guide](../docs/guide.md). Run from the workspace root:
 
 ```bash
-cargo run --example hello
+cargo run -p quire-pdf --example <name>
 ```
 
-Writes `out/hello.pdf` (or the path in argv[1]). Glyphs must exist in the registered font. The fixture used here is Latin-only. Chinese or other missing cmap entries fail the whole document.
+Output paths default under `out/` (gitignored). Pass another path as argv[1].
+
+## hello
+
+End-to-end smoke: sections, bands with page numbers, columns, tables, lists,
+links, blanks, images, and layers → `layout_spec` → `to_pdf`.
+
+Uses `tests/fixtures/quire-measure.ttf` (Latin + a few CJK page-label glyphs).
+Any other missing cmap entry fails the document.
 
 ## bill
 
-Service-bill layout on the same `DocumentSpec` path. Needs a CJK face (see the example header for `QUIRE_CJK_FONT` / `.fonts/`).
+Service-bill layout on the same API. Needs a full CJK face:
 
-```bash
-cargo run --example bill
-```
+- env `QUIRE_CJK_FONT=/path/to/font.ttf`, or
+- a file under workspace `.fonts/` (see the example source header)
 
-Writes `out/bill.pdf` (or the path in argv[1]).
+Without a suitable face the example exits with `MissingGlyph` rather than
+emitting boxes.

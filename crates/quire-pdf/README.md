@@ -1,6 +1,173 @@
 # quire-pdf
 
-PDF document layout crate in the quire workspace.
+**Lay out business documents in Rust and emit vector PDF.**
 
-See the [repository README](../../README.md), [`docs/提案书.md`](../../docs/提案书.md),
-and [`docs/workspace-crates-spec.md`](../../docs/workspace-crates-spec.md).
+You build a `DocumentSpec` — flow content, headers/footers, and page-anchored
+marks — then call `layout_spec` and `to_pdf`. The library measures text with
+[skrifa](https://crates.io/crates/skrifa), breaks lines and pages, places
+tables and lists, draws through an internal canvas, and serializes PDF with a
+private [krilla](https://crates.io/crates/krilla) adapter. krilla types are not
+part of the public API.
+
+| | |
+| --- | --- |
+| Guide | [docs/guide.md](docs/guide.md) |
+| API | [docs.rs/quire-pdf](https://docs.rs/quire-pdf) |
+| MSRV | 1.92 |
+| License | MIT OR Apache-2.0 |
+| Status | `0.x`, API may break; package `publish = false` until the first release |
+
+---
+
+## Install
+
+Until the first crates.io release, depend on the workspace path (or your git
+remote):
+
+```toml
+[dependencies]
+quire-pdf = { path = "crates/quire-pdf" }
+```
+
+Default features enable the krilla backend (`to_pdf`).
+
+```toml
+# Layout tests only — floating helpers:
+quire-pdf = { path = "crates/quire-pdf", features = ["test-utils"] }
+```
+
+---
+
+## Quick start
+
+```rust
+use quire_pdf::spec::{
+    BandInset, BandSlot, BandSpec, Block, Resources, SectionSpec, TextRun,
+};
+use quire_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize, Result};
+
+fn main() -> Result<()> {
+    let font = std::fs::read("tests/fixtures/quire-measure.ttf").expect("fixture font");
+    let resources = Resources::new(font);
+
+    let rendered = layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources,
+        limits: Limits::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::try_uniform(48.0)?,
+            header: Some(BandSpec {
+                inset: BandInset::PageMargins,
+                left: Some(BandSlot::Text(vec![TextRun::Literal("quire-pdf".into())])),
+                right: Some(BandSlot::Text(vec![
+                    TextRun::Literal("Page ".into()),
+                    TextRun::PageNumber,
+                    TextRun::Literal(" / ".into()),
+                    TextRun::PageCount,
+                ])),
+            }),
+            body: vec![
+                Block::paragraph("Hello from quire-pdf."),
+                Block::paragraph("Missing glyphs fail the whole document."),
+            ],
+            ..SectionSpec::default()
+        }],
+    })?;
+
+    let pdf = to_pdf(rendered)?;
+    assert!(pdf.starts_with(b"%PDF"));
+    std::fs::write("out/quickstart.pdf", pdf).expect("write");
+    Ok(())
+}
+```
+
+Runnable demos:
+
+```bash
+cargo run -p quire-pdf --example hello
+cargo run -p quire-pdf --example bill   # needs a CJK face; see examples/README.md
+```
+
+---
+
+## How it works
+
+```text
+┌─────────────┐     layout_spec      ┌──────────┐    to_pdf     ┌─────────┐
+│ DocumentSpec│ ──────────────────► │ Rendered │ ────────────► │ PDF     │
+│ + Resources │   measure / break    │ pages +  │   krilla      │ bytes   │
+└─────────────┘   paginate / paint   │ fonts    │   (private)   └─────────┘
+                                     └──────────┘
+```
+
+1. **Flow body** — paragraphs, spacers, page breaks, keep-together, styled
+   scopes, columns, tables, lists, images, horizontal rules.
+2. **Bands** — header/footer slots; band height is the top/bottom margin.
+3. **Layers** — `behind` / `front` marks in page coordinates (seals, watermarks,
+   paths).
+
+Coordinates: PDF points, **top-left origin, y downward**.  
+Fonts: you supply face bytes; a missing cmap entry fails the document.  
+Dynamic data: use Rust `if` / `for` when building values — there is no template
+DSL and no caller-provided layout closures.
+
+Deep dive: **[docs/guide.md](docs/guide.md)** (blocks, tables, links, limits,
+errors, testing).
+
+---
+
+## Feature flags
+
+| Feature | Default | Purpose |
+| --- | --- | --- |
+| `backend-krilla` | ✓ | Private PDF backend + `to_pdf` |
+| `test-utils` | | `pt_near` / `PT_ABS_TOLERANCE` for layout tests |
+
+---
+
+## Capsule API
+
+| Item | Role |
+| --- | --- |
+| `DocumentSpec` / `SectionSpec` | Document and section values |
+| `Resources` | Font bytes + `add_image` → `ImageRef` |
+| `Block` and friends | Flow content |
+| `BandSpec` / `TextRun` | Header/footer; page numbers at paint time |
+| `LayerMark` / `PageWhen` | Page-anchored marks |
+| `Limits` | Batch safety caps |
+| `layout_spec` | Measure, paginate, record |
+| `to_pdf` | Serialize `Rendered` → `Vec<u8>` |
+| `Errors` / `ErrorKind` | Up to 64 failures with optional `Location` |
+
+---
+
+## Design constraints (v1)
+
+- Horizontal Chinese + Latin; no bidi, vertical text, kerning, ligatures, or justify
+- No TOC / QR / SVG / in-flow canvas / encryption APIs
+- No HTTP image fetch; no fallback fonts
+- No second PDF backend inside this crate
+- `Flowable` stays private
+
+Filling existing AcroForm PDFs is a separate crate (`quire-forms`), not a
+feature flag here.
+
+---
+
+## Compatibility
+
+- **Rust**: MSRV 1.92 (edition 2021)
+- **`unsafe`**: forbidden in this crate
+- **SemVer**: `0.x` — breaking changes may land without a `1.0` bump; read
+  `CHANGELOG.md`
+
+---
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

@@ -1,4 +1,21 @@
 //! Data-only document specifications and their layout entry point.
+//!
+//! # Overview
+//!
+//! | Type | Role |
+//! | --- | --- |
+//! | [`DocumentSpec`] | Page default, [`Resources`], [`crate::Limits`], sections |
+//! | [`SectionSpec`] | Margins, bands, layers, flow [`Block`] list |
+//! | [`Resources`] | Body/bold font bytes; [`Resources::add_image`] → [`ImageRef`] |
+//! | [`Block`] | Paragraphs, tables, columns, lists, images, rules, … |
+//! | [`BandSpec`] / [`TextRun`] | Header/footer; page numbers resolved at paint time |
+//! | [`LayerMark`] / [`PageWhen`] | Page-anchored marks (`behind` / `front`) |
+//! | [`layout_spec`] | Lower + lay out → [`Rendered`] |
+//!
+//! Callers assemble these values with ordinary Rust control flow. There is no
+//! template language and no public `Flowable` trait.
+//!
+//! See the crate README and `docs/guide.md` for end-to-end usage.
 
 mod lower;
 mod token;

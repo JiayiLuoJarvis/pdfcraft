@@ -1,6 +1,74 @@
-//! Quire: PDF document layout on top of a sealed krilla backend.
+//! Lay out documents and emit vector PDF.
 //!
-//! Public surface grows only after items in `docs/提案书.md` are confirmed.
+//! Build a [`DocumentSpec`] from ordinary Rust values, call [`layout_spec`] to
+//! measure, break, and paginate, then [`to_pdf`] to serialize. Fonts and images
+//! live on [`spec::Resources`]. Batch caps live on [`DocumentSpec::limits`].
+//!
+//! # Pipeline
+//!
+//! ```text
+//! Resources + DocumentSpec → layout_spec → Rendered → to_pdf → PDF bytes
+//! ```
+//!
+//! - **Assemble time** — your `if` / `for` choose which [`spec::Block`] values
+//!   enter the body. Page count is unknown.
+//! - **Paint time** — headers, footers, and layer marks may use
+//!   [`spec::TextRun`] / [`spec::PageWhen`]; the library fills page numbers when
+//!   painting each page.
+//!
+//! # Coordinates
+//!
+//! PDF points (`1/72` inch), top-left origin, **y downward** (same as krilla
+//! 0.8.2 `Surface`). Lengths are branded ([`Length`] with [`Finite`] /
+//! [`NonNegative`] / [`Positive`]). Default page margins are zero; set them
+//! explicitly.
+//!
+//! # Fonts and glyphs
+//!
+//! Supply face bytes on [`spec::Resources`]. A character with no cmap entry
+//! fails the document ([`ErrorKind::MissingGlyph`]). There is no fallback font
+//! and no `.notdef` box. v1 targets horizontal Chinese and Latin (no bidi,
+//! vertical writing, kerning, ligatures, or justified lines).
+//!
+//! # Modules
+//!
+//! | Module | Contents |
+//! | --- | --- |
+//! | [`spec`] | Document values and [`layout_spec`] |
+//! | [`geom`] | Lengths, pages, paint, paths |
+//! | [`error`] | [`Error`], [`Errors`], [`ErrorKind`] |
+//! | [`limits`] | [`Limits`] caps |
+//! | [`canvas`] | Drawing surface and recording log |
+//! | [`fonts`] | [`FontId`] |
+//!
+//! Layout and text engines are crate-private. The PDF backend is private and
+//! compiled behind feature `backend-krilla` (default).
+//!
+//! # Example
+//!
+//! ```
+//! use quire_pdf::spec::{Block, Resources, SectionSpec};
+//! use quire_pdf::{layout_spec, to_pdf, DocumentSpec, Margins, PageSize, Result};
+//!
+//! # fn main() -> Result<()> {
+//! let font = std::fs::read("tests/fixtures/quire-measure.ttf").expect("fixture font");
+//! let rendered = layout_spec(DocumentSpec {
+//!     page_size: PageSize::A4,
+//!     resources: Resources::new(font),
+//!     limits: quire_pdf::Limits::default(),
+//!     sections: vec![SectionSpec {
+//!         margins: Margins::try_uniform(48.0)?,
+//!         body: vec![Block::paragraph("Hello from quire-pdf.")],
+//!         ..SectionSpec::default()
+//!     }],
+//! })?;
+//! let pdf = to_pdf(rendered)?;
+//! assert!(pdf.starts_with(b"%PDF"));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! A longer walkthrough ships in `docs/guide.md` next to this crate’s README.
 
 #![forbid(unsafe_code)]
 
@@ -56,6 +124,10 @@ pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
 /// JPEG, GIF, and WebP pixel data that passed header checks while the document
 /// was laid out can still fail here. That [`ErrorKind::Backend`] value has no
 /// page. PNG pixel data fails during [`layout_spec`] instead.
+///
+/// # Errors
+///
+/// Returns backend serialization failures as [`Errors`].
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
     backend::write_pdf(&rendered.recording, rendered.fonts, rendered.images).map_err(Errors::from)
