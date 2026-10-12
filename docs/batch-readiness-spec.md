@@ -193,7 +193,7 @@ A 列表自定义标记编号
 | 刀 | 状态 | 日期 | 备注 |
 | --- | --- | --- | --- |
 | A 列表标记编号 | 完成 | 2026-10-12 | 自定义标记不消耗序号 |
-| B Table::build token | 待做 | | |
+| B Table::build token | 完成 | 2026-10-12 | `add` 时重绑父 `DocToken`；样式仍是 build 时的默认样式 |
 | C single_line_run 换行 | 待做 | | |
 | D limits | 待做 | | 默认数字： |
 | E letter fixture | 待做 | | |

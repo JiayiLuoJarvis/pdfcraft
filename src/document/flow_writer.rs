@@ -11,6 +11,8 @@ mod seal {
 /// the node onto `flow`, so the crate-private node type stays out of the
 /// signature. Paragraphs use `flow`'s style as the parent style. A table,
 /// columns block, or list keeps the style of the flow it was built on.
+/// Adding a [`Table`] rebinds its document token to `flow`, so a cell image
+/// registered on that document resolves. Text style stays the build-time style.
 ///
 /// The trait is sealed. Callers pass [`Paragraph`], [`Table`], [`Columns`],
 /// [`HLine`], [`PlacedImage`], [`Spacer`], or [`ListBlock`].
@@ -39,7 +41,9 @@ impl IntoFlowItem for HLine {
 
 impl seal::Sealed for Table {}
 impl IntoFlowItem for Table {
-    fn add_to(self, flow: &mut Flow) {
+    fn add_to(mut self, flow: &mut Flow) {
+        // `Table::build` mints a fresh token. Cell images belong to `flow`'s document.
+        self.parent.doc = flow.doc;
         if let Some(node) = self.lower(&mut flow.errors) {
             flow.push(node);
         }

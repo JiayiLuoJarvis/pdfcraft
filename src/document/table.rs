@@ -98,6 +98,10 @@ impl Table {
     /// Nested content keeps that build-time style. Prefer [`FlowWriter::table`]
     /// when writing into a live flow so nested content sees that flow's style.
     /// Use this when a helper returns a table for [`FlowWriter::add`].
+    ///
+    /// [`FlowWriter::add`] rebinds this table's document token to the destination
+    /// flow. A cell image registered on that document then resolves. An image
+    /// from another document is still [`ErrorKind::UnknownImage`].
     pub fn build(f: impl FnOnce(&mut Self)) -> Self {
         Self::build_on(&Flow::new(default_style(), DocToken::next()), f)
     }

@@ -11,7 +11,7 @@ use quire_pdf::{
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::{to_pdf, Paper};
 #[cfg(feature = "backend-krilla")]
-use quire_pdf::{ImageBox, PlacedImage};
+use quire_pdf::{Document, ImageBox, PlacedImage, Table};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
@@ -2662,6 +2662,35 @@ fn cell_add_image_matches_sugar() {
         .pages()
     };
     assert_eq!(page(false), page(true));
+}
+
+#[cfg(feature = "backend-krilla")]
+fn make_table(doc: &mut Document<'_>) -> Table {
+    let image = doc
+        .load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
+    Table::build(|table| {
+        table.row([Cell::image(&image, |image| {
+            image.width(Positive::pt(10.0).unwrap());
+        })]);
+    })
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn table_build_cell_image_paints_when_added() {
+    let page = Size::try_pt(200.0, 80.0).unwrap();
+    let rendered = document(PageSize::custom(page), |doc| {
+        let table = make_table(doc);
+        doc.add(table);
+        Ok(())
+    })
+    .unwrap();
+    let images = image_rects(&rendered.pages()[0]);
+    assert_eq!(images.len(), 1);
+    assert_eq!((images[0].1, images[0].2), (1, 1));
+    let expected = Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap();
+    assert_eq!(rect_bits(images[0].3), rect_bits(expected));
 }
 
 #[test]
