@@ -22,12 +22,14 @@ pub use limits::{LimitKind, Limits};
 pub mod canvas;
 pub mod document;
 pub mod fonts;
+pub mod spec;
 
 pub use document::{
     Band, Blank, Cell, Columns, Document, Flow, FlowWriter, HLine, Image, ImageBox, IntoCellItem,
     IntoFlowItem, Layer, List, ListBlock, Numbering, Page, Paragraph, PlacedImage, Ratio, Rendered,
     Section, Shapes, Spacer, Table, TextAt, TextProps, Track,
 };
+pub use spec::{layout_spec, DocumentSpec};
 
 #[cfg(feature = "test-utils")]
 pub use canvas::{pt_near, PT_ABS_TOLERANCE};
