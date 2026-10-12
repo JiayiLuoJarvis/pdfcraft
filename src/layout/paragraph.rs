@@ -8,6 +8,7 @@ use crate::fonts::{FontId, FontStore};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
+use crate::text::break_class::BreakClass;
 use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
 use crate::text::line_break::{break_spans, Advance, LineBudget, Seg, Span, SpanLine};
 use crate::text::measure::{line_metrics, measure_text, LineMetrics, MeasuredText};
@@ -297,6 +298,9 @@ pub(crate) fn single_line_run(
     max_width: f32,
 ) -> Result<GlyphRun> {
     let clustered = ClusteredText::new(text);
+    if (0..clustered.len()).any(|index| clustered.cluster(index).class() == BreakClass::Hard) {
+        return Err(Error::from(ErrorKind::UnexpectedLineBreakInSingleLine));
+    }
     let measured = measure_text(ctx.fonts, ctx.errors, style.font, clustered.glyph_text())?;
     let width = measured.advance_norm * style.font_size.as_pt();
     if width > max_width {

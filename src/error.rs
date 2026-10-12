@@ -242,6 +242,8 @@ pub enum ErrorKind {
     },
     /// Body, margins, or page hooks were written both on the document and in sections.
     ContentOutsideSection,
+    /// A single-line run contains a forced line break.
+    UnexpectedLineBreakInSingleLine,
     /// The PDF backend failed.
     ///
     /// When the PDF writer returned an error, it is the [`source`](StdError::source).
@@ -301,6 +303,9 @@ impl fmt::Display for ErrorKind {
             Self::UnknownImage { id } => write!(f, "image {id} is not registered"),
             Self::ContentOutsideSection => {
                 f.write_str("body or decorations written both on the document and in sections")
+            }
+            Self::UnexpectedLineBreakInSingleLine => {
+                f.write_str("single-line text contains a forced line break")
             }
             Self::Backend { message } => write!(f, "PDF backend failed: {message}"),
         }

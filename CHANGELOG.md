@@ -44,5 +44,6 @@ while remaining `0.x`.
 
 ### Fixed
 
+- `Layer::text_at` and a custom list marker fail with `ErrorKind::UnexpectedLineBreakInSingleLine` when the string contains a forced line break. Nothing is drawn. Header and footer paragraphs still break on that line break.
 - A table from `Table::build` adopts the destination document's token when `FlowWriter::add` lowers it. A cell image loaded on that document paints. An image registered on a different document is still `ErrorKind::UnknownImage`. Nested text keeps the default style captured at `Table::build`.
 - A custom marker on an ordered list no longer advances the counter. Only an automatic label consumes a number. The last automatic label in `examples/hello.rs` is `d.`. That item was `e.` when the custom marker still consumed a number. `GeometryKind::MarkerOutOfRange` carries the next automatic ordinal. LowerAlpha starting at 26, with an automatic item, a custom marker, and another automatic item, fails with number 27.

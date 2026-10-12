@@ -398,6 +398,37 @@ fn non_finite_rotation_does_not_draw() {
 }
 
 #[test]
+fn text_at_with_a_forced_break_fails_before_paint() {
+    for sample in ["A\nB", "A\r\nB"] {
+        let mut doc = doc_with_font();
+        doc.behind(|layer| {
+            layer.text_at(sample, Point::try_pt(10.0, 10.0).unwrap());
+        });
+        let expected = on_first_page(ErrorKind::UnexpectedLineBreakInSingleLine, Region::Behind);
+        let mut rec = RecordingCanvas::new();
+        let result = doc.paint(&mut rec);
+        assert_eq!(
+            result.err().as_ref(),
+            Some(&Errors::from(expected)),
+            "{sample:?}"
+        );
+        assert!(rec.commands().is_empty(), "{sample:?}");
+    }
+}
+
+#[test]
+fn custom_marker_with_a_forced_break_fails_before_paint() {
+    let mut doc = doc_with_font();
+    doc.ul(|list| {
+        list.item_marked("A\nB", |item| item.paragraph(|p| p.text("body")));
+    });
+    assert_fails_with_empty_canvas(
+        doc,
+        &on_first_page(ErrorKind::UnexpectedLineBreakInSingleLine, Region::Body),
+    );
+}
+
+#[test]
 fn missing_glyph_in_front_fails_before_any_page() {
     let mut doc = doc_with_font();
     doc.paragraph(|p| p.text("A"));

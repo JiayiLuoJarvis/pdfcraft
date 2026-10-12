@@ -194,7 +194,7 @@ A 列表自定义标记编号
 | --- | --- | --- | --- |
 | A 列表标记编号 | 完成 | 2026-10-12 | 自定义标记不消耗序号 |
 | B Table::build token | 完成 | 2026-10-12 | `add` 时重绑父 `DocToken`；样式仍是 build 时的默认样式 |
-| C single_line_run 换行 | 待做 | | |
+| C single_line_run 换行 | 完成 | 2026-10-12 | `ErrorKind::UnexpectedLineBreakInSingleLine`；`text_at` 与自定义 marker 遇 BK 失败且不画 |
 | D limits | 待做 | | 默认数字： |
 | E letter fixture | 待做 | | |
 | F 诊断/文档 | 待做 | | |
