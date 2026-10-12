@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use quire_pdf::{
     document, to_pdf, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, Numbering,
-    PageSize, Track,
+    PageSize, Positive, Ratio, Track,
 };
 
 const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
@@ -158,10 +158,10 @@ fn write_table(flow: &mut impl FlowWriter, logo: &Image) {
         t.cell_padding(4.0);
         t.border(0.5, Color::rgb(30, 30, 30));
         t.tracks([
-            Track::Fixed(54.0),
-            Track::Ratio(2.0),
-            Track::Ratio(1.0),
-            Track::Fixed(48.0),
+            Track::Fixed(Positive::pt(54.0).unwrap()),
+            Track::Ratio(Ratio::new(2.0).unwrap()),
+            Track::Ratio(Ratio::new(1.0).unwrap()),
+            Track::Fixed(Positive::pt(48.0).unwrap()),
         ]);
         t.header([
             Cell::paragraph(|p| {

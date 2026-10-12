@@ -42,7 +42,11 @@ impl<'a> Document<'a> {
     /// Decodes `bytes` once and returns a handle for [`Flow::image`], cells, and [`Layer::image_at`].
     ///
     /// Fails now on empty bytes, a byte cap, a pixel or edge cap, or a decode error.
-    /// The byte cap runs before decode. Pixel and edge caps run after the decoder reports
+    /// PNG pixel data is checked here. A valid header with a damaged IDAT fails this call.
+    /// JPEG, GIF, and WebP can still report a pixel error from [`crate::to_pdf`]. That error
+    /// is [`ErrorKind::Backend`] and has no page, because krilla raises it when the document
+    /// finishes.
+    /// The byte cap runs before decode. Pixel and edge caps run after a decoder reports
     /// a size, so a hostile image can still allocate during decode.
     /// Without `backend-krilla` every call fails.
     pub fn load_image(
@@ -233,6 +237,7 @@ impl<'a> Document<'a> {
             .collect();
         let laid = {
             let mut ctx = LayoutCtx {
+                natural: false,
                 fonts: &mut fonts,
                 errors: &mut errors,
             };

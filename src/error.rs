@@ -189,6 +189,8 @@ pub enum ErrorKind {
     },
     /// Content that cannot break or shrink is wider than the available frame width.
     UnbreakableWiderThanFrame {
+        /// Short text of the unbreakable run. `None` for an image or a rule.
+        text: Option<String>,
         /// Width from the current line start through the overflowing atom.
         width: f32,
         /// Available width that was exceeded.
@@ -260,7 +262,10 @@ pub enum ErrorKind {
     /// Body, margins, or page hooks were written both on the document and in sections.
     ContentOutsideSection,
     /// A single-line run contains a forced line break.
-    UnexpectedLineBreakInSingleLine,
+    UnexpectedLineBreakInSingleLine {
+        /// Short normalized text that contains the break. CRLF is one `\n`.
+        text: String,
+    },
     /// The PDF backend failed.
     ///
     /// When the PDF writer returned an error, it is the [`source`](StdError::source).
@@ -284,7 +289,7 @@ impl fmt::Display for ErrorKind {
             Self::Font { index, message } => write!(f, "font index {index}: {message}"),
             Self::MissingGlyph { font, scalar } => write!(
                 f,
-                "font {font} has no glyph for U+{:04X}",
+                "font {font} has no glyph for {scalar:?} (U+{:04X})",
                 u32::from(*scalar)
             ),
             Self::UnknownFont { id } => write!(f, "font {id} is not registered"),
@@ -296,10 +301,16 @@ impl fmt::Display for ErrorKind {
                 f,
                 "font units per em differ: skrifa {skrifa_upem}, krilla {krilla_upem}"
             ),
-            Self::UnbreakableWiderThanFrame { width, avail } => write!(
-                f,
-                "unbreakable content width {width} exceeds available width {avail}"
-            ),
+            Self::UnbreakableWiderThanFrame { text, width, avail } => match text {
+                Some(text) => write!(
+                    f,
+                    "unbreakable content {text:?} width {width} exceeds available width {avail}"
+                ),
+                None => write!(
+                    f,
+                    "unbreakable content width {width} exceeds available width {avail}"
+                ),
+            },
             Self::RunAfterFillBlank => f.write_str("a fill-to-end blank must be the last run"),
             Self::UnsplittableTallerThanFrame { height, avail } => write!(
                 f,
@@ -328,8 +339,8 @@ impl fmt::Display for ErrorKind {
             Self::ContentOutsideSection => {
                 f.write_str("body or decorations written both on the document and in sections")
             }
-            Self::UnexpectedLineBreakInSingleLine => {
-                f.write_str("single-line text contains a forced line break")
+            Self::UnexpectedLineBreakInSingleLine { text } => {
+                write!(f, "single-line text {text:?} contains a forced line break")
             }
             Self::Backend { message } => write!(f, "PDF backend failed: {message}"),
         }
@@ -922,9 +933,52 @@ impl From<Errors> for ErrorBag {
     }
 }
 
+/// At most 24 scalars, then `...` when the source is longer.
+pub(crate) fn text_snippet(text: &str) -> String {
+    const MAX_CHARS: usize = 24;
+    let mut out = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index == MAX_CHARS {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_names_the_missing_scalar_and_the_text_fragment() {
+        assert_eq!(
+            Error::from(ErrorKind::MissingGlyph {
+                font: 0,
+                scalar: '中',
+            })
+            .to_string(),
+            "font 0 has no glyph for '中' (U+4E2D)"
+        );
+        assert_eq!(
+            Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: Some("hello".to_owned()),
+                width: 5.0,
+                avail: 4.0,
+            })
+            .to_string(),
+            "unbreakable content \"hello\" width 5 exceeds available width 4"
+        );
+        assert_eq!(
+            Error::from(ErrorKind::UnexpectedLineBreakInSingleLine {
+                text: "A\nB".to_owned(),
+            })
+            .to_string(),
+            "single-line text \"A\\nB\" contains a forced line break"
+        );
+        assert_eq!(text_snippet(&"字".repeat(30)).chars().count(), 27);
+    }
 
     #[test]
     fn display_appends_the_known_location() {

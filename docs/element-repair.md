@@ -31,17 +31,16 @@
 这些类型进 `src/document.rs`，由 `lib.rs` 重导出。不要把 `layout::ColumnWidth` 直接公开。
 
 ```rust
+pub struct Ratio(f32); // Ratio::new 拒绝非有限或 ≤ 0，错误仍是 ErrorKind::ColumnWidths
+
 pub enum Track {
     Fixed(Length<Positive>),
-    Ratio(f32),   // 构造期拒绝非有限或 ≤ 0，错误仍是 Error::ColumnWidths
+    Ratio(Ratio),
     Auto,
 }
-
-pub struct Border {
-    width: Length<NonNegative>, // 0 = 不描边
-    color: Color,               // 默认黑
-}
 ```
+
+边框不导出 `Border`。调用方用 `Table::border(width, color)`。宽 0 不描边，默认黑。
 
 `Track` 只在 `Table::tracks` 与 `Columns` 的分栏方法之间用。lowering 时映到内部 `ColumnWidth`。`Ratio` 的权重语义与现在的 `layout::columns::Ratio` 相同。
 
@@ -102,7 +101,7 @@ p.end();
 ```rust
 t.tracks([
     Track::Fixed(mm(28.0)),
-    Track::Ratio(1.0),
+    Track::Ratio(Ratio::new(1.0)?),
     Track::Auto,
 ]);
 t.cell_padding(pt(4.0));
@@ -200,7 +199,7 @@ doc.ol(Numbering::Decimal, |l| {
 - `paginate` / `split_stack` 的 `Vec::remove(0)`。行为正确，是性能债。
 - `Style` 补 `Copy`、`Positive` 的 const 工厂。顺手可以，不单开产品工作项。
 - 过宽错误统一成一种变体。先保持图 / 线走 `UnbreakableWiderThanFrame`，表与缩进走过宽几何。若 R3/R4 新路径能沿用已有变体就沿用，不要为统一而改旧测试。
-- 列表项放图片、栏内 `page_break`。提案书白名单没有它们。保持拒绝。
+- 列表项放图片、栏内 `page_break`。提案书白名单没有它们。保持拒绝。栏内 `page_break` 的权威句在提案书 §2.5。公开 `stack` 是样式作用域，不是粘页分组。`Page::is_last` 是全文末页。§2.12 旋转只覆盖 path（`line` / `rect` / `ellipse`），不含 `text_at` / `image_at`。
 
 ## 每个工作项的门禁
 

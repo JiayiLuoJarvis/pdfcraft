@@ -113,6 +113,7 @@ fn wider_beats_taller_and_short_frame_moves() {
     assert_eq!(
         err,
         Error::from(ErrorKind::UnbreakableWiderThanFrame {
+            text: None,
             width: 400.0,
             avail: 300.0,
         })

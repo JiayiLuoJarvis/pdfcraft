@@ -23,7 +23,10 @@ pub struct Page {
 }
 
 impl Page {
-    /// Whether this is the document's last page.
+    /// Whether this is the last page of the whole document.
+    ///
+    /// This is `number == count`. It is not the last page of the section. Compare
+    /// [`Self::section_number`] with [`Self::section_count`] for that.
     #[must_use]
     pub fn is_last(&self) -> bool {
         self.number == self.count

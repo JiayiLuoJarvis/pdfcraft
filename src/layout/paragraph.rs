@@ -169,6 +169,7 @@ impl ParagraphNode {
         let mut errors = ErrorBag::default();
         let laid = {
             let mut ctx = LayoutCtx {
+                natural: false,
                 fonts,
                 errors: &mut errors,
             };
@@ -320,12 +321,15 @@ pub(crate) fn single_line_run(
 ) -> Result<GlyphRun> {
     let clustered = ClusteredText::new(text);
     if (0..clustered.len()).any(|index| clustered.cluster(index).class() == BreakClass::Hard) {
-        return Err(Error::from(ErrorKind::UnexpectedLineBreakInSingleLine));
+        return Err(Error::from(ErrorKind::UnexpectedLineBreakInSingleLine {
+            text: crate::error::text_snippet(clustered.normalized_text()),
+        }));
     }
     let measured = measure_text(ctx.fonts, ctx.errors, style.font, clustered.glyph_text())?;
     let width = measured.advance_norm * style.font_size.as_pt();
     if width > max_width {
         return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
+            text: Some(crate::error::text_snippet(text)),
             width,
             avail: max_width,
         }));

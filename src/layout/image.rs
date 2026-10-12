@@ -31,6 +31,7 @@ impl ImageNode {
         let height = self.size.height().as_pt();
         if width > avail.width {
             return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: None,
                 width,
                 avail: avail.width,
             }));

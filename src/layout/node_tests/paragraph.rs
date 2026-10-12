@@ -25,6 +25,7 @@ fn fit(
     let node = TextNode::from_items(items, style.clone());
     let mut errors = crate::error::ErrorBag::default();
     let mut ctx = LayoutCtx {
+        natural: false,
         fonts,
         errors: &mut errors,
     };
@@ -107,6 +108,7 @@ fn centered_fill_blank_starts_at_the_frame_x() {
     );
     let mut errors = crate::error::ErrorBag::default();
     let mut ctx = LayoutCtx {
+        natural: false,
         fonts: &mut fonts,
         errors: &mut errors,
     };

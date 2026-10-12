@@ -68,6 +68,7 @@ pub(crate) fn render(
 ) -> (Result<()>, RecordingCanvas) {
     let mut errors = ErrorBag::default();
     let mut ctx = LayoutCtx {
+        natural: false,
         fonts,
         errors: &mut errors,
     };

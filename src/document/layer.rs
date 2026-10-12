@@ -17,7 +17,9 @@ impl Layer {
         self.page
     }
 
-    /// Whether this is the document's last page.
+    /// Whether this is the last page of the whole document.
+    ///
+    /// Same rule as [`Page::is_last`]. It is not the last page of the section.
     #[must_use]
     pub fn is_last(&self) -> bool {
         self.page.is_last()
@@ -123,8 +125,10 @@ impl Layer {
         self.push_shape(Path::ellipse(rect), ink, None);
     }
 
-    /// Draws the shapes added in `draw` rotated by `degrees` about `about`.
+    /// Draws the paths added in `draw`, rotated by `degrees` about `about`.
     ///
+    /// `draw` receives [`Shapes`], which can add a line, a rectangle, or an ellipse.
+    /// [`Layer::text_at`] and [`Layer::image_at`] are not rotated.
     /// Positive is clockwise on the page. A non-finite angle fails the document with
     /// [`GeometryKind::NonFiniteRotation`] and does not run `draw`. Shapes keep their order relative
     /// to the layer's other items.
@@ -200,6 +204,8 @@ impl TextAt<'_> {
 }
 
 /// Path-only view of a [`Layer`] inside [`Layer::rotated`].
+///
+/// Text and images stay on [`Layer`]. Rotation does not apply to them.
 pub struct Shapes<'l> {
     pub(crate) layer: &'l mut Layer,
     pub(crate) degrees: f32,

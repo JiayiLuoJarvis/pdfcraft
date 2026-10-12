@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Added
 
+- `Ratio::new` builds a column weight. A weight that is not finite, or is not above zero, fails with `ErrorKind::ColumnWidths` before a table or a column set is assembled.
 - `tests/fixtures/quire-letter.ttf` is an OFL subset of Noto Sans SC Regular with family name QuireLetter. `tests/letter_layout.rs` lays out a confirmation letter through `document` and checks the recorded canvas. `to_pdf` only checks that the bytes start with `%PDF`.
 - `Limits` caps font bytes, image bytes, image pixels, image edge, pages, blocks, table cells, and paragraph bytes. `Document::set_limits` installs a value. Exceeding a cap fails the document with `ErrorKind::LimitExceeded`. Setters reject 0 and any value above four times the default.
 - Header and footer slots span the full page width. `Band::inset` is the only way to pull them in from the page edges.
@@ -24,6 +25,8 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `Track::Fixed` takes `Length<Positive>`. `Track::Ratio` takes `Ratio`. `Border` is no longer exported. Call `Table::border`. `DocumentInfo` is no longer re-exported from the crate root. It remains `quire_pdf::canvas::DocumentInfo` for `Canvas::set_document_info`.
+- **Breaking.** `ErrorKind::UnbreakableWiderThanFrame` carries `text: Option<String>`. `ErrorKind::UnexpectedLineBreakInSingleLine` carries `text: String`. `MissingGlyph`'s display includes the scalar.
 - **Breaking.** A font or an image over its byte cap is `ErrorKind::LimitExceeded` with `LimitKind::FontBytes` or `LimitKind::ImageBytes`. Those failures were `ErrorKind::Font` and `ErrorKind::Image` strings.
 - **Breaking.** `Result<T>` is now `Result<T, Errors>`. `Errors` keeps one to 64 failures in discovery order (`first`, `as_slice`, `iter`, `truncated`). A single untruncated item displays like `Error`. Otherwise the items are numbered, and a truncated list ends with `further errors omitted`. Equality compares items only. `From<Error> for Errors`. Any error fails the document before paint. `Document::section` returns `()`. Geometry, canvas, `Document::font`, `bold_font`, and `load_image` still return one `Error`. `to_pdf` lifts a backend error into `Errors`.
 - **Breaking.** `pt_near` and `PT_ABS_TOLERANCE` are no longer on the default crate root. Enable feature `test-utils` to import them. The empty public `limits` module is removed until real limits land.
@@ -47,6 +50,8 @@ while remaining `0.x`.
 
 ### Fixed
 
+- `keep_together` and a table cell count paragraph spacing between their children. Two lines that fit in the frame, with spacing between them that does not, fail with `ErrorKind::UnsplittableTallerThanFrame`. Spacing after the last child is still outside the group. Ordinary pagination still drops spacing that does not fit, and does not push the next block to the next page for that spacing alone.
+- A PNG whose header is valid and whose pixel data is not fails in `Document::load_image` with `ErrorKind::Image`. JPEG, GIF, and WebP pixel errors can still fail in `to_pdf` with `ErrorKind::Backend` and no page.
 - `Layer::text_at` and a custom list marker fail with `ErrorKind::UnexpectedLineBreakInSingleLine` when the string contains a forced line break. Nothing is drawn. Header and footer paragraphs still break on that line break.
 - A table from `Table::build` adopts the destination document's token when `FlowWriter::add` lowers it. A cell image loaded on that document paints. An image registered on a different document is still `ErrorKind::UnknownImage`. Nested text keeps the default style captured at `Table::build`.
 - A custom marker on an ordered list no longer advances the counter. Only an automatic label consumes a number. The last automatic label in `examples/hello.rs` is `d.`. That item was `e.` when the custom marker still consumed a number. `GeometryKind::MarkerOutOfRange` carries the next automatic ordinal. LowerAlpha starting at 26, with an automatic item, a custom marker, and another automatic item, fails with number 27.

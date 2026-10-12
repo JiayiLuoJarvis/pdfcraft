@@ -1,13 +1,36 @@
 #![allow(clippy::wildcard_imports)]
 use super::*;
 
+/// Positive finite weight for a [`Track::Ratio`] column.
+///
+/// [`Ratio::new`] rejects a weight that is not finite or not above zero.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ratio(f32);
+
+impl Ratio {
+    /// Builds a weight.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ColumnWidths`] with [`ColumnWidthsReason::NonFiniteRatio`] or
+    /// [`ColumnWidthsReason::NonPositiveRatio`].
+    pub fn new(weight: f32) -> std::result::Result<Self, Error> {
+        LayoutRatio::new(weight)?;
+        Ok(Self(weight))
+    }
+
+    pub(crate) fn get(self) -> f32 {
+        self.0
+    }
+}
+
 /// A table or column track width.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Track {
-    /// A length in points. Validated when the table is assembled.
-    Fixed(f32),
-    /// A positive finite weight. Rejected at conversion with [`ErrorKind::ColumnWidths`].
-    Ratio(f32),
+    /// A positive length.
+    Fixed(Length<Positive>),
+    /// A positive finite weight from [`Ratio::new`].
+    Ratio(Ratio),
     /// Remaining width after Fixed tracks. At most one Auto per set of tracks.
     Auto,
 }
@@ -15,8 +38,8 @@ pub enum Track {
 impl Track {
     fn into_width(self) -> Fallible<ColumnWidth> {
         match self {
-            Self::Fixed(width) => Ok(ColumnWidth::Fixed(Positive::pt(width)?)),
-            Self::Ratio(weight) => Ok(ColumnWidth::Ratio(Ratio::new(weight)?)),
+            Self::Fixed(width) => Ok(ColumnWidth::Fixed(width)),
+            Self::Ratio(weight) => Ok(ColumnWidth::Ratio(LayoutRatio::new(weight.get())?)),
             Self::Auto => Ok(ColumnWidth::Auto),
         }
     }
@@ -24,7 +47,7 @@ impl Track {
 
 /// Grid-line stroke. Width zero draws nothing.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Border {
+pub(crate) struct Border {
     pub(crate) width: Length<NonNegative>,
     pub(crate) color: Color,
 }
@@ -189,7 +212,7 @@ impl Table {
             Some(tracks) => table_widths(tracks, cols, &mut blocked, into),
             None => Some(vec![
                 ColumnWidth::Ratio(
-                    Ratio::new(1.0).expect("1 is positive")
+                    LayoutRatio::new(1.0).expect("1 is positive")
                 );
                 cols
             ]),

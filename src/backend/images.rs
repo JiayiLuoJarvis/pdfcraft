@@ -59,6 +59,11 @@ impl ImageRegistry for ImageTable {
                 max: max_bytes as u64,
             }));
         }
+        if format == ImageFormat::Png {
+            // krilla stores a PNG decode error until document finish, which
+            // becomes Backend with no page. Inflate the pixels here instead.
+            validate_png_pixels(&bytes, &self.limits)?;
+        }
         let image = decode(bytes, format)?;
         let (width, height) = image.size();
         if width == 0 || height == 0 {
@@ -102,6 +107,55 @@ impl ImageTable {
     pub(super) fn get(&self, id: ImageId) -> Option<&Raster> {
         self.rasters.get(id.as_u32() as usize)
     }
+}
+
+fn validate_png_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let mut reader = decoder.read_info().map_err(|error| png_error(&error))?;
+    let (width, height) = {
+        let info = reader.info();
+        (info.width, info.height)
+    };
+    if width == 0 || height == 0 {
+        return Err(Error::from(ErrorKind::Image {
+            message: "has an empty side".to_owned(),
+        }));
+    }
+    let max_edge = limits.max_image_edge();
+    let edge = width.max(height);
+    if edge > max_edge {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::ImageEdge,
+            value: u64::from(edge),
+            max: u64::from(max_edge),
+        }));
+    }
+    let pixels = u64::from(width).saturating_mul(u64::from(height));
+    let max_pixels = limits.max_image_pixels();
+    if pixels > max_pixels {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::ImagePixels,
+            value: pixels,
+            max: max_pixels,
+        }));
+    }
+    let size = reader.output_buffer_size().ok_or_else(|| {
+        Error::from(ErrorKind::Image {
+            message: "Png decode failed: image is too large".to_owned(),
+        })
+    })?;
+    let mut frame = vec![0; size];
+    reader
+        .next_frame(&mut frame)
+        .map_err(|error| png_error(&error))?;
+    Ok(())
+}
+
+fn png_error(error: &png::DecodingError) -> Error {
+    Error::from(ErrorKind::Image {
+        message: format!("Png decode failed: {error}"),
+    })
 }
 
 fn decode(bytes: Vec<u8>, format: ImageFormat) -> Result<Image> {

@@ -316,7 +316,7 @@ fn measure_band(
         }) => Err(taller(height)),
         Ok(split) => Err(taller(stacked_height(split, ctx, frame)?)),
         Err(Error {
-            kind: ErrorKind::UnbreakableWiderThanFrame { width, avail },
+            kind: ErrorKind::UnbreakableWiderThanFrame { width, avail, .. },
             ..
         }) => Err(Error::from(ErrorKind::DecorationWiderThanFrame {
             width,

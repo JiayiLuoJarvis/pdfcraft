@@ -207,6 +207,9 @@ fn split_stack(
                 } else if spacing > 0.0 && avail.height >= spacing {
                     y += spacing;
                     avail.height -= spacing;
+                } else if spacing > 0.0 && ctx.natural {
+                    y += spacing;
+                    avail.height = 0.0;
                 }
             }
             Split::Partial {
@@ -223,7 +226,12 @@ fn split_stack(
                     head_height: y,
                     head: Fragment {
                         height: y,
-                        spacing_after: 0.0,
+                        // Only natural-height measurement needs a cut-off gap on the head.
+                        spacing_after: if ctx.natural {
+                            offset.spacing_after
+                        } else {
+                            0.0
+                        },
                         commands,
                     },
                     tail: FlowNode::Stack(rest),

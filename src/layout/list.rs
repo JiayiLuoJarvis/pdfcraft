@@ -220,7 +220,7 @@ impl<N: Flowable> ListNode<N> {
                     if !placed_any {
                         return Ok(Split::MoveToNextPage(self));
                     }
-                    return Ok(partial(commands, y, self));
+                    return Ok(partial(commands, y, 0.0, self));
                 }
             };
 
@@ -241,13 +241,17 @@ impl<N: Flowable> ListNode<N> {
                     pending_marker: None,
                     body: node,
                 });
-                return Ok(partial(commands, y, self));
+                return Ok(partial(commands, y, spacing, self));
             }
             if self.items.is_empty() {
                 trailing_spacing = spacing;
             } else if spacing > 0.0 && avail.height >= spacing {
                 y += spacing;
                 avail.height -= spacing;
+            } else if spacing > 0.0 && ctx.natural {
+                // Measurement must count gaps that will not fit a fresh frame.
+                y += spacing;
+                avail.height = 0.0;
             }
         }
 
@@ -262,12 +266,17 @@ impl<N: Flowable> ListNode<N> {
     }
 }
 
-fn partial<N>(commands: Vec<FragmentCommand>, y: f32, rest: ListNode<N>) -> Split<ListNode<N>> {
+fn partial<N>(
+    commands: Vec<FragmentCommand>,
+    y: f32,
+    spacing_after: f32,
+    rest: ListNode<N>,
+) -> Split<ListNode<N>> {
     Split::Partial {
         head_height: y,
         head: Fragment {
             height: y,
-            spacing_after: 0.0,
+            spacing_after,
             commands,
         },
         tail: rest,

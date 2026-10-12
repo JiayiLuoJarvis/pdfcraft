@@ -6,7 +6,7 @@ use quire_pdf::{
     document, pt_near, CanvasCommand, Cell, CellSpanReason, Color, ColumnWidthsReason, Error,
     ErrorKind, Flow, FlowWriter, GeometryKind, HLine, ImageFormat, Ink, List, ListBlock,
     MarginPreset, Margins, NonNegative, Numbering, PageSize, Paragraph, Path, PathVerb, Pen, Point,
-    Positive, RecordedPage, Rect, Region, Rendered, Result, Size, Spacer, Stroke, Track, A4,
+    Positive, Ratio, RecordedPage, Rect, Region, Rendered, Result, Size, Spacer, Stroke, Track, A4,
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::{to_pdf, Paper};
@@ -623,7 +623,7 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
     let errors = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.table(|t| {
-            t.tracks([Track::Ratio(1.0)]);
+            t.tracks([Track::Ratio(Ratio::new(1.0).unwrap())]);
             t.row([
                 Cell::paragraph(|p| {
                     p.font_size(0.0);
@@ -1050,6 +1050,7 @@ fn list_item_and_overwide_image_fail() {
     assert_eq!(
         wide.first().kind.clone(),
         ErrorKind::UnbreakableWiderThanFrame {
+            text: None,
             width: 101.0,
             avail: 100.0,
         }
@@ -1058,19 +1059,17 @@ fn list_item_and_overwide_image_fail() {
 
 #[cfg(feature = "backend-krilla")]
 #[test]
-fn damaged_pixels_fail_at_pdf_time() {
-    let rendered = document(PageSize::A4, |doc| {
-        let logo = doc.load_image(BAD_IDAT.to_vec(), ImageFormat::Png)?;
-        doc.image(&logo, |_| {});
+fn damaged_png_pixels_fail_at_load() {
+    let err = document(PageSize::A4, |doc| {
+        let _ = doc.load_image(BAD_IDAT.to_vec(), ImageFormat::Png)?;
         Ok(())
     })
+    .err()
     .unwrap();
-    let err = to_pdf(rendered).unwrap_err();
-    assert!(
-        matches!(err.first().kind.clone(), ErrorKind::Backend { .. }),
-        "{err:?}"
-    );
-    assert!(std::error::Error::source(&err).is_some(), "{err:?}");
+    let ErrorKind::Image { message } = &err.first().kind else {
+        panic!("{err:?}");
+    };
+    assert!(message.starts_with("Png decode failed:"), "{message}");
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -2889,7 +2888,7 @@ fn table_tracks_fill_the_frame_and_keep_fixed_width() {
         |doc| {
             doc.font(FONT.to_vec())?;
             doc.table(|t| {
-                t.tracks([Track::Fixed(40.0), Track::Auto]);
+                t.tracks([Track::Fixed(Positive::pt(40.0).unwrap()), Track::Auto]);
                 t.row(["A", "B"]);
             });
             Ok(())
@@ -3005,6 +3004,45 @@ fn columns_gap_zero_places_the_second_column_against_the_first() {
 }
 
 #[test]
+fn ratio_rejects_a_weight_that_is_not_positive_and_finite() {
+    assert_eq!(
+        Ratio::new(0.0).unwrap_err().kind,
+        ErrorKind::ColumnWidths {
+            reason: ColumnWidthsReason::NonPositiveRatio,
+        }
+    );
+    assert_eq!(
+        Ratio::new(-1.0).unwrap_err().kind,
+        ErrorKind::ColumnWidths {
+            reason: ColumnWidthsReason::NonPositiveRatio,
+        }
+    );
+    assert_eq!(
+        Ratio::new(f32::NAN).unwrap_err().kind,
+        ErrorKind::ColumnWidths {
+            reason: ColumnWidthsReason::NonFiniteRatio,
+        }
+    );
+    let pages = document(
+        PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
+        |doc| {
+            doc.font(FONT.to_vec())?;
+            doc.table(|t| {
+                t.tracks([
+                    Track::Ratio(Ratio::new(1.0).unwrap()),
+                    Track::Ratio(Ratio::new(2.0).unwrap()),
+                ]);
+                t.row(["A", "B"]);
+            });
+            Ok(())
+        },
+    )
+    .unwrap()
+    .pages();
+    assert!(pt_near(glyph(&pages[0], "B").x, 100.0));
+}
+
+#[test]
 fn auto_with_ratio_fails_on_columns_and_table_tracks() {
     let columns = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
@@ -3024,7 +3062,7 @@ fn auto_with_ratio_fails_on_columns_and_table_tracks() {
     let table = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.table(|t| {
-            t.tracks([Track::Auto, Track::Ratio(1.0)]);
+            t.tracks([Track::Auto, Track::Ratio(Ratio::new(1.0).unwrap())]);
             t.row(["A", "B"]);
         });
         Ok(())
@@ -3042,7 +3080,7 @@ fn table_tracks_length_must_match_the_first_row() {
     let result = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.table(|t| {
-            t.tracks([Track::Ratio(1.0)]);
+            t.tracks([Track::Ratio(Ratio::new(1.0).unwrap())]);
             t.row(["A", "B"]);
         });
         Ok(())

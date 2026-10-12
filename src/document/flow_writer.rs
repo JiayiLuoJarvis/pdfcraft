@@ -209,6 +209,9 @@ pub trait FlowWriter {
     }
 
     /// Starts the next content on a new page. Only allowed in the body.
+    ///
+    /// A column rejects this. So do a table cell, a list item, and a header or footer band.
+    /// The failure is [`ErrorKind::InvalidCellContent`].
     fn page_break(&mut self) {
         self.flow_mut().push(FlowNode::PageBreak);
     }
@@ -225,8 +228,10 @@ pub trait FlowWriter {
 
     /// Runs `body` with a temporary parent text style. Children inherit unless they override.
     ///
-    /// Like pdfmake's `stack` carrying `fontSize` / `color`: unset fields keep the outer style,
-    /// and the previous parent style is restored when `body` returns.
+    /// This is a style scope, like pdfmake's `stack` carrying `fontSize` / `color`. Unset
+    /// fields keep the outer style, and the previous parent style is restored when `body`
+    /// returns. It does not keep the children on one page. Use [`FlowWriter::keep_together`]
+    /// for that.
     ///
     /// Flow-control sugar. It writes through [`Self::flow_mut`] and is not an
     /// independent block value like [`Table`].

@@ -168,7 +168,7 @@ fn fixed_blank_wider_than_the_indented_line_fails_before_any_page() {
     let Err(errors) = doc.paint(&mut rec) else {
         panic!("expected the blank to be wider than the indented line");
     };
-    let ErrorKind::UnbreakableWiderThanFrame { width, avail } = &errors.first().kind else {
+    let ErrorKind::UnbreakableWiderThanFrame { width, avail, .. } = &errors.first().kind else {
         panic!("{errors:?}");
     };
     assert!(crate::canvas::pt_near(*width, 80.0), "{width}");
@@ -404,7 +404,12 @@ fn text_at_with_a_forced_break_fails_before_paint() {
         doc.behind(|layer| {
             layer.text_at(sample, Point::try_pt(10.0, 10.0).unwrap());
         });
-        let expected = on_first_page(ErrorKind::UnexpectedLineBreakInSingleLine, Region::Behind);
+        let expected = on_first_page(
+            ErrorKind::UnexpectedLineBreakInSingleLine {
+                text: "A\nB".to_owned(),
+            },
+            Region::Behind,
+        );
         let mut rec = RecordingCanvas::new();
         let result = doc.paint(&mut rec);
         assert_eq!(
@@ -424,7 +429,12 @@ fn custom_marker_with_a_forced_break_fails_before_paint() {
     });
     assert_fails_with_empty_canvas(
         doc,
-        &on_first_page(ErrorKind::UnexpectedLineBreakInSingleLine, Region::Body),
+        &on_first_page(
+            ErrorKind::UnexpectedLineBreakInSingleLine {
+                text: "A\nB".to_owned(),
+            },
+            Region::Body,
+        ),
     );
 }
 

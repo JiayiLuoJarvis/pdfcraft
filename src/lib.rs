@@ -24,16 +24,16 @@ pub mod document;
 pub mod fonts;
 
 pub use document::{
-    Band, Blank, Border, Cell, Columns, Document, Flow, FlowWriter, HLine, Image, ImageBox,
-    IntoCellItem, IntoFlowItem, Layer, List, ListBlock, Numbering, Page, Paragraph, PlacedImage,
-    Rendered, Section, Shapes, Spacer, Table, TextAt, TextProps, Track,
+    Band, Blank, Cell, Columns, Document, Flow, FlowWriter, HLine, Image, ImageBox, IntoCellItem,
+    IntoFlowItem, Layer, List, ListBlock, Numbering, Page, Paragraph, PlacedImage, Ratio, Rendered,
+    Section, Shapes, Spacer, Table, TextAt, TextProps, Track,
 };
 
 #[cfg(feature = "test-utils")]
 pub use canvas::{pt_near, PT_ABS_TOLERANCE};
 pub use canvas::{
-    Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, ImageFormat,
-    ImageId, LinkTarget, RecordedPage, RecordingCanvas,
+    Canvas, CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId,
+    LinkTarget, RecordedPage, RecordingCanvas,
 };
 pub use fonts::FontId;
 
@@ -66,6 +66,10 @@ pub fn document<'a>(
 }
 
 /// Writes the pages of `rendered` as PDF bytes.
+///
+/// JPEG, GIF, and WebP pixel data that [`Document::load_image`] accepted from the header
+/// can still fail here. That [`ErrorKind::Backend`] value has no page. PNG pixel data
+/// fails in `load_image` instead.
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
     backend::write_pdf(&rendered.recording, rendered.fonts, rendered.images).map_err(Errors::from)

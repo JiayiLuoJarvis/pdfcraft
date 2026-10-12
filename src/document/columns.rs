@@ -32,7 +32,7 @@ impl Columns {
     /// Adds an equal-ratio column to the right of the previous ones.
     pub fn col(&mut self, f: impl FnOnce(&mut Flow)) {
         self.push_col(
-            ColumnWidth::Ratio(Ratio::new(1.0).expect("1 is positive")),
+            ColumnWidth::Ratio(LayoutRatio::new(1.0).expect("1 is positive")),
             f,
         );
     }
@@ -47,7 +47,7 @@ impl Columns {
 
     /// Adds a ratio-weighted column. Non-finite or non-positive weights fail assembly.
     pub fn col_ratio(&mut self, weight: f32, f: impl FnOnce(&mut Flow)) {
-        match Ratio::new(weight) {
+        match LayoutRatio::new(weight) {
             Ok(ratio) => self.push_col(ColumnWidth::Ratio(ratio), f),
             Err(error) => self.errors.record(error),
         }

@@ -4,7 +4,9 @@
 //! so no node module names the concrete `FlowNode` enum.
 
 use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
-use crate::error::{ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind, Location};
+use crate::error::{
+    Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind, Location,
+};
 use crate::fonts::FontStore;
 use crate::geom::{Paint, Path, Point, Rect, Stroke};
 
@@ -12,6 +14,9 @@ use crate::geom::{Paint, Path, Point, Rect, Stroke};
 pub(crate) struct LayoutCtx<'a> {
     pub(crate) fonts: &'a mut FontStore,
     pub(crate) errors: &'a mut ErrorBag,
+    /// Keep-together and cell measurement count spacing between children.
+    /// Pagination leaves this false and drops spacing that does not fit.
+    pub(crate) natural: bool,
 }
 
 impl LayoutCtx<'_> {
@@ -192,23 +197,37 @@ pub(crate) trait Flowable: Sized {
 }
 
 /// Full-frame natural height. Non-Fit splits become [`ErrorKind::UnsplittableTallerThanFrame`].
+///
+/// Spacing between children counts, including spacing that would not fit in `full`.
+/// The last child's trailing spacing stays on the fragment and is not part of the height.
 pub(crate) fn natural_height<N: Flowable>(
     node: N,
     ctx: &mut LayoutCtx<'_>,
     full: Frame,
 ) -> Result<(f32, Fragment)> {
-    match node.split(ctx, full)? {
-        Split::Fit { height, fragment } => Ok((height, fragment)),
-        split => Err(ErrorKind::UnsplittableTallerThanFrame {
-            height: stacked_height(split, ctx, full)?,
-            avail: full.full_height,
-        }
-        .into()),
-    }
+    let saved = ctx.natural;
+    ctx.natural = true;
+    let split = node.split(ctx, full);
+    let result = match split {
+        Ok(Split::Fit { height, fragment }) if height <= full.full_height => Ok((height, fragment)),
+        Ok(Split::Fit { height, .. }) => Err(too_tall(height, full.full_height)),
+        Ok(split) => match stacked_height(split, ctx, full) {
+            Ok(height) => Err(too_tall(height, full.full_height)),
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    };
+    ctx.natural = saved;
+    result
+}
+
+fn too_tall(height: f32, avail: f32) -> Error {
+    ErrorKind::UnsplittableTallerThanFrame { height, avail }.into()
 }
 
 /// Height of `split` plus every later piece laid out in fresh `full` frames.
 ///
+/// A head's `spacing_after` counts: it is the gap a break cut off inside a group.
 /// Stops early when a fresh frame places nothing, so the sum never loops.
 pub(crate) fn stacked_height<N: Flowable>(
     mut split: Split<N>,
@@ -224,9 +243,11 @@ pub(crate) fn stacked_height<N: Flowable>(
         match split {
             Split::Fit { height, .. } => return Ok(total + height),
             Split::Partial {
-                head_height, tail, ..
+                head_height,
+                head,
+                tail,
             } if head_height > 0.0 => {
-                total += head_height;
+                total += head_height + head.spacing_after;
                 split = tail.split(ctx, fresh)?;
             }
             Split::Partial { .. } | Split::MoveToNextPage(_) => return Ok(total),

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use quire_pdf::{
     document, to_pdf, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, PageSize,
-    Track,
+    Positive, Ratio, Track,
 };
 
 const NAVY: Color = Color::rgb(0x19, 0x2d, 0x74);
@@ -205,7 +205,10 @@ fn write_service_table(flow: &mut impl FlowWriter) {
     flow.table(|t| {
         t.cell_padding(8.0);
         t.border(0.66, GRAY);
-        t.tracks([Track::Ratio(2.2), Track::Ratio(1.0)]);
+        t.tracks([
+            Track::Ratio(Ratio::new(2.2).unwrap()),
+            Track::Ratio(Ratio::new(1.0).unwrap()),
+        ]);
         t.header([
             Cell::paragraph(|p| {
                 p.color(Color::rgb(0xff, 0xff, 0xff));
@@ -277,7 +280,11 @@ fn write_payment(flow: &mut impl FlowWriter, diamond: &Image) {
     flow.table(|t| {
         t.cell_padding(4.0);
         t.border(0.66, GRAY);
-        t.tracks([Track::Fixed(22.0), Track::Ratio(1.0), Track::Ratio(1.0)]);
+        t.tracks([
+            Track::Fixed(Positive::pt(22.0).unwrap()),
+            Track::Ratio(Ratio::new(1.0).unwrap()),
+            Track::Ratio(Ratio::new(1.0).unwrap()),
+        ]);
         t.header([
             Cell::spacer(1.0).fill(NAVY),
             Cell::paragraph(|p| {

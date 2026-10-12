@@ -301,6 +301,7 @@ fn pack_lines<T: Copy>(
                     }
                     None => {
                         return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                            text: overflow_text(groups, &atoms, line_start, i),
                             width: line_width + width,
                             avail,
                         }));
@@ -322,6 +323,29 @@ fn pack_lines<T: Copy>(
         records.push(emit_line(groups, &atoms, line_start, line_start, 0.0));
     }
     Ok(records)
+}
+
+fn overflow_text<T>(
+    groups: &[&ClusteredText],
+    atoms: &[Atom<T>],
+    start: usize,
+    end: usize,
+) -> Option<String> {
+    let mut text = String::new();
+    for atom in &atoms[start..=end] {
+        match *atom {
+            Atom::Ink { group, cluster, .. } | Atom::Hard { group, cluster } => {
+                text.push_str(groups[group].cluster(cluster).as_str());
+            }
+            Atom::Blank { .. } => {}
+        }
+    }
+    let text = crate::error::text_snippet(&text);
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 fn nearest_break<T>(atoms: &[Atom<T>], line_start: usize, overflow_at: usize) -> Option<usize> {
@@ -580,6 +604,7 @@ mod tests {
         assert_eq!(
             err,
             Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: Some("hello".to_owned()),
                 width: 5.0,
                 avail: 4.0
             })
@@ -613,6 +638,7 @@ mod tests {
         assert_eq!(
             err,
             Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: Some("字。".to_owned()),
                 width: 2.0,
                 avail: 1.0
             })
@@ -663,6 +689,7 @@ mod tests {
         assert_eq!(
             err,
             Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: Some("e\u{0301}".to_owned()),
                 width: 2.0,
                 avail: 1.0
             })
@@ -675,6 +702,7 @@ mod tests {
         assert_eq!(
             err,
             Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: Some("\u{FF21}\u{FF22}".to_owned()),
                 width: 2.0,
                 avail: 1.0
             })
@@ -762,6 +790,7 @@ mod tests {
         assert_eq!(
             error,
             Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: Some("你".to_owned()),
                 width: 1.0,
                 avail: 0.5,
             })
@@ -874,6 +903,7 @@ mod tests {
         assert_eq!(
             error,
             Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: None,
                 width: 4.0,
                 avail: 2.0,
             })

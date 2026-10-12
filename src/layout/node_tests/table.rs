@@ -232,6 +232,31 @@ fn zero_border_draws_no_strokes() {
 }
 
 #[test]
+fn cell_height_includes_spacing_between_paragraphs() {
+    let (mut fonts, mut style) = fonts_and_style();
+    let line_h = metrics(&fonts, &style).line_height;
+    let spacing = line_h + 1.0;
+    style.paragraph_spacing = NonNegative::pt(spacing).unwrap();
+    let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(200.0).unwrap())]);
+    spec.body = vec![vec![
+        Cell::new(vec![text("A", &style), text("B", &style)]).unwrap()
+    ]];
+    let table = TableNode::new(spec).unwrap();
+    let (result, rec) = render(
+        FlowNode::Table(table),
+        &mut fonts,
+        page(200.0, line_h * 2.0),
+        &Decorations::none(),
+    );
+    let ErrorKind::UnsplittableTallerThanFrame { height, avail } = result.unwrap_err().kind else {
+        panic!("expected UnsplittableTallerThanFrame");
+    };
+    assert_eq!(height.to_bits(), (line_h + spacing + line_h).to_bits());
+    assert_eq!(avail.to_bits(), (line_h * 2.0).to_bits());
+    assert!(rec.commands().is_empty());
+}
+
+#[test]
 fn cell_rejects_columns_page_break_keep_together_and_tables() {
     let (_, style) = fonts_and_style();
     let columns = ColumnsNode::new(

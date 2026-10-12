@@ -45,6 +45,7 @@ impl HLineNode {
         let height = self.height();
         if width > avail.width {
             return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
+                text: None,
                 width,
                 avail: avail.width,
             }));

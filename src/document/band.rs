@@ -111,7 +111,7 @@ impl Band {
             };
             vec![FlowNode::Text(node)]
         };
-        let even = ColumnWidth::Ratio(Ratio::new(1.0).expect("1 is positive"));
+        let even = ColumnWidth::Ratio(LayoutRatio::new(1.0).expect("1 is positive"));
         let slots: Vec<_> = [(self.left, TextAlign::Start), (self.right, TextAlign::End)]
             .into_iter()
             .filter_map(|(text, align)| text.map(|text| (even, column(text, align))))

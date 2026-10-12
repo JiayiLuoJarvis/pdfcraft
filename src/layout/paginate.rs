@@ -485,6 +485,7 @@ mod tests {
 
             let mut errors = crate::error::ErrorBag::default();
             let mut ctx = LayoutCtx {
+                natural: false,
                 fonts: &mut fonts,
                 errors: &mut errors,
             };
@@ -509,6 +510,7 @@ mod tests {
         let (mut fonts, _) = fonts_and_style(TextAlign::Start, 0.0);
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -530,6 +532,7 @@ mod tests {
         let (mut fonts, _) = fonts_and_style(TextAlign::Start, 0.0);
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -551,6 +554,7 @@ mod tests {
         let para = ParagraphNode::layout(&mut fonts, "A", &style, A4.width().as_pt()).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -573,6 +577,7 @@ mod tests {
         let para = ParagraphNode::layout(&mut fonts, "A", &style, A4.width().as_pt()).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -601,6 +606,7 @@ mod tests {
         let b = ParagraphNode::layout(&mut fonts, "B", &style, w).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -629,6 +635,7 @@ mod tests {
         let b = ParagraphNode::layout(&mut fonts, "B", &style, w).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -662,6 +669,7 @@ mod tests {
         let page = Size::try_pt(200.0, 50.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -698,6 +706,7 @@ mod tests {
         let para = ParagraphNode::layout(&mut fonts, "A\nB\nC", &style, 200.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -737,6 +746,7 @@ mod tests {
         let second = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -772,6 +782,7 @@ mod tests {
         let b = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -811,6 +822,7 @@ mod tests {
         let b = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -840,6 +852,49 @@ mod tests {
     }
 
     #[test]
+    fn keep_together_counts_spacing_between_members() {
+        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let face = fonts.metrics(style.font).unwrap();
+        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let line_h = metrics.line_height;
+        let spacing = line_h + 1.0;
+        let mut spaced = style;
+        spaced.paragraph_spacing = NonNegative::pt(spacing).unwrap();
+        let page = Size::try_pt(200.0, line_h * 2.0).unwrap();
+        let a = ParagraphNode::layout(&mut fonts, "A", &spaced, 200.0).unwrap();
+        let b = ParagraphNode::layout(&mut fonts, "B", &spaced, 200.0).unwrap();
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            natural: false,
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
+        let mut rec = RecordingCanvas::new();
+        let err = paginate_root(
+            FlowNode::KeepTogether(KeepTogetherNode::Open(vec![
+                FlowNode::Paragraph(a),
+                FlowNode::Paragraph(b),
+            ])),
+            &mut ctx,
+            config(page),
+            &Decorations::none(),
+            &mut rec,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            Error::from(ErrorKind::UnsplittableTallerThanFrame {
+                height: line_h + spacing + line_h,
+                avail: line_h * 2.0,
+            })
+            .in_region(Region::Body)
+            .on_page_index(0)
+            .in_section(0)
+        );
+        assert!(rec.commands().is_empty());
+    }
+
+    #[test]
     fn spacing_after_is_kept_when_it_fits() {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 8.0);
         let face = fonts.metrics(style.font).unwrap();
@@ -850,6 +905,7 @@ mod tests {
         let second = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -882,6 +938,7 @@ mod tests {
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 180.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };
@@ -918,6 +975,7 @@ mod tests {
         let decorations = Decorations::none();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
+            natural: false,
             fonts: &mut fonts,
             errors: &mut errors,
         };

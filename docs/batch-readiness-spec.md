@@ -32,7 +32,7 @@
 - [ ] 工作项 A–C（正确性）行为符合下文契约，有回归测试。
 - [x] 工作项 D（限额）公共 `limits` 模块存在；超限返回结构化 `ErrorKind`；有单测；分页循环检查页数。
 - [x] 工作项 E（信件）`tests/letter_layout.rs`（或等价）+ 带真实 CJK 子集的字体夹具；`RecordingCanvas` 钉关键坐标；`to_pdf` 只冒烟 `%PDF`。
-- [ ] 工作项 F（诊断与文档）错误片段 / rustdoc / 提案小项对齐完成。
+- [x] 工作项 F（诊断与文档）错误片段 / rustdoc / 提案小项对齐完成。
 - [ ] `cargo fmt` / `clippy -D warnings` / `test`（含 `backend-krilla`）/ `doc --no-deps` 绿。
 - [ ] **在工作项 D+E 通过之前**，`Cargo.toml` 保持 `publish = false`。
 - [ ] 工作项 P（性能）要么有前后对比数字并落地改动，要么书面记录「测过、不赚、不做」并关掉候选项。
@@ -197,8 +197,8 @@ A 列表自定义标记编号
 | C single_line_run 换行 | 完成 | 2026-10-12 | `ErrorKind::UnexpectedLineBreakInSingleLine`；`text_at` 与自定义 marker 遇 BK 失败且不画 |
 | D limits | 完成 | 2026-10-12 | 默认 font bytes 与 image bytes 各 32 MiB，image pixels 40_000_000，image edge 8192，pages 10_000，blocks 100_000，table cells 50_000，paragraph bytes 1_000_000。setter 拒绝 0，也拒绝高于默认 4 倍的值。像素与边长在 krilla 解码出尺寸之后、句柄入库之前检查，krilla 没有只读头。块、单元格和段落字节在分页前统计正文流，堆叠容器不计块，页眉、页脚和 layer 不计入。页数在 `plan_pages` 提交每一页时检查。图片像素和边长并入 `LimitExceeded`，不另设 `ImageTooLarge`。 |
 | E letter fixture | 完成 | 2026-10-12 | `tests/fixtures/quire-letter.ttf` 是 Noto Sans SC Regular 的 OFL 子集，族名 QuireLetter，23456 字节。`tests/letter_layout.rs` 用 `document` 排确认函。两段中文、中英混排、表头、一张图、全文页码页脚。坐标钉在 `RecordingCanvas`。`to_pdf` 只断言 `%PDF`。`publish = false` 仍保留。 |
-| F 诊断/文档 | 待做 | | |
-| F0 keep_together 间距 | 待做 | | 阻塞公开 paragraph_spacing |
+| F 诊断/文档 | 完成 | 2026-10-12 | F1 三条错误带短文本或 scalar。F2 坏 PNG 在 `load_image` 失败。JPEG、GIF、WebP 的像素错误仍可能在 `to_pdf` 成为没有页码的 `Backend`。F3 提案书写明栏内禁止 `page_break`、旋转只包 path、`stack` 是样式作用域、`Page::is_last` 是全文末页。F4 根上不再导出 `DocumentInfo` 和 `Border`。F5 `Track::Fixed(Length<Positive>)`，`Ratio::new` 拒绝非法权重。 |
+| F0 keep_together 间距 | 完成 | 2026-10-12 | `natural_height` 把组内段后距算进高度。A 与 B 两行正好放下、中间段后距放不下时，`keep_together` 和单元格报 `UnsplittableTallerThanFrame`。组尾段后距仍不进组高。分页里放不下的段后距仍丢掉。未公开 `paragraph_spacing`。 |
 | P0 基准 | 待做 | | |
 | P1–P4 | 待测 | | 无数字不开做 |
 

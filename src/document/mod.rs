@@ -24,7 +24,7 @@ use crate::geom::{
     Color, Ink, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length, Margins, NonNegative,
     PageSize, Path, Pen, Point, Positive, Size,
 };
-use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio};
+use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio as LayoutRatio};
 use crate::layout::decorate::{
     BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
 };
@@ -72,7 +72,7 @@ pub use page::Page;
 pub use paragraph::{Blank, Paragraph};
 pub use section::Section;
 pub use style_props::TextProps;
-pub use table::{Border, Cell, IntoCellItem, Table, Track};
+pub use table::{Cell, IntoCellItem, Ratio, Table, Track};
 
 pub(crate) use band::band_content;
 pub(crate) use columns::reject_auto_with_ratio;
