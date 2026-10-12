@@ -19,11 +19,11 @@ pub enum Numbering {
 /// Items being added to a list. Markers hang in an 18 pt column by default.
 pub struct List {
     pub(crate) parent: Flow,
-    pub(crate) items: Vec<Result<ListItem<FlowNode>>>,
+    pub(crate) items: Vec<ListItem<FlowNode>>,
     pub(crate) start: NonZeroU32,
     pub(crate) marker_width: Length<Positive>,
     pub(crate) nest_indent: Option<Length<Positive>>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl List {
@@ -34,7 +34,7 @@ impl List {
             start: NonZeroU32::MIN,
             marker_width: Positive::pt(18.0).expect("18 pt is positive"),
             nest_indent: None,
-            error: None,
+            errors: ErrorBag::default(),
         };
         f(&mut list);
         list
@@ -65,8 +65,13 @@ impl List {
 
     /// Adds an item with the list's own marker.
     pub fn item(&mut self, f: impl FnOnce(&mut Flow)) {
-        let item = self.parent.nested(f).and_then(ListItem::new);
-        self.items.push(item);
+        let Some(nodes) = self.nested_item(f) else {
+            return;
+        };
+        match ListItem::new(nodes) {
+            Ok(item) => self.items.push(item),
+            Err(error) => self.errors.record(error),
+        }
     }
 
     /// Adds an item with `marker` in place of the list's marker. An empty marker is an error.
@@ -74,30 +79,51 @@ impl List {
     /// A custom marker does not consume an ordered number.
     pub fn item_marked(&mut self, marker: impl Into<String>, f: impl FnOnce(&mut Flow)) {
         let marker = marker.into();
-        let item = self
-            .parent
-            .nested(f)
-            .and_then(|nodes| ListItem::custom(marker, nodes));
-        self.items.push(item);
-    }
-
-    pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
+        let Some(nodes) = self.nested_item(f) else {
+            return;
+        };
+        match ListItem::custom(marker, nodes) {
+            Ok(item) => self.items.push(item),
+            Err(error) => self.errors.record(error),
         }
     }
 
-    pub(crate) fn lower(self, kind: ListKind) -> Result<FlowNode> {
-        if let Some(error) = self.error {
-            return Err(error);
+    fn nested_item(&mut self, f: impl FnOnce(&mut Flow)) -> Option<Vec<FlowNode>> {
+        let mut child = self.parent.child();
+        f(&mut child);
+        let (nodes, errors) = child.into_parts();
+        let failed = !errors.is_empty();
+        self.errors.absorb(errors);
+        if failed {
+            None
+        } else {
+            Some(nodes)
+        }
+    }
+
+    pub(crate) fn note(&mut self, error: Error) {
+        self.errors.record(error);
+    }
+
+    pub(crate) fn lower(self, kind: ListKind, into: &mut ErrorBag) -> Option<FlowNode> {
+        let failed = !self.errors.is_empty();
+        into.absorb(self.errors);
+        if failed {
+            return None;
         }
         let spec = ListSpec {
             kind,
             marker_width: self.marker_width,
             nest_indent: self.nest_indent,
             marker_style: self.parent.style,
-            items: self.items.into_iter().collect::<Result<_>>()?,
+            items: self.items,
         };
-        Ok(FlowNode::List(ListNode::new(spec)?))
+        match ListNode::new(spec) {
+            Ok(node) => Some(FlowNode::List(node)),
+            Err(error) => {
+                into.record(error);
+                None
+            }
+        }
     }
 }

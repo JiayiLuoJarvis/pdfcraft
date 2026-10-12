@@ -6,7 +6,7 @@ use super::*;
 pub struct TextProps {
     pub(crate) font_size: Option<Length<Positive>>,
     pub(crate) color: Option<Color>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl TextProps {
@@ -14,11 +14,7 @@ impl TextProps {
     pub fn font_size(&mut self, size: impl IntoPositive) {
         match size.into_positive() {
             Ok(size) => self.font_size = Some(size),
-            Err(error) => {
-                if self.error.is_none() {
-                    self.error = Some(error);
-                }
-            }
+            Err(error) => self.errors.record(error),
         }
     }
 
@@ -27,9 +23,12 @@ impl TextProps {
         self.color = Some(color);
     }
 
-    pub(crate) fn apply(self, style: &mut Style) -> Result<()> {
-        if let Some(error) = self.error {
-            return Err(error);
+    /// Applies the patch. Returns false when a size was rejected. The error is in `into`.
+    pub(crate) fn apply(self, style: &mut Style, into: &mut ErrorBag) -> bool {
+        let failed = !self.errors.is_empty();
+        into.absorb(self.errors);
+        if failed {
+            return false;
         }
         if let Some(font_size) = self.font_size {
             style.font_size = font_size;
@@ -37,6 +36,6 @@ impl TextProps {
         if let Some(color) = self.color {
             style.color = color;
         }
-        Ok(())
+        true
     }
 }

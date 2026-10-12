@@ -6,7 +6,7 @@
 use std::any::Any;
 use std::ops::Range;
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind};
 use crate::fonts::FontId;
 use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 
@@ -37,7 +37,7 @@ impl LinkTarget {
     /// Builds a URI target.
     ///
     /// An empty string is [`ErrorKind::EmptyLink`]. Spaces are kept.
-    pub fn uri(uri: &str) -> Result<Self> {
+    pub fn uri(uri: &str) -> std::result::Result<Self, Error> {
         if uri.is_empty() {
             return Err(Error::from(ErrorKind::EmptyLink));
         }
@@ -102,14 +102,22 @@ pub(crate) trait ImageRegistry: Any + Send + Sync {
     /// Checks limits, decodes, and returns the id plus pixel size layout will use.
     ///
     /// A failure leaves earlier registrations unchanged.
-    fn register(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<DecodedImage>;
+    fn register(
+        &mut self,
+        bytes: Vec<u8>,
+        format: ImageFormat,
+    ) -> std::result::Result<DecodedImage, Error>;
 }
 
 /// Registry for builds without a decoder. Every image fails.
 pub(crate) struct RejectingImageRegistry;
 
 impl ImageRegistry for RejectingImageRegistry {
-    fn register(&mut self, _bytes: Vec<u8>, _format: ImageFormat) -> Result<DecodedImage> {
+    fn register(
+        &mut self,
+        _bytes: Vec<u8>,
+        _format: ImageFormat,
+    ) -> std::result::Result<DecodedImage, Error> {
         Err(Error::from(ErrorKind::Image {
             message: "decoding needs feature `backend-krilla`".to_owned(),
         }))
@@ -202,32 +210,37 @@ pub enum CanvasCommand {
 /// Draws output that layout has already positioned.
 pub trait Canvas {
     /// Stores document metadata.
-    fn set_document_info(&mut self, info: &DocumentInfo) -> Result<()>;
+    fn set_document_info(&mut self, info: &DocumentInfo) -> std::result::Result<(), Error>;
 
     /// Opens a page of `size`.
-    fn start_page(&mut self, size: Size) -> Result<()>;
+    fn start_page(&mut self, size: Size) -> std::result::Result<(), Error>;
 
     /// Closes the current page.
-    fn finish_page(&mut self) -> Result<()>;
+    fn finish_page(&mut self) -> std::result::Result<(), Error>;
 
     /// Fills `path` with `paint`.
-    fn fill_path(&mut self, path: &Path, paint: &Paint) -> Result<()>;
+    fn fill_path(&mut self, path: &Path, paint: &Paint) -> std::result::Result<(), Error>;
 
     /// Strokes `path` with `paint` and `stroke`.
-    fn stroke_path(&mut self, path: &Path, paint: &Paint, stroke: &Stroke) -> Result<()>;
+    fn stroke_path(
+        &mut self,
+        path: &Path,
+        paint: &Paint,
+        stroke: &Stroke,
+    ) -> std::result::Result<(), Error>;
 
     /// Draws `image` into `rect`.
-    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> Result<()>;
+    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> std::result::Result<(), Error>;
 
     /// Draws a positioned glyph run.
     ///
     /// Advances stay in font units per em.
-    fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<()>;
+    fn draw_glyph_run(&mut self, run: &GlyphRun) -> std::result::Result<(), Error>;
 
     /// Records a hyperlink over `rect`.
     ///
     /// `target` is already a non-empty URI.
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<()>;
+    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> std::result::Result<(), Error>;
 }
 
 /// One page copied out of a [`RecordingCanvas`] log.
@@ -323,23 +336,23 @@ impl Default for RecordingCanvas {
 }
 
 impl Canvas for RecordingCanvas {
-    fn set_document_info(&mut self, info: &DocumentInfo) -> Result<()> {
+    fn set_document_info(&mut self, info: &DocumentInfo) -> std::result::Result<(), Error> {
         self.commands
             .push(CanvasCommand::SetDocumentInfo(info.clone()));
         Ok(())
     }
 
-    fn start_page(&mut self, size: Size) -> Result<()> {
+    fn start_page(&mut self, size: Size) -> std::result::Result<(), Error> {
         self.commands.push(CanvasCommand::StartPage(size));
         Ok(())
     }
 
-    fn finish_page(&mut self) -> Result<()> {
+    fn finish_page(&mut self) -> std::result::Result<(), Error> {
         self.commands.push(CanvasCommand::FinishPage);
         Ok(())
     }
 
-    fn fill_path(&mut self, path: &Path, paint: &Paint) -> Result<()> {
+    fn fill_path(&mut self, path: &Path, paint: &Paint) -> std::result::Result<(), Error> {
         self.commands.push(CanvasCommand::FillPath {
             path: path.clone(),
             paint: *paint,
@@ -347,7 +360,12 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn stroke_path(&mut self, path: &Path, paint: &Paint, stroke: &Stroke) -> Result<()> {
+    fn stroke_path(
+        &mut self,
+        path: &Path,
+        paint: &Paint,
+        stroke: &Stroke,
+    ) -> std::result::Result<(), Error> {
         self.commands.push(CanvasCommand::StrokePath {
             path: path.clone(),
             paint: *paint,
@@ -356,7 +374,7 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> Result<()> {
+    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> std::result::Result<(), Error> {
         self.commands.push(CanvasCommand::DrawImage {
             image: *image,
             rect,
@@ -364,13 +382,13 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<()> {
+    fn draw_glyph_run(&mut self, run: &GlyphRun) -> std::result::Result<(), Error> {
         self.commands
             .push(CanvasCommand::DrawGlyphRun { run: run.clone() });
         Ok(())
     }
 
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<()> {
+    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> std::result::Result<(), Error> {
         self.commands
             .push(CanvasCommand::AnnotateLink { rect, target });
         Ok(())
@@ -378,7 +396,10 @@ impl Canvas for RecordingCanvas {
 }
 
 #[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
-pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Result<()> {
+pub(crate) fn replay(
+    recording: &RecordingCanvas,
+    canvas: &mut dyn Canvas,
+) -> std::result::Result<(), Error> {
     for command in recording.commands() {
         match command {
             CanvasCommand::SetDocumentInfo(info) => canvas.set_document_info(info)?,
@@ -419,7 +440,7 @@ mod tests {
         pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun,
         ImageFormat, ImageId, ImageRegistry, LinkTarget, RecordingCanvas, RejectingImageRegistry,
     };
-    use crate::error::{Error, ErrorKind, Result};
+    use crate::error::{Error, ErrorKind};
     use crate::fonts::FontId;
     use crate::geom::{Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4};
 
@@ -437,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn records_draw_order_advances_and_one_page() -> Result<()> {
+    fn records_draw_order_advances_and_one_page() -> std::result::Result<(), Error> {
         let info = DocumentInfo {
             title: Some("Letter".to_owned()),
             author: Some("Quire".to_owned()),
@@ -534,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_link_is_rejected_and_not_recorded() -> Result<()> {
+    fn empty_link_is_rejected_and_not_recorded() -> std::result::Result<(), Error> {
         let error = LinkTarget::uri("").expect_err("empty uri");
         assert!(matches!(error.kind, ErrorKind::EmptyLink));
         assert_eq!(error.to_string(), "link URI is empty");
@@ -553,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_reissues_every_command_in_order() -> Result<()> {
+    fn replay_reissues_every_command_in_order() -> std::result::Result<(), Error> {
         let at = Point::try_pt(5.0, 6.0)?;
         let mut source = RecordingCanvas::new();
         source.set_document_info(&DocumentInfo {
@@ -594,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn canvas_accepts_a_trait_object() -> Result<()> {
+    fn canvas_accepts_a_trait_object() -> std::result::Result<(), Error> {
         let mut rec = RecordingCanvas::new();
         let canvas: &mut dyn Canvas = &mut rec;
         canvas.finish_page()?;

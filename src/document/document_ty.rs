@@ -7,8 +7,10 @@ pub struct Document<'a> {
     pub(crate) doc: DocToken,
     pub(crate) fonts: FontStore,
     pub(crate) body: Sections<'a>,
-    /// First [`ErrorKind::ContentOutsideSection`], or the error from a section closure.
-    pub(crate) error: Option<Error>,
+    /// Document-level failures: section-closure `Err`, outside-section writes, and
+    /// errors absorbed from sections as they are built.
+    pub(crate) errors: ErrorBag,
+    outside_reported: bool,
     pub(crate) images: Box<dyn ImageRegistry>,
 }
 
@@ -20,7 +22,8 @@ impl<'a> Document<'a> {
             doc,
             fonts: FontStore::new(),
             body: Sections::Implicit(Section::new(default_style(), doc)),
-            error: None,
+            errors: ErrorBag::default(),
+            outside_reported: false,
             images: Box::new(RejectingImageRegistry),
         }
     }
@@ -28,7 +31,11 @@ impl<'a> Document<'a> {
     /// Decodes `bytes` once and returns a handle for [`Flow::image`], cells, and [`Layer::image_at`].
     ///
     /// Fails now on oversized, unparsable, or empty images. Without `backend-krilla` every call fails.
-    pub fn load_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<Image> {
+    pub fn load_image(
+        &mut self,
+        bytes: Vec<u8>,
+        format: ImageFormat,
+    ) -> std::result::Result<Image, Error> {
         let decoded = self.images.register(bytes, format)?;
         Ok(Image {
             decoded,
@@ -37,7 +44,7 @@ impl<'a> Document<'a> {
     }
 
     /// Registers a font from its file bytes. The first font is the one text uses.
-    pub fn font(&mut self, bytes: Vec<u8>) -> Result<()> {
+    pub fn font(&mut self, bytes: Vec<u8>) -> std::result::Result<(), Error> {
         self.fonts
             .register(FontSource {
                 bytes: Arc::new(bytes),
@@ -49,7 +56,7 @@ impl<'a> Document<'a> {
     /// Registers the face used by [`Paragraph::bold`].
     ///
     /// A body font must be registered first. A later call replaces the bold binding.
-    pub fn bold_font(&mut self, bytes: Vec<u8>) -> Result<()> {
+    pub fn bold_font(&mut self, bytes: Vec<u8>) -> std::result::Result<(), Error> {
         if self.fonts.face(FontId::from_raw(0)).is_err() {
             return Err(Error::from(ErrorKind::Font {
                 index: 0,
@@ -112,19 +119,12 @@ impl<'a> Document<'a> {
     /// Appends a section that starts on a new page and keeps its own margins and hooks.
     ///
     /// Registering a font or an image does not count as writing the document.
-    /// Fails with [`ErrorKind::ContentOutsideSection`] when the implicit section
+    /// Records [`ErrorKind::ContentOutsideSection`] when the implicit section
     /// already has body content, non-default margins, or a page hook, and when
     /// body content, margins, or hooks are written on the document after this.
-    pub fn section(&mut self, f: impl FnOnce(&mut Section<'a>) -> Result<()>) -> Result<()> {
-        if let Some(error) = self.error.clone() {
-            return Err(error);
-        }
+    /// That error stays on the document. Later `section` calls still run.
+    pub fn section(&mut self, f: impl FnOnce(&mut Section<'a>) -> Result<()>) {
         let lead_written = matches!(&self.body, Sections::Implicit(section) if section.written());
-        if lead_written {
-            let error = Error::from(ErrorKind::ContentOutsideSection);
-            self.error = Some(error.clone());
-            return Err(error);
-        }
         let style = match &self.body {
             Sections::Implicit(section) => section.flow.style.clone(),
             Sections::Explicit { closed, .. } => closed.style.clone(),
@@ -133,11 +133,26 @@ impl<'a> Document<'a> {
             Sections::Implicit(_) => 0,
             Sections::Explicit { sections, .. } => sections.len(),
         };
+        if lead_written {
+            if let Sections::Implicit(section) = &mut self.body {
+                let flow_errors = std::mem::take(&mut section.flow.errors);
+                let mark = self.errors.mark();
+                self.errors.absorb(flow_errors);
+                self.errors.locate_since(mark, &Location::section(0));
+            }
+            self.fail_outside();
+        }
+        let mark = self.errors.mark();
         let mut section = Section::new(style, self.doc);
-        if let Err(error) = f(&mut section) {
-            let error = error.in_section(index);
-            self.error = Some(error.clone());
-            return Err(error);
+        let returned = f(&mut section);
+        let flow_errors = std::mem::take(&mut section.flow.errors);
+        self.errors.absorb(flow_errors);
+        if let Err(errors) = returned {
+            self.errors.absorb(errors.into());
+        }
+        self.errors.locate_since(mark, &Location::section(index));
+        if lead_written {
+            return;
         }
         if matches!(self.body, Sections::Implicit(_)) {
             let style = section.flow.style.clone();
@@ -149,12 +164,13 @@ impl<'a> Document<'a> {
         } else if let Sections::Explicit { sections, .. } = &mut self.body {
             sections.push(section);
         }
-        Ok(())
     }
 
     pub(crate) fn fail_outside(&mut self) {
-        if self.error.is_none() {
-            self.error = Some(Error::from(ErrorKind::ContentOutsideSection));
+        if !self.outside_reported {
+            self.outside_reported = true;
+            self.errors
+                .record(Error::from(ErrorKind::ContentOutsideSection));
         }
     }
 
@@ -164,16 +180,14 @@ impl<'a> Document<'a> {
             doc,
             mut fonts,
             body,
-            error,
+            mut errors,
             images,
+            outside_reported: _,
         } = self;
-        if let Some(error) = error {
-            return Err(error);
-        }
         let sections = match body {
             Sections::Implicit(section) => vec![section],
             Sections::Explicit { sections, closed } => {
-                closed.into_nodes()?;
+                errors.absorb(closed.errors);
                 sections
             }
         };
@@ -181,9 +195,10 @@ impl<'a> Document<'a> {
         let mut roots = Vec::with_capacity(sections.len());
         let mut decorations = Vec::with_capacity(sections.len());
         for (index, section) in sections.into_iter().enumerate() {
-            let (config, root, deco) = section
-                .lower(page_size, doc)
-                .map_err(|error| error.in_section(index))?;
+            let mark = errors.mark();
+            let (config, root, deco, flow_errors) = section.lower(page_size, doc);
+            errors.absorb(flow_errors);
+            errors.locate_since(mark, &Location::section(index));
             configs.push(config);
             roots.push(root);
             decorations.push(deco);
@@ -198,13 +213,30 @@ impl<'a> Document<'a> {
                 decorations,
             })
             .collect();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
-        paginate_sections(jobs, &mut ctx, canvas)?;
+        let laid = {
+            let mut ctx = LayoutCtx {
+                fonts: &mut fonts,
+                errors: &mut errors,
+            };
+            layout_pages(jobs, &mut ctx)
+        };
+        let laid = match laid {
+            Ok(laid) => laid,
+            Err(hard) => return Err(errors.fail(hard)),
+        };
+        let laid = errors.finish(laid)?;
+        paint_laid(&laid, canvas).map_err(Errors::from)?;
         Ok(Painted { fonts, images })
     }
 
-    /// Paints into a recording. The caller has already run the build closure.
-    pub(crate) fn render(self) -> Result<Rendered> {
+    /// Paints into a recording when `built` is `Ok`. A build `Err` is absorbed and
+    /// layout does not run.
+    pub(crate) fn render(self, built: Result<()>) -> Result<Rendered> {
+        if let Err(returned) = built {
+            let mut errors = self.collect_errors();
+            errors.absorb(returned.into());
+            return Err(errors.finish(()).expect_err("build Err was absorbed"));
+        }
         let mut recording = RecordingCanvas::new();
         let painted = self.paint(&mut recording)?;
         Ok(Rendered {
@@ -212,6 +244,28 @@ impl<'a> Document<'a> {
             fonts: painted.fonts,
             images: painted.images,
         })
+    }
+
+    fn collect_errors(self) -> ErrorBag {
+        let Self {
+            body, mut errors, ..
+        } = self;
+        match body {
+            Sections::Implicit(section) => {
+                let mark = errors.mark();
+                errors.absorb(section.flow.errors);
+                errors.locate_since(mark, &Location::section(0));
+            }
+            Sections::Explicit { sections, closed } => {
+                errors.absorb(closed.errors);
+                for (index, section) in sections.into_iter().enumerate() {
+                    let mark = errors.mark();
+                    errors.absorb(section.flow.errors);
+                    errors.locate_since(mark, &Location::section(index));
+                }
+            }
+        }
+        errors
     }
 }
 

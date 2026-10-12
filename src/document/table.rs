@@ -13,7 +13,7 @@ pub enum Track {
 }
 
 impl Track {
-    fn into_width(self) -> Result<ColumnWidth> {
+    fn into_width(self) -> Fallible<ColumnWidth> {
         match self {
             Self::Fixed(width) => Ok(ColumnWidth::Fixed(Positive::pt(width)?)),
             Self::Ratio(weight) => Ok(ColumnWidth::Ratio(Ratio::new(weight)?)),
@@ -38,7 +38,7 @@ pub struct Table {
     pub(crate) tracks: Option<Vec<Track>>,
     pub(crate) padding: Length<NonNegative>,
     pub(crate) border: Border,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 pub(crate) struct StoredCell {
@@ -54,7 +54,7 @@ pub(crate) enum StoredContent {
     Image(Image, ImageBox),
     HLine(HLine),
     Spacer(Length<NonNegative>),
-    List(Result<FlowNode>),
+    List(Option<FlowNode>),
 }
 
 impl Table {
@@ -71,7 +71,7 @@ impl Table {
                 width: NonNegative::ZERO,
                 color: Color::rgb(0, 0, 0),
             },
-            error: None,
+            errors: ErrorBag::default(),
         };
         f(&mut table);
         table
@@ -107,18 +107,19 @@ impl Table {
     }
 
     fn store(&mut self, cell: Cell<'_>) -> StoredCell {
-        if let Some(error) = cell.error {
-            self.note(error);
-        }
+        self.errors.absorb(cell.errors);
         let content = match cell.content {
             CellContent::Text(text) => StoredContent::Text(text),
             CellContent::Paragraph(paragraph) => StoredContent::Paragraph(paragraph),
             CellContent::Image(image, image_box) => StoredContent::Image(image, image_box),
             CellContent::HLine(line) => StoredContent::HLine(line),
             CellContent::Spacer(height) => StoredContent::Spacer(height),
-            CellContent::List(DeferredList::Bullet(build)) => {
-                StoredContent::List(assemble_list(self.parent.child(), ListKind::Bullet, build))
-            }
+            CellContent::List(DeferredList::Bullet(build)) => StoredContent::List(assemble_list(
+                self.parent.child(),
+                ListKind::Bullet,
+                &mut self.errors,
+                build,
+            )),
             CellContent::List(DeferredList::Ordered(numbering, build)) => {
                 StoredContent::List(assemble_list(
                     self.parent.child(),
@@ -126,6 +127,7 @@ impl Table {
                         style: numbering_kind(numbering),
                         start: NonZeroU32::MIN,
                     },
+                    &mut self.errors,
                     build,
                 ))
             }
@@ -165,15 +167,12 @@ impl Table {
     }
 
     pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
+        self.errors.record(error);
     }
 
-    pub(crate) fn lower(self) -> Result<FlowNode> {
-        if let Some(error) = self.error {
-            return Err(error);
-        }
+    pub(crate) fn lower(self, into: &mut ErrorBag) -> Option<FlowNode> {
+        let failed = !self.errors.is_empty();
+        into.absorb(self.errors);
         let flow = &self.parent;
         let first = self.header.first().or(self.body.first());
         let cols: usize = first.map_or(0, |row| {
@@ -181,52 +180,33 @@ impl Table {
                 .map(|cell| usize::from(cell.col_span.get()))
                 .sum()
         });
-        let even = ColumnWidth::Ratio(Ratio::new(1.0)?);
+        let header = lower_stored_rows(flow, into, self.header);
+        let body = lower_stored_rows(flow, into, self.body);
+        let mut blocked = failed || header.is_none() || body.is_none();
         let widths = match self.tracks {
-            Some(tracks) => {
-                if tracks.len() != cols {
-                    return Err(Error::from(ErrorKind::ColumnWidths {
-                        reason: ColumnWidthsReason::ColumnCount,
-                    }));
-                }
-                tracks
-                    .into_iter()
-                    .map(Track::into_width)
-                    .collect::<Result<Vec<_>>>()?
-            }
-            None => vec![even; cols],
+            Some(tracks) => table_widths(tracks, cols, &mut blocked, into),
+            None => Some(vec![
+                ColumnWidth::Ratio(
+                    Ratio::new(1.0).expect("1 is positive")
+                );
+                cols
+            ]),
         };
-        reject_auto_with_ratio(&widths)?;
-        let lower_rows = |rows: Vec<Vec<StoredCell>>| -> Result<Vec<Vec<layout_table::Cell<_>>>> {
-            rows.into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|cell| {
-                            let content = match cell.content {
-                                StoredContent::Text(text) => vec![flow.text(text)],
-                                StoredContent::Paragraph(paragraph) => {
-                                    vec![lower_paragraph(paragraph, &flow.style)?]
-                                }
-                                StoredContent::List(node) => vec![node?],
-                                StoredContent::Image(image, image_box) => {
-                                    vec![image_box.lower(&image, flow.doc)?]
-                                }
-                                StoredContent::HLine(line) => vec![line.lower()?],
-                                StoredContent::Spacer(height) => {
-                                    vec![FlowNode::Spacer(SpacerNode { height })]
-                                }
-                            };
-                            Ok(layout_table::Cell::new(content)?
-                                .with_span(cell.col_span, cell.row_span)
-                                .with_fill(cell.fill))
-                        })
-                        .collect()
-                })
-                .collect()
+        if let Some(widths) = widths.as_ref() {
+            if let Err(error) = reject_auto_with_ratio(widths) {
+                into.record(error);
+                blocked = true;
+            }
+        }
+        if blocked {
+            return None;
+        }
+        let (Some(header), Some(body), Some(widths)) = (header, body, widths) else {
+            return None;
         };
         let spec = TableSpec {
-            header: lower_rows(self.header)?,
-            body: lower_rows(self.body)?,
+            header,
+            body,
             repeat_header: self.repeat_header,
             padding: self.padding,
             border: layout_table::Border {
@@ -235,8 +215,90 @@ impl Table {
             },
             ..TableSpec::new(widths)
         };
-        Ok(FlowNode::Table(TableNode::new(spec)?))
+        match TableNode::new(spec) {
+            Ok(node) => Some(FlowNode::Table(node)),
+            Err(error) => {
+                into.record(error);
+                None
+            }
+        }
     }
+}
+
+fn table_widths(
+    tracks: Vec<Track>,
+    cols: usize,
+    blocked: &mut bool,
+    into: &mut ErrorBag,
+) -> Option<Vec<ColumnWidth>> {
+    if tracks.len() == cols {
+        let mut widths = Vec::new();
+        for track in tracks {
+            match track.into_width() {
+                Ok(width) => widths.push(width),
+                Err(error) => {
+                    into.record(error);
+                    *blocked = true;
+                }
+            }
+        }
+        if *blocked {
+            None
+        } else {
+            Some(widths)
+        }
+    } else {
+        into.record(Error::from(ErrorKind::ColumnWidths {
+            reason: ColumnWidthsReason::ColumnCount,
+        }));
+        *blocked = true;
+        None
+    }
+}
+
+fn lower_stored_rows(
+    flow: &Flow,
+    into: &mut ErrorBag,
+    rows: Vec<Vec<StoredCell>>,
+) -> Option<Vec<Vec<layout_table::Cell<FlowNode>>>> {
+    let mut out = Vec::with_capacity(rows.len());
+    let mut ok = true;
+    for row in rows {
+        let mut stored = Vec::with_capacity(row.len());
+        for cell in row {
+            let span_col = cell.col_span;
+            let span_row = cell.row_span;
+            let fill = cell.fill;
+            let content = match cell.content {
+                StoredContent::Text(text) => Some(vec![flow.text(text)]),
+                StoredContent::Paragraph(paragraph) => {
+                    lower_paragraph(paragraph, &flow.style, into).map(|node| vec![node])
+                }
+                StoredContent::List(node) => node.map(|node| vec![node]),
+                StoredContent::Image(image, image_box) => image_box
+                    .lower(&image, flow.doc, into)
+                    .map(|node| vec![node]),
+                StoredContent::HLine(line) => line.lower(into).map(|node| vec![node]),
+                StoredContent::Spacer(height) => {
+                    Some(vec![FlowNode::Spacer(SpacerNode { height })])
+                }
+            };
+            match content {
+                Some(content) => match layout_table::Cell::new(content) {
+                    Ok(built) => {
+                        stored.push(built.with_span(span_col, span_row).with_fill(fill));
+                    }
+                    Err(error) => {
+                        into.record(error);
+                        ok = false;
+                    }
+                },
+                None => ok = false,
+            }
+        }
+        out.push(stored);
+    }
+    ok.then_some(out)
 }
 
 /// One table cell.
@@ -247,7 +309,7 @@ pub struct Cell<'a> {
     pub(crate) col_span: NonZeroU16,
     pub(crate) row_span: NonZeroU16,
     pub(crate) fill: Option<Color>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 #[derive(Debug)]
@@ -283,7 +345,7 @@ impl<'a> Cell<'a> {
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
             fill: None,
-            error: None,
+            errors: ErrorBag::default(),
         }
     }
 
@@ -349,10 +411,11 @@ impl<'a> Cell<'a> {
     pub fn spacer(height: impl IntoNonNegative) -> Self {
         match height.into_non_negative() {
             Ok(height) => Self::bare(CellContent::Spacer(height)),
-            Err(error) => Self {
-                error: Some(error),
-                ..Self::bare(CellContent::Spacer(NonNegative::ZERO))
-            },
+            Err(error) => {
+                let mut cell = Self::bare(CellContent::Spacer(NonNegative::ZERO));
+                cell.errors.record(error);
+                cell
+            }
         }
     }
 

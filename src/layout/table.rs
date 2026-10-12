@@ -6,7 +6,9 @@ use std::collections::VecDeque;
 use std::num::NonZeroU16;
 use std::ops::Range;
 
-use crate::error::{CellSpanReason, ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
+use crate::error::{
+    CellSpanReason, ColumnWidthsReason, Error, ErrorKind, Fallible as Result, GeometryKind,
+};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
 use crate::layout::columns::{resolve_column_widths, ColumnWidth};
 use crate::layout::frame::{
@@ -255,8 +257,10 @@ fn measure<N: Flowable>(
             height: inner_full,
             full_height: inner_full,
         };
-        let (h, content) = natural_height(body.into_node(), ctx, frame)
-            .map_err(|error| error.in_cell(cell.row, cell.col))?;
+        let (h, content) = ctx.located(
+            &crate::error::Location::at_cell(cell.row, cell.col),
+            |ctx| natural_height(body.into_node(), ctx, frame),
+        )?;
         let cell_h = h + 2.0 * inset;
         if cell.rows == 1 {
             row_h[cell.row] = row_h[cell.row].max(cell_h);

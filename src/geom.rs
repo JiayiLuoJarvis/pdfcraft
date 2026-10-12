@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind};
 
 /// PDF points in one millimeter (`72 / 25.4`).
 pub const MM_TO_PT: f32 = 72.0 / 25.4;
@@ -74,7 +74,7 @@ pub enum NonNegative {}
 #[derive(Debug, Clone, Copy)]
 pub enum Positive {}
 
-fn finite_pt(value: f32) -> Result<f32> {
+fn finite_pt(value: f32) -> std::result::Result<f32, Error> {
     if value.is_finite() {
         Ok(value)
     } else {
@@ -82,19 +82,19 @@ fn finite_pt(value: f32) -> Result<f32> {
     }
 }
 
-fn pt_from_mm(mm: f32) -> Result<f32> {
+fn pt_from_mm(mm: f32) -> std::result::Result<f32, Error> {
     let mm = finite_pt(mm)?;
     finite_pt(mm * MM_TO_PT)
 }
 
 impl Finite {
     /// Accepts a finite point value.
-    pub fn pt(value: f32) -> Result<Length<Self>> {
+    pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
         Ok(Length::from_trusted_pt(finite_pt(value)?))
     }
 
     /// Accepts a finite millimeter value and stores the point equivalent.
-    pub fn mm(value: f32) -> Result<Length<Self>> {
+    pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
         Ok(Length::from_trusted_pt(pt_from_mm(value)?))
     }
 }
@@ -104,7 +104,7 @@ impl NonNegative {
     pub const ZERO: Length<Self> = Length::from_trusted_pt(0.0);
 
     /// Accepts a finite point value greater than or equal to zero.
-    pub fn pt(value: f32) -> Result<Length<Self>> {
+    pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
         let value = finite_pt(value)?;
         if value < 0.0 {
             return Err(Error::from(ErrorKind::NegativeLength { value }));
@@ -113,7 +113,7 @@ impl NonNegative {
     }
 
     /// Accepts a finite millimeter value greater than or equal to zero.
-    pub fn mm(value: f32) -> Result<Length<Self>> {
+    pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
         let mm = finite_pt(value)?;
         if mm < 0.0 {
             return Err(Error::from(ErrorKind::NegativeLength { value: mm }));
@@ -128,7 +128,7 @@ impl NonNegative {
 
 impl Positive {
     /// Accepts a finite point value strictly greater than zero.
-    pub fn pt(value: f32) -> Result<Length<Self>> {
+    pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
         let value = finite_pt(value)?;
         if value <= 0.0 {
             return Err(Error::from(ErrorKind::NonPositiveLength { value }));
@@ -137,7 +137,7 @@ impl Positive {
     }
 
     /// Accepts a finite millimeter value strictly greater than zero.
-    pub fn mm(value: f32) -> Result<Length<Self>> {
+    pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
         let mm = finite_pt(value)?;
         if mm <= 0.0 {
             return Err(Error::from(ErrorKind::NonPositiveLength { value: mm }));
@@ -171,23 +171,23 @@ impl From<Length<NonNegative>> for Length<Finite> {
 /// Converts a value into a non-negative length at a DSL or geometry boundary.
 pub trait IntoNonNegative {
     /// Rejects non-finite or negative inputs.
-    fn into_non_negative(self) -> Result<Length<NonNegative>>;
+    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error>;
 }
 
 impl IntoNonNegative for Length<NonNegative> {
-    fn into_non_negative(self) -> Result<Length<NonNegative>> {
+    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error> {
         Ok(self)
     }
 }
 
 impl IntoNonNegative for Length<Positive> {
-    fn into_non_negative(self) -> Result<Length<NonNegative>> {
+    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error> {
         Ok(self.into())
     }
 }
 
 impl IntoNonNegative for f32 {
-    fn into_non_negative(self) -> Result<Length<NonNegative>> {
+    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error> {
         NonNegative::pt(self)
     }
 }
@@ -195,17 +195,17 @@ impl IntoNonNegative for f32 {
 /// Converts a value into a strictly positive length at a DSL or geometry boundary.
 pub trait IntoPositive {
     /// Rejects non-finite or non-positive inputs.
-    fn into_positive(self) -> Result<Length<Positive>>;
+    fn into_positive(self) -> std::result::Result<Length<Positive>, Error>;
 }
 
 impl IntoPositive for Length<Positive> {
-    fn into_positive(self) -> Result<Length<Positive>> {
+    fn into_positive(self) -> std::result::Result<Length<Positive>, Error> {
         Ok(self)
     }
 }
 
 impl IntoPositive for f32 {
-    fn into_positive(self) -> Result<Length<Positive>> {
+    fn into_positive(self) -> std::result::Result<Length<Positive>, Error> {
         Positive::pt(self)
     }
 }
@@ -213,29 +213,29 @@ impl IntoPositive for f32 {
 /// Converts a value into a finite length at a DSL or geometry boundary.
 pub trait IntoFinite {
     /// Rejects non-finite inputs.
-    fn into_finite(self) -> Result<Length<Finite>>;
+    fn into_finite(self) -> std::result::Result<Length<Finite>, Error>;
 }
 
 impl IntoFinite for Length<Finite> {
-    fn into_finite(self) -> Result<Length<Finite>> {
+    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
         Ok(self)
     }
 }
 
 impl IntoFinite for Length<NonNegative> {
-    fn into_finite(self) -> Result<Length<Finite>> {
+    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
         Ok(self.into())
     }
 }
 
 impl IntoFinite for Length<Positive> {
-    fn into_finite(self) -> Result<Length<Finite>> {
+    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
         Ok(self.into())
     }
 }
 
 impl IntoFinite for f32 {
-    fn into_finite(self) -> Result<Length<Finite>> {
+    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
         Finite::pt(self)
     }
 }
@@ -243,17 +243,17 @@ impl IntoFinite for f32 {
 /// Converts a value into a [`Point`] at a DSL or geometry boundary.
 pub trait IntoPoint {
     /// Rejects non-finite coordinates.
-    fn into_point(self) -> Result<Point>;
+    fn into_point(self) -> std::result::Result<Point, Error>;
 }
 
 impl IntoPoint for Point {
-    fn into_point(self) -> Result<Point> {
+    fn into_point(self) -> std::result::Result<Point, Error> {
         Ok(self)
     }
 }
 
 impl IntoPoint for (f32, f32) {
-    fn into_point(self) -> Result<Point> {
+    fn into_point(self) -> std::result::Result<Point, Error> {
         Point::try_pt(self.0, self.1)
     }
 }
@@ -261,17 +261,17 @@ impl IntoPoint for (f32, f32) {
 /// Converts a value into a [`Rect`] at a DSL or geometry boundary.
 pub trait IntoRect {
     /// Rejects non-finite origins or non-positive size.
-    fn into_rect(self) -> Result<Rect>;
+    fn into_rect(self) -> std::result::Result<Rect, Error>;
 }
 
 impl IntoRect for Rect {
-    fn into_rect(self) -> Result<Rect> {
+    fn into_rect(self) -> std::result::Result<Rect, Error> {
         Ok(self)
     }
 }
 
 impl IntoRect for (f32, f32, f32, f32) {
-    fn into_rect(self) -> Result<Rect> {
+    fn into_rect(self) -> std::result::Result<Rect, Error> {
         Rect::try_pt(self.0, self.1, self.2, self.3)
     }
 }
@@ -294,12 +294,12 @@ impl Point {
     }
 
     /// Builds a point from finite point values.
-    pub fn try_pt(x: f32, y: f32) -> Result<Self> {
+    pub fn try_pt(x: f32, y: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Finite::pt(x)?, Finite::pt(y)?))
     }
 
     /// Builds a point from finite millimeter values.
-    pub fn try_mm(x: f32, y: f32) -> Result<Self> {
+    pub fn try_mm(x: f32, y: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Finite::mm(x)?, Finite::mm(y)?))
     }
 
@@ -336,12 +336,12 @@ impl Size {
     }
 
     /// Builds a size from positive point values.
-    pub fn try_pt(width: f32, height: f32) -> Result<Self> {
+    pub fn try_pt(width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Positive::pt(width)?, Positive::pt(height)?))
     }
 
     /// Builds a size from positive millimeter values.
-    pub fn try_mm(width: f32, height: f32) -> Result<Self> {
+    pub fn try_mm(width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Positive::mm(width)?, Positive::mm(height)?))
     }
 
@@ -485,7 +485,7 @@ impl Rect {
     }
 
     /// Builds a rectangle from point values. Width and height must be positive.
-    pub fn try_pt(x: f32, y: f32, width: f32, height: f32) -> Result<Self> {
+    pub fn try_pt(x: f32, y: f32, width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(
             Point::try_pt(x, y)?,
             Size::try_pt(width, height)?,
@@ -493,7 +493,7 @@ impl Rect {
     }
 
     /// Builds a rectangle from millimeter values. Width and height must be positive.
-    pub fn try_mm(x: f32, y: f32, width: f32, height: f32) -> Result<Self> {
+    pub fn try_mm(x: f32, y: f32, width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(
             Point::try_mm(x, y)?,
             Size::try_mm(width, height)?,
@@ -510,7 +510,7 @@ impl Rect {
         self.size
     }
 
-    pub(crate) fn translated(self, dx: f32, dy: f32) -> Result<Self> {
+    pub(crate) fn translated(self, dx: f32, dy: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(
             Point::try_pt(self.origin.x().as_pt() + dx, self.origin.y().as_pt() + dy)?,
             self.size,
@@ -552,7 +552,7 @@ impl Margins {
     }
 
     /// The same length on every side, from a length or pt value.
-    pub fn try_uniform(value: impl IntoNonNegative) -> Result<Self> {
+    pub fn try_uniform(value: impl IntoNonNegative) -> std::result::Result<Self, Error> {
         Ok(Self::uniform(value.into_non_negative()?))
     }
 
@@ -562,7 +562,7 @@ impl Margins {
         right: impl IntoNonNegative,
         bottom: impl IntoNonNegative,
         left: impl IntoNonNegative,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, Error> {
         Ok(Self::new(
             top.into_non_negative()?,
             right.into_non_negative()?,
@@ -708,7 +708,7 @@ pub struct Pen {
 
 impl Pen {
     /// Stroke of `color` and `width` (a positive length or pt value).
-    pub fn new(color: Color, width: impl IntoPositive) -> Result<Self> {
+    pub fn new(color: Color, width: impl IntoPositive) -> std::result::Result<Self, Error> {
         Ok(Self {
             color,
             stroke: Stroke::new(width.into_positive()?),
@@ -792,7 +792,7 @@ impl Path {
     /// Closed rectangle. `MoveTo` the top-left, then three `LineTo` clockwise, then `Close`.
     ///
     /// Fails when `origin + extent` is not finite.
-    pub(crate) fn rect(rect: Rect) -> Result<Self> {
+    pub(crate) fn rect(rect: Rect) -> std::result::Result<Self, Error> {
         let x = rect.origin().x().as_pt();
         let y = rect.origin().y().as_pt();
         let right = x + rect.size().width().as_pt();
@@ -809,7 +809,7 @@ impl Path {
     /// `MoveTo` the right-middle, then four `CubicTo` quarter arcs clockwise (y down), then `Close`.
     /// Each control point is `KAPPA` radii off its endpoint.
     /// Fails when a constructed point is not finite.
-    pub(crate) fn ellipse(rect: Rect) -> Result<Self> {
+    pub(crate) fn ellipse(rect: Rect) -> std::result::Result<Self, Error> {
         let rx = rect.size().width().as_pt() / 2.0;
         let ry = rect.size().height().as_pt() / 2.0;
         let cx = rect.origin().x().as_pt() + rx;
@@ -855,7 +855,7 @@ impl Path {
         &self.verbs
     }
 
-    pub(crate) fn translated(&self, dx: f32, dy: f32) -> Result<Self> {
+    pub(crate) fn translated(&self, dx: f32, dy: f32) -> std::result::Result<Self, Error> {
         self.map_points(|point| Point::try_pt(point.x().as_pt() + dx, point.y().as_pt() + dy))
     }
 
@@ -863,7 +863,7 @@ impl Path {
     ///
     /// Positive is clockwise on the page, matching krilla `Transform::from_rotate`.
     /// Fails when a rotated coordinate is not finite.
-    pub(crate) fn rotated(&self, degrees: f32, about: Point) -> Result<Self> {
+    pub(crate) fn rotated(&self, degrees: f32, about: Point) -> std::result::Result<Self, Error> {
         let (sin, cos) = degrees.to_radians().sin_cos();
         let ox = about.x().as_pt();
         let oy = about.y().as_pt();
@@ -875,7 +875,10 @@ impl Path {
         })
     }
 
-    fn map_points(&self, mut map: impl FnMut(Point) -> Result<Point>) -> Result<Self> {
+    fn map_points(
+        &self,
+        mut map: impl FnMut(Point) -> std::result::Result<Point, Error>,
+    ) -> std::result::Result<Self, Error> {
         let verbs = self
             .verbs
             .iter()
@@ -891,7 +894,7 @@ impl Path {
                     PathVerb::Close => PathVerb::Close,
                 })
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<std::result::Result<Vec<_>, Error>>()?;
         Ok(Self {
             verbs: verbs.into_boxed_slice(),
         })

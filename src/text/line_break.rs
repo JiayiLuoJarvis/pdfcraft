@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use crate::error::{Error, ErrorKind, GeometryKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::text::break_class::{allows, BreakClass, PairClass};
 use crate::text::cluster::{Cluster, ClusterCursor, ClusteredText};
 

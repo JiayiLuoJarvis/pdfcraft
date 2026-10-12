@@ -34,7 +34,7 @@ pub struct ImageBox {
     pub(crate) width: Option<Length<Positive>>,
     pub(crate) height: Option<Length<Positive>>,
     pub(crate) align: TextAlign,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl Default for ImageBox {
@@ -43,7 +43,7 @@ impl Default for ImageBox {
             width: None,
             height: None,
             align: TextAlign::Start,
-            error: None,
+            errors: ErrorBag::default(),
         }
     }
 }
@@ -76,20 +76,32 @@ impl ImageBox {
     }
 
     pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
+        self.errors.record(error);
     }
 
-    pub(crate) fn lower(self, image: &Image, doc: DocToken) -> Result<FlowNode> {
-        if let Some(error) = self.error {
-            return Err(error);
-        }
+    pub(crate) fn lower(
+        self,
+        image: &Image,
+        doc: DocToken,
+        into: &mut ErrorBag,
+    ) -> Option<FlowNode> {
+        let failed = !self.errors.is_empty();
+        into.absorb(self.errors);
         if image.doc != doc {
-            return Err(Error::from(ErrorKind::UnknownImage {
+            into.record(Error::from(ErrorKind::UnknownImage {
                 id: image.decoded.id.as_u32(),
             }));
+            return None;
         }
-        ImageNode::new(image.decoded, self.width, self.height, self.align).map(FlowNode::Image)
+        if failed {
+            return None;
+        }
+        match ImageNode::new(image.decoded, self.width, self.height, self.align) {
+            Ok(node) => Some(FlowNode::Image(node)),
+            Err(error) => {
+                into.record(error);
+                None
+            }
+        }
     }
 }

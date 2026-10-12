@@ -23,7 +23,7 @@ use crate::backend::convert::{
 };
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
 use crate::canvas::DocumentInfo;
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::geom::Paint;
 
 /// Renders closed page plans into PDF bytes.
@@ -389,7 +389,8 @@ mod tests {
                 index: 0,
             })
             .unwrap();
-        let measured = measure_text(&mut store, id, "A").unwrap();
+        let mut errors = crate::error::ErrorBag::default();
+        let measured = measure_text(&mut store, &mut errors, id, "A").unwrap();
         let fonts = Arc::new(store);
         let run = GlyphRun {
             font: id,
@@ -424,7 +425,8 @@ mod tests {
                 index: 0,
             })
             .unwrap();
-        let measured = measure_text(&mut store, id, "AA").unwrap();
+        let mut errors = crate::error::ErrorBag::default();
+        let measured = measure_text(&mut store, &mut errors, id, "AA").unwrap();
         let fonts = Arc::new(store);
         let first = &measured.glyphs[0];
         let second = &measured.glyphs[1];

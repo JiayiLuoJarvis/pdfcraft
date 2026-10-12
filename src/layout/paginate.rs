@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 
 use crate::canvas::Canvas;
-use crate::error::{Error, GeometryKind, Region, Result};
+use crate::error::{Error, Fallible as Result, GeometryKind, Location, Region};
 use crate::geom::{Margins, Point, Size};
 use crate::layout::decorate::{measure_bands, Decorations, PageBands, SectionSpan};
 use crate::layout::flow::FlowNode;
@@ -86,18 +86,23 @@ pub(crate) fn paginate_root(
     )
 }
 
-/// Plan every section, then measure and paint the flat page list.
-pub(crate) fn paginate_sections(
+pub(crate) struct LaidDocument {
+    pages: Vec<PagePlan>,
+    bands: Vec<PageBands>,
+}
+
+/// Plan every section and measure bands. Painting is separate so a dirty bag can skip it.
+pub(crate) fn layout_pages(
     jobs: Vec<SectionJob<'_>>,
     ctx: &mut LayoutCtx<'_>,
-    canvas: &mut dyn Canvas,
-) -> Result<()> {
+) -> Result<LaidDocument> {
     let mut pages = Vec::new();
     let mut spans = Vec::with_capacity(jobs.len());
     for (section, job) in jobs.into_iter().enumerate() {
         let start = pages.len();
-        let planned = plan_pages(job.root, ctx, job.config, start)
-            .map_err(|error| error.in_section(section))?;
+        let planned = ctx.located(&Location::section(section), |ctx| {
+            plan_pages(job.root, ctx, job.config, start)
+        })?;
         let len = u32::try_from(planned.len())
             .ok()
             .and_then(NonZeroU32::new)
@@ -115,7 +120,32 @@ pub(crate) fn paginate_sections(
     }
     let sizes: Vec<Size> = pages.iter().map(|page| page.size).collect();
     let bands = measure_bands(&sizes, &spans, ctx)?;
-    paint_pages(&pages, &bands, canvas)
+    Ok(LaidDocument { pages, bands })
+}
+
+/// Plan every section, then measure and paint the flat page list.
+pub(crate) fn paginate_sections(
+    jobs: Vec<SectionJob<'_>>,
+    ctx: &mut LayoutCtx<'_>,
+    canvas: &mut dyn Canvas,
+) -> Result<()> {
+    let laid = match layout_pages(jobs, ctx) {
+        Ok(laid) => laid,
+        Err(hard) => {
+            let bag = std::mem::take(ctx.errors);
+            return Err(bag.fail(hard).into_iter().next().expect("fail keeps one"));
+        }
+    };
+    if !ctx.errors.is_empty() {
+        let bag = std::mem::take(ctx.errors);
+        let errors = bag.finish(()).expect_err("bag was not empty");
+        return Err(errors.first().clone());
+    }
+    paint_pages(&laid.pages, &laid.bands, canvas)
+}
+
+pub(crate) fn paint_laid(laid: &LaidDocument, canvas: &mut dyn Canvas) -> Result<()> {
+    paint_pages(&laid.pages, &laid.bands, canvas)
 }
 
 /// `first_page` is the zero-based index of this section's first page in the document.
@@ -154,11 +184,10 @@ fn plan_pages(
                     height: (body_h - y).max(0.0),
                     full_height: body_h,
                 };
-                let split = node.split(ctx, avail).map_err(|error| {
-                    error
-                        .in_region(Region::Body)
-                        .on_page_index(first_page + pages.len())
-                })?;
+                let split = ctx.located(
+                    &Location::page_index(first_page + pages.len()).with_region(Region::Body),
+                    |ctx| node.split(ctx, avail),
+                )?;
                 match split {
                     Split::Fit { height, fragment } => {
                         let page = current.as_mut().expect("content page open");
@@ -397,7 +426,11 @@ mod tests {
             };
             let expected_y = metrics.baseline;
 
-            let mut ctx = LayoutCtx { fonts: &mut fonts };
+            let mut errors = crate::error::ErrorBag::default();
+            let mut ctx = LayoutCtx {
+                fonts: &mut fonts,
+                errors: &mut errors,
+            };
             let mut rec = RecordingCanvas::new();
             paginate_root(
                 FlowNode::Paragraph(para),
@@ -417,7 +450,11 @@ mod tests {
     #[test]
     fn leading_page_break_is_noop_one_blank_page() {
         let (mut fonts, _) = fonts_and_style(TextAlign::Start, 0.0);
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![FlowNode::PageBreak]),
@@ -434,7 +471,11 @@ mod tests {
     #[test]
     fn leading_two_page_breaks_still_one_page() {
         let (mut fonts, _) = fonts_and_style(TextAlign::Start, 0.0);
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![FlowNode::PageBreak, FlowNode::PageBreak]),
@@ -451,7 +492,11 @@ mod tests {
     fn content_then_one_page_break_drops_pending() {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
         let para = ParagraphNode::layout(&mut fonts, "A", &style, A4.width().as_pt()).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![FlowNode::Paragraph(para), FlowNode::PageBreak]),
@@ -469,7 +514,11 @@ mod tests {
     fn content_then_two_page_breaks_yields_blank_body_page() {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
         let para = ParagraphNode::layout(&mut fonts, "A", &style, A4.width().as_pt()).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -493,7 +542,11 @@ mod tests {
         let w = A4.width().as_pt();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, w).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, w).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -517,7 +570,11 @@ mod tests {
         let w = A4.width().as_pt();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, w).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, w).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -546,7 +603,11 @@ mod tests {
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let page = Size::try_pt(200.0, 50.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -578,7 +639,11 @@ mod tests {
         let line_h = metrics.line_height;
         let page = Size::try_pt(200.0, line_h * 2.0).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A\nB\nC", &style, 200.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Paragraph(para),
@@ -613,7 +678,11 @@ mod tests {
         let page = Size::try_pt(200.0, line_h).unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let second = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -644,7 +713,11 @@ mod tests {
         let filler = ParagraphNode::layout(&mut fonts, "X", &style, 200.0).unwrap();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -679,7 +752,11 @@ mod tests {
         let page = Size::try_pt(200.0, line_h + 1.0).unwrap();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         let err = paginate_root(
             FlowNode::KeepTogether(KeepTogetherNode::Open(vec![
@@ -714,7 +791,11 @@ mod tests {
         let page = Size::try_pt(200.0, line_h * 2.0 + 8.0).unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let second = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Stack(vec![
@@ -742,7 +823,11 @@ mod tests {
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 180.0).unwrap();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_root(
             FlowNode::Paragraph(para),
@@ -774,7 +859,11 @@ mod tests {
         let second_width = 400.0 - 30.0 - 8.0;
         let second = ParagraphNode::layout(&mut fonts, "B", &style, second_width).unwrap();
         let decorations = Decorations::none();
-        let mut ctx = LayoutCtx { fonts: &mut fonts };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
         let mut rec = RecordingCanvas::new();
         paginate_sections(
             vec![

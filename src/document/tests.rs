@@ -1,6 +1,6 @@
 #![allow(clippy::wildcard_imports)]
 use super::*;
-use crate::error::{Location, Region};
+use crate::error::{Errors, Location, Region};
 use crate::fonts::fixture_bytes;
 use crate::geom::{PageSize, Rect};
 
@@ -135,8 +135,8 @@ fn fill_blank_coalesces_text_before_it_and_rejects_a_later_run() {
             panic!("paragraph stays on the implicit section");
         };
         assert_eq!(
-            section.flow.error,
-            Some(Error::from(ErrorKind::RunAfterFillBlank))
+            section.flow.errors.as_slice(),
+            &[Error::from(ErrorKind::RunAfterFillBlank)]
         );
         assert!(section.flow.nodes.is_empty());
     }
@@ -165,18 +165,14 @@ fn fixed_blank_wider_than_the_indented_line_fails_before_any_page() {
         p.blank(NonNegative::pt(80.0).unwrap());
     });
     let mut rec = RecordingCanvas::new();
-    let Err(error) = doc.paint(&mut rec) else {
+    let Err(errors) = doc.paint(&mut rec) else {
         panic!("expected the blank to be wider than the indented line");
     };
-    let Error {
-        kind: ErrorKind::UnbreakableWiderThanFrame { width, avail },
-        ..
-    } = error
-    else {
-        panic!("{error:?}");
+    let ErrorKind::UnbreakableWiderThanFrame { width, avail } = &errors.first().kind else {
+        panic!("{errors:?}");
     };
-    assert!(crate::canvas::pt_near(width, 80.0), "{width}");
-    assert!(crate::canvas::pt_near(avail, 60.0), "{avail}");
+    assert!(crate::canvas::pt_near(*width, 80.0), "{width}");
+    assert!(crate::canvas::pt_near(*avail, 60.0), "{avail}");
     assert!(rec.commands().is_empty());
 }
 
@@ -208,7 +204,7 @@ fn on_first_page(error: impl Into<Error>, region: Region) -> Error {
 fn assert_fails_with_empty_canvas(doc: Document<'_>, expected: &Error) {
     let mut rec = RecordingCanvas::new();
     let result = doc.paint(&mut rec);
-    assert_eq!(result.err().as_ref(), Some(expected));
+    assert_eq!(result.err().as_ref(), Some(&Errors::from(expected.clone())));
     assert!(rec.commands().is_empty());
 }
 
@@ -339,7 +335,7 @@ fn bold_and_indent_failures_happen_before_any_page() {
     let mut rec = RecordingCanvas::new();
     let error = overwide.paint(&mut rec).err().unwrap();
     assert!(
-        matches!(error.kind, ErrorKind::UnbreakableWiderThanFrame { avail, .. }
+        matches!(error.first().kind, ErrorKind::UnbreakableWiderThanFrame { avail, .. }
                 if crate::canvas::pt_near(avail, 12.0)
         ),
         "{error:?}"
@@ -393,7 +389,9 @@ fn non_finite_rotation_does_not_draw() {
         layer.rotated(f32::NAN, Point::ZERO, |_| ran.set(true));
     });
     assert!(matches!(
-        doc.paint(&mut RecordingCanvas::new()).err().map(|error| error.kind),
+        doc.paint(&mut RecordingCanvas::new())
+            .err()
+            .map(|error| error.first().kind.clone()),
         Some(ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees })) if degrees.is_nan()
     ));
     assert!(!ran.get());
@@ -428,7 +426,7 @@ fn header_without_margin_fails_before_any_page() {
     let mut rec = RecordingCanvas::new();
     let result = doc.paint(&mut rec);
     assert!(
-        matches!(result.map_err(|error| error.kind), Err(ErrorKind::DecorationTallerThanMargin { margin, .. }) if margin == 0.0)
+        matches!(result.map_err(|error| error.first().kind.clone()), Err(ErrorKind::DecorationTallerThanMargin { margin, .. }) if margin == 0.0)
     );
     assert!(rec.commands().is_empty());
 }
@@ -446,14 +444,14 @@ fn keep_together_taller_than_the_page_fails_before_any_page() {
     let page_h = PageSize::A4.resolve().height().as_pt();
     assert!(
         matches!(
-            error.kind,
+            error.first().kind,
             ErrorKind::UnsplittableTallerThanFrame { height, avail }
                 if height > 2.0 * page_h && avail.to_bits() == page_h.to_bits()
         ),
         "{error:?}"
     );
     assert_eq!(
-        error.at,
+        error.first().at,
         Some(Location {
             section: Some(0),
             page: Some(1),
@@ -468,17 +466,10 @@ fn keep_together_taller_than_the_page_fails_before_any_page() {
 fn section_after_paragraph_fails_before_any_page() {
     let mut doc = doc_with_font();
     doc.paragraph(|p| p.text("A"));
-    let err = doc
-        .section(|section| {
-            section.paragraph(|p| p.text("B"));
-            Ok(())
-        })
-        .unwrap_err();
-    assert_eq!(err, Error::from(ErrorKind::ContentOutsideSection));
-    assert_eq!(
-        err.to_string(),
-        "body or decorations written both on the document and in sections"
-    );
+    doc.section(|section| {
+        section.paragraph(|p| p.text("B"));
+        Ok(())
+    });
     assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }
 
@@ -488,8 +479,7 @@ fn paragraph_after_section_fails_before_any_page() {
     doc.section(|section| {
         section.paragraph(|p| p.text("A"));
         Ok(())
-    })
-    .unwrap();
+    });
     doc.paragraph(|p| p.text("B"));
     assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }
@@ -500,8 +490,7 @@ fn add_after_section_fails_before_any_page() {
     doc.section(|section| {
         section.paragraph(|p| p.text("A"));
         Ok(())
-    })
-    .unwrap();
+    });
     doc.add(Paragraph::build(|p| p.text("B")));
     assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }
@@ -535,8 +524,7 @@ fn margins_after_section_fail_before_any_page() {
     doc.section(|section| {
         section.paragraph(|p| p.text("A"));
         Ok(())
-    })
-    .unwrap();
+    });
     doc.margins(Margins::uniform(NonNegative::pt(12.0).unwrap()));
     assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
 }

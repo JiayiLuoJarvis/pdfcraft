@@ -31,9 +31,26 @@ impl Error {
         self
     }
 
+    /// Fills location fields this error does not know yet. An inner value wins.
+    pub(crate) fn fill_missing(&mut self, at: &Location) {
+        let loc = self.location();
+        if loc.section.is_none() {
+            loc.section = at.section;
+        }
+        if loc.page.is_none() {
+            loc.page = at.page;
+        }
+        if loc.region.is_none() {
+            loc.region = at.region;
+        }
+        if loc.cell.is_none() {
+            loc.cell = at.cell;
+        }
+    }
+
     /// Records the zero-based section index unless an inner layer already did.
     pub(crate) fn in_section(mut self, index: usize) -> Self {
-        self.location().section.get_or_insert(index);
+        self.fill_missing(&Location::section(index));
         self
     }
 
@@ -41,21 +58,19 @@ impl Error {
     ///
     /// A page number that does not fit `u32` stays unknown.
     pub(crate) fn on_page_index(mut self, index: usize) -> Self {
-        if let Some(number) = index.checked_add(1).and_then(|n| u32::try_from(n).ok()) {
-            self.location().page.get_or_insert(number);
-        }
+        self.fill_missing(&Location::page_index(index));
         self
     }
 
     /// Records the page region unless an inner layer already did.
     pub(crate) fn in_region(mut self, region: Region) -> Self {
-        self.location().region.get_or_insert(region);
+        self.fill_missing(&Location::with_region(Location::default(), region));
         self
     }
 
     /// Records the table cell unless a nested table already did.
     pub(crate) fn in_cell(mut self, row: usize, col: usize) -> Self {
-        self.location().cell.get_or_insert(CellIndex { row, col });
+        self.fill_missing(&Location::at_cell(row, col));
         self
     }
 
@@ -198,7 +213,7 @@ pub enum ErrorKind {
         /// Rejected node kind, such as `"columns"`.
         node: &'static str,
     },
-    /// Table spans do not tile the grid. [`Location::cell`] names the offending slot.
+    /// Table spans do not tile the grid. [`Location`]'s `cell` field names the offending slot.
     InvalidCellSpan(CellSpanReason),
     /// Header or footer content is taller than its margin band.
     DecorationTallerThanMargin {
@@ -515,7 +530,7 @@ impl fmt::Display for CellSpanReason {
 /// Where layout was when an error happened. Unknown parts are `None`.
 ///
 /// An inner layer records first and outer layers do not overwrite it, so
-/// [`cell`](Self::cell) names the innermost table cell.
+/// the `cell` field names the innermost table cell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Location {
@@ -528,6 +543,34 @@ pub struct Location {
     pub region: Option<Region>,
     /// Innermost table cell.
     pub cell: Option<CellIndex>,
+}
+
+impl Location {
+    pub(crate) fn section(index: usize) -> Self {
+        Self {
+            section: Some(index),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn page_index(index: usize) -> Self {
+        Self {
+            page: index.checked_add(1).and_then(|n| u32::try_from(n).ok()),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn at_cell(row: usize, col: usize) -> Self {
+        Self {
+            cell: Some(CellIndex { row, col }),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn with_region(mut self, region: Region) -> Self {
+        self.region = Some(region);
+        self
+    }
 }
 
 impl fmt::Display for Location {
@@ -586,8 +629,269 @@ pub struct CellIndex {
     pub col: usize,
 }
 
-/// Result of constructing a value or drawing to a canvas.
-pub type Result<T> = std::result::Result<T, Error>;
+/// One failure from a call that can only fail one way.
+///
+/// Document assembly and [`crate::document`] return [`Result`], which is a list.
+pub(crate) type Fallible<T> = std::result::Result<T, Error>;
+
+const MAX_ERRORS: usize = 64;
+
+/// One or more failures from one document build, in discovery order.
+///
+/// Never empty. At most 64 items are kept. [`truncated`](Self::truncated) reports
+/// that more were found. Equality compares each item by [`Error::kind`] and
+/// [`Error::at`] only.
+#[derive(Debug, Clone)]
+pub struct Errors {
+    items: Vec<Error>,
+    truncated: bool,
+}
+
+impl PartialEq for Errors {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+    }
+}
+
+impl Errors {
+    /// The first failure found.
+    #[must_use]
+    pub fn first(&self) -> &Error {
+        self.items.first().expect("Errors keeps at least one item")
+    }
+
+    /// Kept failures, in discovery order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[Error] {
+        &self.items
+    }
+
+    /// Same as [`as_slice`](Self::as_slice)`.iter()`.
+    pub fn iter(&self) -> std::slice::Iter<'_, Error> {
+        self.items.iter()
+    }
+
+    /// More failures were found than kept.
+    #[must_use]
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
+impl From<Error> for Errors {
+    fn from(error: Error) -> Self {
+        Self {
+            items: vec![error],
+            truncated: false,
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Errors {
+    type Item = &'a Error;
+    type IntoIter = std::slice::Iter<'a, Error>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
+
+impl IntoIterator for Errors {
+    type Item = Error;
+    type IntoIter = std::vec::IntoIter<Error>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.into_iter()
+    }
+}
+
+impl fmt::Display for Errors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.items.len() == 1 && !self.truncated {
+            return write!(f, "{}", self.items[0]);
+        }
+        for (index, error) in self.items.iter().enumerate() {
+            if index > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{}. {error}", index + 1)?;
+        }
+        if self.truncated {
+            write!(f, "\nfurther errors omitted")?;
+        }
+        Ok(())
+    }
+}
+
+impl StdError for Errors {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self.items.as_slice() {
+            [only] => StdError::source(only),
+            _ => None,
+        }
+    }
+}
+
+/// Result of running a document or writing its PDF.
+pub type Result<T> = std::result::Result<T, Errors>;
+
+/// Append-only accumulator. Cap, order, and truncation live here.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct ErrorBag {
+    items: Vec<Error>,
+    seen: u64,
+    unknown_fonts: Vec<u32>,
+}
+
+/// Position in a bag, for "anything since here?" and locating those items.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Mark {
+    index: usize,
+    seen: u64,
+}
+
+/// Soft font failures. Layout records these and keeps scanning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FontFault {
+    /// `scalar` has no glyph in `font`.
+    MissingGlyph {
+        /// Raw font id.
+        font: u32,
+        /// Unmapped scalar.
+        scalar: char,
+    },
+    /// Bold was requested and no bold face is registered.
+    BoldFaceRequired,
+    /// `id` is not in the font store.
+    UnknownFont {
+        /// Raw font id.
+        id: u32,
+    },
+}
+
+impl From<FontFault> for Error {
+    fn from(fault: FontFault) -> Self {
+        match fault {
+            FontFault::MissingGlyph { font, scalar } => {
+                ErrorKind::MissingGlyph { font, scalar }.into()
+            }
+            FontFault::BoldFaceRequired => ErrorKind::BoldFaceRequired.into(),
+            FontFault::UnknownFont { id } => ErrorKind::UnknownFont { id }.into(),
+        }
+    }
+}
+
+impl ErrorBag {
+    /// Appends `error` unless this id was already recorded as [`ErrorKind::UnknownFont`].
+    ///
+    /// A full bag counts the error and drops it.
+    pub(crate) fn record(&mut self, error: impl Into<Error>) {
+        let error = error.into();
+        if let ErrorKind::UnknownFont { id } = error.kind {
+            if self.unknown_fonts.contains(&id) {
+                return;
+            }
+            self.unknown_fonts.push(id);
+        }
+        self.seen = self.seen.saturating_add(1);
+        if self.items.len() < MAX_ERRORS {
+            self.items.push(error);
+        }
+    }
+
+    /// Appends `other` after this bag. A repeated [`ErrorKind::UnknownFont`] id is kept once.
+    pub(crate) fn absorb(&mut self, other: Self) {
+        let dropped = other.seen.saturating_sub(other.items.len() as u64);
+        for error in other.items {
+            self.record(error);
+        }
+        self.seen = self.seen.saturating_add(dropped);
+    }
+
+    pub(crate) fn mark(&self) -> Mark {
+        Mark {
+            index: self.items.len(),
+            seen: self.seen,
+        }
+    }
+
+    /// Nothing was recorded since `mark`. A repeated unknown-font id does not count.
+    pub(crate) fn clean_since(&self, mark: Mark) -> bool {
+        self.seen == mark.seen
+    }
+
+    /// Fills unknown location fields on items kept since `mark`.
+    pub(crate) fn locate_since(&mut self, mark: Mark, at: &Location) {
+        for error in self.items.iter_mut().skip(mark.index) {
+            error.fill_missing(at);
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.clean_since(Mark { index: 0, seen: 0 })
+    }
+
+    pub(crate) fn as_slice(&self) -> &[Error] {
+        &self.items
+    }
+
+    /// `Ok(value)` when nothing was recorded.
+    pub(crate) fn finish<T>(self, value: T) -> Result<T> {
+        if self.is_empty() {
+            debug_assert!(self.as_slice().is_empty());
+            Ok(value)
+        } else {
+            Err(self.into_errors())
+        }
+    }
+
+    /// Keeps `hard` as the stop reason.
+    ///
+    /// When the bag is already full, the last kept item is replaced and
+    /// [`Errors::truncated`] stays set so the dropped item is still reported.
+    pub(crate) fn fail(mut self, hard: Error) -> Errors {
+        if self.items.len() >= MAX_ERRORS {
+            let last = self.items.len() - 1;
+            self.note_unknown_font(&hard);
+            self.items[last] = hard;
+            if self.seen <= self.items.len() as u64 {
+                self.seen = self.items.len() as u64 + 1;
+            }
+        } else {
+            self.record(hard);
+        }
+        self.into_errors()
+    }
+
+    fn note_unknown_font(&mut self, error: &Error) {
+        if let ErrorKind::UnknownFont { id } = error.kind {
+            if !self.unknown_fonts.contains(&id) {
+                self.unknown_fonts.push(id);
+            }
+        }
+    }
+
+    fn into_errors(self) -> Errors {
+        Errors {
+            truncated: self.seen > self.items.len() as u64,
+            items: self.items,
+        }
+    }
+}
+
+impl From<Errors> for ErrorBag {
+    fn from(errors: Errors) -> Self {
+        let mut bag = Self::default();
+        let truncated = errors.truncated;
+        for error in errors.items {
+            bag.record(error);
+        }
+        if truncated && bag.seen <= bag.items.len() as u64 {
+            bag.seen = bag.items.len() as u64 + 1;
+        }
+        bag
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -639,5 +943,135 @@ mod tests {
         assert_eq!(plain, chained);
         assert!(plain.source().is_none());
         assert!(chained.source().is_some());
+    }
+
+    fn kind(n: u32) -> Error {
+        ErrorKind::UnknownImage { id: n }.into()
+    }
+
+    #[test]
+    fn bag_keeps_sixty_four_and_marks_truncation() {
+        let mut bag = ErrorBag::default();
+        for n in 0..65 {
+            bag.record(kind(n));
+        }
+        let errors = bag.finish(()).unwrap_err();
+        assert_eq!(errors.as_slice().len(), 64);
+        assert!(errors.truncated());
+        assert_eq!(errors.first(), &kind(0));
+        assert_eq!(errors.as_slice()[63], kind(63));
+        assert!(errors.as_slice().iter().all(|error| error != &kind(64)));
+    }
+
+    #[test]
+    fn absorb_keeps_discovery_order() {
+        let mut first = ErrorBag::default();
+        first.record(kind(1));
+        let mut second = ErrorBag::default();
+        second.record(kind(2));
+        second.record(kind(3));
+        first.absorb(second);
+        let errors = first.finish(()).unwrap_err();
+        assert_eq!(errors.as_slice(), &[kind(1), kind(2), kind(3)]);
+        assert!(!errors.truncated());
+    }
+
+    #[test]
+    fn equality_ignores_truncation() {
+        let mut truncated_bag = ErrorBag::default();
+        for n in 0..65 {
+            truncated_bag.record(kind(n));
+        }
+        let truncated = truncated_bag.finish(()).unwrap_err();
+        assert!(truncated.truncated());
+        let mut same = ErrorBag::default();
+        for error in truncated.as_slice() {
+            same.record(error.clone());
+        }
+        let kept = same.finish(()).unwrap_err();
+        assert!(!kept.truncated());
+        assert_eq!(kept, truncated);
+    }
+
+    #[test]
+    fn from_error_is_one_item() {
+        let error = Error::from(ErrorKind::EmptyLink);
+        let errors = Errors::from(error.clone());
+        assert_eq!(errors.as_slice(), std::slice::from_ref(&error));
+        assert!(!errors.truncated());
+        assert_eq!(errors.to_string(), error.to_string());
+    }
+
+    #[test]
+    fn display_numbers_more_than_one_item() {
+        let mut bag = ErrorBag::default();
+        bag.record(ErrorKind::EmptyLink);
+        bag.record(ErrorKind::BoldFaceRequired);
+        let errors = bag.finish(()).unwrap_err();
+        assert_eq!(
+            errors.to_string(),
+            "1. link URI is empty\n2. bold text needs a registered bold font"
+        );
+    }
+
+    #[test]
+    fn fail_on_a_full_bag_replaces_the_last_item() {
+        let mut bag = ErrorBag::default();
+        for n in 0..64 {
+            bag.record(kind(n));
+        }
+        let errors = bag.fail(Error::from(ErrorKind::EmptyLink));
+        assert_eq!(errors.as_slice().len(), 64);
+        assert!(errors.truncated());
+        assert_eq!(errors.as_slice()[63], Error::from(ErrorKind::EmptyLink));
+        assert_eq!(errors.first(), &kind(0));
+    }
+
+    #[test]
+    fn unknown_font_is_recorded_once_per_id() {
+        let mut bag = ErrorBag::default();
+        bag.record(FontFault::UnknownFont { id: 0 });
+        bag.record(ErrorKind::UnknownFont { id: 0 });
+        bag.record(FontFault::UnknownFont { id: 1 });
+        bag.record(FontFault::MissingGlyph {
+            font: 0,
+            scalar: 'A',
+        });
+        bag.record(FontFault::MissingGlyph {
+            font: 0,
+            scalar: 'A',
+        });
+        let errors = bag.finish(()).unwrap_err();
+        assert_eq!(
+            errors.as_slice(),
+            &[
+                Error::from(ErrorKind::UnknownFont { id: 0 }),
+                Error::from(ErrorKind::UnknownFont { id: 1 }),
+                Error::from(ErrorKind::MissingGlyph {
+                    font: 0,
+                    scalar: 'A'
+                }),
+                Error::from(ErrorKind::MissingGlyph {
+                    font: 0,
+                    scalar: 'A'
+                }),
+            ]
+        );
+        assert!(!errors.truncated());
+    }
+
+    #[test]
+    fn one_item_delegates_source_and_many_do_not() {
+        let chained = Error::from(ErrorKind::Backend {
+            message: "m".to_owned(),
+        })
+        .with_source(std::fmt::Error);
+        let one = Errors::from(chained);
+        assert!(one.source().is_some());
+        let mut bag = ErrorBag::default();
+        bag.record(ErrorKind::EmptyLink);
+        bag.record(ErrorKind::BoldFaceRequired);
+        let many = bag.finish(()).unwrap_err();
+        assert!(many.source().is_none());
     }
 }

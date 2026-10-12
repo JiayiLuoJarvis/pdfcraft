@@ -14,7 +14,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use crate::canvas::{replay, ImageRegistry, RecordingCanvas};
-use crate::error::Result;
+use crate::error::Fallible as Result;
 use crate::fonts::FontStore;
 
 pub(crate) use images::ImageTable;

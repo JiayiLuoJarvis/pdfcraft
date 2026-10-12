@@ -4,13 +4,36 @@
 //! so no node module names the concrete `FlowNode` enum.
 
 use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
-use crate::error::{ErrorKind, GeometryKind, Result};
+use crate::error::{ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind, Location};
 use crate::fonts::FontStore;
 use crate::geom::{Paint, Path, Point, Rect, Stroke};
 
-/// Fonts available while splitting.
+/// Fonts and the document error bag available while splitting.
 pub(crate) struct LayoutCtx<'a> {
     pub(crate) fonts: &'a mut FontStore,
+    pub(crate) errors: &'a mut ErrorBag,
+}
+
+impl LayoutCtx<'_> {
+    /// Records a font failure and keeps scanning. Other failures stay on [`Result`].
+    pub(crate) fn soft(&mut self, fault: FontFault) {
+        self.errors.record(fault);
+    }
+
+    /// Fills unknown location fields on errors recorded by `f`, and on a hard error.
+    pub(crate) fn located<T>(
+        &mut self,
+        at: &Location,
+        f: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mark = self.errors.mark();
+        let out = f(self);
+        self.errors.locate_since(mark, at);
+        out.map_err(|mut error| {
+            error.fill_missing(at);
+            error
+        })
+    }
 }
 
 /// Remaining layout region. `height` may be zero; `width` and `full_height` stay positive.

@@ -1,7 +1,7 @@
 //! Atomic raster block. Size is resolved at build time. Split only places it.
 
 use crate::canvas::DecodedImage;
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::geom::{Length, Positive, Rect, Size};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;

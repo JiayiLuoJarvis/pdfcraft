@@ -4,7 +4,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::layout::frame::{Flowable, NodeKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

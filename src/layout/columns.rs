@@ -2,7 +2,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::error::{ColumnWidthsReason, Error, ErrorKind, Result};
+use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible as Result};
 use crate::geom::{Length, NonNegative, Positive};
 use crate::layout::frame::{Flowable, Fragment, Frame, LayoutCtx, Split};
 use crate::layout::nesting::{check_content, Container};

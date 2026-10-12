@@ -22,28 +22,36 @@ pub trait IntoFlowItem: seal::Sealed {
 impl seal::Sealed for Paragraph {}
 impl IntoFlowItem for Paragraph {
     fn add_to(self, flow: &mut Flow) {
-        flow.push(lower_paragraph(self, &flow.style));
+        if let Some(node) = lower_paragraph(self, &flow.style, &mut flow.errors) {
+            flow.push(node);
+        }
     }
 }
 
 impl seal::Sealed for HLine {}
 impl IntoFlowItem for HLine {
     fn add_to(self, flow: &mut Flow) {
-        flow.push(self.lower());
+        if let Some(node) = self.lower(&mut flow.errors) {
+            flow.push(node);
+        }
     }
 }
 
 impl seal::Sealed for Table {}
 impl IntoFlowItem for Table {
     fn add_to(self, flow: &mut Flow) {
-        flow.push(self.lower());
+        if let Some(node) = self.lower(&mut flow.errors) {
+            flow.push(node);
+        }
     }
 }
 
 impl seal::Sealed for Columns {}
 impl IntoFlowItem for Columns {
     fn add_to(self, flow: &mut Flow) {
-        flow.push(self.lower());
+        if let Some(node) = self.lower(&mut flow.errors) {
+            flow.push(node);
+        }
     }
 }
 
@@ -69,7 +77,9 @@ impl PlacedImage {
 impl seal::Sealed for PlacedImage {}
 impl IntoFlowItem for PlacedImage {
     fn add_to(self, flow: &mut Flow) {
-        flow.push(self.box_.lower(&self.image, flow.doc));
+        if let Some(node) = self.box_.lower(&self.image, flow.doc, &mut flow.errors) {
+            flow.push(node);
+        }
     }
 }
 
@@ -88,7 +98,9 @@ impl IntoFlowItem for BuiltList {
             },
             ListKind::Bullet => ListKind::Bullet,
         };
-        flow.push(self.list.lower(kind));
+        if let Some(node) = self.list.lower(kind, &mut flow.errors) {
+            flow.push(node);
+        }
     }
 }
 
@@ -182,16 +194,17 @@ pub trait FlowWriter {
 
     /// Appends vertical space. The part that does not fit continues on the next page.
     fn spacer(&mut self, height: impl IntoNonNegative) {
-        self.flow_mut().push(
-            height
-                .into_non_negative()
-                .map(|height| FlowNode::Spacer(SpacerNode { height })),
-        );
+        match height.into_non_negative() {
+            Ok(height) => self
+                .flow_mut()
+                .push(FlowNode::Spacer(SpacerNode { height })),
+            Err(error) => self.flow_mut().push_err(error),
+        }
     }
 
     /// Starts the next content on a new page. Only allowed in the body.
     fn page_break(&mut self) {
-        self.flow_mut().push(Ok(FlowNode::PageBreak));
+        self.flow_mut().push(FlowNode::PageBreak);
     }
 
     /// Appends content that moves to the next page as one piece instead of splitting.
@@ -200,10 +213,8 @@ pub trait FlowWriter {
     /// independent block value like [`Table`].
     fn keep_together(&mut self, f: impl FnOnce(&mut Flow)) {
         let flow = self.flow_mut();
-        let node = flow
-            .nested(f)
-            .map(|nodes| FlowNode::KeepTogether(KeepTogetherNode::Open(nodes)));
-        flow.push(node);
+        let nodes = flow.nested(f);
+        flow.push(FlowNode::KeepTogether(KeepTogetherNode::Open(nodes)));
     }
 
     /// Runs `body` with a temporary parent text style. Children inherit unless they override.
@@ -218,10 +229,7 @@ pub trait FlowWriter {
         let saved = flow.style.clone();
         let mut props = TextProps::default();
         style(&mut props);
-        if let Err(error) = props.apply(&mut flow.style) {
-            if flow.error.is_none() {
-                flow.error = Some(error);
-            }
+        if !props.apply(&mut flow.style, &mut flow.errors) {
             flow.style = saved;
             return;
         }

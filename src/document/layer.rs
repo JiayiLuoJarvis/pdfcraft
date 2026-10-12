@@ -7,7 +7,7 @@ pub struct Layer {
     pub(crate) style: Style,
     pub(crate) doc: DocToken,
     pub(crate) items: Vec<LayerItem>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl Layer {
@@ -31,8 +31,7 @@ impl Layer {
         let saved = self.style.clone();
         let mut props = TextProps::default();
         style(&mut props);
-        if let Err(error) = props.apply(&mut self.style) {
-            self.note(error);
+        if !props.apply(&mut self.style, &mut self.errors) {
             self.style = saved;
             return;
         }
@@ -155,23 +154,17 @@ impl Layer {
     }
 
     pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
+        self.errors.record(error);
     }
 
-    fn push_shape(&mut self, path: Result<Path>, ink: Ink, turn: Option<(f32, Point)>) {
+    fn push_shape(&mut self, path: Fallible<Path>, ink: Ink, turn: Option<(f32, Point)>) {
         let path = path.and_then(|path| match turn {
             Some((degrees, about)) if !is_zero_angle(degrees) => path.rotated(degrees, about),
             _ => Ok(path),
         });
         match path {
             Ok(path) => self.items.push(LayerItem::Shape { path, ink }),
-            Err(error) => {
-                if self.error.is_none() {
-                    self.error = Some(error);
-                }
-            }
+            Err(error) => self.errors.record(error),
         }
     }
 }
@@ -257,7 +250,7 @@ impl Shapes<'_> {
     }
 }
 
-pub(crate) fn straight_path(from: Point, to: Point) -> Result<Path> {
+pub(crate) fn straight_path(from: Point, to: Point) -> Fallible<Path> {
     if from == to {
         Err(GeometryKind::ZeroLengthSegment.into())
     } else {
@@ -270,18 +263,16 @@ pub(crate) fn is_zero_angle(degrees: f32) -> bool {
 }
 
 pub(crate) fn layer_content(hook: LayerHook<'_>, style: Style, doc: DocToken) -> LayerContent<'_> {
-    Box::new(move |info: &PageInfo| {
+    Box::new(move |info: &PageInfo, errors: &mut ErrorBag| {
         let mut layer = Layer {
             page: Page::from(info),
             style: style.clone(),
             doc,
             items: Vec::new(),
-            error: None,
+            errors: ErrorBag::default(),
         };
         hook(&mut layer);
-        match layer.error {
-            Some(error) => Err(error),
-            None => Ok(layer.items),
-        }
+        errors.absorb(layer.errors);
+        Ok(layer.items)
     })
 }

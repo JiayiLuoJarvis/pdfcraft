@@ -1,6 +1,6 @@
 //! Atomic horizontal rule. Width resolves against the frame at split time.
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;

@@ -9,7 +9,7 @@ use krilla::geom::{PathBuilder, Point as KPoint, Rect as KRect, Size as KSize};
 use krilla::num::NormalizedF32;
 use krilla::paint::{Fill, FillRule, Stroke as KStroke};
 
-use crate::error::{GeometryKind, Result};
+use crate::error::{Fallible as Result, GeometryKind};
 use crate::geom::{Paint, Path, PathVerb, Point, Rect, Size, Stroke};
 
 /// Identity point mapping.

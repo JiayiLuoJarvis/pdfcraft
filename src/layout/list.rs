@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
-use crate::error::{GeometryKind, Result};
+use crate::error::{Fallible as Result, GeometryKind};
 use crate::geom::{Length, Point, Positive};
 use crate::layout::frame::{Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::nesting::ItemBody;
@@ -213,8 +213,7 @@ impl<N: Flowable> ListNode<N> {
             };
 
             if let Some(label) = &item.pending_marker {
-                let mut run =
-                    single_line_run(ctx.fonts, label, &self.marker_style, self.marker_width)?;
+                let mut run = single_line_run(ctx, label, &self.marker_style, self.marker_width)?;
                 let baseline = first_baseline(&fragment).unwrap_or(run.origin.y().as_pt());
                 run.origin = Point::try_pt(0.0, y + baseline)?;
                 commands.push(FragmentCommand::Glyphs(run));

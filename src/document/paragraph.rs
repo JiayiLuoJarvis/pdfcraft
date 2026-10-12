@@ -10,7 +10,7 @@ pub struct Paragraph {
     pub(crate) color: Option<Color>,
     pub(crate) font_size: Option<Length<Positive>>,
     pub(crate) active_link: Option<LinkTarget>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl Default for Paragraph {
@@ -22,7 +22,7 @@ impl Default for Paragraph {
             color: None,
             font_size: None,
             active_link: None,
-            error: None,
+            errors: ErrorBag::default(),
         }
     }
 }
@@ -162,9 +162,7 @@ impl Paragraph {
     }
 
     pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
+        self.errors.record(error);
     }
 }
 

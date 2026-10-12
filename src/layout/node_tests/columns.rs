@@ -1,4 +1,4 @@
-use crate::error::{ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
+use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{NonNegative, Positive};
 use crate::layout::columns::{
     default_column_gap, resolve_column_widths, ColumnWidth, ColumnsNode, Ratio,

@@ -8,8 +8,9 @@ pub struct Flow {
     pub(crate) style: Style,
     pub(crate) doc: DocToken,
     pub(crate) nodes: Vec<FlowNode>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
     pub(crate) reject_pushes: bool,
+    outside_reported: bool,
 }
 
 impl Flow {
@@ -18,8 +19,9 @@ impl Flow {
             style,
             doc,
             nodes: Vec::new(),
-            error: None,
+            errors: ErrorBag::default(),
             reject_pushes: false,
+            outside_reported: false,
         }
     }
 
@@ -31,38 +33,55 @@ impl Flow {
     }
 
     pub(crate) fn written(&self) -> bool {
-        !self.nodes.is_empty() || self.error.is_some()
+        !self.nodes.is_empty() || !self.errors.is_empty()
     }
 
     pub(crate) fn child(&self) -> Self {
         Self::new(self.style.clone(), self.doc)
     }
 
-    pub(crate) fn push(&mut self, node: Result<FlowNode>) {
-        if self.error.is_some() {
-            return;
-        }
+    /// Appends a lowered node. A closed document flow records
+    /// [`ErrorKind::ContentOutsideSection`] once and drops the node.
+    pub(crate) fn push(&mut self, node: FlowNode) {
         if self.reject_pushes {
-            self.error = Some(Error::from(ErrorKind::ContentOutsideSection));
+            if !self.outside_reported {
+                self.outside_reported = true;
+                self.errors
+                    .record(Error::from(ErrorKind::ContentOutsideSection));
+            }
             return;
         }
-        match node {
-            Ok(node) => self.nodes.push(node),
-            Err(error) => self.error = Some(error),
+        self.nodes.push(node);
+    }
+
+    /// Records `error` and does not append a node. Later siblings still run.
+    pub(crate) fn push_err(&mut self, error: Error) {
+        if self.reject_pushes {
+            self.push_rejected();
+            return;
+        }
+        self.errors.record(error);
+    }
+
+    fn push_rejected(&mut self) {
+        if !self.outside_reported {
+            self.outside_reported = true;
+            self.errors
+                .record(Error::from(ErrorKind::ContentOutsideSection));
         }
     }
 
-    pub(crate) fn nested(&mut self, f: impl FnOnce(&mut Flow)) -> Result<Vec<FlowNode>> {
+    /// Runs `f` on a child flow and merges its bag. Failed nodes are already absent.
+    pub(crate) fn nested(&mut self, f: impl FnOnce(&mut Flow)) -> Vec<FlowNode> {
         let mut child = self.child();
         f(&mut child);
-        child.into_nodes()
+        let (nodes, errors) = child.into_parts();
+        self.errors.absorb(errors);
+        nodes
     }
 
-    pub(crate) fn into_nodes(self) -> Result<Vec<FlowNode>> {
-        match self.error {
-            Some(error) => Err(error),
-            None => Ok(self.nodes),
-        }
+    pub(crate) fn into_parts(self) -> (Vec<FlowNode>, ErrorBag) {
+        (self.nodes, self.errors)
     }
 
     pub(crate) fn text(&self, text: String) -> FlowNode {
@@ -70,9 +89,15 @@ impl Flow {
     }
 }
 
-pub(crate) fn lower_paragraph(paragraph: Paragraph, parent: &Style) -> Result<FlowNode> {
-    if let Some(error) = paragraph.error {
-        return Err(error);
+pub(crate) fn lower_paragraph(
+    paragraph: Paragraph,
+    parent: &Style,
+    into: &mut ErrorBag,
+) -> Option<FlowNode> {
+    let failed = !paragraph.errors.is_empty();
+    into.absorb(paragraph.errors);
+    if failed {
+        return None;
     }
     let mut style = parent.clone();
     style.first_line_indent = paragraph.first_line_indent;
@@ -83,7 +108,7 @@ pub(crate) fn lower_paragraph(paragraph: Paragraph, parent: &Style) -> Result<Fl
     if let Some(font_size) = paragraph.font_size {
         style.font_size = font_size;
     }
-    Ok(FlowNode::Text(TextNode::from_items(paragraph.items, style)))
+    Some(FlowNode::Text(TextNode::from_items(paragraph.items, style)))
 }
 
 pub(crate) fn numbering_kind(numbering: Numbering) -> MarkerKind {
@@ -99,15 +124,16 @@ pub(crate) fn numbering_kind(numbering: Numbering) -> MarkerKind {
 pub(crate) fn assemble_list(
     parent: Flow,
     kind: ListKind,
+    into: &mut ErrorBag,
     f: impl FnOnce(&mut List),
-) -> Result<FlowNode> {
+) -> Option<FlowNode> {
     let mut list = List {
         parent,
         items: Vec::new(),
         start: NonZeroU32::MIN,
         marker_width: Positive::pt(18.0).expect("18 pt is positive"),
         nest_indent: None,
-        error: None,
+        errors: ErrorBag::default(),
     };
     f(&mut list);
     let kind = match kind {
@@ -117,5 +143,5 @@ pub(crate) fn assemble_list(
         },
         ListKind::Bullet => ListKind::Bullet,
     };
-    list.lower(kind)
+    list.lower(kind, into)
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::backend::emit;
 use crate::backend::images::{ImageTable, Raster};
 use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget};
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::fonts::FontStore;
 use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 

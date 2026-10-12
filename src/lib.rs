@@ -8,8 +8,8 @@ pub mod error;
 pub mod geom;
 
 pub use error::{
-    CellIndex, CellSpanReason, ColumnWidthsReason, Error, ErrorKind, GeometryKind, Location,
-    Region, Result,
+    CellIndex, CellSpanReason, ColumnWidthsReason, Error, ErrorKind, Errors, GeometryKind,
+    Location, Region, Result,
 };
 pub use geom::{
     Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length,
@@ -44,9 +44,9 @@ pub(crate) mod backend;
 
 /// Lays out a document whose default paper is `page_size`.
 ///
-/// `build` runs once. Builder mistakes are deferred: the first one is
-/// returned from here, before any page is drawn. A missing glyph anywhere,
-/// including headers and layers, also fails the whole document.
+/// `build` runs once. Builder mistakes and missing glyphs are collected, up to
+/// 64, and returned together. Any of them fails the whole document before a
+/// page is drawn. An `Err` returned from `build` is included and stops layout.
 ///
 /// Text uses the first font passed to [`Document::font`] at 12 pt with line
 /// height 1.2, black, start-aligned. Margins default to zero.
@@ -59,12 +59,12 @@ pub fn document<'a>(
     {
         doc.images = Box::new(backend::ImageTable::default());
     }
-    build(&mut doc)?;
-    doc.render()
+    let returned = build(&mut doc);
+    doc.render(returned)
 }
 
 /// Writes the pages of `rendered` as PDF bytes.
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
-    backend::write_pdf(&rendered.recording, rendered.fonts, rendered.images)
+    backend::write_pdf(&rendered.recording, rendered.fonts, rendered.images).map_err(Errors::from)
 }

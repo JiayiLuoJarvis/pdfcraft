@@ -4,7 +4,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::error::{ErrorKind, GeometryKind, Result};
+use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{Length, NonNegative};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::frame::{natural_height, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split};

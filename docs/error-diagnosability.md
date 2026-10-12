@@ -2,8 +2,8 @@
 
 | 项 | 值 |
 | --- | --- |
-| 日期 | 2026-10-10 |
-| 状态 | **刀 1–3 已落地**（`Error { kind, at }`、`Location`、`source()` 链）。刀 4（多错收集）仍开着。 |
+| 日期 | 2026-10-10（刀 1–3）；刀 4 落地 2026-10-12 |
+| 状态 | **刀 1–4 已落地**（`Error { kind, at }`、`Location`、`source()` 链、`Errors` 多错收集）。 |
 | 相关 | [`code-quality-assessment.md`](code-quality-assessment.md) §1–§4；姿态见 [`AGENTS.md`](../AGENTS.md)「现阶段姿态」 |
 | 代码 | 主要 `src/error.rs`；构造点遍布 `document/`、`layout/`、`text/`、`fonts.rs`、`backend/` |
 
@@ -18,7 +18,7 @@
    ```
    `kind` = 是什么错；`at` = 在哪（未知则 `None`）。不为每个变体重复抄位置字段。
 2. **§1 变体结构化**：`GeometryKind` / `InvalidCellSpan` 带 kind+行列 / `UnsplittableTallerThanFrame { height, avail }` / `ColumnWidthsReason` 枚举。禁止再扩 `&'static str` reason。
-3. **§2**：本阶段承诺填 `Location`（节、表行列、页码、header/footer 等 layout/组装可知信息）。**不做**调用方源码行号。**多错收集另刀**（刀 4）。
+3. **§2**：本阶段承诺填 `Location`（节、表行列、页码、header/footer 等 layout/组装可知信息）。**不做**调用方源码行号。多错收集见刀 4（已落地）。
 4. **§3**：手写 `Error`，实现真正的 `source()`；不引入 `thiserror` / `anyhow`。依赖错误按下文「依赖错误约定」处理。
 5. **§4**：修正 `DecorationTallerThanMargin` 的 `height` 语义（禁止用 `page_h` 冒充内容高）；**删除**无构造点的 `UnsupportedCanvasOperation`。
 6. **粗体未注册**（评估 §6）：刀 1 增加独立 kind（如 `BoldFaceRequired`），禁止再报 `UnknownFont { id: 1 }`。
@@ -31,7 +31,7 @@
 | 1 | `Error` / `ErrorKind` / `Location` 骨架；§1 结构化；§4 删/修；`BoldFaceRequired`；测试跟 |
 | 2 | 组装与 layout 填 `Location` |
 | 3 | 依赖错误的 `source()` 链（Font / Image / Backend 等） |
-| 4 | （可选）多错收集 API — **未做** |
+| 4 | 多错收集 API — **已落地** |
 
 `Location` / `ErrorKind` 的精确字段名与变体表在刀 1 实现 PR 定；勿提前冻进提案书。
 
@@ -39,9 +39,65 @@
 
 - `Location { section, page, region, cell }`：`section` 从 0 计；`page` 是全文档 1 起的页码；`region` 为 `Body` / `Header` / `Footer` / `Behind` / `Front`；`cell` 为表格网格 0 起的行列（含表头行）。内层先写，外层不覆盖。
 - `InvalidCellSpan` 只带 `CellSpanReason`，行列放在 `at.cell`，不在变体里重复。
-- `source` 私有，存 `Arc<dyn Error + Send + Sync>`，以保住 `Error: Clone`（文档会克隆延迟的首错）。`PartialEq` 只比 `kind` 与 `at`。
+- `source` 私有，存 `Arc<dyn Error + Send + Sync>`，以保住 `Error: Clone`。`PartialEq` 只比 `kind` 与 `at`。
 - `Display` 不拼 source 文本，按 Rust 错误惯例留给 `source()` 链。
 - 仍为 `None` 的位置：组装期在单元格构造时就拒绝的内容（此时还没有网格行列），以及 `to_pdf` 收尾阶段的序列化失败。
+
+### 刀 4：多错收集（已落地）
+
+1. **做不做 / 何时**  
+   本里程碑做。不延后到限额或信件夹具之后。
+
+2. **收集范围**  
+   - 组装期：凡今日走 `note()` / `Flow::push(Err)` / `Vec<Result>` collect 的路径，改为写入同一错误表。  
+   - 测量期：同一跑里收集可安全继续的失败，至少包括 `MissingGlyph`、`BoldFaceRequired`、`UnknownFont`（与组装错同一桶）。  
+   - 几何 / 分页硬失败：记入表后可 hard-stop 后续 layout；不假装继续排出稳定后续页。  
+   - `to_pdf` / backend：仍单错，不并进「一次跑多错」承诺。  
+   - 缺字、几何、单元格：同一 `Error` / `Errors` 桶，不按业务拆 API。
+
+3. **API 形状**  
+   - `Error` 仍表示单错（`kind` + `at` + 可选 `source`）。  
+   - 新增非空 `Errors`（名称实现时定；须 `Clone`、按条 `PartialEq`、可迭代）。  
+   - 公共 `Result<T> = std::result::Result<T, Errors>`。`From<Error> for Errors`。  
+   - `document` / `paint` / `render` 失败时，`Err` 即为完整列表（受上限截断）。无第二套「再取列表」入口。
+
+4. **与整份失败**  
+   有任一错即不产出 `Rendered` / PDF。刀 4 只增加诊断，不引入部分页成功。与提案书 §4「缺字整份失败」一致。
+
+5. **上限与排序**  
+   - 最多收集 64 条。满则停止追加，并标明截断。  
+   - 顺序为库遍历发现序（组装文档序，再测量序）。纠正今日「容器 `self.error` / `Document.error` 在 lower 时压过更早子项错」的优先级扭曲。不做按 kind 稳定重排。
+
+6. **继续 vs hard-stop**  
+   - 组装：记下错误后 builder 闭包仍走完；已有错时仍 lower 兄弟以收集，但不把节点纳入成功树。  
+   - 必须 hard-stop 的例子：画布生命周期已破坏、backend 序列化失败、分页已 stalled / 版心非法以致继续测量无意义。  
+   - 内层今日已跳过闭包的路径（空 link、非法 `col_fixed` 等）可保持跳过，不强行制造更多错。
+
+7. **Display / PartialEq / Clone**  
+   - `Errors` 的 `Display`：多行（或编号）打印每条，单条格式与今日 `Error` 一致。  
+   - `PartialEq`：逐条比 `kind` 与 `at`（与单条一致，忽略各条 `source`）。  
+   - 保持 `Clone`，以便文档侧克隆延迟错误表。
+
+8. **明确不做**  
+   - 调用方源码行号  
+   - `thiserror` / `anyhow` 进公共面；公共面泄漏 krilla/skrifa 错误类型  
+   - 并行收集  
+   - 部分页 / 部分 PDF  
+   - 未确认功能顺手塞进本刀  
+
+实现提示（非 API 承诺）：改动重心是 `note` 与各 `error: Option<Error>` → 错误表、`Flow::push`、`List`/`Columns` 的 `collect`、`measure_text` 的缺字继续策略、`src/error.rs` 的 `Errors` 与 `Result`。遵守 [`module-dependency.md`](module-dependency.md)：`error` 不依赖 document/layout。
+
+### 落地记录（刀 4）
+
+- 公共 `Result<T>` 是 `Result<T, Errors>`。`Errors` 非空，最多保留 64 条，顺序是发现序。访问器是 `first`、`as_slice`、`iter`、`truncated`。`From<Error> for Errors`。
+- 恰好一条且未截断时，`Display` 与该条 `Error` 相同。否则按编号逐条打印。截断时末行是 `further errors omitted`。
+- `PartialEq` 只比各条 `kind` 与 `at`，不比 `truncated`。`source()` 仅在恰好一条时转给该条，多条时为 `None`。
+- `Document::section` 返回 `()`。闭包返回的 `Err` 并进文档的错误表，后面的节继续执行。调用方 `build` 闭包若返回 `Err`，吸收该错误后不再测量。
+- 组装记下错误后仍 lower 兄弟节点。失败节点不进入成功树。表在 lower 时先收集单元格，再记录列数等容器错误，容器错不再盖住更早的子项。
+- 测量把 `MissingGlyph`、`BoldFaceRequired`、`UnknownFont` 写入同一张表并继续扫描。缺字保留在簇序列里，前进宽度为 0，绘制时跳过，不用 `.notdef` 占位。同一个 `UnknownFont` id 只记录一次，重复项不占 64 条名额，也不因此把表标成截断。
+- 几何、分页停滞、版心非法、画布生命周期、backend 序列化仍是单错并停止后续测量。表已满时，这条硬错误替换最后保留的一项，并保持 `truncated`，使停止原因仍可见。`to_pdf` 把 backend 的单错升成 `Errors`。
+- 有任一错就不产出 `Rendered` 或 PDF。
+- 几何、画布、`Document::font`、`bold_font`、`load_image` 仍返回单个 `Error`。
 
 ---
 
@@ -113,4 +169,4 @@ impl std::error::Error for Error {
 
 ## 与评估原文的对照
 
-评估 §1–§4 的现象描述仍成立。处理方式以上表为准，不再采用「Display 补丁」或「无限期字符串化」。
+刀 1–4 的处理方式以上文为准，不再采用「Display 补丁」或「无限期字符串化」。失败时交出 `Errors`，不再只留首错。

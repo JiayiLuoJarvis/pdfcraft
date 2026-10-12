@@ -8,7 +8,7 @@ use std::sync::Arc;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 
 /// Opaque font identifier stored on a [`crate::canvas::GlyphRun`].
 ///

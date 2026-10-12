@@ -3,10 +3,10 @@
 use std::num::{NonZeroU16, NonZeroU32};
 
 use quire_pdf::{
-    document, pt_near, CanvasCommand, Cell, Color, ColumnWidthsReason, Error, ErrorKind, Flow,
-    FlowWriter, GeometryKind, ImageFormat, Ink, MarginPreset, Margins, NonNegative, Numbering,
-    PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect, Region, Rendered, Result,
-    Size, Stroke, Track, A4,
+    document, pt_near, CanvasCommand, Cell, CellSpanReason, Color, ColumnWidthsReason, Error,
+    ErrorKind, Flow, FlowWriter, GeometryKind, ImageFormat, Ink, MarginPreset, Margins,
+    NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, RecordedPage, Rect,
+    Region, Rendered, Result, Size, Stroke, Track, A4,
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::{to_pdf, Paper};
@@ -388,7 +388,7 @@ fn header_with_zero_margin_is_rejected() {
         Ok(())
     });
     assert!(
-        matches!(result.map_err(|error| error.kind), Err(ErrorKind::DecorationTallerThanMargin { height, margin }) if pt_near(height, LINE) && margin == 0.0)
+        matches!(result.map_err(|error| error.first().kind.clone()), Err(ErrorKind::DecorationTallerThanMargin { height, margin }) if pt_near(height, LINE) && margin == 0.0)
     );
 }
 
@@ -442,7 +442,7 @@ fn custom_marker_wider_than_marker_width_errors() {
         Ok(())
     });
     assert!(
-        matches!(result.map_err(|error| error.kind), Err(ErrorKind::UnbreakableWiderThanFrame { avail, .. }) if pt_near(avail, 10.0))
+        matches!(result.map_err(|error| error.first().kind.clone()), Err(ErrorKind::UnbreakableWiderThanFrame { avail, .. }) if pt_near(avail, 10.0))
     );
 }
 
@@ -556,7 +556,7 @@ fn nesting_rules_come_from_layout() {
         Ok(())
     });
     assert_eq!(
-        result.err().map(|error| error.kind),
+        result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::InvalidCellContent {
             container: "column",
             node: "page break"
@@ -565,8 +565,8 @@ fn nesting_rules_come_from_layout() {
 }
 
 #[test]
-fn first_builder_error_wins_and_later_calls_are_ignored() {
-    let result = document(PageSize::A4, |doc| {
+fn assembly_errors_follow_discovery_order() {
+    let errors = document(PageSize::A4, |doc| {
         doc.font(FONT.to_vec())?;
         doc.columns(|row| row.col(|c| c.paragraph(|p| p.text("only one"))));
         doc.table(|t| {
@@ -574,13 +574,109 @@ fn first_builder_error_wins_and_later_calls_are_ignored() {
             t.row(["c"]);
         });
         Ok(())
-    });
+    })
+    .err()
+    .unwrap();
     assert_eq!(
-        result.err().map(|error| error.kind),
-        Some(ErrorKind::ColumnWidths {
-            reason: ColumnWidthsReason::ColumnCount
-        })
+        errors
+            .as_slice()
+            .iter()
+            .map(|error| error.kind.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::ColumnCount,
+            },
+            ErrorKind::InvalidCellSpan(CellSpanReason::EmptySlot),
+        ]
     );
+    assert_eq!(
+        location(&errors.as_slice()[1]),
+        (Some(0), None, None, Some((1, 1)))
+    );
+    assert!(!errors.truncated());
+}
+
+#[test]
+fn a_cell_error_is_kept_when_the_table_also_fails() {
+    let errors = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.table(|t| {
+            t.tracks([Track::Ratio(1.0)]);
+            t.row([
+                Cell::paragraph(|p| {
+                    p.font_size(0.0);
+                }),
+                Cell::new("b"),
+            ]);
+        });
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(
+        errors
+            .as_slice()
+            .iter()
+            .map(|error| error.kind.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ErrorKind::NonPositiveLength { value: 0.0 },
+            ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::ColumnCount,
+            },
+        ]
+    );
+}
+
+#[test]
+fn missing_glyphs_in_later_paragraphs_are_all_reported() {
+    let errors = document(PageSize::A4, |doc| {
+        doc.font(FONT.to_vec())?;
+        doc.paragraph(|p| p.text("A\u{FFFF}"));
+        doc.paragraph(|p| p.text("B\u{FFFE}"));
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(
+        errors
+            .as_slice()
+            .iter()
+            .map(|error| error.kind.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ErrorKind::MissingGlyph {
+                font: 0,
+                scalar: '\u{FFFF}',
+            },
+            ErrorKind::MissingGlyph {
+                font: 0,
+                scalar: '\u{FFFE}',
+            },
+        ]
+    );
+}
+
+#[test]
+fn assembly_keeps_sixty_four_errors_and_marks_truncation() {
+    let errors = document(PageSize::A4, |doc| {
+        for _ in 0..65 {
+            doc.spacer(-1.0);
+        }
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert_eq!(errors.as_slice().len(), 64);
+    assert!(errors.truncated());
+    assert!(errors.as_slice().iter().all(|error| {
+        matches!(
+            &error.kind,
+            ErrorKind::NegativeLength { value } if value.to_bits() == (-1.0f32).to_bits()
+        )
+    }));
+    assert!(errors.to_string().ends_with("further errors omitted"));
 }
 
 #[test]
@@ -590,7 +686,7 @@ fn closure_errors_propagate_unchanged() {
         Ok(())
     });
     assert_eq!(
-        result.err().map(|error| error.kind),
+        result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::NegativeLength { value: -1.0 })
     );
 }
@@ -602,7 +698,7 @@ fn text_without_a_font_fails() {
         Ok(())
     });
     assert_eq!(
-        result.err().map(|error| error.kind),
+        result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::UnknownFont { id: 0 })
     );
 }
@@ -664,7 +760,7 @@ fn bold_and_indent_configuration_errors_are_specific() {
     .err()
     .unwrap();
     assert_eq!(
-        before_body.kind,
+        before_body.first().kind.clone(),
         ErrorKind::Font {
             index: 0,
             message: "body font is not registered".to_owned(),
@@ -678,7 +774,10 @@ fn bold_and_indent_configuration_errors_are_specific() {
     })
     .err()
     .unwrap();
-    assert_eq!(missing_bold.kind, ErrorKind::BoldFaceRequired);
+    assert_eq!(
+        missing_bold.first().kind.clone(),
+        ErrorKind::BoldFaceRequired
+    );
 
     let invalid_indent = document(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()), |doc| {
         doc.font(FONT.to_vec())?;
@@ -691,7 +790,7 @@ fn bold_and_indent_configuration_errors_are_specific() {
     .err()
     .unwrap();
     assert_eq!(
-        invalid_indent.kind,
+        invalid_indent.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::FirstLineIndent {
             indent: 24.0,
             width: 24.0,
@@ -709,7 +808,7 @@ fn bold_and_indent_configuration_errors_are_specific() {
     .err()
     .unwrap();
     assert!(
-        matches!(overwide.kind, ErrorKind::UnbreakableWiderThanFrame { avail, .. } if pt_near(avail, 12.0)
+        matches!(overwide.first().kind.clone(), ErrorKind::UnbreakableWiderThanFrame { avail, .. } if pt_near(avail, 12.0)
         ),
         "{overwide:?}"
     );
@@ -768,7 +867,7 @@ fn load_image_without_decoder_is_an_image_error() {
     })
     .err()
     .unwrap();
-    assert!(matches!(err.kind, ErrorKind::Image { .. }));
+    assert!(matches!(err.first().kind.clone(), ErrorKind::Image { .. }));
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -865,7 +964,10 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     })
     .err()
     .unwrap();
-    assert!(matches!(garbage.kind, ErrorKind::Image { .. }));
+    assert!(matches!(
+        garbage.first().kind.clone(),
+        ErrorKind::Image { .. }
+    ));
 
     let empty = document(PageSize::A4, |doc| {
         let _ = doc.load_image(Vec::new(), ImageFormat::Png)?;
@@ -873,7 +975,9 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     })
     .err()
     .unwrap();
-    assert!(matches!(empty.kind, ErrorKind::Image { message } if message == "bytes are empty"));
+    assert!(
+        matches!(empty.first().kind.clone(), ErrorKind::Image { message } if message == "bytes are empty")
+    );
 
     let mut stolen = None;
     let _ = document(PageSize::A4, |doc| {
@@ -887,7 +991,10 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     })
     .err()
     .unwrap();
-    assert!(matches!(foreign.kind, ErrorKind::UnknownImage { id: 0 }));
+    assert!(matches!(
+        foreign.first().kind.clone(),
+        ErrorKind::UnknownImage { id: 0 }
+    ));
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -901,7 +1008,7 @@ fn list_item_and_overwide_image_fail() {
     .err()
     .unwrap();
     assert_eq!(
-        listed.kind,
+        listed.first().kind.clone(),
         ErrorKind::InvalidCellContent {
             container: "list item",
             node: "image"
@@ -920,7 +1027,7 @@ fn list_item_and_overwide_image_fail() {
     .err()
     .unwrap();
     assert_eq!(
-        wide.kind,
+        wide.first().kind.clone(),
         ErrorKind::UnbreakableWiderThanFrame {
             width: 101.0,
             avail: 100.0,
@@ -938,7 +1045,10 @@ fn damaged_pixels_fail_at_pdf_time() {
     })
     .unwrap();
     let err = to_pdf(rendered).unwrap_err();
-    assert!(matches!(err.kind, ErrorKind::Backend { .. }), "{err:?}");
+    assert!(
+        matches!(err.first().kind.clone(), ErrorKind::Backend { .. }),
+        "{err:?}"
+    );
     assert!(std::error::Error::source(&err).is_some(), "{err:?}");
 }
 
@@ -968,13 +1078,13 @@ fn two_sections_number_document_pages_and_section_pages() {
             section.page_break();
             section.paragraph(|p| p.text("B"));
             Ok(())
-        })?;
+        });
         doc.section(|section| {
             section.margins(Margins::uniform(margin));
             section.footer(section_footer);
             section.paragraph(|p| p.text("C"));
             Ok(())
-        })?;
+        });
         Ok(())
     })
     .unwrap()
@@ -994,7 +1104,7 @@ fn second_section_header_stays_at_page_edge_until_caller_insets() {
             section.header(|header| header.left("One"));
             section.paragraph(|p| p.text("A"));
             Ok(())
-        })?;
+        });
         doc.section(|section| {
             section.margins(Margins::new(
                 NonNegative::pt(20.0)?,
@@ -1009,7 +1119,7 @@ fn second_section_header_stays_at_page_edge_until_caller_insets() {
             });
             section.paragraph(|p| p.text("B"));
             Ok(())
-        })?;
+        });
         Ok(())
     })
     .unwrap()
@@ -1029,12 +1139,12 @@ fn paragraph_then_section_is_content_outside_section() {
         doc.section(|section| {
             section.paragraph(|p| p.text("B"));
             Ok(())
-        })?;
+        });
         Ok(())
     })
     .err()
     .unwrap();
-    assert_eq!(err.kind, ErrorKind::ContentOutsideSection);
+    assert_eq!(err.first().kind.clone(), ErrorKind::ContentOutsideSection);
 }
 
 #[test]
@@ -1045,7 +1155,7 @@ fn empty_section_is_one_page_and_still_draws_its_footer() {
             section.margins(Margins::uniform(NonNegative::pt(20.0)?));
             section.footer(|footer| footer.left("foot"));
             Ok(())
-        })?;
+        });
         Ok(())
     })
     .unwrap()
@@ -1062,7 +1172,7 @@ fn trailing_page_break_inside_a_section_does_not_add_a_page() {
             section.paragraph(|p| p.text("A"));
             section.page_break();
             Ok(())
-        })?;
+        });
         Ok(())
     })
     .unwrap()
@@ -1079,12 +1189,12 @@ fn two_sections_on_different_paper_write_a_pdf() {
         doc.section(|section| {
             section.paragraph(|p| p.text("A"));
             Ok(())
-        })?;
+        });
         doc.section(|section| {
             section.page_size(Paper::Letter.landscape());
             section.paragraph(|p| p.text("B"));
             Ok(())
-        })?;
+        });
         Ok(())
     })
     .unwrap();
@@ -1367,14 +1477,14 @@ fn hline_taller_than_body_fails_before_any_page() {
     );
     let error = result.err().unwrap();
     assert_eq!(
-        error.kind,
+        error.first().kind.clone(),
         ErrorKind::UnsplittableTallerThanFrame {
             height: 25.0,
             avail: 20.0,
         }
     );
     assert_eq!(
-        location(&error),
+        location(error.first()),
         (Some(0), Some(1), Some(Region::Body), None)
     );
 }
@@ -1487,14 +1597,14 @@ fn cell_spacer_taller_than_body_fails_before_any_page() {
     );
     let error = result.err().unwrap();
     assert_eq!(
-        error.kind,
+        error.first().kind.clone(),
         ErrorKind::UnsplittableTallerThanFrame {
             height: 21.0,
             avail: 20.0,
         }
     );
     assert_eq!(
-        location(&error),
+        location(error.first()),
         (Some(0), Some(1), Some(Region::Body), Some((0, 0)))
     );
 }
@@ -2175,7 +2285,7 @@ fn empty_uri_fails_the_document() {
         Ok(())
     });
     assert!(matches!(
-        body.map_err(|error| error.kind),
+        body.map_err(|error| error.first().kind.clone()),
         Err(ErrorKind::EmptyLink)
     ));
 
@@ -2187,7 +2297,7 @@ fn empty_uri_fails_the_document() {
         Ok(())
     });
     assert!(matches!(
-        band.map_err(|error| error.kind),
+        band.map_err(|error| error.first().kind.clone()),
         Err(ErrorKind::EmptyLink)
     ));
 }
@@ -2343,7 +2453,7 @@ fn cell_paragraph_errors_record_no_pages() {
         Ok(())
     });
     assert_eq!(
-        empty_link.err().map(|error| error.kind),
+        empty_link.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::EmptyLink)
     );
 
@@ -2358,7 +2468,7 @@ fn cell_paragraph_errors_record_no_pages() {
         Ok(())
     });
     assert_eq!(
-        after_fill.err().map(|error| error.kind),
+        after_fill.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::RunAfterFillBlank)
     );
 }
@@ -2383,14 +2493,14 @@ fn cell_paragraph_indent_uses_cell_width() {
     );
     let error = result.err().unwrap();
     assert_eq!(
-        error.kind,
+        error.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::FirstLineIndent {
             indent: 24.0,
             width: 20.0,
         })
     );
     assert_eq!(
-        location(&error),
+        location(error.first()),
         (Some(0), Some(1), Some(Region::Body), Some((0, 0)))
     );
 }
@@ -2408,14 +2518,14 @@ fn cell_rich_taller_than_frame_does_not_continue() {
     let error = paragraph.err().unwrap();
     assert!(
         matches!(
-            error.kind,
+            error.first().kind.clone(),
             ErrorKind::UnsplittableTallerThanFrame { height, avail }
                 if pt_near(height, LINE * 2.0) && pt_near(avail, LINE)
         ),
         "{error:?}"
     );
     assert_eq!(
-        location(&error),
+        location(error.first()),
         (Some(0), Some(1), Some(Region::Body), Some((0, 0)))
     );
 
@@ -2432,7 +2542,7 @@ fn cell_rich_taller_than_frame_does_not_continue() {
     let error = list.err().unwrap();
     assert!(
         matches!(
-            error.kind,
+            error.first().kind.clone(),
             ErrorKind::UnsplittableTallerThanFrame { height, avail }
                 if pt_near(height, LINE * 2.0) && pt_near(avail, LINE)
         ),
@@ -2521,7 +2631,7 @@ fn cell_list_item_rejects_forbidden_kids() {
             Ok(())
         });
         assert_eq!(
-            result.err().map(|error| error.kind),
+            result.err().map(|error| error.first().kind.clone()),
             Some(ErrorKind::InvalidCellContent {
                 container: "list item",
                 node,
@@ -2550,7 +2660,7 @@ fn cell_list_item_rejects_forbidden_kids() {
             Ok(())
         });
         assert_eq!(
-            result.err().map(|error| error.kind),
+            result.err().map(|error| error.first().kind.clone()),
             Some(ErrorKind::InvalidCellContent {
                 container: "list item",
                 node: "image",
@@ -2575,14 +2685,14 @@ fn cell_list_narrower_than_marker_is_invalid_geometry() {
     );
     let error = result.err().unwrap();
     assert_eq!(
-        error.kind,
+        error.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::ListIndentWiderThanFrame {
             indent: 18.0,
             avail: 18.0,
         })
     );
     assert_eq!(
-        location(&error),
+        location(error.first()),
         (Some(0), Some(1), Some(Region::Body), Some((0, 0)))
     );
 }
@@ -2751,7 +2861,7 @@ fn auto_with_ratio_fails_on_columns_and_table_tracks() {
         Ok(())
     });
     assert_eq!(
-        columns.err().map(|error| error.kind),
+        columns.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::ColumnWidths {
             reason: ColumnWidthsReason::AutoWithRatio
         })
@@ -2766,7 +2876,7 @@ fn auto_with_ratio_fails_on_columns_and_table_tracks() {
         Ok(())
     });
     assert_eq!(
-        table.err().map(|error| error.kind),
+        table.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::ColumnWidths {
             reason: ColumnWidthsReason::AutoWithRatio
         })
@@ -2784,7 +2894,7 @@ fn table_tracks_length_must_match_the_first_row() {
         Ok(())
     });
     assert_eq!(
-        result.err().map(|error| error.kind),
+        result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::ColumnWidths {
             reason: ColumnWidthsReason::ColumnCount
         })
@@ -2840,11 +2950,11 @@ fn inch_preset_on_a_narrow_page_is_invalid_geometry() {
     );
     let error = result.err().unwrap();
     assert_eq!(
-        error.kind,
+        error.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::BodyFrame {
             width: -44.0,
             height: 56.0,
         })
     );
-    assert_eq!(location(&error), (Some(0), None, None, None));
+    assert_eq!(location(error.first()), (Some(0), None, None, None));
 }

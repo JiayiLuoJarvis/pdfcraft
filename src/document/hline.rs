@@ -15,7 +15,7 @@ pub struct HLine {
     pub(crate) color: Color,
     pub(crate) space_before: Length<NonNegative>,
     pub(crate) space_after: Length<NonNegative>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl Default for HLine {
@@ -27,7 +27,7 @@ impl Default for HLine {
             color: Color::rgb(0, 0, 0),
             space_before: NonNegative::ZERO,
             space_after: NonNegative::ZERO,
-            error: None,
+            errors: ErrorBag::default(),
         }
     }
 }
@@ -88,16 +88,16 @@ impl HLine {
     }
 
     pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
+        self.errors.record(error);
     }
 
-    pub(crate) fn lower(self) -> Result<FlowNode> {
-        if let Some(error) = self.error {
-            return Err(error);
+    pub(crate) fn lower(self, into: &mut ErrorBag) -> Option<FlowNode> {
+        let failed = !self.errors.is_empty();
+        into.absorb(self.errors);
+        if failed {
+            return None;
         }
-        Ok(FlowNode::HLine(HLineNode::new(
+        Some(FlowNode::HLine(HLineNode::new(
             self.width,
             self.align,
             self.thickness,

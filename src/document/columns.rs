@@ -4,8 +4,9 @@ use super::*;
 /// Columns being added to a row.
 pub struct Columns {
     pub(crate) parent: Flow,
-    pub(crate) cols: Vec<Result<(ColumnWidth, Vec<FlowNode>)>>,
+    pub(crate) cols: Vec<(ColumnWidth, Vec<FlowNode>)>,
     pub(crate) gap: Length<NonNegative>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl Columns {
@@ -14,6 +15,7 @@ impl Columns {
             parent: parent.child(),
             cols: Vec::new(),
             gap: default_column_gap(),
+            errors: ErrorBag::default(),
         };
         f(&mut columns);
         columns
@@ -23,7 +25,7 @@ impl Columns {
     pub fn gap(&mut self, gap: impl IntoNonNegative) {
         match gap.into_non_negative() {
             Ok(gap) => self.gap = gap,
-            Err(error) => self.cols.push(Err(error)),
+            Err(error) => self.errors.record(error),
         }
     }
 
@@ -39,7 +41,7 @@ impl Columns {
     pub fn col_fixed(&mut self, width: impl IntoPositive, f: impl FnOnce(&mut Flow)) {
         match width.into_positive() {
             Ok(width) => self.push_col(ColumnWidth::Fixed(width), f),
-            Err(error) => self.cols.push(Err(error)),
+            Err(error) => self.errors.record(error),
         }
     }
 
@@ -47,7 +49,7 @@ impl Columns {
     pub fn col_ratio(&mut self, weight: f32, f: impl FnOnce(&mut Flow)) {
         match Ratio::new(weight) {
             Ok(ratio) => self.push_col(ColumnWidth::Ratio(ratio), f),
-            Err(error) => self.cols.push(Err(error)),
+            Err(error) => self.errors.record(error),
         }
     }
 
@@ -57,19 +59,41 @@ impl Columns {
     }
 
     fn push_col(&mut self, width: ColumnWidth, f: impl FnOnce(&mut Flow)) {
-        let col = self.parent.nested(f).map(|nodes| (width, nodes));
-        self.cols.push(col);
+        let mut child = self.parent.child();
+        f(&mut child);
+        let (nodes, errors) = child.into_parts();
+        let failed = !errors.is_empty();
+        self.errors.absorb(errors);
+        if !failed {
+            self.cols.push((width, nodes));
+        }
     }
 
-    pub(crate) fn lower(self) -> Result<FlowNode> {
-        let cols = self.cols.into_iter().collect::<Result<Vec<_>>>()?;
-        let widths: Vec<_> = cols.iter().map(|(w, _)| *w).collect();
-        reject_auto_with_ratio(&widths)?;
-        Ok(FlowNode::Columns(ColumnsNode::new(self.gap, cols)?))
+    pub(crate) fn lower(self, into: &mut ErrorBag) -> Option<FlowNode> {
+        let failed = !self.errors.is_empty();
+        into.absorb(self.errors);
+        let widths: Vec<_> = self.cols.iter().map(|(width, _)| *width).collect();
+        let widths_ok = match reject_auto_with_ratio(&widths) {
+            Ok(()) => true,
+            Err(error) => {
+                into.record(error);
+                false
+            }
+        };
+        if failed || !widths_ok {
+            return None;
+        }
+        match ColumnsNode::new(self.gap, self.cols) {
+            Ok(node) => Some(FlowNode::Columns(node)),
+            Err(error) => {
+                into.record(error);
+                None
+            }
+        }
     }
 }
 
-pub(crate) fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Result<()> {
+pub(crate) fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Fallible<()> {
     let auto = widths.iter().any(|w| matches!(w, ColumnWidth::Auto));
     let ratio = widths.iter().any(|w| matches!(w, ColumnWidth::Ratio(_)));
     if auto && ratio {

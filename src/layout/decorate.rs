@@ -4,7 +4,9 @@
 
 use std::num::NonZeroU32;
 
-use crate::error::{Error, ErrorKind, GeometryKind, Region, Result};
+use crate::error::{
+    Error, ErrorBag, ErrorKind, Fallible as Result, GeometryKind, Location, Region,
+};
 use crate::geom::{Ink, Margins, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{
@@ -45,7 +47,8 @@ pub(crate) struct PageInfo {
     pub(crate) margins: Margins,
 }
 
-pub(crate) type BandContent<'a> = Box<dyn Fn(&PageInfo) -> Result<Vec<FlowNode>> + 'a>;
+pub(crate) type BandContent<'a> =
+    Box<dyn Fn(&PageInfo, &mut ErrorBag) -> Result<Vec<FlowNode>> + 'a>;
 
 /// Unwrapped line for behind/front. `at` is the line-box top-left; alignment is ignored.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +74,8 @@ pub(crate) enum LayerItem {
     },
 }
 
-pub(crate) type LayerContent<'a> = Box<dyn Fn(&PageInfo) -> Result<Vec<LayerItem>> + 'a>;
+pub(crate) type LayerContent<'a> =
+    Box<dyn Fn(&PageInfo, &mut ErrorBag) -> Result<Vec<LayerItem>> + 'a>;
 
 #[derive(Default)]
 pub(crate) struct Decorations<'a> {
@@ -151,19 +155,20 @@ pub(crate) fn measure_bands(
             let top = margins.top().as_pt();
             let bottom = margins.bottom().as_pt();
             let page_h = size.height().as_pt();
-            let at = |region| {
-                move |error: Error| {
-                    error
-                        .in_region(region)
-                        .on_page_index(index)
-                        .in_section(section)
-                }
-            };
-            let mut band = |content: &Option<BandContent<'_>>, y: f32, margin: f32| -> Result<_> {
+            let mut place = |region: Region,
+                             content: &Option<BandContent<'_>>,
+                             y: f32,
+                             margin: f32|
+             -> Result<_> {
                 let Some(content) = content else {
                     return Ok(None);
                 };
-                let fragment = measure_band(ctx, content(&page)?, size, margin)?;
+                let mut at = Location::page_index(index).with_region(region);
+                at.section = Some(section);
+                let fragment = ctx.located(&at, |ctx| {
+                    let nodes = content(&page, ctx.errors)?;
+                    measure_band(ctx, nodes, size, margin)
+                })?;
                 fragment
                     .map(|fragment| {
                         Ok(PlacedFragment {
@@ -173,16 +178,27 @@ pub(crate) fn measure_bands(
                     })
                     .transpose()
             };
-            let header = band(&decorations.header, 0.0, top).map_err(at(Region::Header))?;
-            let footer =
-                band(&decorations.footer, page_h - bottom, bottom).map_err(at(Region::Footer))?;
+            let header = place(Region::Header, &decorations.header, 0.0, top)?;
+            let footer = place(Region::Footer, &decorations.footer, page_h - bottom, bottom)?;
+            let behind = {
+                let mut at = Location::page_index(index).with_region(Region::Behind);
+                at.section = Some(section);
+                ctx.located(&at, |ctx| {
+                    measure_layer(ctx, decorations.behind.as_ref(), &page)
+                })?
+            };
+            let front = {
+                let mut at = Location::page_index(index).with_region(Region::Front);
+                at.section = Some(section);
+                ctx.located(&at, |ctx| {
+                    measure_layer(ctx, decorations.front.as_ref(), &page)
+                })?
+            };
             bands.push(PageBands {
-                behind: measure_layer(ctx, decorations.behind.as_ref(), &page)
-                    .map_err(at(Region::Behind))?,
+                behind,
                 header,
                 footer,
-                front: measure_layer(ctx, decorations.front.as_ref(), &page)
-                    .map_err(at(Region::Front))?,
+                front,
             });
         }
     }
@@ -220,14 +236,14 @@ fn measure_layer(
         return Ok(None);
     };
     let mut commands = Vec::new();
-    for item in content(page)? {
+    for item in content(page, ctx.errors)? {
         match item {
             LayerItem::Text(item) => {
                 let style = Style {
                     align: TextAlign::Start,
                     ..item.style
                 };
-                let mut run = single_line_run(ctx.fonts, &item.text, &style, f32::INFINITY)?;
+                let mut run = single_line_run(ctx, &item.text, &style, f32::INFINITY)?;
                 run.origin = Point::try_pt(
                     item.at.x().as_pt() + run.origin.x().as_pt(),
                     item.at.y().as_pt() + run.origin.y().as_pt(),
@@ -324,12 +340,12 @@ mod tests {
 
     fn band(label: &'static str, style: &Style) -> BandContent<'static> {
         let style = style.clone();
-        Box::new(move |_: &PageInfo| Ok(vec![text(label, &style)]))
+        Box::new(move |_: &PageInfo, _: &mut ErrorBag| Ok(vec![text(label, &style)]))
     }
 
     fn numbered(style: &Style) -> BandContent<'static> {
         let style = style.clone();
-        Box::new(move |page: &PageInfo| {
+        Box::new(move |page: &PageInfo, _: &mut ErrorBag| {
             let label = format!("Page {} / {}", page.number.get(), page.count.get());
             Ok(vec![text(&label, &style)])
         })
@@ -445,7 +461,9 @@ mod tests {
         let body = text("A", &style);
         let lines = vec!["H"; 40].join("\n");
         let decorations = Decorations {
-            header: Some(Box::new(move |_: &PageInfo| Ok(vec![text(&lines, &style)]))),
+            header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
+                Ok(vec![text(&lines, &style)])
+            })),
             ..Decorations::none()
         };
         let (result, _) = render(body, &mut fonts, margins(30.0, 0.0, 0.0), &decorations);
@@ -517,7 +535,7 @@ mod tests {
         )
         .unwrap();
         let decorations = Decorations {
-            header: Some(Box::new(move |_: &PageInfo| {
+            header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
                 Ok(vec![FlowNode::Image(image.clone())])
             })),
             ..Decorations::none()
@@ -545,7 +563,7 @@ mod tests {
     fn band_rejects_tables() {
         let (mut fonts, style) = fonts_and_style();
         let decorations = Decorations {
-            header: Some(Box::new(|_: &PageInfo| {
+            header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
                 Ok(vec![FlowNode::Table(TableNode::new(TableSpec::new(
                     vec![ColumnWidth::Auto],
                 ))?)])
@@ -584,7 +602,7 @@ mod tests {
         let b = metrics(&fonts, &style).baseline;
         let header_style = style.clone();
         let decorations = Decorations {
-            header: Some(Box::new(move |_: &PageInfo| {
+            header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
                 Ok(vec![two_columns(
                     vec![text("L", &header_style)],
                     vec![text("R", &header_style)],
@@ -614,7 +632,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style();
         let header_style = style.clone();
         let decorations = Decorations {
-            header: Some(Box::new(move |_: &PageInfo| {
+            header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
                 let table = TableNode::new(TableSpec::new(vec![ColumnWidth::Auto]))?;
                 Ok(vec![two_columns(
                     vec![text("L", &header_style)],
@@ -644,7 +662,7 @@ mod tests {
 
     fn layer(label: &'static str, x: f32, y: f32, style: &Style) -> LayerContent<'static> {
         let style = style.clone();
-        Box::new(move |_: &PageInfo| {
+        Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
             Ok(vec![LayerItem::Text(LayerText {
                 text: label.to_owned(),
                 at: Point::try_pt(x, y).unwrap(),
@@ -742,7 +760,7 @@ mod tests {
         );
         let decorations = Decorations {
             header: Some(band("H", &style)),
-            behind: Some(Box::new(move |_: &PageInfo| {
+            behind: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
                 Ok(vec![LayerItem::Shape {
                     path: path.clone(),
                     ink: Ink::Stroke(Pen::new(Color::rgb(1, 2, 3), 1.5).unwrap()),
@@ -770,7 +788,7 @@ mod tests {
         let rect = Rect::try_pt(10.0, 20.0, 40.0, 20.0).unwrap();
         let path = Path::ellipse(rect).unwrap();
         let decorations = Decorations {
-            behind: Some(Box::new(move |_: &PageInfo| {
+            behind: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
                 Ok(vec![LayerItem::Shape {
                     path: path.clone(),
                     ink: Ink::FillStroke(
@@ -817,7 +835,7 @@ mod tests {
     fn band_error_returns_before_any_page_starts() {
         let (mut fonts, style) = fonts_and_style();
         let decorations = Decorations {
-            header: Some(Box::new(|_: &PageInfo| {
+            header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
                 Err(Error::from(ErrorKind::EmptyLink))
             })),
             ..Decorations::none()

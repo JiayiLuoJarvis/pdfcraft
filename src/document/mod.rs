@@ -15,7 +15,10 @@ use crate::canvas::{
     Canvas, DecodedImage, ImageFormat, ImageRegistry, LinkTarget, RecordedPage, RecordingCanvas,
     RejectingImageRegistry,
 };
-use crate::error::{ColumnWidthsReason, Error, ErrorKind, GeometryKind, Result};
+use crate::error::{
+    ColumnWidthsReason, Error, ErrorBag, ErrorKind, Errors, Fallible, GeometryKind, Location,
+    Result,
+};
 use crate::fonts::{FontId, FontSource, FontStore};
 use crate::geom::{
     Color, Ink, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length, Margins, NonNegative,
@@ -30,7 +33,7 @@ use crate::layout::frame::LayoutCtx;
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
-use crate::layout::paginate::{paginate_sections, PaginateConfig, SectionJob};
+use crate::layout::paginate::{layout_pages, paint_laid, PaginateConfig, SectionJob};
 use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun};
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table as layout_table;

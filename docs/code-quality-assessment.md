@@ -33,9 +33,9 @@
 
 下面按优先级粗排。真正动手顺序等逐条讨论后再定。
 
-### 1–4. 错误可诊断性 — **刀 1–3 已落地**
+### 1–4. 错误可诊断性 — **刀 1–4 已落地**
 
-见 [`error-diagnosability.md`](error-diagnosability.md)。`Error { kind, at }`、结构化变体、`Location`、`source()` 链、`BoldFaceRequired`、删 `UnsupportedCanvasOperation`、修正 decoration 高度。**刀 4（多错收集）未做。**
+见 [`error-diagnosability.md`](error-diagnosability.md)。`Error { kind, at }`、结构化变体、`Location`、`source()` 链、`BoldFaceRequired`、删 `UnsupportedCanvasOperation`、修正 decoration 高度。**刀 4（多错收集）已落地。**
 
 ### 5–6. 公开面清理与隐性默认 — **已落地**
 
@@ -84,7 +84,7 @@
 | --- | --- |
 | 模块组织 | 目标 DAG 已落地（[`module-dependency.md`](module-dependency.md)）：生产代码无环，document 不再依赖 backend |
 | 风格 | 机械层统一。API 三种形态 0.x 可接受，1.0 前宜收敛 |
-| 报错 / 批跑 | 刀 1–3 已落地（定位 + `source()`）。多错收集仍开 |
+| 报错 / 批跑 | 刀 1–4 已落地（定位 + `source()` + `Errors` 多错收集） |
 | 对照官方 Rust | `Error` 已是 kind+location+source。正文入流为 `FlowWriter` |
 
 ## 两类读者分别要知道的
@@ -92,7 +92,7 @@
 **迁几十份 PDF 的调用方。**
 
 - 可以依赖「一份失败就整份不出」和「缺字必报」。
-- `Error.at` 可带节/页/页眉页脚/单元格；仍只保留首错（多错收集未做）。
+- `Error.at` 可带节/页/页眉页脚/单元格。`document` 失败时返回 `Errors`（最多 64 条，发现序，截断另报）。见 [`error-diagnosability.md`](error-diagnosability.md)。
 - `pt_near` 仅在 `test-utils` feature 下从 crate 根导出。
 
 **维护者。**
@@ -103,7 +103,7 @@
 
 ## 讨论顺序建议
 
-1. 报错可诊断性——**刀 1–3 已落地**；刀 4 另开。
+1. 报错可诊断性——**刀 1–4 已落地**。
 2. 公开面清理——**已落地**。
 3. 组织与依赖——**已落地**，见 [`module-dependency.md`](module-dependency.md)「落地记录」。
 4. `Deref` 到 `Flow`——**已落地**。

@@ -89,7 +89,7 @@ impl<'a> Section<'a> {
         self,
         default_page: PageSize,
         doc: DocToken,
-    ) -> Result<(PaginateConfig, FlowNode, Decorations<'a>)> {
+    ) -> (PaginateConfig, FlowNode, Decorations<'a>, ErrorBag) {
         let Self {
             page_size,
             margins,
@@ -104,13 +104,14 @@ impl<'a> Section<'a> {
             page_size: page_size.unwrap_or(default_page).resolve(),
             margins,
         };
-        let root = FlowNode::Stack(flow.into_nodes()?);
+        let (nodes, errors) = flow.into_parts();
+        let root = FlowNode::Stack(nodes);
         let decorations = Decorations {
             header: header.map(|hook| band_content(hook, style.clone())),
             footer: footer.map(|hook| band_content(hook, style.clone())),
             behind: behind.map(|hook| layer_content(hook, style.clone(), doc)),
             front: front.map(|hook| layer_content(hook, style, doc)),
         };
-        Ok((config, root, decorations))
+        (config, root, decorations, errors)
     }
 }

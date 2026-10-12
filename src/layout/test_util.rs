@@ -1,7 +1,7 @@
 //! Shared fixtures for layout tests.
 
 use crate::canvas::{CanvasCommand, RecordedPage, RecordingCanvas};
-use crate::error::Result;
+use crate::error::{ErrorBag, Fallible as Result};
 use crate::fonts::{fixture_bytes, FontSource, FontStore};
 use crate::geom::{Color, Margins, NonNegative, Path, PathVerb, Positive, Size};
 use crate::layout::decorate::Decorations;
@@ -66,7 +66,11 @@ pub(crate) fn render(
     config: PaginateConfig,
     decorations: &Decorations<'_>,
 ) -> (Result<()>, RecordingCanvas) {
-    let mut ctx = LayoutCtx { fonts };
+    let mut errors = ErrorBag::default();
+    let mut ctx = LayoutCtx {
+        fonts,
+        errors: &mut errors,
+    };
     let mut rec = RecordingCanvas::new();
     let result = paginate_root(root, &mut ctx, config, decorations, &mut rec);
     (result, rec)

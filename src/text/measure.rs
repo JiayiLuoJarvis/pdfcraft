@@ -9,7 +9,7 @@ use std::ops::Range;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::MetadataProvider;
 
-use crate::error::{Error, ErrorKind, GeometryKind, Result};
+use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
 use crate::fonts::{parse_face, FaceMetrics, FontId, FontStore};
 use crate::geom::{Length, Positive};
 
@@ -20,6 +20,8 @@ pub(crate) struct MeasuredGlyph {
     pub(crate) advance_font_units: f32,
     pub(crate) advance_norm: f32,
     pub(crate) byte_range: Range<usize>,
+    /// Missing and unknown-font scalars stay in the cluster tape at advance 0 and are not drawn.
+    pub(crate) omit: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,17 +42,23 @@ pub(crate) struct LineMetrics {
 
 pub(crate) fn measure_text(
     fonts: &mut FontStore,
+    errors: &mut ErrorBag,
     font: FontId,
     text: &str,
 ) -> Result<MeasuredText> {
-    let (bytes, index, units_per_em) = {
-        let face = fonts.face(font)?;
-        (
-            std::sync::Arc::clone(&face.source.bytes),
-            face.source.index,
-            face.metrics.units_per_em,
-        )
+    let face = match fonts.face(font) {
+        Ok(face) => face,
+        Err(error) => {
+            if matches!(error.kind, ErrorKind::UnknownFont { .. }) {
+                errors.record(FontFault::UnknownFont { id: font.as_u32() });
+                return Ok(omitted_text(text));
+            }
+            return Err(error);
+        }
     };
+    let bytes = std::sync::Arc::clone(&face.source.bytes);
+    let index = face.source.index;
+    let units_per_em = face.metrics.units_per_em;
     let font_ref = parse_face(bytes.as_slice(), index)?;
     let charmap = font_ref.charmap();
     let glyph_metrics = font_ref.glyph_metrics(Size::unscaled(), LocationRef::default());
@@ -58,12 +66,14 @@ pub(crate) fn measure_text(
     let mut glyphs = Vec::new();
     let mut total_norm = 0.0;
     for (start, scalar) in text.char_indices() {
+        let end = start + scalar.len_utf8();
         let Some(gid) = charmap.map(scalar) else {
-            return Err(ErrorKind::MissingGlyph {
+            errors.record(FontFault::MissingGlyph {
                 font: font.as_u32(),
                 scalar,
-            }
-            .into());
+            });
+            glyphs.push(omitted_glyph(scalar, start..end));
+            continue;
         };
         let glyph_id = gid.to_u32();
         let advance_font_units = {
@@ -84,13 +94,13 @@ pub(crate) fn measure_text(
         };
         let advance_norm = advance_font_units / units_per_em;
         total_norm += advance_norm;
-        let end = start + scalar.len_utf8();
         glyphs.push(MeasuredGlyph {
             scalar,
             glyph_id,
             advance_font_units,
             advance_norm,
             byte_range: start..end,
+            omit: false,
         });
     }
 
@@ -99,6 +109,29 @@ pub(crate) fn measure_text(
         glyphs,
         advance_norm: total_norm,
     })
+}
+
+fn omitted_glyph(scalar: char, byte_range: Range<usize>) -> MeasuredGlyph {
+    MeasuredGlyph {
+        scalar,
+        glyph_id: 0,
+        advance_font_units: 0.0,
+        advance_norm: 0.0,
+        byte_range,
+        omit: true,
+    }
+}
+
+fn omitted_text(text: &str) -> MeasuredText {
+    let glyphs = text
+        .char_indices()
+        .map(|(start, scalar)| omitted_glyph(scalar, start..start + scalar.len_utf8()))
+        .collect();
+    MeasuredText {
+        text: text.to_owned(),
+        glyphs,
+        advance_norm: 0.0,
+    }
 }
 
 pub(crate) fn line_metrics(
@@ -144,18 +177,27 @@ mod tests {
     #[test]
     fn unmapped_scalar_is_missing_glyph() {
         let (mut fonts, id) = loaded();
-        let err = measure_text(&mut fonts, id, "\u{FFFF}").unwrap_err();
-        assert!(matches!(err.kind, ErrorKind::MissingGlyph {
-                font,
-                scalar: '\u{FFFF}'
-            } if font == id.as_u32()
-        ));
+        let mut errors = ErrorBag::default();
+        let measured = measure_text(&mut fonts, &mut errors, id, "A\u{FFFF}B").unwrap();
+        assert!(!measured.glyphs[0].omit && !measured.glyphs[2].omit);
+        assert!(measured.glyphs[1].omit);
+        assert!(measured.glyphs[1].advance_norm.abs() <= f32::EPSILON);
+        let found = errors.finish(()).unwrap_err();
+        assert_eq!(
+            found.as_slice(),
+            &[Error::from(ErrorKind::MissingGlyph {
+                font: id.as_u32(),
+                scalar: '\u{FFFF}',
+            })]
+        );
     }
 
     #[test]
     fn fixture_ascii_and_cjk_advances_are_pinned() {
         let (mut fonts, id) = loaded();
-        let measured = measure_text(&mut fonts, id, "A第").unwrap();
+        let mut errors = ErrorBag::default();
+        let measured = measure_text(&mut fonts, &mut errors, id, "A第").unwrap();
+        assert!(errors.is_empty());
         assert_eq!(measured.glyphs.len(), 2);
         assert_eq!(measured.glyphs[0].scalar, 'A');
         assert_eq!(measured.glyphs[1].scalar, '第');

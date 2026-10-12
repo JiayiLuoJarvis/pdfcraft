@@ -3,14 +3,14 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
-use crate::error::{Error, ErrorKind, GeometryKind, Result};
+use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
 use crate::fonts::{FontId, FontStore};
 use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::style::{Style, TextAlign};
 use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
 use crate::text::line_break::{break_spans, Advance, LineBudget, Seg, Span, SpanLine};
-use crate::text::measure::{line_metrics, measure_text, MeasuredText};
+use crate::text::measure::{line_metrics, measure_text, LineMetrics, MeasuredText};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Face {
@@ -130,7 +130,7 @@ impl TextNode {
         ctx: &mut LayoutCtx<'_>,
         avail: Frame,
     ) -> Result<Split<ParagraphNode>> {
-        ParagraphNode::layout_runs(ctx.fonts, &self.items, &self.style, avail.width)?.split(avail)
+        ParagraphNode::layout_runs(ctx, &self.items, &self.style, avail.width)?.split(avail)
     }
 }
 
@@ -155,11 +155,28 @@ impl ParagraphNode {
         } else {
             vec![InlineItem::Text(TextRun::new(text, Face::Body))]
         };
-        Self::layout_runs(fonts, &items, style, width)
+        let mut errors = ErrorBag::default();
+        let laid = {
+            let mut ctx = LayoutCtx {
+                fonts,
+                errors: &mut errors,
+            };
+            Self::layout_runs(&mut ctx, &items, style, width)?
+        };
+        if errors.is_empty() {
+            Ok(laid)
+        } else {
+            Err(errors
+                .finish(())
+                .expect_err("bag was not empty")
+                .into_iter()
+                .next()
+                .expect("Errors keeps one item"))
+        }
     }
 
     fn layout_runs(
-        fonts: &mut FontStore,
+        ctx: &mut LayoutCtx<'_>,
         items: &[InlineItem],
         style: &Style,
         width: f32,
@@ -174,7 +191,7 @@ impl ParagraphNode {
             return Err(GeometryKind::FirstLineIndent { indent, width }.into());
         }
         let font_size = style.font_size.as_pt();
-        let prepared = prepare_inline(fonts, items, style)?;
+        let prepared = prepare_inline(ctx, items, style)?;
         let group_refs: Vec<&ClusteredText> = prepared
             .groups
             .iter()
@@ -191,8 +208,7 @@ impl ParagraphNode {
                 cluster_width_pt(&prepared.groups[group], cluster.glyph_range(), font_size)
             },
         )?;
-        let face = fonts.metrics(style.font)?;
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor)?;
+        let metrics = line_metrics_or_soft(ctx, style)?;
         let line_height = metrics.line_height;
 
         let mut lines = Vec::with_capacity(broken.len());
@@ -275,13 +291,13 @@ impl ParagraphNode {
 
 /// One unwrapped run of `text` at origin `(0, baseline)`.
 pub(crate) fn single_line_run(
-    fonts: &mut FontStore,
+    ctx: &mut LayoutCtx<'_>,
     text: &str,
     style: &Style,
     max_width: f32,
 ) -> Result<GlyphRun> {
     let clustered = ClusteredText::new(text);
-    let measured = measure_text(fonts, style.font, clustered.glyph_text())?;
+    let measured = measure_text(ctx.fonts, ctx.errors, style.font, clustered.glyph_text())?;
     let width = measured.advance_norm * style.font_size.as_pt();
     if width > max_width {
         return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
@@ -289,8 +305,7 @@ pub(crate) fn single_line_run(
             avail: max_width,
         }));
     }
-    let face = fonts.metrics(style.font)?;
-    let metrics = line_metrics(face, style.font_size, style.line_height_factor)?;
+    let metrics = line_metrics_or_soft(ctx, style)?;
     let mut run = glyph_run_for_line(
         &measured,
         0..measured.glyphs.len(),
@@ -388,6 +403,7 @@ struct InlineGlyph {
     glyph_id: u32,
     advance_norm: f32,
     byte_range: std::ops::Range<usize>,
+    omit: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -402,7 +418,11 @@ struct Prepared {
     spans: Vec<Span<BlankDraw>>,
 }
 
-fn prepare_inline(fonts: &mut FontStore, items: &[InlineItem], style: &Style) -> Result<Prepared> {
+fn prepare_inline(
+    ctx: &mut LayoutCtx<'_>,
+    items: &[InlineItem],
+    style: &Style,
+) -> Result<Prepared> {
     let mut groups = Vec::new();
     let mut spans = Vec::new();
     let mut pending: Vec<TextRun> = Vec::new();
@@ -410,12 +430,12 @@ fn prepare_inline(fonts: &mut FontStore, items: &[InlineItem], style: &Style) ->
         match item {
             InlineItem::Text(run) => {
                 if pending.first().is_some_and(|first| first.link != run.link) {
-                    flush_text(fonts, style.font, &mut pending, &mut groups, &mut spans)?;
+                    flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
                 }
                 pending.push(run.clone());
             }
             InlineItem::Blank(blank) => {
-                flush_text(fonts, style.font, &mut pending, &mut groups, &mut spans)?;
+                flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
                 spans.push(Span::Blank {
                     advance: blank_advance(blank.width, style.font_size.as_pt())?,
                     payload: BlankDraw {
@@ -427,12 +447,12 @@ fn prepare_inline(fonts: &mut FontStore, items: &[InlineItem], style: &Style) ->
             }
         }
     }
-    flush_text(fonts, style.font, &mut pending, &mut groups, &mut spans)?;
+    flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
     Ok(Prepared { groups, spans })
 }
 
 fn flush_text(
-    fonts: &mut FontStore,
+    ctx: &mut LayoutCtx<'_>,
     body: FontId,
     pending: &mut Vec<TextRun>,
     groups: &mut Vec<MeasuredInline>,
@@ -441,7 +461,7 @@ fn flush_text(
     if pending.is_empty() {
         return Ok(());
     }
-    let measured = measure_inline(fonts, pending, body)?;
+    let measured = measure_inline(ctx, pending, body)?;
     spans.push(Span::Group(groups.len()));
     groups.push(measured);
     pending.clear();
@@ -536,18 +556,27 @@ fn empty_glyph_run(style: &Style, x: f32, baseline: f32) -> Result<GlyphRun> {
     })
 }
 
-fn measure_inline(fonts: &mut FontStore, runs: &[TextRun], body: FontId) -> Result<MeasuredInline> {
+fn measure_inline(
+    ctx: &mut LayoutCtx<'_>,
+    runs: &[TextRun],
+    body: FontId,
+) -> Result<MeasuredInline> {
     let link = runs.first().and_then(|run| run.link.clone());
     debug_assert!(
         runs.iter().all(|run| run.link == link),
         "one measured group must share one link"
     );
     let text = cluster_tagged(runs.iter().map(|run| (run.face, run.text.as_str())));
-    let bold = if runs
+    let needs_bold = runs
         .iter()
-        .any(|run| run.face == Face::Bold && !run.text.is_empty())
-    {
-        Some(fonts.bold()?)
+        .any(|run| run.face == Face::Bold && !run.text.is_empty());
+    let bold = if needs_bold {
+        if let Ok(id) = ctx.fonts.bold() {
+            Some(id)
+        } else {
+            ctx.soft(FontFault::BoldFaceRequired);
+            Some(body)
+        }
     } else {
         None
     };
@@ -555,10 +584,10 @@ fn measure_inline(fonts: &mut FontStore, runs: &[TextRun], body: FontId) -> Resu
         .glyph_tags()
         .iter()
         .map(|face| match face {
-            Face::Body => Ok(body),
-            Face::Bold => bold.ok_or(ErrorKind::BoldFaceRequired.into()),
+            Face::Body => body,
+            Face::Bold => bold.unwrap_or(body),
         })
-        .collect::<Result<_>>()?;
+        .collect();
     let glyph_text = text.clustered().glyph_text();
     let mut byte_boundaries: Vec<_> = glyph_text.char_indices().map(|(byte, _)| byte).collect();
     byte_boundaries.push(glyph_text.len());
@@ -572,18 +601,48 @@ fn measure_inline(fonts: &mut FontStore, runs: &[TextRun], body: FontId) -> Resu
             end += 1;
         }
         let byte_start = byte_boundaries[start];
-        let measured = measure_text(fonts, font, &glyph_text[byte_start..byte_boundaries[end]])?;
+        let measured = measure_text(
+            ctx.fonts,
+            ctx.errors,
+            font,
+            &glyph_text[byte_start..byte_boundaries[end]],
+        )?;
         debug_assert_eq!(measured.glyphs.len(), end - start);
         glyphs.extend(measured.glyphs.into_iter().map(|glyph| InlineGlyph {
             font,
             glyph_id: glyph.glyph_id,
             advance_norm: glyph.advance_norm,
             byte_range: (glyph.byte_range.start + byte_start)..(glyph.byte_range.end + byte_start),
+            omit: glyph.omit,
         }));
         start = end;
     }
 
     Ok(MeasuredInline { text, glyphs, link })
+}
+
+fn line_metrics_or_soft(ctx: &mut LayoutCtx<'_>, style: &Style) -> Result<LineMetrics> {
+    match ctx.fonts.metrics(style.font) {
+        Ok(face) => line_metrics(face, style.font_size, style.line_height_factor),
+        Err(error) => {
+            if let ErrorKind::UnknownFont { id } = error.kind {
+                ctx.soft(FontFault::UnknownFont { id });
+                let size = style.font_size.as_pt();
+                let factor = style.line_height_factor;
+                if !factor.is_finite() || factor <= 0.0 {
+                    return Err(GeometryKind::LineHeightFactor { factor }.into());
+                }
+                return Ok(LineMetrics {
+                    ascent: size,
+                    descent: 0.0,
+                    leading: 0.0,
+                    line_height: size * factor,
+                    baseline: size,
+                });
+            }
+            Err(error)
+        }
+    }
 }
 
 fn cluster_width_pt(
@@ -626,8 +685,9 @@ fn glyph_runs_for_line(
         }
         let byte_start = measured.glyphs[start].byte_range.start;
         let byte_end = measured.glyphs[end - 1].byte_range.end;
-        let glyphs = measured.glyphs[start..end]
+        let glyphs: Vec<_> = measured.glyphs[start..end]
             .iter()
+            .filter(|glyph| !glyph.omit)
             .map(|glyph| GlyphPlacement {
                 glyph_id: glyph.glyph_id,
                 advance_norm: glyph.advance_norm,
@@ -635,6 +695,10 @@ fn glyph_runs_for_line(
                     ..(glyph.byte_range.end - byte_start),
             })
             .collect();
+        if glyphs.is_empty() {
+            start = end;
+            continue;
+        }
         let advance = measured.glyphs[start..end]
             .iter()
             .map(|glyph| glyph.advance_norm * style.font_size.as_pt())
@@ -666,6 +730,7 @@ fn glyph_run_for_line(
     let byte_origin = byte_range.start;
     let glyphs = measured.glyphs[glyph_range]
         .iter()
+        .filter(|glyph| !glyph.omit)
         .map(|glyph| GlyphPlacement {
             glyph_id: glyph.glyph_id,
             advance_norm: glyph.advance_norm,

@@ -23,7 +23,11 @@ fn fit(
     height: f32,
 ) -> Fragment {
     let node = TextNode::from_items(items, style.clone());
-    let mut ctx = LayoutCtx { fonts };
+    let mut errors = crate::error::ErrorBag::default();
+    let mut ctx = LayoutCtx {
+        fonts,
+        errors: &mut errors,
+    };
     let Split::Fit { fragment, .. } = node
         .split(
             &mut ctx,
@@ -101,7 +105,11 @@ fn centered_fill_blank_starts_at_the_frame_x() {
         ],
         style,
     );
-    let mut ctx = LayoutCtx { fonts: &mut fonts };
+    let mut errors = crate::error::ErrorBag::default();
+    let mut ctx = LayoutCtx {
+        fonts: &mut fonts,
+        errors: &mut errors,
+    };
     let Split::Fit { fragment, .. } = node
         .split(
             &mut ctx,

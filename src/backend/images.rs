@@ -8,7 +8,7 @@ use krilla::image::Image;
 use krilla::Data;
 
 use crate::canvas::{DecodedImage, ImageFormat, ImageId, ImageRegistry};
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Fallible as Result};
 
 /// Encoded bytes above this are rejected before krilla sees them.
 ///

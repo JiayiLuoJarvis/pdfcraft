@@ -17,7 +17,7 @@ pub struct Band {
     pub(crate) right: Option<BandSlot>,
     pub(crate) inset_left: Length<NonNegative>,
     pub(crate) inset_right: Length<NonNegative>,
-    pub(crate) error: Option<Error>,
+    pub(crate) errors: ErrorBag,
 }
 
 impl Band {
@@ -91,15 +91,11 @@ impl Band {
     }
 
     pub(crate) fn note(&mut self, error: Error) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
+        self.errors.record(error);
     }
 
-    pub(crate) fn lower(self, style: &Style) -> Result<Vec<FlowNode>> {
-        if let Some(error) = self.error {
-            return Err(error);
-        }
+    pub(crate) fn lower(self, style: &Style, into: &mut ErrorBag) -> Vec<FlowNode> {
+        into.absorb(self.errors);
         let column = |slot: BandSlot, align: TextAlign| {
             let style = Style {
                 align,
@@ -115,47 +111,55 @@ impl Band {
             };
             vec![FlowNode::Text(node)]
         };
-        let even = ColumnWidth::Ratio(Ratio::new(1.0)?);
+        let even = ColumnWidth::Ratio(Ratio::new(1.0).expect("1 is positive"));
         let slots: Vec<_> = [(self.left, TextAlign::Start), (self.right, TextAlign::End)]
             .into_iter()
             .filter_map(|(text, align)| text.map(|text| (even, column(text, align))))
             .collect();
         if slots.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
-        let spacer = |pad: Length<NonNegative>| -> Result<Option<(ColumnWidth, Vec<FlowNode>)>> {
+        let spacer = |pad: Length<NonNegative>,
+                      into: &mut ErrorBag|
+         -> Option<(ColumnWidth, Vec<FlowNode>)> {
             if pad.as_pt() == 0.0 {
-                return Ok(None);
+                return None;
             }
-            Ok(Some((
-                ColumnWidth::Fixed(Positive::pt(pad.as_pt())?),
-                Vec::new(),
-            )))
+            match Positive::pt(pad.as_pt()) {
+                Ok(width) => Some((ColumnWidth::Fixed(width), Vec::new())),
+                Err(error) => {
+                    into.record(error);
+                    None
+                }
+            }
         };
-        let mut tracks: Vec<_> = spacer(self.inset_left)?.into_iter().collect();
+        let mut tracks: Vec<_> = spacer(self.inset_left, into).into_iter().collect();
         tracks.extend(slots);
-        tracks.extend(spacer(self.inset_right)?);
+        tracks.extend(spacer(self.inset_right, into));
         if tracks.len() == 1 {
-            return Ok(tracks.remove(0).1);
+            return tracks.remove(0).1;
         }
-        Ok(vec![FlowNode::Columns(ColumnsNode::new(
-            NonNegative::ZERO,
-            tracks,
-        )?)])
+        match ColumnsNode::new(NonNegative::ZERO, tracks) {
+            Ok(node) => vec![FlowNode::Columns(node)],
+            Err(error) => {
+                into.record(error);
+                Vec::new()
+            }
+        }
     }
 }
 
 pub(crate) fn band_content(hook: BandHook<'_>, style: Style) -> BandContent<'_> {
-    Box::new(move |info: &PageInfo| {
+    Box::new(move |info: &PageInfo, errors: &mut ErrorBag| {
         let mut band = Band {
             page: Page::from(info),
             left: None,
             right: None,
             inset_left: NonNegative::ZERO,
             inset_right: NonNegative::ZERO,
-            error: None,
+            errors: ErrorBag::default(),
         };
         hook(&mut band);
-        band.lower(&style)
+        Ok(band.lower(&style, errors))
     })
 }
