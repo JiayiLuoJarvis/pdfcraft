@@ -1,19 +1,27 @@
-//! Read `AcroForm` widgets from an existing PDF.
+//! Fill `AcroForm` widgets in an existing PDF and flatten the result.
 //!
-//! [`list_fields`] returns one value per widget annotation. The crate does not
-//! depend on `quire-pdf` and does not use `krilla`.
+//! [`list_fields`] returns one value per widget annotation. [`fill_and_flatten`]
+//! draws text, checks, and choices in PDF user space, then removes every widget
+//! annotation and the catalog `AcroForm` entry. The origin is the bottom-left
+//! of the page and y increases upward.
+//!
+//! This crate does not depend on `quire-pdf` and does not use `krilla`.
 
 #![forbid(unsafe_code)]
 
 mod error;
 mod fields;
+mod fill;
+mod font;
 mod inspect;
+mod overlay;
 
 pub use error::{Error, ErrorKind};
 pub use fields::{
     FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, MissingName, DEFAULT_FONT_SIZE,
     FONT_SIZE_STEP, LINE_HEIGHT_FACTOR, MIN_FONT_SIZE, PAD_BOTTOM, PAD_TOP, PAD_X,
 };
+pub use fill::fill_and_flatten;
 pub use inspect::list_fields;
 
 /// A forms result.

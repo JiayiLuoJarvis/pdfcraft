@@ -1,8 +1,3 @@
-//! Public field values and fill settings.
-//!
-//! Text is drawn in PDF user space. The origin is the bottom-left of the page
-//! and y increases upward.
-
 /// Starting font size in points.
 pub const DEFAULT_FONT_SIZE: f32 = 12.0;
 
@@ -46,8 +41,7 @@ pub enum FieldType {
 
 /// One widget from [`crate::list_fields`].
 ///
-/// Two widgets that share a name produce two values. The rectangle and the
-/// checkbox on-state stay inside the crate.
+/// Two widgets that share a name produce two values. The rectangle stays inside the crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldInfo {
     /// `/T`, inherited from the first parent that has the key.
@@ -75,14 +69,14 @@ pub enum FieldValue {
     CheckBox(bool),
 }
 
-/// TrueType or TrueType-collection bytes for one fill call.
+/// Bytes of one TrueType font with a `glyf` table.
 ///
-/// There is no process-wide default font.
+/// There is no process-wide default font. A font collection is rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontBytes<'a> {
     /// Font file bytes.
     pub bytes: &'a [u8],
-    /// Face index inside a collection. A single TrueType font uses `0`.
+    /// Face index. A single TrueType font uses `0`.
     pub index: u32,
 }
 
@@ -96,7 +90,7 @@ pub enum MissingName {
     Ignore,
 }
 
-/// Settings for one fill call.
+/// Settings for one [`crate::fill_and_flatten`] call.
 ///
 /// Text is left aligned and bottom aligned. Per-field alignment, `line_below`,
 /// and `absolute_lines` are not part of this version.

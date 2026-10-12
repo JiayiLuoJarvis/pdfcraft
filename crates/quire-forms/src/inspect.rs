@@ -1,15 +1,9 @@
-//! Walk page annotations and build one snapshot per widget.
-
 use lopdf::{Document, Object};
 
 use crate::error::{Error, ErrorKind, Result};
 use crate::fields::{FieldInfo, FieldType};
 
-/// Widget rectangle in PDF user space, lower-left origin, y upward.
-///
-/// The corners are ordered so `x0 <= x1` and `y0 <= y1`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 pub(crate) struct PdfRect {
     pub(crate) x0: f32,
     pub(crate) y0: f32,
@@ -17,7 +11,22 @@ pub(crate) struct PdfRect {
     pub(crate) y1: f32,
 }
 
-/// One widget, including geometry the public [`FieldInfo`] omits.
+impl PdfRect {
+    pub(crate) fn new(x0: f32, y0: f32, x1: f32, y1: f32) -> Self {
+        let (x0, x1) = ordered(x0, x1);
+        let (y0, y1) = ordered(y0, y1);
+        Self { x0, y0, x1, y1 }
+    }
+
+    pub(crate) fn width(self) -> f32 {
+        self.x1 - self.x0
+    }
+
+    pub(crate) fn height(self) -> f32 {
+        self.y1 - self.y0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WidgetSnap {
     pub(crate) name: String,
@@ -25,11 +34,6 @@ pub(crate) struct WidgetSnap {
     pub(crate) page_index: usize,
     pub(crate) rect: PdfRect,
     pub(crate) options: Vec<String>,
-    /// Appearance state other than `Off`, such as `Yes`.
-    ///
-    /// Fill draws its own check path and does not select this appearance.
-    #[allow(dead_code)]
-    pub(crate) on_state: String,
 }
 
 impl WidgetSnap {
@@ -130,14 +134,12 @@ fn widget_snap(doc: &Document, page_index: usize, annot: &Object) -> Option<Widg
     let field_type = classify(ft.as_deref(), flags);
     let options =
         inherited(doc, &dict, b"Opt").map_or_else(Vec::new, |obj| read_options(doc, &obj));
-    let on_state = on_state(doc, &dict);
     Some(WidgetSnap {
         name,
         field_type,
         page_index,
         rect,
         options,
-        on_state,
     })
 }
 
@@ -179,7 +181,7 @@ enum Step {
     Stop,
 }
 
-fn deep_deref(doc: &Document, mut obj: Object) -> Object {
+pub(crate) fn deep_deref(doc: &Document, mut obj: Object) -> Object {
     for _ in 0..8 {
         let Object::Reference(id) = obj else {
             break;
@@ -221,9 +223,7 @@ fn read_rect(obj: &Object) -> Option<PdfRect> {
         }
         n[index] = value;
     }
-    let (x0, x1) = ordered(n[0], n[2]);
-    let (y0, y1) = ordered(n[1], n[3]);
-    Some(PdfRect { x0, y0, x1, y1 })
+    Some(PdfRect::new(n[0], n[1], n[2], n[3]))
 }
 
 fn ordered(a: f32, b: f32) -> (f32, f32) {
@@ -259,25 +259,4 @@ fn push_option(out: &mut Vec<String>, obj: &Object) {
     if !out.contains(&text) {
         out.push(text);
     }
-}
-
-fn on_state(doc: &Document, inline: &lopdf::Dictionary) -> String {
-    let Some(ap) = inherited(doc, inline, b"AP") else {
-        return String::new();
-    };
-    let Object::Dictionary(ap) = ap else {
-        return String::new();
-    };
-    let Ok(normal) = ap.get(b"N") else {
-        return String::new();
-    };
-    let Object::Dictionary(states) = deep_deref(doc, normal.clone()) else {
-        return String::new();
-    };
-    for (key, _) in &states {
-        if key.as_slice() != b"Off" {
-            return String::from_utf8_lossy(key).into_owned();
-        }
-    }
-    String::new()
 }

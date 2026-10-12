@@ -1,8 +1,3 @@
-//! Failures from reading a PDF, checking a field, or writing the flattened file.
-//!
-//! [`Error`] carries one [`ErrorKind`] and an optional dependency [`source`](std::error::Error::source).
-//! Equality compares `kind` only.
-
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;

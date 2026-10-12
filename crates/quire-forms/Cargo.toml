@@ -11,6 +11,7 @@ categories = ["graphics"]
 
 [dependencies]
 lopdf = { version = "=0.34.0", default-features = false, features = ["nom_parser"] }
+skrifa = { version = "=0.47.0" }
 
 [lints.rust]
 unsafe_code = "forbid"
