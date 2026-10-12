@@ -1,0 +1,16 @@
+ts	phase	decision	why	evidence	result
+2026-10-10T10:40:23Z	start	autonomous quality land on feat/flow-writer	exit: stock commits + confirmed knives green gates; no multi-error collect	session autonomous-run	open
+2026-10-10T10:40:23Z	stock	split stock into FlowWriter residual, confirmed docs, example features	unrelated themes must not share a commit	git status	open
+2026-10-10T10:40:23Z	stock	committed FlowWriter residual, confirmed docs, example feature gates	stock before implementation per brief	7b1b89d,f3803e1,5b7d75f	stock done
+2026-10-10T10:41:28Z	stock	committed 7b1b89d FlowWriter docs, f3803e1 confirmed dirs, 5b7d75f example features	split unrelated stock themes	7b1b89d,f3803e1,5b7d75f	stock done
+2026-10-10T10:41:28Z	error	delegated Error knives 1-3 to poteto-agent on feat/flow-writer	hardest cross-cutting API reshape needs focused agent	agent 7db8fe9d-e6f8-432b-8955-fbe9113bc33f	running
+2026-10-10T10:41:28Z	pub	fixed ImageBox rustdoc to 1px=1pt; deferred test-utils/limits until after Error lib.rs churn	avoid edit conflicts with Error agent	src/document/image.rs	partial
+2026-10-10T10:41:41Z	pub	committed ImageBox rustdoc 1px=1pt	confirmed public-surface item with no behavior change	44ad8a4	tests not required for doc-only
+2026-10-10T11:01:12Z	error	Error knives 1-3 landed as single commit	agent reported gates green except pre-existing geom doc links	0f86397	verify next
+2026-10-10T11:04:55Z	pub	landed test-utils gate, removed empty limits, fixed geom doc links	confirmed public-surface items; cargo test+clippy+doc green	f6c2933	pub surface done
+2026-10-10T11:16:57Z	org	verified org commits 7d98169 4aa474b a1724c4; production DAG clean	document no backend; decorate no paginate; nodes no flow in prod	a1724c4	org prod done; test reverse edges open
+2026-10-10T11:16:57Z	org	delegated moving node #[cfg(test)] out of node modules for hard rule 3	主题内不将就; module-dependency hard rule 3	agent bba84040-f847-4d4b-bc16-996c2f15128d	running
+2026-10-10T11:24:49Z	org	node tests moved to layout/node_tests; hard rule 3 clear	confirmed module-dependency rule 3; rg shows no flow in six node files	a53bd7a	org complete
+2026-10-10T11:24:49Z	gates	full CI-shaped gates green on HEAD a53bd7a	fmt clippy both feature sets test both feature sets doc -Dwarnings both	agent-tools/4ae09958 gate log	predicate met
+2026-10-10T11:24:49Z	done	exit predicate met: stock+confirmed knives+gates; knife4 deliberately skipped	user Done list	feat/flow-writer a53bd7a	DONE
+2026-10-10T11:26:03Z	audit	trail cross-review completed by claude-opus	show-me-your-work requires different-family review before handback	agent 9ad1415b-1ca4-4acc-89ab-35f722d3800a	9 flags surfaced to operator
