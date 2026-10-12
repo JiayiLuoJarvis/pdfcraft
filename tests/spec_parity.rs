@@ -1,12 +1,14 @@
 //! Behavior checks for the data-only document specification path.
 
 use quire_pdf::spec::{
-    BandInset, BandSlot, Block, LayerMark, PageWhen, Resources, SectionSpec, TextRun, TextStyle,
+    Alignment, BandInset, BandSlot, Block, CellBlock, CellSpec, ImageRef, ImageSpec, LayerMark,
+    PageWhen, Resources, SectionSpec, TableSpec, TextRun, TextStyle,
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::to_pdf;
 use quire_pdf::{
-    layout_spec, pt_near, CanvasCommand, DocumentSpec, Margins, NonNegative, PageSize, Point,
+    layout_spec, pt_near, CanvasCommand, DocumentSpec, ErrorKind, ImageFormat, Margins,
+    NonNegative, PageSize, Point,
 };
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
@@ -102,4 +104,67 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         assert!(pdf.starts_with(b"%PDF"));
         std::fs::write("target/spec-parity.pdf", pdf).unwrap();
     }
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn foreign_cell_image_ref_is_unknown() {
+    let png = include_bytes!("fixtures/one-pixel.png");
+    let mut other = Resources::new(FONT.to_vec());
+    let foreign = other.add_image(png.to_vec(), ImageFormat::Png);
+    let mut dest = Resources::new(FONT.to_vec());
+    let _owned = dest.add_image(png.to_vec(), ImageFormat::Png);
+    let err = layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: dest,
+        limits: quire_pdf::Limits::default(),
+        sections: vec![cell_image_section(foreign)],
+    })
+    .err()
+    .unwrap();
+    assert_eq!(err.as_slice().len(), 1);
+    assert!(matches!(
+        err.first().kind.clone(),
+        ErrorKind::UnknownImage { id: 0 }
+    ));
+    assert_eq!(err.first().at.as_ref().and_then(|at| at.section), Some(0));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn local_cell_image_ref_draws() {
+    let png = include_bytes!("fixtures/one-pixel.png");
+    let mut dest = Resources::new(FONT.to_vec());
+    let owned = dest.add_image(png.to_vec(), ImageFormat::Png);
+    let rendered = layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: dest,
+        limits: quire_pdf::Limits::default(),
+        sections: vec![cell_image_section(owned)],
+    })
+    .unwrap();
+    let draws = rendered
+        .pages()
+        .iter()
+        .flat_map(quire_pdf::RecordedPage::ops)
+        .filter(|command| matches!(command, CanvasCommand::DrawImage { .. }))
+        .count();
+    assert_eq!(draws, 1);
+}
+
+fn cell_image_section(image: ImageRef) -> SectionSpec {
+    let mut section = SectionSpec::default();
+    section.body.push(Block::Table(TableSpec {
+        body: vec![vec![CellSpec {
+            content: vec![CellBlock::Image(ImageSpec {
+                image,
+                width: None,
+                height: None,
+                align: Alignment::Start,
+            })],
+            ..CellSpec::default()
+        }]],
+        ..TableSpec::default()
+    }));
+    section
 }

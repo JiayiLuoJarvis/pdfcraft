@@ -45,14 +45,26 @@ impl DocumentSpec {
 }
 
 /// Fonts and encoded images owned by a specification.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[must_use]
 pub struct Resources {
     /// Body font bytes. The first face is used by normal text.
     pub body_font: Vec<u8>,
     /// Optional face used by bold paragraph runs.
     pub bold_font: Option<Vec<u8>>,
+    token: DocToken,
     images: Vec<ImageResource>,
+}
+
+impl Default for Resources {
+    fn default() -> Self {
+        Self {
+            body_font: Vec::new(),
+            bold_font: None,
+            token: DocToken::next(),
+            images: Vec::new(),
+        }
+    }
 }
 
 impl Resources {
@@ -60,8 +72,7 @@ impl Resources {
     pub fn new(body_font: Vec<u8>) -> Self {
         Self {
             body_font,
-            bold_font: None,
-            images: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -69,7 +80,10 @@ impl Resources {
     pub fn add_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> ImageRef {
         let index = u32::try_from(self.images.len()).unwrap_or(u32::MAX);
         self.images.push(ImageResource { bytes, format });
-        ImageRef(index)
+        ImageRef {
+            resources: self.token,
+            index,
+        }
     }
 }
 
@@ -80,9 +94,12 @@ struct ImageResource {
 }
 
 /// A specification-local image handle returned by [`Resources::add_image`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
-pub struct ImageRef(u32);
+pub struct ImageRef {
+    resources: DocToken,
+    index: u32,
+}
 
 /// One section with its own page setup, decorations, and body.
 #[derive(Debug, Default)]
@@ -636,6 +653,7 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
 
     for (index, spec) in sections.into_iter().enumerate() {
         let mark = errors.mark();
+        validate_section_images(&spec, &image_handles, &mut errors);
         let section = lower_section(spec, page_size, style.clone(), doc, &image_handles);
         let (config, root, decoration, section_errors) = section.lower(page_size, doc);
         errors.absorb(section_errors);
@@ -685,7 +703,7 @@ fn lower_resources(
     limits: Limits,
     doc: DocToken,
     errors: &mut ErrorBag,
-) -> (FontStore, Box<dyn ImageRegistry>, Vec<Image>) {
+) -> (FontStore, Box<dyn ImageRegistry>, LoweredImages) {
     let mut fonts = FontStore::new();
     fonts.set_max_bytes(limits.max_font_bytes());
     match fonts.register(FontSource {
@@ -710,11 +728,27 @@ fn lower_resources(
     let mut handles = Vec::with_capacity(resources.images.len());
     for image in resources.images {
         match registry.register(image.bytes, image.format) {
-            Ok(decoded) => handles.push(Image { decoded, doc }),
-            Err(error) => errors.record(error),
+            Ok(decoded) => handles.push(Some(Image { decoded, doc })),
+            Err(error) => {
+                errors.record(error);
+                handles.push(None);
+            }
         }
     }
-    (fonts, registry, handles)
+    (
+        fonts,
+        registry,
+        LoweredImages {
+            resources: resources.token,
+            handles,
+        },
+    )
+}
+
+#[derive(Clone)]
+struct LoweredImages {
+    resources: DocToken,
+    handles: Vec<Option<Image>>,
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -732,7 +766,7 @@ fn lower_section(
     default_page: PageSize,
     style: crate::layout::style::Style,
     doc: DocToken,
-    images: &[Image],
+    images: &LoweredImages,
 ) -> Section<'static> {
     let SectionSpec {
         page_size,
@@ -753,18 +787,18 @@ fn lower_section(
         section.footer(move |band| apply_band(&spec, band));
     }
     if !behind.is_empty() {
-        let handles = images.to_vec();
+        let handles = images.clone();
         section.behind(move |layer| apply_layer(&behind, &handles, layer));
     }
     if !front.is_empty() {
-        let handles = images.to_vec();
+        let handles = images.clone();
         section.front(move |layer| apply_layer(&front, &handles, layer));
     }
     lower_blocks(body, &mut section.flow, images);
     section
 }
 
-fn lower_blocks(blocks: Vec<Block>, flow: &mut Flow, images: &[Image]) {
+fn lower_blocks(blocks: Vec<Block>, flow: &mut Flow, images: &LoweredImages) {
     for block in blocks {
         match block {
             Block::Paragraph(spec) => flow.paragraph(move |paragraph| {
@@ -784,10 +818,11 @@ fn lower_blocks(blocks: Vec<Block>, flow: &mut Flow, images: &[Image]) {
             Block::Columns(spec) => lower_columns(spec, flow, images),
             Block::Table(spec) => lower_table(spec, flow, images),
             Block::List(spec) => lower_list(spec, flow, images),
-            Block::Image(spec) => match image_for(spec.image, images) {
-                Ok(image) => flow.image(image, |box_| apply_image_box(spec, box_)),
-                Err(error) => flow.push_err(error),
-            },
+            Block::Image(spec) => {
+                if let Ok(Some(image)) = image_for(spec.image, images) {
+                    flow.image(image, |box_| apply_image_box(spec, box_));
+                }
+            }
             Block::HLine(spec) => flow.hline(|line| apply_hline(spec, line)),
         }
     }
@@ -850,7 +885,7 @@ fn apply_text_style(style: TextStyle, props: &mut TextProps) {
     }
 }
 
-fn lower_columns(spec: ColumnsSpec, flow: &mut Flow, images: &[Image]) {
+fn lower_columns(spec: ColumnsSpec, flow: &mut Flow, images: &LoweredImages) {
     flow.columns(|columns| {
         columns.gap(spec.gap);
         for column in spec.columns {
@@ -870,7 +905,7 @@ fn lower_columns(spec: ColumnsSpec, flow: &mut Flow, images: &[Image]) {
     });
 }
 
-fn lower_table(spec: TableSpec, flow: &mut Flow, images: &[Image]) {
+fn lower_table(spec: TableSpec, flow: &mut Flow, images: &LoweredImages) {
     flow.table(|table| {
         table.repeat_header(spec.repeat_header);
         if let Some(tracks) = spec.tracks {
@@ -887,7 +922,7 @@ fn lower_table(spec: TableSpec, flow: &mut Flow, images: &[Image]) {
     });
 }
 
-fn lower_cell(spec: CellSpec, images: &[Image]) -> Cell<'_> {
+fn lower_cell(spec: CellSpec, images: &LoweredImages) -> Cell<'_> {
     let mut cell = Cell::empty();
     for block in spec.content {
         cell = match block {
@@ -896,12 +931,14 @@ fn lower_cell(spec: CellSpec, images: &[Image]) -> Cell<'_> {
                 apply_paragraph(spec, paragraph);
             })),
             CellBlock::HLine(spec) => cell.add(HLine::build(|line| apply_hline(spec, line))),
-            CellBlock::Image(spec) => match image_for(spec.image, images) {
-                Ok(image) => cell.add(crate::document::PlacedImage::build(image, |box_| {
-                    apply_image_box(spec, box_);
-                })),
-                Err(_) => cell,
-            },
+            CellBlock::Image(spec) => {
+                if let Ok(Some(image)) = image_for(spec.image, images) {
+                    cell = cell.add(crate::document::PlacedImage::build(image, |box_| {
+                        apply_image_box(spec, box_);
+                    }));
+                }
+                cell
+            }
             CellBlock::Spacer(height) => cell.add(Spacer::new(height)),
             CellBlock::List(spec) => cell.add(list_block(spec, images)),
         };
@@ -913,7 +950,7 @@ fn lower_cell(spec: CellSpec, images: &[Image]) -> Cell<'_> {
     cell
 }
 
-fn lower_list(spec: ListSpec, flow: &mut Flow, images: &[Image]) {
+fn lower_list(spec: ListSpec, flow: &mut Flow, images: &LoweredImages) {
     match spec.kind {
         ListKind::Bullet => flow.ul(|list| apply_list(spec, list, images)),
         ListKind::Ordered(numbering) => {
@@ -922,7 +959,7 @@ fn lower_list(spec: ListSpec, flow: &mut Flow, images: &[Image]) {
     }
 }
 
-fn list_block(spec: ListSpec, images: &[Image]) -> ListBlock<'_> {
+fn list_block(spec: ListSpec, images: &LoweredImages) -> ListBlock<'_> {
     match spec.kind {
         ListKind::Bullet => ListBlock::bullet(move |list| apply_list(spec, list, images)),
         ListKind::Ordered(numbering) => {
@@ -931,7 +968,7 @@ fn list_block(spec: ListSpec, images: &[Image]) -> ListBlock<'_> {
     }
 }
 
-fn apply_list(spec: ListSpec, list: &mut List, images: &[Image]) {
+fn apply_list(spec: ListSpec, list: &mut List, images: &LoweredImages) {
     list.start(spec.start);
     list.marker_width(spec.marker_width);
     if let Some(indent) = spec.nest_indent {
@@ -1034,7 +1071,7 @@ fn render_text(runs: &[TextRun], page: &crate::document::Page) -> String {
     text
 }
 
-fn apply_layer(marks: &[LayerMark], images: &[Image], layer: &mut crate::document::Layer) {
+fn apply_layer(marks: &[LayerMark], images: &LoweredImages, layer: &mut crate::document::Layer) {
     let page = layer.page();
     for mark in marks {
         let when = match mark {
@@ -1061,7 +1098,7 @@ fn apply_layer(marks: &[LayerMark], images: &[Image], layer: &mut crate::documen
                 }
             }
             LayerMark::Image { image, rect, .. } => {
-                if let Ok(image) = image_for(*image, images) {
+                if let Ok(Some(image)) = image_for(*image, images) {
                     layer.image_at(image, *rect);
                 }
             }
@@ -1095,8 +1132,81 @@ impl PageWhen {
     }
 }
 
-fn image_for(image: ImageRef, images: &[Image]) -> std::result::Result<&Image, Error> {
-    images
-        .get(image.0 as usize)
-        .ok_or_else(|| Error::from(ErrorKind::UnknownImage { id: image.0 }))
+fn validate_section_images(section: &SectionSpec, images: &LoweredImages, errors: &mut ErrorBag) {
+    validate_marks(&section.behind, images, errors);
+    validate_marks(&section.front, images, errors);
+    validate_blocks(&section.body, images, errors);
+}
+
+fn validate_blocks(blocks: &[Block], images: &LoweredImages, errors: &mut ErrorBag) {
+    for block in blocks {
+        match block {
+            Block::KeepTogether(children) | Block::Styled { children, .. } => {
+                validate_blocks(children, images, errors);
+            }
+            Block::Columns(spec) => {
+                for column in &spec.columns {
+                    validate_blocks(&column.blocks, images, errors);
+                }
+            }
+            Block::Table(spec) => {
+                for row in spec.header.iter().chain(spec.body.iter()) {
+                    for cell in row {
+                        validate_cell_blocks(&cell.content, images, errors);
+                    }
+                }
+            }
+            Block::List(spec) => validate_list(spec, images, errors),
+            Block::Image(spec) => reject_image(spec.image, images, errors),
+            Block::Paragraph(_) | Block::Spacer(_) | Block::PageBreak | Block::HLine(_) => {}
+        }
+    }
+}
+
+fn validate_cell_blocks(blocks: &[CellBlock], images: &LoweredImages, errors: &mut ErrorBag) {
+    for block in blocks {
+        match block {
+            CellBlock::Image(spec) => reject_image(spec.image, images, errors),
+            CellBlock::List(spec) => validate_list(spec, images, errors),
+            CellBlock::Text(_)
+            | CellBlock::Paragraph(_)
+            | CellBlock::HLine(_)
+            | CellBlock::Spacer(_) => {}
+        }
+    }
+}
+
+fn validate_list(spec: &ListSpec, images: &LoweredImages, errors: &mut ErrorBag) {
+    for item in &spec.items {
+        validate_blocks(&item.blocks, images, errors);
+    }
+}
+
+fn validate_marks(marks: &[LayerMark], images: &LoweredImages, errors: &mut ErrorBag) {
+    for mark in marks {
+        if let LayerMark::Image { image, .. } = mark {
+            reject_image(*image, images, errors);
+        }
+    }
+}
+
+fn reject_image(image: ImageRef, images: &LoweredImages, errors: &mut ErrorBag) {
+    if let Err(error) = image_for(image, images) {
+        errors.record(error);
+    }
+}
+
+// `Ok(None)` is a decode failure already stored on the bag.
+// `Err` is a foreign or missing handle. `validate_section_images` records that error.
+fn image_for(
+    image: ImageRef,
+    images: &LoweredImages,
+) -> std::result::Result<Option<&Image>, Error> {
+    if image.resources != images.resources {
+        return Err(Error::from(ErrorKind::UnknownImage { id: image.index }));
+    }
+    match images.handles.get(image.index as usize) {
+        Some(slot) => Ok(slot.as_ref()),
+        None => Err(Error::from(ErrorKind::UnknownImage { id: image.index })),
+    }
 }
