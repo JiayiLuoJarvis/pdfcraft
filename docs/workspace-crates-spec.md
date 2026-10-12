@@ -24,9 +24,9 @@ quire/                              # workspace 根（无业务 package）
     quire-pdf/                      # 现有排版库（主线）
       Cargo.toml
       src/ tests/ examples/
-    quire-forms/                    # 读已有 AcroForm 并 flatten（产品已确认，实现未写入）
+    quire-forms/                    # 读已有 AcroForm 并 flatten（§10；基础填写已实现）
       Cargo.toml
-      src/lib.rs
+      src/ tests/ examples/
     quire-orgchart/                 # 股权架构图（空壳）
       Cargo.toml
       src/lib.rs
@@ -37,7 +37,7 @@ quire/                              # workspace 根（无业务 package）
 | Crate | 职责 | 现状 |
 | --- | --- | --- |
 | `quire-pdf` | `DocumentSpec` → 排版 → Canvas → krilla 出 PDF | 主线实现 |
-| `quire-forms` | 读第三方 PDF 字节，填写已有 AcroForm，写出已 flatten 的 PDF | 产品已确认，见提案书 §10。实现未开始。`publish = false` |
+| `quire-forms` | 读第三方 PDF 字节，填写已有 AcroForm，写出已 flatten 的 PDF | 提案书 §10 已确认。`list_fields` 与 ASCII `fill_and_flatten` 已实现。中文填写、OTF、对齐覆盖、`line_below`、`absolute_lines` 未做。`publish = false` |
 | `quire-orgchart` | 股权架构图生成（独立公共面） | 空壳；提案书曾列为不做，未确认前不实现 |
 
 ## 依赖硬规则
@@ -78,15 +78,17 @@ cargo fmt --all -- --check
 cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
 cargo test -p quire-pdf --features test-utils
 cargo doc -p quire-pdf --no-deps
-cargo check -p quire-forms -p quire-orgchart
+cargo test -p quire-forms
+cargo doc -p quire-forms --no-deps
+cargo check -p quire-orgchart
 ```
 
-CI 对 `quire-pdf` 保留原有 feature 矩阵；空壳至少 `cargo check` / `clippy`。
+CI 对 `quire-pdf` 保留原有 feature 矩阵。`quire-forms` 跑 `cargo test`。`quire-orgchart` 至少 `cargo check` / `clippy`。
 
 ## 明确不做（本规格）
 
 - 拆多个 git 仓库。
-- 在本规格的结构落地里预写填表或架构图 API。填表 API 按提案书 §10，由后续 PR 写入 `quire-forms`。架构图在确认前不写。
+- 在本规格的结构落地里预写架构图 API。填表基础 API 已在 `quire-forms`。对齐覆盖、`line_below`、`absolute_lines`、中文填写仍未做。架构图在确认前不写。
 - 把 `lopdf` / `pdf-writer` 等引进 `quire-pdf`。
 - 未确认前实现股权架构图业务逻辑。
 
@@ -96,5 +98,5 @@ CI 对 `quire-pdf` 保留原有 feature 矩阵；空壳至少 `cargo check` / `c
 | --- | --- |
 | 根 `[workspace]` + `crates/*` | 已落地 |
 | `quire-pdf` 迁入 `crates/quire-pdf` | 已落地 |
-| `quire-forms` / `quire-orgchart` 空壳 | 已落地 |
-| `quire-forms` 产品 API 与依赖 | 已确认，见提案书 §10。依赖为 `lopdf =0.34.0` 与 `skrifa =0.47.0`。不引入 `krilla`。与 `quire-pdf` 无依赖边。实现留到后续 PR |
+| `quire-orgchart` 空壳 | 已落地 |
+| `quire-forms` 产品 API 与依赖 | 已确认，见提案书 §10。依赖为 `lopdf =0.34.0` 与 `skrifa =0.47.0`。不引入 `krilla`。与 `quire-pdf` 无依赖边。基础 `list_fields` 与 `fill_and_flatten` 已落地 |

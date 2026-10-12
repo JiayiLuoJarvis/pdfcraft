@@ -10,11 +10,12 @@ while remaining `0.x`.
 
 ### Documentation
 
-- Confirmed `quire-forms` in the proposal. The crate takes PDF bytes, fills existing AcroForm fields, and flattens on every successful call, including an empty field map. It does not depend on `quire-pdf`. The shell stays empty until a later implementation change.
+- Confirmed `quire-forms` in the proposal. The crate takes PDF bytes, fills existing AcroForm fields, and flattens on every successful call, including an empty field map. It does not depend on `quire-pdf`.
 - `quire-pdf` ships a self-contained crates.io-style README, `docs/guide.md` usage guide, crate/module rustdoc, dual license files in the package, and `package.metadata.docs.rs`. Caller docs do not require reading internal proposal notes.
 
 ### Added
 
+- `quire-forms` lists AcroForm widgets with `list_fields` and fills ASCII text, checkboxes, and choices with `fill_and_flatten`. A successful call removes every widget annotation and the catalog `AcroForm` entry. An empty field map still removes the form. Font bytes are an argument on `FillOptions`. The crate pins `lopdf` 0.34.0 and `skrifa` 0.47.0. It does not depend on `quire-pdf`. CJK fill, OTF fonts, alignment overrides, `line_below`, and `absolute_lines` are not in this change.
 - Repository is a Cargo workspace: `crates/quire-pdf` (existing layout library), plus empty shells `quire-forms` and `quire-orgchart`. Boundaries are in `docs/workspace-crates-spec.md`. Callers depend on the crate they need; forms must not depend on `quire-pdf`.
 - `Ratio::new` builds a column weight. A weight that is not finite, or is not above zero, fails with `ErrorKind::ColumnWidths` before a table or a column set is assembled.
 - `tests/fixtures/quire-letter.ttf` is an OFL subset of Noto Sans SC Regular with family name QuireLetter. `tests/letter_layout.rs` lays out a confirmation letter through `layout_spec` and checks the recorded canvas. `to_pdf` only checks that the bytes start with `%PDF`.

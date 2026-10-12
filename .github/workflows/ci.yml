@@ -27,8 +27,14 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
 
+      - name: Install poppler
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: clippy shells
         run: cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
+
+      - name: test quire-forms
+        run: cargo test -p quire-forms
 
       - name: clippy quire-pdf (no default features)
         run: cargo clippy -p quire-pdf --all-targets --no-default-features --features test-utils -- -D warnings

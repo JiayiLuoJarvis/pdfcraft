@@ -11,7 +11,7 @@
 
 冲突时：提案书 > workspace 规格（包边界）> 本文件 > 设计稿未确认部分。
 
-提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。该 crate 仍是空壳。实现按后续 PR 写入 `quire-forms`。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 ASCII `fill_and_flatten` 已在 `crates/quire-forms`。中文填写、OTF、对齐覆盖、`line_below`、`absolute_lines` 仍未做。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
 仍须遵守：未确认功能不「顺便」做；`publish = false` 直到限额与信件夹具通过。
 
@@ -77,7 +77,7 @@ quire/
         backend/          仅 feature backend-krilla；唯一可 use krilla 处
       tests/              集成测试；fixtures/ 放字体与样张
       examples/           可运行示例
-    quire-forms/          读已有 AcroForm 并 flatten（§10 已确认；实现未写入；禁止依赖 quire-pdf；不用 krilla）
+    quire-forms/          读已有 AcroForm 并 flatten（§10 已确认；基础填写已实现；禁止依赖 quire-pdf；不用 krilla）
     quire-orgchart/       股权架构图（空壳；未确认前不实现）
   .github/workflows/      CI
 ```
@@ -126,12 +126,16 @@ cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
 cargo test -p quire-pdf --features test-utils
 cargo doc -p quire-pdf --no-deps
 cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
+cargo test -p quire-forms
+cargo doc -p quire-forms --no-deps
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
 # `--all-targets` / 集成测试需要 `test-utils`（quire-pdf 导出 `pt_near`）。
 #
 # feature 组合变多后再强制：
 #   cargo hack check -p quire-pdf --each-feature
 ```
+
+`quire-forms` 的填写测试会调用 `pdftotext`。
 
 ### 语言与依赖
 
