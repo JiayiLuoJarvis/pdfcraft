@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Added
 
+- `tests/fixtures/quire-letter.ttf` is an OFL subset of Noto Sans SC Regular with family name QuireLetter. `tests/letter_layout.rs` lays out a confirmation letter through `document` and checks the recorded canvas. `to_pdf` only checks that the bytes start with `%PDF`.
 - `Limits` caps font bytes, image bytes, image pixels, image edge, pages, blocks, table cells, and paragraph bytes. `Document::set_limits` installs a value. Exceeding a cap fails the document with `ErrorKind::LimitExceeded`. Setters reject 0 and any value above four times the default.
 - Header and footer slots span the full page width. `Band::inset` is the only way to pull them in from the page edges.
 - `Paragraph::center` and `Paragraph::end` set line alignment. The default stays start.

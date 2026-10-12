@@ -31,7 +31,7 @@
 
 - [ ] 刀 A–C（正确性）行为符合下文契约，有回归测试。
 - [x] 刀 D（限额）公共 `limits` 模块存在；超限返回结构化 `ErrorKind`；有单测；分页循环检查页数。
-- [ ] 刀 E（信件）`tests/letter_layout.rs`（或等价）+ 带真实 CJK 子集的字体夹具；`RecordingCanvas` 钉关键坐标；`to_pdf` 只冒烟 `%PDF`。
+- [x] 刀 E（信件）`tests/letter_layout.rs`（或等价）+ 带真实 CJK 子集的字体夹具；`RecordingCanvas` 钉关键坐标；`to_pdf` 只冒烟 `%PDF`。
 - [ ] 刀 F（诊断与文档）错误片段 / rustdoc / 提案小项对齐完成。
 - [ ] `cargo fmt` / `clippy -D warnings` / `test`（含 `backend-krilla`）/ `doc --no-deps` 绿。
 - [ ] **在刀 D+E 通过之前**，`Cargo.toml` 保持 `publish = false`。
@@ -196,7 +196,7 @@ A 列表自定义标记编号
 | B Table::build token | 完成 | 2026-10-12 | `add` 时重绑父 `DocToken`；样式仍是 build 时的默认样式 |
 | C single_line_run 换行 | 完成 | 2026-10-12 | `ErrorKind::UnexpectedLineBreakInSingleLine`；`text_at` 与自定义 marker 遇 BK 失败且不画 |
 | D limits | 完成 | 2026-10-12 | 默认 font bytes 与 image bytes 各 32 MiB，image pixels 40_000_000，image edge 8192，pages 10_000，blocks 100_000，table cells 50_000，paragraph bytes 1_000_000。setter 拒绝 0，也拒绝高于默认 4 倍的值。像素与边长在 krilla 解码出尺寸之后、句柄入库之前检查，krilla 没有只读头。块、单元格和段落字节在分页前统计正文流，堆叠容器不计块，页眉、页脚和 layer 不计入。页数在 `plan_pages` 提交每一页时检查。图片像素和边长并入 `LimitExceeded`，不另设 `ImageTooLarge`。 |
-| E letter fixture | 待做 | | |
+| E letter fixture | 完成 | 2026-10-12 | `tests/fixtures/quire-letter.ttf` 是 Noto Sans SC Regular 的 OFL 子集，族名 QuireLetter，23456 字节。`tests/letter_layout.rs` 用 `document` 排确认函。两段中文、中英混排、表头、一张图、全文页码页脚。坐标钉在 `RecordingCanvas`。`to_pdf` 只断言 `%PDF`。`publish = false` 仍保留。 |
 | F 诊断/文档 | 待做 | | |
 | F0 keep_together 间距 | 待做 | | 阻塞公开 paragraph_spacing |
 | P0 基准 | 待做 | | |
