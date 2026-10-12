@@ -1,0 +1,29 @@
+ts	phase	decision	why	evidence	result
+2026-10-12T05:45:55Z	start	autonomous-run batch-readiness A through P	operator said complete all; collapse Orchestrate to in-session Autonomous run	chat-run batch-readiness	open
+2026-10-12T05:45:55Z	frame	exit predicate is spec section 2 milestone	A-C D E F gates; P0 then optional P1-4; publish=false until D+E	docs/batch-readiness-spec.md:29	open
+2026-10-12T05:47:24Z	knife-A	committed knife A on fix/knife-a-list-marker-counter	sequence units; PR blocked by missing remote and invalid gh token	01a3f77	tests green prior; commit done
+2026-10-12T05:48:10Z	knife-B	spawned implementer for Table::build DocToken rebind	autonomy complete-all; one writer per branch	agent b054cf6d	in flight
+2026-10-12T05:54:49Z	knife-B	accepted Table::build DocToken rebind on add	matches knife B contract; DrawImage test present	33ed0da	verified
+2026-10-12T05:55:07Z	knife-C	spawned single_line_run BK reject implementer	sequence after verified B	from 33ed0da	in flight
+2026-10-12T06:07:43Z	knife-C	accepted UnexpectedLineBreakInSingleLine	text_at and custom marker fail before paint	eb31353	verified
+2026-10-12T06:07:43Z	knife-D	spawned Limits implementer	A-C done; D before E and P	from eb31353	in flight
+2026-10-12T06:27:03Z	knife-D	accepted public Limits with eight caps	tests/limits.rs 8 ok; publish=false kept	1b41512	verified
+2026-10-12T06:27:03Z	knife-E	spawned letter fixture CJK implementer	D done; E before publish discussion and P	from 1b41512	in flight
+2026-10-12T06:27:22Z	knife-E	prepared /tmp/quire-fonttools venv with pyftsubset	system pip blocked by PEP668	/tmp/quire-fonttools/bin/pyftsubset	ready
+2026-10-12T06:41:05Z	work-E	accepted letter fixture QuireLetter + letter_layout	2 tests ok; publish=false kept	470eae5	verified
+2026-10-12T06:41:05Z	docs	reapplied 刀 to 工作项 after E reverted living docs	operator asked formal terminology	docs/*.md AGENTS.md	restored
+2026-10-12T06:41:33Z	work-F	spawned diagnostics and docs alignment implementer	E verified; terminology committed 223cece	from 223cece	in flight
+2026-10-12T06:48:21Z	work-F	first F agent failed on fixture image read	provider rejects bad/corrupt-looking images; bad-idat.png is intentional	01ff967f	respawned
+2026-10-12T06:48:21Z	work-F	respawned F with no-image-open rule	continue complete-all	d0a689ae	in flight
+2026-10-12T07:00:00Z	work-F	spawned F0-F5 implementer on tip 223cece	operator continue complete-all; no commit; never open fixture png as image	agent 0f99f053	in flight
+2026-10-12T07:05:59Z	work-F	stopped second F0-F5 implementer on write collision	another agent is concurrently editing the same tree (LayoutCtx.natural, error.rs, document_ty.rs); racing would corrupt both diffs	split_stack break branch overwritten 15:05:18; mtime churn in src/error.rs 15:05:33	halted; partial overlap left in tree
+2026-10-12T07:10:00Z	work-F	sole writer; keep LayoutCtx.natural for F0	collision stopped; smaller diff; pagination still drops unfit spacing; list gated like split_stack	F0 test green; list.rs else-if y>0 reverted to natural	decided
+2026-10-12T07:20:00Z	work-F	accepted F0-F5 uncommitted; sole-writer cleanup after collision	F0 LayoutCtx.natural; F1 snippets; F2 png validate; F3 docs; F4 drop Border/DocumentInfo root export; F5 Track/Ratio; clippy dead test attr fixed	gates green; no commit
+2026-10-12T07:22:00Z	work-P0	recorded release baseline on ubuntu1710 tip 223cece	tests/batch_baseline.rs ignored harness	letter_x8/wide_table/paragraphs_400 numbers in spec §7
+2026-10-12T07:24:00Z	work-P1	accepted VecDeque for plan_pages and split_stack	paragraphs_5000 layout 137.93ms -> 121.83ms	landed uncommitted
+2026-10-12T07:24:30Z	work-P2-P4	closed without code	P0 letter-scale and wide table not hot enough; no glyph/table clone hotspot numbers	closed in spec §7
+2026-10-12T07:25:00Z	milestone	batch-readiness exit predicate met in working tree	A-F P0 P1 done; P2-P4 closed; publish=false kept; no push/PR	await operator review; no commit
+2026-10-12T07:30:00Z	work-F	accepted F commit on fix/work-f-diagnostics	agent d0a689ae landed F0-F5; P0/P1 had been reverted from tree	f0b6139	verified
+2026-10-12T07:32:00Z	work-P0	restored ignored batch_baseline harness after F tip	operator continue; no commit	tests/batch_baseline.rs	uncommitted
+2026-10-12T07:33:00Z	work-P1	VecDeque plan_pages+split_stack; paragraphs_5000 135.04->115.92ms	prove it works on measured hotspot	src/layout/{paginate,flow}.rs	uncommitted
+2026-10-12T07:33:30Z	work-P2-P4	closed without code	P0 letter-scale and wide table not hot	spec §7	closed

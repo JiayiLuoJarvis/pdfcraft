@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
+use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
 use crate::canvas::Canvas;
@@ -159,9 +160,9 @@ fn plan_pages(
     max_pages: u32,
 ) -> Result<Vec<PagePlan>> {
     config.validate()?;
-    let mut nodes = match root {
-        FlowNode::Stack(kids) => kids,
-        other => vec![other],
+    let mut nodes: VecDeque<FlowNode> = match root {
+        FlowNode::Stack(kids) => kids.into(),
+        other => VecDeque::from([other]),
     };
 
     let body_w = config.body_width();
@@ -173,8 +174,7 @@ fn plan_pages(
     let mut current: Option<PagePlan> = None;
     let mut y = 0.0f32;
 
-    while !nodes.is_empty() {
-        let node = nodes.remove(0);
+    while let Some(node) = nodes.pop_front() {
         match node {
             FlowNode::PageBreak => {
                 cursor = apply_page_break(
@@ -227,7 +227,7 @@ fn plan_pages(
                             fragment: head,
                         });
                         commit_page(&mut pages, &mut current, first_page, max_pages)?;
-                        nodes.insert(0, tail);
+                        nodes.push_front(tail);
                         y = 0.0;
                         cursor = PageCursor::Fresh;
                     }
@@ -240,7 +240,7 @@ fn plan_pages(
                             .on_page_index(first_page + pages.len()));
                         }
                         commit_page(&mut pages, &mut current, first_page, max_pages)?;
-                        nodes.insert(0, tail);
+                        nodes.push_front(tail);
                         y = 0.0;
                         cursor = PageCursor::Fresh;
                     }

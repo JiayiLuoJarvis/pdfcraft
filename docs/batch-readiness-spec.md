@@ -29,13 +29,13 @@
 
 全部满足才算「批量就绪」里程碑完结（性能工作项可标为可选通过）：
 
-- [ ] 工作项 A–C（正确性）行为符合下文契约，有回归测试。
+- [x] 工作项 A–C（正确性）行为符合下文契约，有回归测试。
 - [x] 工作项 D（限额）公共 `limits` 模块存在；超限返回结构化 `ErrorKind`；有单测；分页循环检查页数。
 - [x] 工作项 E（信件）`tests/letter_layout.rs`（或等价）+ 带真实 CJK 子集的字体夹具；`RecordingCanvas` 钉关键坐标；`to_pdf` 只冒烟 `%PDF`。
 - [x] 工作项 F（诊断与文档）错误片段 / rustdoc / 提案小项对齐完成。
-- [ ] `cargo fmt` / `clippy -D warnings` / `test`（含 `backend-krilla`）/ `doc --no-deps` 绿。
-- [ ] **在工作项 D+E 通过之前**，`Cargo.toml` 保持 `publish = false`。
-- [ ] 工作项 P（性能）要么有前后对比数字并落地改动，要么书面记录「测过、不赚、不做」并关掉候选项。
+- [x] `cargo fmt` / `clippy -D warnings` / `test`（含 `backend-krilla`）/ `doc --no-deps` 绿。
+- [x] **在工作项 D+E 通过之前**，`Cargo.toml` 保持 `publish = false`（仍保留，未开删除 PR）。
+- [x] 工作项 P（性能）要么有前后对比数字并落地改动，要么书面记录「测过、不赚、不做」并关掉候选项。
 
 ## 3. 工作项顺序（必须按序，可再拆 PR）
 
@@ -199,8 +199,11 @@ A 列表自定义标记编号
 | E letter fixture | 完成 | 2026-10-12 | `tests/fixtures/quire-letter.ttf` 是 Noto Sans SC Regular 的 OFL 子集，族名 QuireLetter，23456 字节。`tests/letter_layout.rs` 用 `document` 排确认函。两段中文、中英混排、表头、一张图、全文页码页脚。坐标钉在 `RecordingCanvas`。`to_pdf` 只断言 `%PDF`。`publish = false` 仍保留。 |
 | F 诊断/文档 | 完成 | 2026-10-12 | F1 三条错误带短文本或 scalar。F2 坏 PNG 在 `load_image` 失败。JPEG、GIF、WebP 的像素错误仍可能在 `to_pdf` 成为没有页码的 `Backend`。F3 提案书写明栏内禁止 `page_break`、旋转只包 path、`stack` 是样式作用域、`Page::is_last` 是全文末页。F4 根上不再导出 `DocumentInfo` 和 `Border`。F5 `Track::Fixed(Length<Positive>)`，`Ratio::new` 拒绝非法权重。 |
 | F0 keep_together 间距 | 完成 | 2026-10-12 | `natural_height` 把组内段后距算进高度。A 与 B 两行正好放下、中间段后距放不下时，`keep_together` 和单元格报 `UnsplittableTallerThanFrame`。组尾段后距仍不进组高。分页里放不下的段后距仍丢掉。未公开 `paragraph_spacing`。 |
-| P0 基准 | 待做 | | |
-| P1–P4 | 待测 | | 无数字不开做 |
+| P0 基准 | 完成 | 2026-10-12 | 可复现入口：`cargo test --release --features test-utils --test batch_baseline -- --ignored --nocapture`。机器 `ubuntu1710`，`Linux 6.8.0-139-generic x86_64`，基线 tip `f0b6139`。含 P1 的 P0 样张墙钟（release）：`letter_x8` layout 6.28 ms / to_pdf 6.15 ms / 8 页 / peak RSS 约 6.5 MiB；`wide_table_40x12` layout 2.74 ms / to_pdf 4.28 ms / 1 页；`paragraphs_400` layout 7.88 ms / to_pdf 12.06 ms / 10 页 / peak RSS 约 8.1 MiB。 |
+| P1 VecDeque | 完成 | 2026-10-12 | `plan_pages` 与 `split_stack` 的 `Vec::remove(0)` 改为 `VecDeque`。决策样张 `paragraphs_5000`（同机 release）：改前 layout 135.04 ms，改后 115.92 ms（约 −14%）。行为测全绿。 |
+| P2 FontRef 缓存 | 关闭 | 2026-10-12 | P0 信件与 400 段样张 layout 已在十毫秒量级。未做字形路径剖析；合同体量不刚需。有热路径数字后再开。 |
+| P3 krilla Font 复用 | 关闭 | 2026-10-12 | 同上。`to_pdf` 在 P0 样张上不是秒级热点。 |
+| P4 表跨页克隆 | 关闭 | 2026-10-12 | `wide_table_40x12` 单页、墙钟与 RSS 都低。无跨页大表峰值证据前不做。 |
 
 ## 8. 一句话
 

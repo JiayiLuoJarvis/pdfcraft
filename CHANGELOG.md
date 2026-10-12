@@ -48,6 +48,10 @@ while remaining `0.x`.
 - Branded lengths (`Length` with `Finite` / `NonNegative` / `Positive`), page geometry (`Point`, `Size`, `Rect`, `Margins`), paint (`Color`, `Paint`, `Stroke`), and non-empty `Path` / `PathBuilder` in `geom`, plus construction `Error` variants. Package name is `quire-pdf`.
 - Repository scaffold, module tree placeholders, and agent/contributor conventions.
 
+### Performance
+
+- Root pagination and stack splitting dequeue with `VecDeque` instead of `Vec::remove(0)`. On a 5000-paragraph release baseline, layout fell from about 135 ms to about 116 ms on the same host.
+
 ### Fixed
 
 - `keep_together` and a table cell count paragraph spacing between their children. Two lines that fit in the frame, with spacing between them that does not, fail with `ErrorKind::UnsplittableTallerThanFrame`. Spacing after the last child is still outside the group. Ordinary pagination still drops spacing that does not fit, and does not push the next block to the next page for that spacing alone.

@@ -4,6 +4,8 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
+use std::collections::VecDeque;
+
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{Length, NonNegative};
 use crate::layout::columns::ColumnsNode;
@@ -174,7 +176,7 @@ fn split_keep_together(
 fn split_stack(
     ctx: &mut LayoutCtx<'_>,
     mut avail: Frame,
-    mut kids: Vec<FlowNode>,
+    kids: Vec<FlowNode>,
 ) -> Result<Split<FlowNode>> {
     if kids.is_empty() {
         return Ok(Split::Fit {
@@ -183,13 +185,13 @@ fn split_stack(
         });
     }
 
+    let mut kids: VecDeque<FlowNode> = kids.into();
     let mut commands = Vec::new();
     let mut y = 0.0f32;
     let mut trailing_spacing = 0.0f32;
     let mut placed_any = false;
 
-    while !kids.is_empty() {
-        let child = kids.remove(0);
+    while let Some(child) = kids.pop_front() {
         match child.split(ctx, avail)? {
             Split::Fit {
                 height,
@@ -220,8 +222,9 @@ fn split_stack(
                 let offset = head.with_offset(0.0, y)?;
                 commands.extend(offset.commands);
                 y += head_height;
-                let mut rest = vec![tail];
-                rest.append(&mut kids);
+                let mut rest = Vec::with_capacity(kids.len() + 1);
+                rest.push(tail);
+                rest.extend(kids);
                 return Ok(Split::Partial {
                     head_height: y,
                     head: Fragment {
@@ -238,13 +241,12 @@ fn split_stack(
                 });
             }
             Split::MoveToNextPage(node) => {
+                let mut rest = Vec::with_capacity(kids.len() + 1);
+                rest.push(node);
+                rest.extend(kids);
                 if !placed_any {
-                    let mut rest = vec![node];
-                    rest.append(&mut kids);
                     return Ok(Split::MoveToNextPage(FlowNode::Stack(rest)));
                 }
-                let mut rest = vec![node];
-                rest.append(&mut kids);
                 return Ok(Split::Partial {
                     head_height: y,
                     head: Fragment {
