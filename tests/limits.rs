@@ -1,9 +1,9 @@
-//! Public `Limits` caps through `document`.
+//! Public `Limits` caps through `layout_spec`.
 
-use quire_pdf::{document, ErrorKind, FlowWriter, LimitKind, Limits, PageSize};
-
+use quire_pdf::spec::{Block, CellBlock, CellSpec, Resources, SectionSpec, TableSpec};
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::ImageFormat;
+use quire_pdf::{layout_spec, DocumentSpec, ErrorKind, LimitKind, Limits, PageSize};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 
@@ -13,13 +13,37 @@ fn tighten(edit: impl FnOnce(&mut Limits)) -> Limits {
     limits
 }
 
+fn lay(
+    resources: Resources,
+    limits: Limits,
+    section: SectionSpec,
+) -> quire_pdf::Result<quire_pdf::Rendered> {
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources,
+        limits,
+        sections: vec![section],
+    })
+}
+
+fn fonted(limits: Limits, body: Vec<Block>) -> quire_pdf::Result<quire_pdf::Rendered> {
+    lay(
+        Resources::new(FONT.to_vec()),
+        limits,
+        SectionSpec {
+            body,
+            ..SectionSpec::default()
+        },
+    )
+}
+
 #[test]
 fn font_byte_limit_rejects_before_parse() {
-    let err = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_font_bytes(1).unwrap()));
-        doc.font(b"ab".to_vec())?;
-        Ok(())
-    })
+    let err = lay(
+        Resources::new(b"ab".to_vec()),
+        tighten(|limits| limits.set_max_font_bytes(1).unwrap()),
+        SectionSpec::default(),
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -35,11 +59,13 @@ fn font_byte_limit_rejects_before_parse() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn image_byte_limit_rejects_before_decode() {
-    let err = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_image_bytes(1).unwrap()));
-        let _ = doc.load_image(vec![1, 2], ImageFormat::Png)?;
-        Ok(())
-    })
+    let mut resources = Resources::default();
+    let _ = resources.add_image(vec![1, 2], ImageFormat::Png);
+    let err = lay(
+        resources,
+        tighten(|limits| limits.set_max_image_bytes(1).unwrap()),
+        SectionSpec::default(),
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -54,27 +80,25 @@ fn image_byte_limit_rejects_before_decode() {
 
 #[test]
 fn one_page_fits_a_page_limit_of_one() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_pages(1).unwrap()));
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text("A"));
-        Ok(())
-    })
+    let rendered = fonted(
+        tighten(|limits| limits.set_max_pages(1).unwrap()),
+        vec![Block::paragraph("A")],
+    )
     .unwrap();
     assert_eq!(rendered.pages().len(), 1);
 }
 
 #[test]
 fn page_limit_fails_when_the_next_page_is_committed() {
-    let err = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_pages(1).unwrap()));
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text("A"));
-        doc.page_break();
-        doc.page_break();
-        doc.paragraph(|p| p.text("B"));
-        Ok(())
-    })
+    let err = fonted(
+        tighten(|limits| limits.set_max_pages(1).unwrap()),
+        vec![
+            Block::paragraph("A"),
+            Block::PageBreak,
+            Block::PageBreak,
+            Block::paragraph("B"),
+        ],
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -89,26 +113,24 @@ fn page_limit_fails_when_the_next_page_is_committed() {
 
 #[test]
 fn two_pages_fit_when_the_limit_is_two() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_pages(2).unwrap()));
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text("A"));
-        doc.page_break();
-        doc.paragraph(|p| p.text("B"));
-        Ok(())
-    })
+    let rendered = fonted(
+        tighten(|limits| limits.set_max_pages(2).unwrap()),
+        vec![
+            Block::paragraph("A"),
+            Block::PageBreak,
+            Block::paragraph("B"),
+        ],
+    )
     .unwrap();
     assert_eq!(rendered.pages().len(), 2);
 }
 
 #[test]
 fn block_limit_counts_body_paragraphs() {
-    let err = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_blocks(1).unwrap()));
-        doc.paragraph(|p| p.text("A"));
-        doc.paragraph(|p| p.text("B"));
-        Ok(())
-    })
+    let err = fonted(
+        tighten(|limits| limits.set_max_blocks(1).unwrap()),
+        vec![Block::paragraph("A"), Block::paragraph("B")],
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -123,13 +145,22 @@ fn block_limit_counts_body_paragraphs() {
 
 #[test]
 fn table_cell_limit_counts_cells() {
-    let err = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| limits.set_max_table_cells(1).unwrap()));
-        doc.table(|table| {
-            table.row(["a", "b"]);
-        });
-        Ok(())
-    })
+    let err = fonted(
+        tighten(|limits| limits.set_max_table_cells(1).unwrap()),
+        vec![Block::Table(TableSpec {
+            body: vec![vec![
+                CellSpec {
+                    content: vec![CellBlock::Text("a".into())],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::Text("b".into())],
+                    ..CellSpec::default()
+                },
+            ]],
+            ..TableSpec::default()
+        })],
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -144,13 +175,10 @@ fn table_cell_limit_counts_cells() {
 
 #[test]
 fn paragraph_byte_limit_counts_utf8() {
-    let err = document(PageSize::A4, |doc| {
-        doc.set_limits(tighten(|limits| {
-            limits.set_max_paragraph_bytes(1).unwrap();
-        }));
-        doc.paragraph(|p| p.text("ab"));
-        Ok(())
-    })
+    let err = fonted(
+        tighten(|limits| limits.set_max_paragraph_bytes(1).unwrap()),
+        vec![Block::paragraph("ab")],
+    )
     .err()
     .unwrap();
     assert_eq!(

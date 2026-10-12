@@ -7,14 +7,17 @@ use std::sync::Arc;
 use crate::canvas::RejectingImageRegistry;
 use crate::canvas::{ImageFormat, ImageRegistry, RecordingCanvas};
 use crate::document::{
-    default_style, Cell, DocToken, Flow, FlowWriter, HLine, Image, ImageBox, List, ListBlock,
-    Numbering, Paragraph, Rendered, Section, Spacer, TextProps, Track,
+    default_style, lower_paragraph, Band, Cell, DocToken, Flow, HLine, Image, ImageBox, Layer,
+    List, ListBlock, Numbering, Page, Paragraph, PlacedImage, Rendered, Spacer, Track,
 };
 use crate::error::{Error, ErrorBag, ErrorKind, Errors, Location, Result};
 use crate::fonts::{FontSource, FontStore};
 use crate::geom::{Color, Ink, Length, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect};
+use crate::layout::decorate::{Decorations, LayerContent};
 use crate::layout::flow::check_limits;
+use crate::layout::flow::{FlowNode, KeepTogetherNode, SpacerNode};
 use crate::layout::frame::LayoutCtx;
+use crate::layout::paginate::PaginateConfig;
 use crate::layout::paginate::{layout_pages, paint_laid, SectionJob};
 use crate::limits::Limits;
 
@@ -654,8 +657,8 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
     for (index, spec) in sections.into_iter().enumerate() {
         let mark = errors.mark();
         validate_section_images(&spec, &image_handles, &mut errors);
-        let section = lower_section(spec, page_size, style.clone(), doc, &image_handles);
-        let (config, root, decoration, section_errors) = section.lower(page_size, doc);
+        let (config, root, decoration, section_errors) =
+            lower_section(spec, page_size, style.clone(), doc, &image_handles);
         errors.absorb(section_errors);
         errors.locate_since(mark, &Location::section(index));
         configs.push(config);
@@ -706,20 +709,34 @@ fn lower_resources(
 ) -> (FontStore, Box<dyn ImageRegistry>, LoweredImages) {
     let mut fonts = FontStore::new();
     fonts.set_max_bytes(limits.max_font_bytes());
-    match fonts.register(FontSource {
-        bytes: Arc::new(resources.body_font),
-        index: 0,
-    }) {
-        Ok(_) => {}
-        Err(error) => errors.record(error),
-    }
-    if let Some(bytes) = resources.bold_font {
+    let body_registered = if resources.body_font.is_empty() {
+        false
+    } else {
         match fonts.register(FontSource {
-            bytes: Arc::new(bytes),
+            bytes: Arc::new(resources.body_font),
             index: 0,
         }) {
-            Ok(id) => fonts.set_bold(id),
-            Err(error) => errors.record(error),
+            Ok(_) => true,
+            Err(error) => {
+                errors.record(error);
+                false
+            }
+        }
+    };
+    if let Some(bytes) = resources.bold_font {
+        if body_registered {
+            match fonts.register(FontSource {
+                bytes: Arc::new(bytes),
+                index: 0,
+            }) {
+                Ok(id) => fonts.set_bold(id),
+                Err(error) => errors.record(error),
+            }
+        } else {
+            errors.record(Error::from(ErrorKind::Font {
+                index: 0,
+                message: "body font is not registered".to_owned(),
+            }));
         }
     }
 
@@ -767,7 +784,7 @@ fn lower_section(
     style: crate::layout::style::Style,
     doc: DocToken,
     images: &LoweredImages,
-) -> Section<'static> {
+) -> (PaginateConfig, FlowNode, Decorations<'static>, ErrorBag) {
     let SectionSpec {
         page_size,
         margins,
@@ -777,53 +794,103 @@ fn lower_section(
         front,
         body,
     } = spec;
-    let mut section = Section::new(style, doc);
-    section.page_size(page_size.unwrap_or(default_page));
-    section.margins(margins);
-    if let Some(spec) = header {
-        section.header(move |band| apply_band(&spec, band));
+    let mut flow = Flow::new(style.clone(), doc);
+    lower_blocks(body, &mut flow, images);
+    let decorations = Decorations {
+        header: header.map(|spec| band_content(spec, style.clone())),
+        footer: footer.map(|spec| band_content(spec, style.clone())),
+        behind: layer_content(behind, style.clone(), doc, images.clone()),
+        front: layer_content(front, style, doc, images.clone()),
+    };
+    let (nodes, errors) = flow.into_parts();
+    let config = PaginateConfig {
+        page_size: page_size.unwrap_or(default_page).resolve(),
+        margins,
+    };
+    (config, FlowNode::Stack(nodes), decorations, errors)
+}
+
+fn band_content(
+    spec: BandSpec,
+    style: crate::layout::style::Style,
+) -> crate::layout::decorate::BandContent<'static> {
+    Box::new(move |info, errors| {
+        let mut band = Band {
+            page: Page::from(info),
+            left: None,
+            right: None,
+            inset_left: NonNegative::ZERO,
+            inset_right: NonNegative::ZERO,
+            errors: ErrorBag::default(),
+        };
+        apply_band(&spec, &mut band);
+        Ok(band.lower(&style, errors))
+    })
+}
+
+fn layer_content(
+    marks: Vec<LayerMark>,
+    style: crate::layout::style::Style,
+    doc: DocToken,
+    images: LoweredImages,
+) -> Option<LayerContent<'static>> {
+    if marks.is_empty() {
+        return None;
     }
-    if let Some(spec) = footer {
-        section.footer(move |band| apply_band(&spec, band));
-    }
-    if !behind.is_empty() {
-        let handles = images.clone();
-        section.behind(move |layer| apply_layer(&behind, &handles, layer));
-    }
-    if !front.is_empty() {
-        let handles = images.clone();
-        section.front(move |layer| apply_layer(&front, &handles, layer));
-    }
-    lower_blocks(body, &mut section.flow, images);
-    section
+    Some(Box::new(move |info, errors| {
+        let mut layer = Layer {
+            page: Page::from(info),
+            style: style.clone(),
+            doc,
+            items: Vec::new(),
+            errors: ErrorBag::default(),
+        };
+        apply_layer(&marks, &images, &mut layer);
+        errors.absorb(layer.errors);
+        Ok(layer.items)
+    }))
 }
 
 fn lower_blocks(blocks: Vec<Block>, flow: &mut Flow, images: &LoweredImages) {
     for block in blocks {
         match block {
-            Block::Paragraph(spec) => flow.paragraph(move |paragraph| {
-                apply_paragraph(spec, paragraph);
-            }),
-            Block::Spacer(height) => flow.add(Spacer::new(height)),
-            Block::PageBreak => flow.page_break(),
+            Block::Paragraph(spec) => {
+                let paragraph = Paragraph::build(|paragraph| apply_paragraph(spec, paragraph));
+                if let Some(node) = lower_paragraph(paragraph, &flow.style, &mut flow.errors) {
+                    flow.push(node);
+                }
+            }
+            Block::Spacer(height) => flow.push(FlowNode::Spacer(SpacerNode { height })),
+            Block::PageBreak => flow.push(FlowNode::PageBreak),
             Block::KeepTogether(children) => {
-                flow.keep_together(|nested| lower_blocks(children, nested, images));
+                let nodes = flow.nested(|nested| lower_blocks(children, nested, images));
+                flow.push(FlowNode::KeepTogether(KeepTogetherNode::Open(nodes)));
             }
             Block::Styled { style, children } => {
-                flow.stack(
-                    |props| apply_text_style(style, props),
-                    |nested| lower_blocks(children, nested, images),
-                );
+                let saved = flow.style.clone();
+                if let Some(size) = style.font_size {
+                    flow.style.font_size = size;
+                }
+                if let Some(color) = style.color {
+                    flow.style.color = color;
+                }
+                lower_blocks(children, flow, images);
+                flow.style = saved;
             }
             Block::Columns(spec) => lower_columns(spec, flow, images),
             Block::Table(spec) => lower_table(spec, flow, images),
             Block::List(spec) => lower_list(spec, flow, images),
             Block::Image(spec) => {
                 if let Some(image) = image_for(spec.image, images) {
-                    flow.image(image, |box_| apply_image_box(spec, box_));
+                    PlacedImage::build(image, |box_| apply_image_box(spec, box_)).push_on(flow);
                 }
             }
-            Block::HLine(spec) => flow.hline(|line| apply_hline(spec, line)),
+            Block::HLine(spec) => {
+                let line = HLine::build(|line| apply_hline(spec, line));
+                if let Some(node) = line.lower(&mut flow.errors) {
+                    flow.push(node);
+                }
+            }
         }
     }
 }
@@ -876,17 +943,8 @@ fn apply_alignment(align: Alignment, paragraph: &mut Paragraph) {
     }
 }
 
-fn apply_text_style(style: TextStyle, props: &mut TextProps) {
-    if let Some(size) = style.font_size {
-        props.font_size(size);
-    }
-    if let Some(color) = style.color {
-        props.color(color);
-    }
-}
-
 fn lower_columns(spec: ColumnsSpec, flow: &mut Flow, images: &LoweredImages) {
-    flow.columns(|columns| {
+    let columns = crate::document::Columns::build_on(flow, |columns| {
         columns.gap(spec.gap);
         for column in spec.columns {
             let blocks = column.blocks;
@@ -903,10 +961,13 @@ fn lower_columns(spec: ColumnsSpec, flow: &mut Flow, images: &LoweredImages) {
             }
         }
     });
+    if let Some(node) = columns.lower(&mut flow.errors) {
+        flow.push(node);
+    }
 }
 
 fn lower_table(spec: TableSpec, flow: &mut Flow, images: &LoweredImages) {
-    flow.table(|table| {
+    let table = crate::document::Table::build_on(flow, |table| {
         table.repeat_header(spec.repeat_header);
         if let Some(tracks) = spec.tracks {
             table.tracks(tracks);
@@ -920,6 +981,9 @@ fn lower_table(spec: TableSpec, flow: &mut Flow, images: &LoweredImages) {
             table.row(row.into_iter().map(|cell| lower_cell(cell, images)));
         }
     });
+    if let Some(node) = table.lower(&mut flow.errors) {
+        flow.push(node);
+    }
 }
 
 fn lower_cell(spec: CellSpec, images: &LoweredImages) -> Cell<'_> {
@@ -951,11 +1015,9 @@ fn lower_cell(spec: CellSpec, images: &LoweredImages) -> Cell<'_> {
 }
 
 fn lower_list(spec: ListSpec, flow: &mut Flow, images: &LoweredImages) {
-    match spec.kind {
-        ListKind::Bullet => flow.ul(|list| apply_list(spec, list, images)),
-        ListKind::Ordered(numbering) => {
-            flow.ol(numbering, |list| apply_list(spec, list, images));
-        }
+    let built = list_block(spec, images).build_on(flow);
+    if let Some(node) = built.lower(&mut flow.errors) {
+        flow.push(node);
     }
 }
 

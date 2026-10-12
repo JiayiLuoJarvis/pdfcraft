@@ -1,4 +1,4 @@
-//! Multi-page smoke demo that walks most of the public flow DSL.
+//! Multi-page smoke demo on [`DocumentSpec`].
 //!
 //! ```text
 //! cargo run --example hello
@@ -13,15 +13,20 @@ use std::fs;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::PathBuf;
 
+use quire_pdf::spec::{
+    Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
+    ColumnSpec, ColumnsSpec, HLineSpec, ImageSpec, InlineRun, ListItemSpec, ListKind, ListSpec,
+    ParagraphSpec, Resources, SectionSpec, TableSpec, TextRun,
+};
 use quire_pdf::{
-    document, to_pdf, Cell, Color, Document, FlowWriter, Image, ImageFormat, Margins, Numbering,
-    PageSize, Positive, Ratio, Track,
+    layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
+    Positive, Ratio, Result, Track,
 };
 
 const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
 const PIXEL: &[u8] = include_bytes!("../tests/fixtures/one-pixel.png");
 
-fn main() -> quire_pdf::Result<()> {
+fn main() -> Result<()> {
     let out = env::args()
         .nth(1)
         .map_or_else(|| PathBuf::from("out/hello.pdf"), PathBuf::from);
@@ -29,253 +34,506 @@ fn main() -> quire_pdf::Result<()> {
         fs::create_dir_all(parent).expect("create output dir");
     }
 
-    let rendered = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.bold_font(FONT.to_vec())?;
-        let logo = doc.load_image(PIXEL.to_vec(), ImageFormat::Png)?;
-        decorate_pages(doc)?;
-        write_title(doc, &logo);
-        write_lists(doc);
-        write_table(doc, &logo);
-        doc.page_break();
-        write_closing(doc);
-        Ok(())
+    let mut resources = Resources::new(FONT.to_vec());
+    resources.bold_font = Some(FONT.to_vec());
+    let logo = resources.add_image(PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = layout_spec(quire_pdf::DocumentSpec {
+        page_size: PageSize::A4,
+        resources,
+        limits: quire_pdf::Limits::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::try_uniform(48.0)?,
+            header: Some(BandSpec {
+                inset: BandInset::PageMargins,
+                left: Some(BandSlot::Link {
+                    uri: vec![TextRun::Literal("https://example.test/quire".into())],
+                    text: vec![TextRun::Literal("quire demo".into())],
+                }),
+                right: Some(BandSlot::Text(vec![
+                    TextRun::Literal("第 ".into()),
+                    TextRun::PageNumber,
+                    TextRun::Literal(" 页 / 共 ".into()),
+                    TextRun::PageCount,
+                    TextRun::Literal(" 页".into()),
+                ])),
+            }),
+            footer: Some(BandSpec {
+                inset: BandInset::PageMargins,
+                left: Some(BandSlot::Text(vec![TextRun::Literal(
+                    "layout smoke".into(),
+                )])),
+                right: Some(BandSlot::Link {
+                    uri: vec![TextRun::Literal("https://example.test/footer".into())],
+                    text: vec![TextRun::Literal("footer link".into())],
+                }),
+            }),
+            body: hello_body(logo)?,
+            ..SectionSpec::default()
+        }],
     })?;
     let pdf = to_pdf(rendered)?;
-
     fs::write(&out, &pdf).expect("write PDF");
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());
     Ok(())
 }
 
-fn decorate_pages(doc: &mut Document<'_>) -> quire_pdf::Result<()> {
-    doc.margins(Margins::try_uniform(48.0)?);
-    doc.header(|h| {
-        let m = h.page().margins;
-        h.inset(m.left(), m.right());
-        h.left_link("https://example.test/quire", "quire demo");
-        h.right(format!(
-            "第 {} 页 / 共 {} 页",
-            h.page().number,
-            h.page().count
-        ));
-    });
-    doc.footer(|f| {
-        let m = f.page().margins;
-        f.inset(m.left(), m.right());
-        f.left("layout smoke");
-        f.right_link("https://example.test/footer", "footer link");
-    });
-    Ok(())
+fn pos(value: f32) -> Result<Length<Positive>> {
+    Positive::pt(value).map_err(quire_pdf::Errors::from)
 }
 
-fn write_title(flow: &mut impl FlowWriter, logo: &Image) {
-    flow.paragraph(|p| {
-        p.center();
-        p.bold("Quire layout tour");
-    });
-    flow.hline(|h| {
-        h.width(220.0);
-        h.thickness(1.25);
-        h.color(Color::rgb(40, 40, 40));
-        h.space_before(6.0);
-        h.space_after(12.0);
-    });
-    flow.image(logo, |image| {
-        image.width(36.0);
-        image.center();
-    });
-    flow.spacer(10.0);
-    flow.paragraph(|p| {
-        p.first_line_indent(18.0);
-        p.text("This example exercises paragraph runs, ");
-        p.bold("bold");
-        p.text(", ");
-        p.link("https://example.test/docs", |p| p.text("links"));
-        p.text(", blanks, lists, columns, tables, images, keep-together,");
-        p.text(" and page breaks.");
-    });
-    flow.paragraph(|p| {
-        p.text("Signed: ");
-        p.blank(96.0).thickness(0.75).color(Color::rgb(0, 0, 0));
-        p.text("  date ");
-        p.blank_em(6).thickness(0.75).baseline_offset(1.5);
-    });
-    flow.paragraph(|p| {
-        p.text("Notes");
-        p.blank_to_end()
-            .thickness(0.5)
-            .color(Color::rgb(90, 90, 90));
-    });
+fn nn(value: f32) -> Result<Length<NonNegative>> {
+    NonNegative::pt(value).map_err(quire_pdf::Errors::from)
 }
 
-fn write_lists(flow: &mut impl FlowWriter) {
-    flow.columns(|row| {
-        row.gap(16.0);
-        row.col(|col| {
-            col.paragraph(|p| p.bold("Bullets"));
-            col.ul(|list| {
-                list.marker_width(16.0);
-                list.nest_indent(20.0);
-                list.item(|item| {
-                    item.paragraph(|p| p.text("measure with skrifa"));
-                    item.ul(|inner| {
-                        inner.item(|n| n.paragraph(|p| p.text("cluster")));
-                        inner.item(|n| n.paragraph(|p| p.text("advance")));
-                    });
-                });
-                list.item(|item| item.paragraph(|p| p.text("break lines in the frame")));
-                list.item_marked("*", |item| {
-                    item.paragraph(|p| p.text("custom marker item"));
-                });
-            });
-        });
-        row.col_ratio(1.2, |col| {
-            col.paragraph(|p| p.bold("Ordered"));
-            col.ol(Numbering::LowerAlpha, |list| {
-                list.start(NonZeroU32::new(2).unwrap());
-                list.item(|item| item.paragraph(|p| p.text("paginate")));
-                list.item(|item| item.paragraph(|p| p.text("decorate")));
-                list.item_marked("(x)", |item| {
-                    item.paragraph(|p| p.text("marked, no number burn"));
-                });
-                list.item(|item| item.paragraph(|p| p.text("emit PDF")));
-            });
-        });
-    });
-    flow.hline(|h| {
-        h.start();
-        h.width(160.0);
-        h.space_before(14.0);
-        h.space_after(10.0);
-    });
+fn text(value: impl Into<String>) -> InlineRun {
+    InlineRun::Text(value.into())
 }
 
-fn write_table(flow: &mut impl FlowWriter, logo: &Image) {
-    flow.paragraph(|p| p.bold("Shipment table"));
-    flow.table(|t| {
-        t.repeat_header(true);
-        t.cell_padding(4.0);
-        t.border(0.5, Color::rgb(30, 30, 30));
-        t.tracks([
-            Track::Fixed(Positive::pt(54.0).unwrap()),
+fn bold(value: impl Into<String>) -> InlineRun {
+    InlineRun::Bold(value.into())
+}
+
+fn link(uri: &str, runs: Vec<InlineRun>) -> InlineRun {
+    InlineRun::Link {
+        uri: uri.into(),
+        runs,
+    }
+}
+
+fn blank(
+    width: BlankWidth,
+    thickness: f32,
+    color: Option<Color>,
+    offset: Option<f32>,
+) -> Result<InlineRun> {
+    Ok(InlineRun::Blank(BlankSpec {
+        width,
+        thickness: Some(pos(thickness)?),
+        color,
+        baseline_offset: offset.map(nn).transpose()?,
+    }))
+}
+
+fn paragraph(runs: Vec<InlineRun>, align: Alignment, indent: f32) -> Result<Block> {
+    Ok(Block::Paragraph(ParagraphSpec {
+        runs,
+        first_line_indent: nn(indent)?,
+        align,
+        ..ParagraphSpec::default()
+    }))
+}
+
+fn rule(
+    width: Option<f32>,
+    align: Alignment,
+    thickness: f32,
+    color: Color,
+    before: f32,
+    after: f32,
+) -> Result<Block> {
+    Ok(Block::HLine(HLineSpec {
+        width: width.map(pos).transpose()?,
+        align,
+        thickness: pos(thickness)?,
+        color,
+        space_before: nn(before)?,
+        space_after: nn(after)?,
+    }))
+}
+
+fn ratio(weight: f32, blocks: Vec<Block>) -> ColumnSpec {
+    ColumnSpec {
+        width: Track::Ratio(Ratio::new(weight).expect("weight is positive")),
+        blocks,
+    }
+}
+
+fn bullets() -> Result<Block> {
+    Ok(Block::List(ListSpec {
+        marker_width: pos(16.0)?,
+        nest_indent: Some(pos(20.0)?),
+        items: vec![
+            ListItemSpec {
+                marker: None,
+                blocks: vec![
+                    paragraph(vec![text("measure with skrifa")], Alignment::Start, 0.0)?,
+                    Block::List(ListSpec {
+                        items: vec![
+                            ListItemSpec {
+                                marker: None,
+                                blocks: vec![paragraph(
+                                    vec![text("cluster")],
+                                    Alignment::Start,
+                                    0.0,
+                                )?],
+                            },
+                            ListItemSpec {
+                                marker: None,
+                                blocks: vec![paragraph(
+                                    vec![text("advance")],
+                                    Alignment::Start,
+                                    0.0,
+                                )?],
+                            },
+                        ],
+                        ..ListSpec::default()
+                    }),
+                ],
+            },
+            ListItemSpec {
+                marker: None,
+                blocks: vec![paragraph(
+                    vec![text("break lines in the frame")],
+                    Alignment::Start,
+                    0.0,
+                )?],
+            },
+            ListItemSpec {
+                marker: Some("*".into()),
+                blocks: vec![paragraph(
+                    vec![text("custom marker item")],
+                    Alignment::Start,
+                    0.0,
+                )?],
+            },
+        ],
+        ..ListSpec::default()
+    }))
+}
+
+fn ordered() -> Result<Block> {
+    Ok(Block::List(ListSpec {
+        kind: ListKind::Ordered(Numbering::LowerAlpha),
+        start: NonZeroU32::new(2).unwrap(),
+        items: vec![
+            item(paragraph(vec![text("paginate")], Alignment::Start, 0.0)?),
+            item(paragraph(vec![text("decorate")], Alignment::Start, 0.0)?),
+            marked(
+                "(x)",
+                paragraph(vec![text("marked, no number burn")], Alignment::Start, 0.0)?,
+            ),
+            item(paragraph(vec![text("emit PDF")], Alignment::Start, 0.0)?),
+        ],
+        ..ListSpec::default()
+    }))
+}
+
+fn item(block: Block) -> ListItemSpec {
+    ListItemSpec {
+        marker: None,
+        blocks: vec![block],
+    }
+}
+
+fn marked(marker: &str, block: Block) -> ListItemSpec {
+    ListItemSpec {
+        marker: Some(marker.into()),
+        blocks: vec![block],
+    }
+}
+
+fn head_cell(label: &str) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Paragraph(ParagraphSpec {
+            runs: vec![bold(label)],
+            color: Some(Color::rgb(255, 255, 255)),
+            ..ParagraphSpec::default()
+        })],
+        fill: Some(Color::rgb(40, 40, 40)),
+        ..CellSpec::default()
+    }
+}
+
+fn text_cell(value: impl Into<String>) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(value.into())],
+        ..CellSpec::default()
+    }
+}
+
+fn span_text(value: &str, cols: u16) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(value.into())],
+        col_span: NonZeroU16::new(cols).unwrap(),
+        ..CellSpec::default()
+    }
+}
+
+fn shipment_rows(logo: quire_pdf::spec::ImageRef) -> Result<Vec<Vec<CellSpec>>> {
+    let mut rows = vec![
+        vec![
+            CellSpec {
+                content: vec![CellBlock::Text("A1".into())],
+                row_span: NonZeroU16::new(2).unwrap(),
+                ..CellSpec::default()
+            },
+            CellSpec {
+                content: vec![CellBlock::Paragraph(ParagraphSpec {
+                    runs: vec![text("Pen "), bold("set")],
+                    ..ParagraphSpec::default()
+                })],
+                ..CellSpec::default()
+            },
+            CellSpec {
+                content: vec![CellBlock::List(ListSpec {
+                    items: vec![
+                        item(paragraph(vec![text("black")], Alignment::Start, 0.0)?),
+                        item(paragraph(vec![text("blue")], Alignment::Start, 0.0)?),
+                    ],
+                    ..ListSpec::default()
+                })],
+                ..CellSpec::default()
+            },
+            text_cell("12"),
+        ],
+        vec![
+            CellSpec {
+                content: vec![CellBlock::Paragraph(ParagraphSpec {
+                    runs: vec![link("https://example.test/ink", vec![text("Ink")])],
+                    ..ParagraphSpec::default()
+                })],
+                ..CellSpec::default()
+            },
+            CellSpec {
+                content: vec![CellBlock::List(ListSpec {
+                    kind: ListKind::Ordered(Numbering::Decimal),
+                    items: vec![
+                        item(paragraph(vec![text("bottle")], Alignment::Start, 0.0)?),
+                        marked("+", paragraph(vec![text("refill")], Alignment::Start, 0.0)?),
+                    ],
+                    ..ListSpec::default()
+                })],
+                ..CellSpec::default()
+            },
+            text_cell("3"),
+        ],
+        vec![
+            text_cell("B2"),
+            CellSpec {
+                content: vec![CellBlock::Image(ImageSpec {
+                    image: logo,
+                    width: Some(pos(18.0)?),
+                    height: None,
+                    align: Alignment::Center,
+                })],
+                ..CellSpec::default()
+            },
+            CellSpec {
+                content: vec![CellBlock::HLine(HLineSpec {
+                    thickness: pos(0.75)?,
+                    color: Color::rgb(120, 0, 0),
+                    ..HLineSpec::default()
+                })],
+                ..CellSpec::default()
+            },
+            CellSpec {
+                content: vec![CellBlock::Spacer(nn(8.0)?)],
+                ..CellSpec::default()
+            },
+        ],
+    ];
+    for n in 0..36 {
+        rows.push(vec![
+            text_cell(format!("R{n}")),
+            text_cell(format!("part {n}")),
+            text_cell("stock"),
+            text_cell(format!("{}", (n % 9) + 1)),
+        ]);
+    }
+    rows.push(vec![span_text("Total rows above", 4)]);
+    Ok(rows)
+}
+
+fn title_blocks(logo: quire_pdf::spec::ImageRef) -> Result<Vec<Block>> {
+    Ok(vec![
+        paragraph(vec![bold("Quire layout tour")], Alignment::Center, 0.0)?,
+        rule(
+            Some(220.0),
+            Alignment::Center,
+            1.25,
+            Color::rgb(40, 40, 40),
+            6.0,
+            12.0,
+        )?,
+        Block::Image(ImageSpec {
+            image: logo,
+            width: Some(pos(36.0)?),
+            height: None,
+            align: Alignment::Center,
+        }),
+        Block::Spacer(nn(10.0)?),
+        paragraph(
+            vec![
+                text("This example exercises paragraph runs, "),
+                bold("bold"),
+                text(", "),
+                link("https://example.test/docs", vec![text("links")]),
+                text(", blanks, lists, columns, tables, images, keep-together,"),
+                text(" and page breaks."),
+            ],
+            Alignment::Start,
+            18.0,
+        )?,
+        paragraph(
+            vec![
+                text("Signed: "),
+                blank(
+                    BlankWidth::Fixed(nn(96.0)?),
+                    0.75,
+                    Some(Color::rgb(0, 0, 0)),
+                    None,
+                )?,
+                text("  date "),
+                blank(BlankWidth::Em(6), 0.75, None, Some(1.5))?,
+            ],
+            Alignment::Start,
+            0.0,
+        )?,
+        paragraph(
+            vec![
+                text("Notes"),
+                blank(
+                    BlankWidth::ToEndOfLine,
+                    0.5,
+                    Some(Color::rgb(90, 90, 90)),
+                    None,
+                )?,
+            ],
+            Alignment::Start,
+            0.0,
+        )?,
+        Block::Columns(ColumnsSpec {
+            gap: nn(16.0)?,
+            columns: vec![
+                ratio(
+                    1.0,
+                    vec![
+                        paragraph(vec![bold("Bullets")], Alignment::Start, 0.0)?,
+                        bullets()?,
+                    ],
+                ),
+                ratio(
+                    1.2,
+                    vec![
+                        paragraph(vec![bold("Ordered")], Alignment::Start, 0.0)?,
+                        ordered()?,
+                    ],
+                ),
+            ],
+        }),
+        rule(
+            Some(160.0),
+            Alignment::Start,
+            1.0,
+            Color::rgb(0, 0, 0),
+            14.0,
+            10.0,
+        )?,
+    ])
+}
+
+fn table_block(logo: quire_pdf::spec::ImageRef) -> Result<Block> {
+    Ok(Block::Table(TableSpec {
+        header: vec![
+            vec![
+                head_cell("Code"),
+                head_cell("Item"),
+                head_cell("Notes"),
+                head_cell("Qty"),
+            ],
+            vec![span_text("group A", 4)],
+        ],
+        body: shipment_rows(logo)?,
+        tracks: Some(vec![
+            Track::Fixed(pos(54.0)?),
             Track::Ratio(Ratio::new(2.0).unwrap()),
             Track::Ratio(Ratio::new(1.0).unwrap()),
-            Track::Fixed(Positive::pt(48.0).unwrap()),
-        ]);
-        t.header([
-            Cell::paragraph(|p| {
-                p.color(Color::rgb(255, 255, 255));
-                p.bold("Code");
-            })
-            .fill(Color::rgb(40, 40, 40)),
-            Cell::paragraph(|p| {
-                p.color(Color::rgb(255, 255, 255));
-                p.bold("Item");
-            })
-            .fill(Color::rgb(40, 40, 40)),
-            Cell::paragraph(|p| {
-                p.color(Color::rgb(255, 255, 255));
-                p.bold("Notes");
-            })
-            .fill(Color::rgb(40, 40, 40)),
-            Cell::paragraph(|p| {
-                p.color(Color::rgb(255, 255, 255));
-                p.bold("Qty");
-            })
-            .fill(Color::rgb(40, 40, 40)),
-        ]);
-        t.header([Cell::new("group A").col_span(NonZeroU16::new(4).unwrap())]);
-        t.row([
-            Cell::new("A1").row_span(NonZeroU16::new(2).unwrap()),
-            Cell::paragraph(|p| {
-                p.text("Pen ");
-                p.bold("set");
-            }),
-            Cell::ul(|list| {
-                list.item(|item| item.paragraph(|p| p.text("black")));
-                list.item(|item| item.paragraph(|p| p.text("blue")));
-            }),
-            Cell::new("12"),
-        ]);
-        t.row([
-            Cell::paragraph(|p| {
-                p.link("https://example.test/ink", |p| p.text("Ink"));
-            }),
-            Cell::ol(Numbering::Decimal, |list| {
-                list.item(|item| item.paragraph(|p| p.text("bottle")));
-                list.item_marked("+", |item| item.paragraph(|p| p.text("refill")));
-            }),
-            Cell::new("3"),
-        ]);
-        t.row([
-            Cell::new("B2"),
-            Cell::image(logo, |image| {
-                image.width(18.0);
-                image.center();
-            }),
-            Cell::hline(|h| {
-                h.thickness(0.75);
-                h.color(Color::rgb(120, 0, 0));
-            }),
-            Cell::spacer(8.0),
-        ]);
-        for n in 0..36 {
-            t.row([
-                format!("R{n}"),
-                format!("part {n}"),
-                "stock".to_owned(),
-                format!("{}", (n % 9) + 1),
-            ]);
-        }
-        t.row([Cell::new("Total rows above").col_span(NonZeroU16::new(4).unwrap())]);
-    });
+            Track::Fixed(pos(48.0)?),
+        ]),
+        cell_padding: nn(4.0)?,
+        border_width: nn(0.5)?,
+        border_color: Color::rgb(30, 30, 30),
+        ..TableSpec::default()
+    }))
 }
 
-fn write_closing(flow: &mut impl FlowWriter) {
-    flow.keep_together(|g| {
-        g.paragraph(|p| {
-            p.center();
-            p.bold("Keep-together block");
-        });
-        g.paragraph(|p| {
-            p.text("These two lines move as one piece when the remaining");
-            p.text(" frame is too short.");
-        });
-        g.hline(|h| {
-            h.end();
-            h.width(120.0);
-            h.space_before(4.0);
-        });
-    });
-    flow.spacer(8.0);
-    flow.columns(|row| {
-        row.col_fixed(140.0, |col| {
-            col.paragraph(|p| p.bold("Fixed column"));
-            col.paragraph(|p| p.text("Narrow frame wraps AA AA AA AA AA words here."));
-            col.ol(Numbering::UpperRoman, |list| {
-                list.item(|item| item.paragraph(|p| p.text("one")));
-                list.item(|item| item.paragraph(|p| p.text("two")));
-            });
-        });
-        row.col_auto(|col| {
-            col.paragraph(|p| p.bold("Auto column"));
-            col.table(|t| {
-                t.border(0.4, Color::rgb(0, 0, 0));
-                t.cell_padding(3.0);
-                t.header(["Side", "Val"]);
-                t.row(["L", "1"]);
-                t.row(["R", "2"]);
-            });
-            col.paragraph(|p| {
-                p.end();
-                p.text("end-aligned note");
-            });
-        });
-    });
-    flow.spacer(16.0);
-    flow.paragraph(|p| {
-        p.center();
-        p.text("End of tour.");
-    });
+fn closing_blocks() -> Result<Vec<Block>> {
+    Ok(vec![
+        Block::KeepTogether(vec![
+            paragraph(vec![bold("Keep-together block")], Alignment::Center, 0.0)?,
+            paragraph(
+                vec![
+                    text("These two lines move as one piece when the remaining"),
+                    text(" frame is too short."),
+                ],
+                Alignment::Start,
+                0.0,
+            )?,
+            rule(
+                Some(120.0),
+                Alignment::End,
+                1.0,
+                Color::rgb(0, 0, 0),
+                4.0,
+                0.0,
+            )?,
+        ]),
+        Block::Spacer(nn(8.0)?),
+        Block::Columns(ColumnsSpec {
+            gap: nn(12.0)?,
+            columns: vec![
+                ColumnSpec {
+                    width: Track::Fixed(pos(140.0)?),
+                    blocks: vec![
+                        paragraph(vec![bold("Fixed column")], Alignment::Start, 0.0)?,
+                        paragraph(
+                            vec![text("Narrow frame wraps AA AA AA AA AA words here.")],
+                            Alignment::Start,
+                            0.0,
+                        )?,
+                        Block::List(ListSpec {
+                            kind: ListKind::Ordered(Numbering::UpperRoman),
+                            items: vec![
+                                item(paragraph(vec![text("one")], Alignment::Start, 0.0)?),
+                                item(paragraph(vec![text("two")], Alignment::Start, 0.0)?),
+                            ],
+                            ..ListSpec::default()
+                        }),
+                    ],
+                },
+                ColumnSpec {
+                    width: Track::Auto,
+                    blocks: vec![
+                        paragraph(vec![bold("Auto column")], Alignment::Start, 0.0)?,
+                        Block::Table(TableSpec {
+                            header: vec![vec![text_cell("Side"), text_cell("Val")]],
+                            body: vec![
+                                vec![text_cell("L"), text_cell("1")],
+                                vec![text_cell("R"), text_cell("2")],
+                            ],
+                            cell_padding: nn(3.0)?,
+                            border_width: nn(0.4)?,
+                            ..TableSpec::default()
+                        }),
+                        paragraph(vec![text("end-aligned note")], Alignment::End, 0.0)?,
+                    ],
+                },
+            ],
+        }),
+        Block::Spacer(nn(16.0)?),
+        paragraph(vec![text("End of tour.")], Alignment::Center, 0.0)?,
+    ])
+}
+
+fn hello_body(logo: quire_pdf::spec::ImageRef) -> Result<Vec<Block>> {
+    let mut body = title_blocks(logo)?;
+    body.push(paragraph(
+        vec![bold("Shipment table")],
+        Alignment::Start,
+        0.0,
+    )?);
+    body.push(table_block(logo)?);
+    body.push(Block::PageBreak);
+    body.extend(closing_blocks()?);
+    Ok(body)
 }

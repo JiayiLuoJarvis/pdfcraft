@@ -35,7 +35,7 @@
 - 排版坐标：**左上原点，y 向下**；与 krilla 0.8.2 Surface 一致，适配器里对几何做恒等映射，不预翻转。
 - 版本保持 `0.x`；`publish = false` 直到限额与信件夹具通过。
 
-调用方式（提案书 §1，已定）：闭包式 DSL；正文流式；`behind` / `front` 等定位绘制在**每一页绘制时**跑。`Flowable` 只在库内部，不向调用方暴露。
+调用方式（提案书 §1，已定）：`DocumentSpec` 值，经 `layout_spec` 排版。正文流式。页眉、页脚、`behind` / `front` 在每一页绘制时由库填页码。调用方不提供闭包。`Flowable` 只在库内部，不向调用方暴露。
 
 ## 概念三分（对照 pdfmake，谈范围时用）
 
@@ -64,7 +64,8 @@ quire/
     error.rs geom.rs
     # limits.rs returns with the limits PR (not an empty pub shell)
     canvas.rs           Canvas / RecordingCanvas；无 krilla
-    document.rs         公共 DSL（§2 定后再写）
+    spec/               公共 DocumentSpec；layout_spec 降成流和页饰
+    document/           crate 内降级，不向调用方提供闭包
     fonts.rs
     text/               cluster / measure / break_class / line_break
     layout/             frame flow nesting paragraph columns table list decorate paginate dump

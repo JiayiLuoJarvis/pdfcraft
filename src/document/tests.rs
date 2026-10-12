@@ -1,487 +1,497 @@
-#![allow(clippy::wildcard_imports)]
-use super::*;
-use crate::error::{Errors, Location, Region};
+//! Painted and error behavior of values lowered by `layout_spec`.
+
+use crate::canvas::{pt_near, CanvasCommand};
+use crate::error::{ErrorKind, GeometryKind, Location, Region};
 use crate::fonts::fixture_bytes;
-use crate::geom::{PageSize, Rect};
+use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect, Size};
+use crate::layout_spec;
+use crate::spec::{
+    Alignment, BlankSpec, BlankWidth, Block, InlineRun, LayerMark, LayerShape, ListItemSpec,
+    ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec, TextRun, TextStyle,
+};
+use crate::DocumentSpec;
 
-fn doc_with_font<'a>() -> Document<'a> {
-    let mut doc = Document::new(PageSize::A4);
-    doc.font(fixture_bytes().to_vec()).unwrap();
-
-    doc
+fn resources() -> Resources {
+    let mut resources = Resources::new(fixture_bytes().as_ref().clone());
+    resources.bold_font = Some(fixture_bytes().as_ref().clone());
+    resources
 }
 
-#[test]
-fn paragraph_enters_the_flow_unwrapped() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| p.text("A B"));
-    let Sections::Implicit(section) = &doc.body else {
-        panic!("paragraph stays on the implicit section");
-    };
-    assert!(matches!(
-        section.flow.nodes.as_slice(),
-        [FlowNode::Text(text)] if *text == TextNode::new("A B", default_style())
-    ));
+fn lay(page: PageSize, section: SectionSpec) -> crate::Result<crate::Rendered> {
+    layout_spec(DocumentSpec {
+        page_size: page,
+        resources: resources(),
+        limits: crate::Limits::default(),
+        sections: vec![section],
+    })
 }
 
-#[test]
-fn paragraph_coalesces_adjacent_faces_and_ignores_empty_appends() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| {
-        p.text("A");
-        p.text("");
-        p.text("B");
-        p.bold("C");
-        p.bold("D");
-        p.text("E");
-    });
-    let Sections::Implicit(section) = &doc.body else {
-        panic!("paragraph stays on the implicit section");
-    };
-    let expected = TextNode::from_runs(
-        vec![
-            TextRun::new("AB", Face::Body),
-            TextRun::new("CD", Face::Bold),
-            TextRun::new("E", Face::Body),
-        ],
-        default_style(),
-    );
-    assert!(matches!(
-        section.flow.nodes.as_slice(),
-        [FlowNode::Text(text)] if *text == expected
-    ));
-}
-
-fn flow_text(doc: &Document<'_>) -> TextNode {
-    let Sections::Implicit(section) = &doc.body else {
-        panic!("paragraph stays on the implicit section");
-    };
-    match section.flow.nodes.as_slice() {
-        [FlowNode::Text(text)] => text.clone(),
-        other => panic!("expected one text node, got {other:?}"),
+fn body(blocks: Vec<Block>) -> SectionSpec {
+    SectionSpec {
+        body: blocks,
+        ..SectionSpec::default()
     }
 }
 
-#[test]
-fn blank_breaks_text_coalescing() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| {
-        p.text("A");
-        p.blank(NonNegative::pt(10.0).unwrap())
-            .thickness(Positive::pt(0.5).unwrap())
-            .color(Color::rgb(1, 2, 3))
-            .baseline_offset(NonNegative::pt(2.0).unwrap());
-        p.text("B");
-    });
-    let mut blank = InlineBlank::new(BlankWidth::Fixed(NonNegative::pt(10.0).unwrap()));
-    blank.thickness = Positive::pt(0.5).unwrap();
-    blank.color = Some(Color::rgb(1, 2, 3));
-    blank.baseline_offset = NonNegative::pt(2.0).unwrap();
-    let expected = TextNode::from_items(
-        vec![
-            InlineItem::Text(TextRun::new("A", Face::Body)),
-            InlineItem::Blank(blank),
-            InlineItem::Text(TextRun::new("B", Face::Body)),
-        ],
-        default_style(),
-    );
-    assert_eq!(flow_text(&doc), expected);
+fn texts(rendered: &crate::Rendered) -> Vec<String> {
+    rendered
+        .pages()
+        .iter()
+        .flat_map(crate::canvas::RecordedPage::ops)
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn fonts(rendered: &crate::Rendered) -> Vec<u32> {
+    rendered
+        .pages()
+        .iter()
+        .flat_map(crate::canvas::RecordedPage::ops)
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.font.as_u32()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn targets(rendered: &crate::Rendered) -> Vec<String> {
+    rendered
+        .pages()
+        .iter()
+        .flat_map(crate::canvas::RecordedPage::ops)
+        .filter_map(|op| match op {
+            CanvasCommand::AnnotateLink { target, .. } => Some(target.as_str().to_owned()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
-fn fill_blank_coalesces_text_before_it_and_rejects_a_later_run() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| {
-        p.text("A");
-        p.text("B");
-        p.blank_to_end();
-        p.text("");
-        p.bold("");
-    });
-    let expected = TextNode::from_items(
-        vec![
-            InlineItem::Text(TextRun::new("AB", Face::Body)),
-            InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
-        ],
-        default_style(),
-    );
-    assert_eq!(flow_text(&doc), expected);
+fn adjacent_same_face_runs_paint_as_one_glyph_run() {
+    let rendered = lay(
+        PageSize::A4,
+        body(vec![Block::Paragraph(ParagraphSpec {
+            runs: vec![
+                InlineRun::Text("A".into()),
+                InlineRun::Text(String::new()),
+                InlineRun::Text("B".into()),
+                InlineRun::Bold("C".into()),
+                InlineRun::Bold("D".into()),
+                InlineRun::Text("E".into()),
+            ],
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .unwrap();
+    assert_eq!(texts(&rendered), ["AB", "CD", "E"]);
+    assert_eq!(fonts(&rendered), [0, 1, 0]);
+}
 
-    for build in [
-        |p: &mut Paragraph| {
-            p.blank_to_end();
-            p.text("x");
-        },
-        |p: &mut Paragraph| {
-            p.blank_to_end();
-            p.bold("x");
-        },
-        |p: &mut Paragraph| {
-            p.blank_to_end();
-            p.blank(NonNegative::ZERO);
-        },
-        |p: &mut Paragraph| {
-            p.blank_to_end();
-            p.blank_em(1);
-        },
-        |p: &mut Paragraph| {
-            p.blank_to_end();
-            p.blank_to_end();
-        },
+#[test]
+fn a_blank_splits_adjacent_text_into_two_glyph_runs() {
+    let rendered = lay(
+        PageSize::A4,
+        body(vec![Block::Paragraph(ParagraphSpec {
+            runs: vec![
+                InlineRun::Text("A".into()),
+                InlineRun::Blank(BlankSpec {
+                    width: BlankWidth::Fixed(NonNegative::pt(10.0).unwrap()),
+                    thickness: Some(Positive::pt(0.5).unwrap()),
+                    color: Some(Color::rgb(1, 2, 3)),
+                    baseline_offset: Some(NonNegative::pt(2.0).unwrap()),
+                }),
+                InlineRun::Text("B".into()),
+            ],
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .unwrap();
+    assert_eq!(texts(&rendered), ["A", "B"]);
+    let pages = rendered.pages();
+    let strokes = pages[0]
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, CanvasCommand::StrokePath { .. }))
+        .count();
+    assert_eq!(strokes, 1);
+}
+
+#[test]
+fn a_run_after_fill_blank_fails_before_any_page() {
+    for runs in [
+        vec![
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::ToEndOfLine,
+                ..blank_default()
+            }),
+            InlineRun::Text("x".into()),
+        ],
+        vec![
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::ToEndOfLine,
+                ..blank_default()
+            }),
+            InlineRun::Bold("x".into()),
+        ],
+        vec![
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::ToEndOfLine,
+                ..blank_default()
+            }),
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::Fixed(NonNegative::ZERO),
+                ..blank_default()
+            }),
+        ],
+        vec![
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::ToEndOfLine,
+                ..blank_default()
+            }),
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::Em(1),
+                ..blank_default()
+            }),
+        ],
+        vec![
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::ToEndOfLine,
+                ..blank_default()
+            }),
+            InlineRun::Blank(BlankSpec {
+                width: BlankWidth::ToEndOfLine,
+                ..blank_default()
+            }),
+        ],
     ] {
-        let mut doc = doc_with_font();
-        doc.paragraph(build);
-        let Sections::Implicit(section) = &doc.body else {
-            panic!("paragraph stays on the implicit section");
-        };
-        assert_eq!(
-            section.flow.errors.as_slice(),
-            &[Error::from(ErrorKind::RunAfterFillBlank)]
-        );
-        assert!(section.flow.nodes.is_empty());
+        let error = lay(
+            PageSize::A4,
+            body(vec![Block::Paragraph(ParagraphSpec {
+                runs,
+                ..ParagraphSpec::default()
+            })]),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.first().kind, ErrorKind::RunAfterFillBlank);
+    }
+}
+
+fn blank_default() -> BlankSpec {
+    BlankSpec {
+        width: BlankWidth::ToEndOfLine,
+        thickness: None,
+        color: None,
+        baseline_offset: None,
     }
 }
 
 #[test]
-fn run_after_fill_blank_paints_nothing() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| {
-        p.text("A");
-        p.blank_to_end();
-        p.text("x");
-    });
-    assert_fails_with_empty_canvas(
-        doc,
-        &Error::from(ErrorKind::RunAfterFillBlank).in_section(0),
-    );
+fn a_fixed_blank_wider_than_the_indented_line_fails() {
+    let error = lay(
+        PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
+        body(vec![Block::Paragraph(ParagraphSpec {
+            runs: vec![InlineRun::Blank(BlankSpec {
+                width: BlankWidth::Fixed(NonNegative::pt(80.0).unwrap()),
+                ..blank_default()
+            })],
+            first_line_indent: NonNegative::pt(40.0).unwrap(),
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .err()
+    .unwrap();
+    let ErrorKind::UnbreakableWiderThanFrame { width, avail, .. } = &error.first().kind else {
+        panic!("{error:?}");
+    };
+    assert!(pt_near(*width, 80.0), "{width}");
+    assert!(pt_near(*avail, 60.0), "{avail}");
 }
 
 #[test]
-fn fixed_blank_wider_than_the_indented_line_fails_before_any_page() {
-    let mut doc = Document::new(PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()));
-    doc.font(fixture_bytes().to_vec()).unwrap();
-    doc.paragraph(|p| {
-        p.first_line_indent(NonNegative::pt(40.0).unwrap());
-        p.blank(NonNegative::pt(80.0).unwrap());
-    });
-    let mut rec = RecordingCanvas::new();
-    let Err(errors) = doc.paint(&mut rec) else {
-        panic!("expected the blank to be wider than the indented line");
-    };
-    let ErrorKind::UnbreakableWiderThanFrame { width, avail, .. } = &errors.first().kind else {
-        panic!("{errors:?}");
-    };
-    assert!(crate::canvas::pt_near(*width, 80.0), "{width}");
-    assert!(crate::canvas::pt_near(*avail, 60.0), "{avail}");
-    assert!(rec.commands().is_empty());
+fn nested_links_restore_the_outer_target() {
+    let rendered = lay(
+        PageSize::A4,
+        body(vec![Block::Paragraph(ParagraphSpec {
+            runs: vec![
+                InlineRun::Link {
+                    uri: "https://a".into(),
+                    runs: vec![
+                        InlineRun::Text("A".into()),
+                        InlineRun::Text("B".into()),
+                        InlineRun::Bold("C".into()),
+                        InlineRun::Link {
+                            uri: "https://b".into(),
+                            runs: vec![InlineRun::Text("D".into())],
+                        },
+                        InlineRun::Text("E".into()),
+                    ],
+                },
+                InlineRun::Text("F".into()),
+            ],
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .unwrap();
+    assert_eq!(texts(&rendered), ["AB", "C", "D", "E", "F"]);
+    assert_eq!(fonts(&rendered), [0, 1, 0, 0, 0]);
+    assert_eq!(targets(&rendered), ["https://a", "https://b", "https://a"]);
 }
 
 #[test]
-fn bold_font_requires_body_and_rebinds_to_the_latest_face() {
-    let mut doc = Document::new(PageSize::A4);
+fn an_empty_uri_fails_before_any_page() {
+    let error = lay(
+        PageSize::A4,
+        body(vec![Block::Paragraph(ParagraphSpec {
+            runs: vec![
+                InlineRun::Text("A".into()),
+                InlineRun::Link {
+                    uri: String::new(),
+                    runs: vec![InlineRun::Text("x".into())],
+                },
+            ],
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.first().kind, ErrorKind::EmptyLink);
+}
+
+#[test]
+fn an_empty_band_uri_is_located_in_the_header() {
+    let error = lay(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            header: Some(crate::spec::BandSpec {
+                left: Some(crate::spec::BandSlot::Link {
+                    uri: vec![TextRun::Literal(String::new())],
+                    text: vec![TextRun::Literal("Home".into())],
+                }),
+                right: Some(crate::spec::BandSlot::Link {
+                    uri: vec![TextRun::Literal("https://example.com".into())],
+                    text: vec![TextRun::Literal("Later".into())],
+                }),
+                ..crate::spec::BandSpec::default()
+            }),
+            body: vec![Block::paragraph("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.first().kind, ErrorKind::EmptyLink);
     assert_eq!(
-        doc.bold_font(fixture_bytes().to_vec()).unwrap_err(),
-        Error::from(ErrorKind::Font {
-            index: 0,
-            message: "body font is not registered".to_owned(),
+        error.first().at,
+        Some(Location {
+            section: Some(0),
+            page: Some(1),
+            region: Some(Region::Header),
+            cell: None,
         })
     );
-    doc.font(fixture_bytes().to_vec()).unwrap();
-    doc.bold_font(fixture_bytes().to_vec()).unwrap();
-    assert_eq!(doc.fonts.bold().unwrap(), FontId::from_raw(1));
-    doc.bold_font(fixture_bytes().to_vec()).unwrap();
-    assert_eq!(doc.fonts.bold().unwrap(), FontId::from_raw(2));
-}
-
-fn on_first_page(error: impl Into<Error>, region: Region) -> Error {
-    error
-        .into()
-        .in_region(region)
-        .on_page_index(0)
-        .in_section(0)
-}
-
-fn assert_fails_with_empty_canvas(doc: Document<'_>, expected: &Error) {
-    let mut rec = RecordingCanvas::new();
-    let result = doc.paint(&mut rec);
-    assert_eq!(result.err().as_ref(), Some(&Errors::from(expected.clone())));
-    assert!(rec.commands().is_empty());
-}
-
-#[test]
-fn link_coalesces_on_face_and_uri_and_restores_the_outer_target() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| {
-        p.link("https://a", |p| {
-            p.text("A");
-            p.text("B");
-            p.bold("C");
-            p.link("https://b", |p| p.text("D"));
-            p.text("E");
-        });
-        p.text("F");
-    });
-    let a = Some(LinkTarget::uri("https://a").unwrap());
-    let b = Some(LinkTarget::uri("https://b").unwrap());
-    let expected = TextNode::from_runs(
-        vec![
-            TextRun::new("AB", Face::Body).with_link(a.clone()),
-            TextRun::new("C", Face::Bold).with_link(a),
-            TextRun::new("D", Face::Body).with_link(b),
-            TextRun::new("E", Face::Body).with_link(Some(LinkTarget::uri("https://a").unwrap())),
-            TextRun::new("F", Face::Body),
-        ],
-        default_style(),
-    );
-    assert_eq!(flow_text(&doc), expected);
-}
-
-#[test]
-fn blank_inside_a_link_stays_unlinked() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| {
-        p.link("u", |p| {
-            p.text("A");
-            p.blank(NonNegative::pt(10.0).unwrap());
-            p.text("B");
-        });
-    });
-    let link = Some(LinkTarget::uri("u").unwrap());
-    let expected = TextNode::from_items(
-        vec![
-            InlineItem::Text(TextRun::new("A", Face::Body).with_link(link.clone())),
-            InlineItem::Blank(InlineBlank::new(BlankWidth::Fixed(
-                NonNegative::pt(10.0).unwrap(),
-            ))),
-            InlineItem::Text(TextRun::new("B", Face::Body).with_link(link)),
-        ],
-        default_style(),
-    );
-    assert_eq!(flow_text(&doc), expected);
-}
-
-#[test]
-fn empty_uri_does_not_run_the_link_closure() {
-    let mut doc = doc_with_font();
-    let mut ran = false;
-    doc.paragraph(|p| {
-        p.text("A");
-        p.link("", |_| ran = true);
-    });
-    assert!(!ran);
-    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::EmptyLink).in_section(0));
-}
-
-#[test]
-fn empty_band_uri_paints_nothing() {
-    let mut doc = doc_with_font();
-    doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
-    doc.header(|h| {
-        h.left_link("", "Home");
-        h.right_link("https://example.com", "Later");
-    });
-    doc.paragraph(|p| p.text("A"));
-    assert_fails_with_empty_canvas(doc, &on_first_page(ErrorKind::EmptyLink, Region::Header));
 }
 
 const MISSING: char = '\u{6f22}';
 
 #[test]
-fn bold_and_indent_failures_happen_before_any_page() {
-    let mut missing_bold = doc_with_font();
-    missing_bold.paragraph(|p| p.bold("A"));
-    assert_fails_with_empty_canvas(
-        missing_bold,
-        &on_first_page(ErrorKind::BoldFaceRequired, Region::Body),
+fn a_missing_header_glyph_is_located_in_the_header() {
+    let error = lay(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            header: Some(crate::spec::BandSpec {
+                left: Some(crate::spec::BandSlot::Text(vec![TextRun::Literal(
+                    MISSING.to_string(),
+                )])),
+                ..crate::spec::BandSpec::default()
+            }),
+            body: vec![Block::paragraph("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind,
+        ErrorKind::MissingGlyph {
+            font: 0,
+            scalar: MISSING,
+        }
     );
-
-    let mut missing_glyph = doc_with_font();
-    missing_glyph.bold_font(fixture_bytes().to_vec()).unwrap();
-    missing_glyph.paragraph(|p| p.bold(MISSING.to_string()));
-    assert_fails_with_empty_canvas(
-        missing_glyph,
-        &on_first_page(
-            ErrorKind::MissingGlyph {
-                font: 1,
-                scalar: MISSING,
-            },
-            Region::Body,
-        ),
+    assert_eq!(
+        error.first().at.as_ref().and_then(|at| at.region),
+        Some(Region::Header)
     );
+}
 
-    let mut invalid_indent = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
-    invalid_indent.font(fixture_bytes().to_vec()).unwrap();
-    invalid_indent.paragraph(|p| {
-        p.first_line_indent(NonNegative::pt(24.0).unwrap());
-        p.text("A");
-    });
-    assert_fails_with_empty_canvas(
-        invalid_indent,
-        &on_first_page(
-            GeometryKind::FirstLineIndent {
-                indent: 24.0,
-                width: 24.0,
-            },
-            Region::Body,
-        ),
+#[test]
+fn a_zero_length_layer_segment_fails_before_any_page() {
+    let point = Point::try_pt(4.0, 5.0).unwrap();
+    let error = layout_spec(DocumentSpec {
+        page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
+        resources: Resources::default(),
+        limits: crate::Limits::default(),
+        sections: vec![SectionSpec {
+            behind: vec![
+                LayerMark::Line {
+                    when: PageWhen::All,
+                    from: point,
+                    to: point,
+                    pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                },
+                LayerMark::Rect {
+                    when: PageWhen::All,
+                    rect: Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
+                    ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                },
+            ],
+            ..SectionSpec::default()
+        }],
+    })
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind,
+        ErrorKind::InvalidGeometry(GeometryKind::ZeroLengthSegment)
     );
+    assert_eq!(
+        error.first().at.as_ref().and_then(|at| at.region),
+        Some(Region::Behind)
+    );
+}
 
-    let mut overwide = Document::new(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()));
-    overwide.font(fixture_bytes().to_vec()).unwrap();
-    overwide.paragraph(|p| {
-        p.first_line_indent(NonNegative::pt(12.0).unwrap());
-        p.text("AA");
-    });
-    let mut rec = RecordingCanvas::new();
-    let error = overwide.paint(&mut rec).err().unwrap();
+#[test]
+fn a_non_finite_rotation_fails_before_any_page() {
+    let error = layout_spec(DocumentSpec {
+        page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
+        resources: Resources::default(),
+        limits: crate::Limits::default(),
+        sections: vec![SectionSpec {
+            behind: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: f32::NAN,
+                pivot: Point::ZERO,
+                shapes: vec![LayerShape::Rect {
+                    rect: Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
+                    ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                }],
+            }],
+            ..SectionSpec::default()
+        }],
+    })
+    .err()
+    .unwrap();
     assert!(
-        matches!(error.first().kind, ErrorKind::UnbreakableWiderThanFrame { avail, .. }
-                if crate::canvas::pt_near(avail, 12.0)
+        matches!(
+            error.first().kind,
+            ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees }) if degrees.is_nan()
         ),
         "{error:?}"
     );
-    assert!(rec.commands().is_empty());
 }
 
 #[test]
-fn missing_glyph_in_header_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
-    doc.header(|h| h.left(MISSING.to_string()));
-    doc.paragraph(|p| p.text("A"));
-    assert_fails_with_empty_canvas(
-        doc,
-        &on_first_page(
-            ErrorKind::MissingGlyph {
-                font: 0,
-                scalar: MISSING,
-            },
-            Region::Header,
-        ),
-    );
-}
-
-#[test]
-fn degenerate_layer_line_fails_before_any_page() {
-    let mut doc = Document::new(PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()));
-    let point = Point::try_pt(4.0, 5.0).unwrap();
-    let pen = Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap();
-    doc.behind(|layer| {
-        layer.line(point, point, pen);
-        layer.rect(
-            Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
-            Ink::Fill(Color::rgb(0, 0, 0)),
-        );
-    });
-    assert_fails_with_empty_canvas(
-        doc,
-        &on_first_page(GeometryKind::ZeroLengthSegment, Region::Behind),
-    );
-}
-
-#[test]
-fn non_finite_rotation_does_not_draw() {
-    use std::cell::Cell;
-
-    let ran = Cell::new(false);
-    let mut doc = Document::new(PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()));
-    doc.behind(|layer| {
-        layer.rotated(f32::NAN, Point::ZERO, |_| ran.set(true));
-    });
-    assert!(matches!(
-        doc.paint(&mut RecordingCanvas::new())
-            .err()
-            .map(|error| error.first().kind.clone()),
-        Some(ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees })) if degrees.is_nan()
-    ));
-    assert!(!ran.get());
-}
-
-#[test]
-fn text_at_with_a_forced_break_fails_before_paint() {
+fn a_forced_break_in_layer_text_fails_before_any_page() {
     for sample in ["A\nB", "A\r\nB"] {
-        let mut doc = doc_with_font();
-        doc.behind(|layer| {
-            layer.text_at(sample, Point::try_pt(10.0, 10.0).unwrap());
-        });
-        let expected = on_first_page(
+        let error = lay(
+            PageSize::A4,
+            SectionSpec {
+                behind: vec![LayerMark::Text {
+                    when: PageWhen::All,
+                    text: vec![TextRun::Literal(sample.into())],
+                    at: Point::try_pt(10.0, 10.0).unwrap(),
+                    style: TextStyle::default(),
+                }],
+                ..SectionSpec::default()
+            },
+        )
+        .err()
+        .unwrap();
+        assert_eq!(
+            error.first().kind,
             ErrorKind::UnexpectedLineBreakInSingleLine {
                 text: "A\nB".to_owned(),
             },
-            Region::Behind,
-        );
-        let mut rec = RecordingCanvas::new();
-        let result = doc.paint(&mut rec);
-        assert_eq!(
-            result.err().as_ref(),
-            Some(&Errors::from(expected)),
             "{sample:?}"
         );
-        assert!(rec.commands().is_empty(), "{sample:?}");
+        assert_eq!(
+            error.first().at.as_ref().and_then(|at| at.region),
+            Some(Region::Behind)
+        );
     }
 }
 
 #[test]
-fn custom_marker_with_a_forced_break_fails_before_paint() {
-    let mut doc = doc_with_font();
-    doc.ul(|list| {
-        list.item_marked("A\nB", |item| item.paragraph(|p| p.text("body")));
-    });
-    assert_fails_with_empty_canvas(
-        doc,
-        &on_first_page(
-            ErrorKind::UnexpectedLineBreakInSingleLine {
-                text: "A\nB".to_owned(),
-            },
-            Region::Body,
-        ),
-    );
-}
-
-#[test]
-fn missing_glyph_in_front_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| p.text("A"));
-    doc.front(|page| {
-        if page.is_last() {
-            page.text_at(MISSING.to_string(), Point::try_pt(10.0, 10.0).unwrap());
+fn a_forced_break_in_a_custom_marker_fails_before_any_page() {
+    let error = lay(
+        PageSize::A4,
+        body(vec![Block::List(ListSpec {
+            items: vec![ListItemSpec {
+                marker: Some("A\nB".into()),
+                blocks: vec![Block::paragraph("body")],
+            }],
+            ..ListSpec::default()
+        })]),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind,
+        ErrorKind::UnexpectedLineBreakInSingleLine {
+            text: "A\nB".to_owned(),
         }
-    });
-    assert_fails_with_empty_canvas(
-        doc,
-        &on_first_page(
-            ErrorKind::MissingGlyph {
-                font: 0,
-                scalar: MISSING,
-            },
-            Region::Front,
-        ),
+    );
+    assert_eq!(
+        error.first().at.as_ref().and_then(|at| at.region),
+        Some(Region::Body)
     );
 }
 
 #[test]
-fn header_without_margin_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.header(|h| h.left("H"));
-    doc.paragraph(|p| p.text("A"));
-    let mut rec = RecordingCanvas::new();
-    let result = doc.paint(&mut rec);
-    assert!(
-        matches!(result.map_err(|error| error.first().kind.clone()), Err(ErrorKind::DecorationTallerThanMargin { margin, .. }) if margin == 0.0)
-    );
-    assert!(rec.commands().is_empty());
-}
-
-#[test]
-fn keep_together_taller_than_the_page_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.keep_together(|g| {
-        for _ in 0..100 {
-            g.paragraph(|p| p.text("line"));
+fn a_missing_glyph_on_the_last_page_front_is_located_there() {
+    let error = lay(
+        PageSize::A4,
+        SectionSpec {
+            body: vec![Block::paragraph("A")],
+            front: vec![LayerMark::Text {
+                when: PageWhen::Last,
+                text: vec![TextRun::Literal(MISSING.to_string())],
+                at: Point::try_pt(10.0, 10.0).unwrap(),
+                style: TextStyle::default(),
+            }],
+            ..SectionSpec::default()
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind,
+        ErrorKind::MissingGlyph {
+            font: 0,
+            scalar: MISSING,
         }
-    });
-    let mut rec = RecordingCanvas::new();
-    let error = doc.paint(&mut rec).err().unwrap();
+    );
+    assert_eq!(
+        error.first().at.as_ref().and_then(|at| at.region),
+        Some(Region::Front)
+    );
+}
+
+#[test]
+fn keep_together_taller_than_the_page_names_the_body() {
+    let error = lay(
+        PageSize::A4,
+        body(vec![Block::KeepTogether(
+            (0..100).map(|_| Block::paragraph("line")).collect(),
+        )]),
+    )
+    .err()
+    .unwrap();
     let page_h = PageSize::A4.resolve().height().as_pt();
     assert!(
         matches!(
@@ -500,86 +510,48 @@ fn keep_together_taller_than_the_page_fails_before_any_page() {
             cell: None,
         })
     );
-    assert!(rec.commands().is_empty());
 }
 
 #[test]
-fn section_after_paragraph_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.paragraph(|p| p.text("A"));
-    doc.section(|section| {
-        section.paragraph(|p| p.text("B"));
-        Ok(())
-    });
-    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
+fn one_value_path_paints_a_paragraph_and_a_cell() {
+    let rendered = lay(
+        PageSize::A4,
+        body(vec![
+            Block::paragraph("Risk"),
+            Block::Table(crate::spec::TableSpec {
+                body: vec![vec![crate::spec::CellSpec {
+                    content: vec![crate::spec::CellBlock::Text("cell".into())],
+                    ..crate::spec::CellSpec::default()
+                }]],
+                ..crate::spec::TableSpec::default()
+            }),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(texts(&rendered), ["Risk", "cell"]);
 }
 
 #[test]
-fn paragraph_after_section_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.section(|section| {
-        section.paragraph(|p| p.text("A"));
-        Ok(())
-    });
-    doc.paragraph(|p| p.text("B"));
-    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
-}
-
-#[test]
-fn add_after_section_fails_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.section(|section| {
-        section.paragraph(|p| p.text("A"));
-        Ok(())
-    });
-    doc.add(Paragraph::build(|p| p.text("B")));
-    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
-}
-
-#[test]
-fn bad_spacer_or_list_after_section_is_content_outside_section() {
-    let mut doc = doc_with_font();
-    doc.section(|section| {
-        section.paragraph(|p| p.text("A"));
-        Ok(())
-    });
-    doc.spacer(-1.0);
-    doc.ol(Numbering::Decimal, |list| {
-        list.item(|item| item.paragraph(|p| p.text("B")));
-    });
-    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
-}
-
-#[test]
-fn add_places_a_built_paragraph_and_table() {
-    let mut via_add = doc_with_font();
-    via_add.add(Paragraph::build(|p| p.text("Risk")));
-    via_add.add(Table::build(|t| t.row(["cell"])));
-
-    let mut via_sugar = doc_with_font();
-    via_sugar.paragraph(|p| p.text("Risk"));
-    via_sugar.table(|t| t.row(["cell"]));
-
-    let Sections::Implicit(added) = &via_add.body else {
-        panic!("add stays on the implicit section");
+fn paragraph_align_end_wins_when_center_is_not_set() {
+    let rendered = lay(
+        PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
+        body(vec![Block::Paragraph(ParagraphSpec {
+            runs: vec![InlineRun::Text("D".into())],
+            align: Alignment::End,
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .unwrap();
+    let pages = rendered.pages();
+    let CanvasCommand::DrawGlyphRun { run } = &pages[0].ops()[0] else {
+        panic!("glyph");
     };
-    let Sections::Implicit(sugar) = &via_sugar.body else {
-        panic!("sugar stays on the implicit section");
-    };
-    assert!(matches!(
-        added.flow.nodes.first(),
-        Some(FlowNode::Text(text)) if *text == TextNode::new("Risk", default_style())
-    ));
-    assert_eq!(added.flow.nodes, sugar.flow.nodes);
-}
-
-#[test]
-fn margins_after_section_fail_before_any_page() {
-    let mut doc = doc_with_font();
-    doc.section(|section| {
-        section.paragraph(|p| p.text("A"));
-        Ok(())
-    });
-    doc.margins(Margins::uniform(NonNegative::pt(12.0).unwrap()));
-    assert_fails_with_empty_canvas(doc, &Error::from(ErrorKind::ContentOutsideSection));
+    let x = run.origin.x().as_pt();
+    let width = run
+        .glyphs
+        .iter()
+        .map(|glyph| glyph.advance_norm)
+        .sum::<f32>()
+        * run.font_size.as_pt();
+    assert!(pt_near(x + width, 120.0), "{x}");
 }

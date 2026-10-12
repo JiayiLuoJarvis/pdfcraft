@@ -17,34 +17,10 @@ impl Layer {
         self.page
     }
 
-    /// Whether this is the last page of the whole document.
-    ///
-    /// Same rule as [`Page::is_last`]. It is not the last page of the section.
-    #[must_use]
-    pub fn is_last(&self) -> bool {
-        self.page.is_last()
-    }
-
-    /// Runs `body` with a temporary parent text style. [`Layer::text_at`] inherits unless overridden.
-    ///
-    /// Like pdfmake's `stack` carrying `fontSize` / `color`. The previous parent style is restored
-    /// when `body` returns.
-    pub fn stack(&mut self, style: impl FnOnce(&mut TextProps), body: impl FnOnce(&mut Layer)) {
-        let saved = self.style.clone();
-        let mut props = TextProps::default();
-        style(&mut props);
-        if !props.apply(&mut self.style, &mut self.errors) {
-            self.style = saved;
-            return;
-        }
-        body(self);
-        self.style = saved;
-    }
-
     /// Draws `s` on one line with the top-left of its line box at `at`. It is not wrapped or clipped.
     ///
-    /// Inherits the layer's current parent style (document defaults, or the enclosing
-    /// [`Layer::stack`]). Chain [`TextAt::font_size`] / [`TextAt::color`] to override this call only.
+    /// Inherits the layer's current parent style. Chain [`TextAt::font_size`] / [`TextAt::color`]
+    /// to override this call only.
     pub fn text_at(&mut self, s: impl AsRef<str>, at: impl IntoPoint) -> TextAt<'_> {
         let at = match at.into_point() {
             Ok(at) => at,
@@ -266,19 +242,4 @@ pub(crate) fn straight_path(from: Point, to: Point) -> Fallible<Path> {
 
 pub(crate) fn is_zero_angle(degrees: f32) -> bool {
     degrees.to_bits() == 0 || degrees.to_bits() == (-0.0f32).to_bits()
-}
-
-pub(crate) fn layer_content(hook: LayerHook<'_>, style: Style, doc: DocToken) -> LayerContent<'_> {
-    Box::new(move |info: &PageInfo, errors: &mut ErrorBag| {
-        let mut layer = Layer {
-            page: Page::from(info),
-            style: style.clone(),
-            doc,
-            items: Vec::new(),
-            errors: ErrorBag::default(),
-        };
-        hook(&mut layer);
-        errors.absorb(layer.errors);
-        Ok(layer.items)
-    })
 }

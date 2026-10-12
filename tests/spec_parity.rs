@@ -1,15 +1,17 @@
 //! Behavior checks for the data-only document specification path.
 
+#[cfg(feature = "backend-krilla")]
+use quire_pdf::spec::{Alignment, CellBlock, CellSpec, ImageRef, ImageSpec, TableSpec};
 use quire_pdf::spec::{
-    Alignment, BandInset, BandSlot, Block, CellBlock, CellSpec, ImageRef, ImageSpec, LayerMark,
-    PageWhen, Resources, SectionSpec, TableSpec, TextRun, TextStyle,
+    BandInset, BandSlot, Block, LayerMark, PageWhen, Resources, SectionSpec, TextRun, TextStyle,
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::to_pdf;
 use quire_pdf::{
-    layout_spec, pt_near, CanvasCommand, DocumentSpec, ErrorKind, ImageFormat, Margins,
-    NonNegative, PageSize, Point,
+    layout_spec, pt_near, CanvasCommand, DocumentSpec, Margins, NonNegative, PageSize, Point,
 };
+#[cfg(feature = "backend-krilla")]
+use quire_pdf::{ErrorKind, ImageFormat};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const BASELINE: f32 = 13.812;
@@ -152,6 +154,7 @@ fn local_cell_image_ref_draws() {
     assert_eq!(draws, 1);
 }
 
+#[cfg(feature = "backend-krilla")]
 fn cell_image_section(image: ImageRef) -> SectionSpec {
     let mut section = SectionSpec::default();
     section.body.push(Block::Table(TableSpec {

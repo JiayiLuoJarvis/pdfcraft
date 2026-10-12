@@ -25,6 +25,7 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `document()`, `FlowWriter`, and the public builders that took closures are removed. Build a `DocumentSpec` and call `layout_spec`. Page numbers, page counts, section counters, and last-page marks are `TextRun` and `PageWhen` values. `Band`, `Layer`, `Flow`, `Section`, `IntoFlowItem`, and `ListBlock` are no longer exported. `Track`, `Ratio`, `Numbering`, `Rendered`, `Document`, and `Image` stay at the crate root. `Document::set_limits` and `Document::load_image` remain so existing doc links resolve. Layout itself goes through `layout_spec`.
 - **Breaking.** `Track::Fixed` takes `Length<Positive>`. `Track::Ratio` takes `Ratio`. `Border` is no longer exported. Call `Table::border`. `DocumentInfo` is no longer re-exported from the crate root. It remains `quire_pdf::canvas::DocumentInfo` for `Canvas::set_document_info`.
 - **Breaking.** `ErrorKind::UnbreakableWiderThanFrame` carries `text: Option<String>`. `ErrorKind::UnexpectedLineBreakInSingleLine` carries `text: String`. `MissingGlyph`'s display includes the scalar.
 - **Breaking.** A font or an image over its byte cap is `ErrorKind::LimitExceeded` with `LimitKind::FontBytes` or `LimitKind::ImageBytes`. Those failures were `ErrorKind::Font` and `ErrorKind::Image` strings.
@@ -38,7 +39,7 @@ while remaining `0.x`.
 - Font parse failures and PDF serialization failures keep the skrifa or krilla error as `Error::source()`. Equality compares `kind` and `at` only.
 - `UnsupportedCanvasOperation` is removed. Nothing produced it.
 - `layout` and `text` are crate-private. Empty `layout/dump.rs` is gone.
-- **Breaking.** `Rendered::to_pdf()` is now the free function `quire_pdf::to_pdf(rendered)`, still behind feature `backend-krilla`. `document` lives only at the crate root; the `quire_pdf::document::document` path is gone.
+- **Breaking.** `Rendered::to_pdf()` is now the free function `quire_pdf::to_pdf(rendered)`, still behind feature `backend-krilla`.
 
 ### Added
 

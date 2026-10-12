@@ -29,14 +29,6 @@ impl Columns {
         }
     }
 
-    /// Adds an equal-ratio column to the right of the previous ones.
-    pub fn col(&mut self, f: impl FnOnce(&mut Flow)) {
-        self.push_col(
-            ColumnWidth::Ratio(LayoutRatio::new(1.0).expect("1 is positive")),
-            f,
-        );
-    }
-
     /// Adds a fixed-width column.
     pub fn col_fixed(&mut self, width: impl IntoPositive, f: impl FnOnce(&mut Flow)) {
         match width.into_positive() {

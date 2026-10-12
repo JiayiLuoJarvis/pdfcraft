@@ -1,39 +1,30 @@
-//! Public document construction surface (Rust DSL).
+//! Crate-private lowering from values to flow nodes.
 //!
-//! [`document()`](crate::document()) runs the caller's closure once to assemble the body flow.
-//! Header, footer, behind, and front closures run again on every page after
-//! pagination, so only they see page numbers.
+//! Callers build a [`crate::DocumentSpec`] and pass it to [`crate::layout_spec`].
+//! Page-time header, footer, and layer closures stay inside this module.
 
 // Submodules share the former monolith import surface via `use super::*`.
 #![allow(clippy::wildcard_imports)]
 
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
 
 use crate::canvas::{
-    Canvas, DecodedImage, ImageFormat, ImageRegistry, LinkTarget, RecordedPage, RecordingCanvas,
+    DecodedImage, ImageFormat, ImageRegistry, LinkTarget, RecordedPage, RecordingCanvas,
     RejectingImageRegistry,
 };
-use crate::error::{
-    ColumnWidthsReason, Error, ErrorBag, ErrorKind, Errors, Fallible, GeometryKind, Location,
-    Result,
-};
-use crate::fonts::{FontId, FontSource, FontStore};
+use crate::error::{ColumnWidthsReason, Error, ErrorBag, ErrorKind, Fallible, GeometryKind};
+use crate::fonts::{FontId, FontStore};
 use crate::geom::{
     Color, Ink, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length, Margins, NonNegative,
     PageSize, Path, Pen, Point, Positive, Size,
 };
 use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio as LayoutRatio};
-use crate::layout::decorate::{
-    BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
-};
-use crate::layout::flow::{FlowNode, KeepTogetherNode, SpacerNode};
-use crate::layout::frame::LayoutCtx;
+use crate::layout::decorate::{LayerItem, LayerText, PageInfo};
+use crate::layout::flow::{FlowNode, SpacerNode};
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{ListItem, ListKind, ListNode, ListSpec, MarkerKind};
-use crate::layout::paginate::{layout_pages, paint_laid, PaginateConfig, SectionJob};
 use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun};
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table as layout_table;
@@ -51,33 +42,30 @@ mod layer;
 mod list;
 mod page;
 mod paragraph;
-mod section;
-mod style_props;
 mod table;
 mod token;
 
 #[cfg(test)]
 mod tests;
 
-pub use band::Band;
-pub use columns::Columns;
 pub use document_ty::{Document, Rendered};
-pub use flow::Flow;
-pub use flow_writer::{FlowWriter, IntoFlowItem, PlacedImage, Spacer};
-pub use hline::HLine;
-pub use image::{Image, ImageBox};
-pub use layer::{Layer, Shapes, TextAt};
-pub use list::{List, ListBlock, Numbering};
-pub use page::Page;
-pub use paragraph::{Blank, Paragraph};
-pub use section::Section;
-pub use style_props::TextProps;
-pub use table::{Cell, IntoCellItem, Ratio, Table, Track};
+pub use image::Image;
+pub use list::Numbering;
+pub use table::{Ratio, Track};
 
-pub(crate) use band::band_content;
+pub(crate) use band::Band;
+pub(crate) use columns::Columns;
+pub(crate) use flow::Flow;
+pub(crate) use flow_writer::{IntoFlowItem, PlacedImage, Spacer};
+pub(crate) use hline::HLine;
+pub(crate) use image::ImageBox;
+pub(crate) use layer::Layer;
+pub(crate) use list::{List, ListBlock};
+pub(crate) use page::Page;
+pub(crate) use paragraph::Paragraph;
+pub(crate) use table::{Cell, Table};
+
 pub(crate) use columns::reject_auto_with_ratio;
 pub(crate) use document_ty::default_style;
 pub(crate) use flow::{lower_paragraph, numbering_kind};
-pub(crate) use layer::layer_content;
-pub(crate) use section::{BandHook, LayerHook, Sections};
 pub(crate) use token::DocToken;

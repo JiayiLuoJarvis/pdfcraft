@@ -116,19 +116,6 @@ impl Table {
         table
     }
 
-    /// Builds a table on a detached flow that uses the default text style.
-    ///
-    /// Nested content keeps that build-time style. Prefer [`FlowWriter::table`]
-    /// when writing into a live flow so nested content sees that flow's style.
-    /// Use this when a helper returns a table for [`FlowWriter::add`].
-    ///
-    /// [`FlowWriter::add`] rebinds this table's document token to the destination
-    /// flow. A cell image registered on that document then resolves. An image
-    /// from another document is still [`ErrorKind::UnknownImage`].
-    pub fn build(f: impl FnOnce(&mut Self)) -> Self {
-        Self::build_on(&Flow::new(default_style(), DocToken::next()), f)
-    }
-
     /// Adds a header row. Several calls make a multi-row header.
     pub fn header<'c, I>(&mut self, cells: I)
     where
@@ -349,12 +336,7 @@ mod seal {
 ///
 /// Sealed. Implementors are [`Paragraph`], [`HLine`], [`PlacedImage`],
 /// [`Spacer`], and [`ListBlock`]. [`Table`] and [`Columns`] implement
-/// [`IntoFlowItem`] only, so they cannot go into a cell:
-///
-/// ```compile_fail
-/// use quire_pdf::{Cell, Table};
-/// let _ = Cell::empty().add(Table::build(|t| t.row(["a"])));
-/// ```
+/// [`IntoFlowItem`] only, so they cannot go into a cell.
 ///
 /// Adding stores the value. Paragraphs, lines, images, and spacers lower with
 /// the table's parent style and document token. A [`ListBlock`] runs when the
@@ -444,55 +426,6 @@ impl<'a> Cell<'a> {
         let mut cell = Self::empty();
         cell.pieces.push(Piece::Text(text.into()));
         cell
-    }
-
-    /// A one-by-one cell holding one paragraph. The closure runs immediately.
-    ///
-    /// Content taller than the cell's inner full frame is
-    /// [`ErrorKind::UnsplittableTallerThanFrame`].
-    pub fn paragraph(f: impl FnOnce(&mut Paragraph)) -> Self {
-        Self::empty().add(Paragraph::build(f))
-    }
-
-    /// A one-by-one cell holding a bulleted list.
-    ///
-    /// The closure runs when the cell is written into a row. It may borrow
-    /// locals that live until that `row` or `header` call returns.
-    ///
-    /// Content taller than the cell's inner full frame is
-    /// [`ErrorKind::UnsplittableTallerThanFrame`].
-    pub fn ul(f: impl FnOnce(&mut List) + 'a) -> Self {
-        Self::empty().add(ListBlock::bullet(f))
-    }
-
-    /// A one-by-one cell holding a numbered list starting at 1.
-    ///
-    /// The closure runs when the cell is written into a row. It may borrow
-    /// locals that live until that `row` or `header` call returns.
-    ///
-    /// Content taller than the cell's inner full frame is
-    /// [`ErrorKind::UnsplittableTallerThanFrame`].
-    pub fn ol(numbering: Numbering, f: impl FnOnce(&mut List) + 'a) -> Self {
-        Self::empty().add(ListBlock::numbered(numbering, f))
-    }
-
-    /// A one-by-one cell holding `image`.
-    pub fn image(image: &Image, f: impl FnOnce(&mut ImageBox)) -> Self {
-        Self::empty().add(PlacedImage::build(image, f))
-    }
-
-    /// A one-by-one cell holding a horizontal line as wide as the cell content.
-    pub fn hline(f: impl FnOnce(&mut HLine)) -> Self {
-        Self::empty().add(HLine::build(f))
-    }
-
-    /// A one-by-one cell holding vertical space that paints nothing.
-    ///
-    /// Height may be zero. Taller than the cell's inner full frame is
-    /// [`ErrorKind::UnsplittableTallerThanFrame`]. Unlike [`Flow::spacer`], the blank
-    /// does not split across pages inside the cell.
-    pub fn spacer(height: impl IntoNonNegative) -> Self {
-        Self::empty().add(Spacer::new(height))
     }
 
     /// Spans `n` columns to the right.

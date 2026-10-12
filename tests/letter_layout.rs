@@ -2,8 +2,12 @@
 
 #![cfg(feature = "backend-krilla")]
 
+use quire_pdf::spec::{
+    Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, ImageSpec, Resources, SectionSpec,
+    TableSpec, TextRun,
+};
 use quire_pdf::{
-    document, pt_near, to_pdf, CanvasCommand, FlowWriter, ImageFormat, Margins, NonNegative,
+    layout_spec, pt_near, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative,
     PageSize, Positive, RecordedPage, Result, A4,
 };
 
@@ -29,26 +33,66 @@ struct GlyphSample {
 }
 
 fn letter() -> Result<quire_pdf::Rendered> {
-    document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(MARGIN)?));
-        doc.footer(|footer| {
-            let page = footer.page();
-            footer.left(format!("第 {} 页 / 共 {} 页", page.number, page.count));
-        });
-        doc.paragraph(|p| p.text(BODY_1));
-        doc.paragraph(|p| p.text(BODY_2));
-        doc.paragraph(|p| p.text(MIXED));
-        doc.table(|table| {
-            table.header(["项目", "金额", "交货日"]);
-            table.row(["设备", "12000", "2026-10-31"]);
-            table.row(["服务", "8000", "2026-11-15"]);
-        });
-        let mark = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        let side = Positive::pt(8.0)?;
-        doc.image(&mark, |image| image.width(side));
-        Ok(())
+    let mut resources = Resources::new(FONT.to_vec());
+    let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let margin = NonNegative::pt(MARGIN)?;
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources,
+        limits: quire_pdf::Limits::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::uniform(margin),
+            footer: Some(BandSpec {
+                left: Some(BandSlot::Text(vec![
+                    TextRun::Literal("第 ".into()),
+                    TextRun::PageNumber,
+                    TextRun::Literal(" 页 / 共 ".into()),
+                    TextRun::PageCount,
+                    TextRun::Literal(" 页".into()),
+                ])),
+                ..BandSpec::default()
+            }),
+            body: vec![
+                Block::paragraph(BODY_1),
+                Block::paragraph(BODY_2),
+                Block::paragraph(MIXED),
+                Block::Table(TableSpec {
+                    header: vec![vec![
+                        text_cell("项目"),
+                        text_cell("金额"),
+                        text_cell("交货日"),
+                    ]],
+                    body: vec![
+                        vec![
+                            text_cell("设备"),
+                            text_cell("12000"),
+                            text_cell("2026-10-31"),
+                        ],
+                        vec![
+                            text_cell("服务"),
+                            text_cell("8000"),
+                            text_cell("2026-11-15"),
+                        ],
+                    ],
+                    ..TableSpec::default()
+                }),
+                Block::Image(ImageSpec {
+                    image: mark,
+                    width: Some(Positive::pt(8.0)?),
+                    height: None,
+                    align: Alignment::Start,
+                }),
+            ],
+            ..SectionSpec::default()
+        }],
     })
+}
+
+fn text_cell(text: &str) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(text.into())],
+        ..CellSpec::default()
+    }
 }
 
 fn runs(page: &RecordedPage) -> Vec<GlyphSample> {

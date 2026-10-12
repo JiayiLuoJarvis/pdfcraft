@@ -78,12 +78,18 @@ impl PlacedImage {
     }
 }
 
-impl seal::Sealed for PlacedImage {}
-impl IntoFlowItem for PlacedImage {
-    fn add_to(self, flow: &mut Flow) {
+impl PlacedImage {
+    pub(crate) fn push_on(self, flow: &mut Flow) {
         if let Some(node) = self.box_.lower(&self.image, flow.doc, &mut flow.errors) {
             flow.push(node);
         }
+    }
+}
+
+impl seal::Sealed for PlacedImage {}
+impl IntoFlowItem for PlacedImage {
+    fn add_to(self, flow: &mut Flow) {
+        self.push_on(flow);
     }
 }
 
@@ -128,144 +134,6 @@ impl IntoFlowItem for ListBlock<'_> {
         let built = self.build_on(flow);
         if let Some(node) = built.lower(&mut flow.errors) {
             flow.push(node);
-        }
-    }
-}
-
-/// Types that append body content: [`Flow`], [`Section`], and [`Document`].
-///
-/// Everyday callers use the sugar methods. Prefer [`FlowWriter::add`] when a
-/// helper builds an element value and returns it.
-pub trait FlowWriter {
-    /// Target flow for this writer.
-    ///
-    /// On [`Document`], this is the implicit section or the rejecting flow after
-    /// an explicit [`Document::section`]. Not the everyday entry point.
-    fn flow_mut(&mut self) -> &mut Flow;
-
-    /// Appends a pre-built flow item.
-    ///
-    /// Advanced path for factories that return an element. Everyday code should
-    /// call the sugar methods instead. [`Self::stack`] and
-    /// [`Self::keep_together`] do not build a value for this method. They write
-    /// through [`Self::flow_mut`].
-    fn add(&mut self, item: impl IntoFlowItem) {
-        item.add_to(self.flow_mut());
-    }
-
-    /// Appends a paragraph. It wraps at the width of wherever it lands.
-    fn paragraph(&mut self, f: impl FnOnce(&mut Paragraph)) {
-        self.add(Paragraph::build(f));
-    }
-
-    /// Appends columns side by side. `col` stays equal-ratio. Gap defaults to 12 pt.
-    /// Needs at least two columns.
-    fn columns(&mut self, f: impl FnOnce(&mut Columns)) {
-        let item = {
-            let flow = self.flow_mut();
-            Columns::build_on(flow, f)
-        };
-        self.add(item);
-    }
-
-    /// Appends a borderless table with equal-width columns.
-    ///
-    /// The column count is the span sum of the first row.
-    fn table(&mut self, f: impl FnOnce(&mut Table)) {
-        let item = {
-            let flow = self.flow_mut();
-            Table::build_on(flow, f)
-        };
-        self.add(item);
-    }
-
-    /// Appends a bulleted list.
-    fn ul(&mut self, f: impl FnOnce(&mut List)) {
-        self.add(ListBlock::bullet(f));
-    }
-
-    /// Appends a numbered list. Numbering starts at 1 unless [`List::start`] says otherwise.
-    fn ol(&mut self, numbering: Numbering, f: impl FnOnce(&mut List)) {
-        self.add(ListBlock::numbered(numbering, f));
-    }
-
-    /// Appends an image that moves to the next page whole instead of splitting.
-    ///
-    /// Wider than the frame, or taller than the page body, is an error. The image never shrinks.
-    fn image(&mut self, image: &Image, f: impl FnOnce(&mut ImageBox)) {
-        self.add(PlacedImage::build(image, f));
-    }
-
-    /// Appends a horizontal line that moves to the next page whole instead of splitting.
-    ///
-    /// Longer than the frame, or taller than the page body, is an error. The line never shrinks.
-    fn hline(&mut self, f: impl FnOnce(&mut HLine)) {
-        self.add(HLine::build(f));
-    }
-
-    /// Appends vertical space. The part that does not fit continues on the next page.
-    fn spacer(&mut self, height: impl IntoNonNegative) {
-        self.add(Spacer::new(height));
-    }
-
-    /// Starts the next content on a new page. Only allowed in the body.
-    ///
-    /// A column rejects this. So do a table cell, a list item, and a header or footer band.
-    /// The failure is [`ErrorKind::InvalidCellContent`].
-    fn page_break(&mut self) {
-        self.flow_mut().push(FlowNode::PageBreak);
-    }
-
-    /// Appends content that moves to the next page as one piece instead of splitting.
-    ///
-    /// Flow-control sugar. It writes through [`Self::flow_mut`] and is not an
-    /// independent block value like [`Table`].
-    fn keep_together(&mut self, f: impl FnOnce(&mut Flow)) {
-        let flow = self.flow_mut();
-        let nodes = flow.nested(f);
-        flow.push(FlowNode::KeepTogether(KeepTogetherNode::Open(nodes)));
-    }
-
-    /// Runs `body` with a temporary parent text style. Children inherit unless they override.
-    ///
-    /// This is a style scope, like pdfmake's `stack` carrying `fontSize` / `color`. Unset
-    /// fields keep the outer style, and the previous parent style is restored when `body`
-    /// returns. It does not keep the children on one page. Use [`FlowWriter::keep_together`]
-    /// for that.
-    ///
-    /// Flow-control sugar. It writes through [`Self::flow_mut`] and is not an
-    /// independent block value like [`Table`].
-    fn stack(&mut self, style: impl FnOnce(&mut TextProps), body: impl FnOnce(&mut Flow)) {
-        let flow = self.flow_mut();
-        let saved = flow.style.clone();
-        let mut props = TextProps::default();
-        style(&mut props);
-        if !props.apply(&mut flow.style, &mut flow.errors) {
-            flow.style = saved;
-            return;
-        }
-        body(flow);
-        flow.style = saved;
-    }
-}
-
-impl FlowWriter for Flow {
-    fn flow_mut(&mut self) -> &mut Flow {
-        self
-    }
-}
-
-impl FlowWriter for Section<'_> {
-    fn flow_mut(&mut self) -> &mut Flow {
-        &mut self.flow
-    }
-}
-
-impl FlowWriter for Document<'_> {
-    fn flow_mut(&mut self) -> &mut Flow {
-        match &mut self.body {
-            Sections::Implicit(section) => &mut section.flow,
-            Sections::Explicit { closed, .. } => closed,
         }
     }
 }

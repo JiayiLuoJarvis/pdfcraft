@@ -2,7 +2,7 @@
 
 Rust PDF document layout library (crate name **`quire-pdf`**).
 
-You describe the document with a Rust DSL (flow content + page-anchored escapes).
+You describe the document as a `DocumentSpec` (flow content + page-anchored marks) and lay it out with `layout_spec`.
 The library measures text, breaks lines and pages, lays out tables, then draws through
 an internal canvas. The only PDF backend is a private [krilla](https://crates.io/crates/krilla)
 adapter.

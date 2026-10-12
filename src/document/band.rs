@@ -148,18 +148,3 @@ impl Band {
         }
     }
 }
-
-pub(crate) fn band_content(hook: BandHook<'_>, style: Style) -> BandContent<'_> {
-    Box::new(move |info: &PageInfo, errors: &mut ErrorBag| {
-        let mut band = Band {
-            page: Page::from(info),
-            left: None,
-            right: None,
-            inset_left: NonNegative::ZERO,
-            inset_right: NonNegative::ZERO,
-            errors: ErrorBag::default(),
-        };
-        hook(&mut band);
-        Ok(band.lower(&style, errors))
-    })
-}

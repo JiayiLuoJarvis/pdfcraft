@@ -6,7 +6,7 @@
 //!
 //! Prints machine identity, git tip when available, and three samples:
 //! letter pages, a wide table, and many short paragraphs. Each sample reports
-//! `document` time, `to_pdf` time, page count, PDF bytes, and peak RSS.
+//! layout time, `to_pdf` time, page count, PDF bytes, and peak RSS.
 
 #![cfg(feature = "backend-krilla")]
 
@@ -14,9 +14,13 @@ use std::fs;
 use std::process::Command;
 use std::time::Instant;
 
+use quire_pdf::spec::{
+    Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, ImageSpec, Resources, SectionSpec,
+    TableSpec, TextRun,
+};
 use quire_pdf::{
-    document, to_pdf, FlowWriter, ImageFormat, Margins, NonNegative, PageSize, Positive, Ratio,
-    Rendered, Result, Track, A4,
+    layout_spec, to_pdf, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize, Positive,
+    Ratio, Rendered, Result, Track, A4,
 };
 
 const LETTER_FONT: &[u8] = include_bytes!("fixtures/quire-letter.ttf");
@@ -64,64 +68,116 @@ fn time_sample(name: &str, build: impl FnOnce() -> Result<Rendered>) -> Result<(
 }
 
 fn letter_doc(copies: usize) -> Result<Rendered> {
-    document(PageSize::A4, |doc| {
-        doc.font(LETTER_FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
-        doc.footer(|footer| {
-            let page = footer.page();
-            footer.left(format!("第 {} 页 / 共 {} 页", page.number, page.count));
-        });
-        for index in 0..copies {
-            if index > 0 {
-                doc.page_break();
-            }
-            doc.paragraph(|p| p.text(BODY_1));
-            doc.paragraph(|p| p.text(BODY_2));
-            doc.paragraph(|p| p.text(MIXED));
-            doc.table(|table| {
-                table.header(["项目", "金额", "交货日"]);
-                table.row(["设备", "12000", "2026-10-31"]);
-                table.row(["服务", "8000", "2026-11-15"]);
-            });
-            let mark = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-            let side = Positive::pt(8.0)?;
-            doc.image(&mark, |image| image.width(side));
+    let mut resources = Resources::new(LETTER_FONT.to_vec());
+    let mut body = Vec::new();
+    for index in 0..copies {
+        if index > 0 {
+            body.push(Block::PageBreak);
         }
-        Ok(())
+        body.push(Block::paragraph(BODY_1));
+        body.push(Block::paragraph(BODY_2));
+        body.push(Block::paragraph(MIXED));
+        body.push(Block::Table(TableSpec {
+            header: vec![vec![
+                text_cell("项目"),
+                text_cell("金额"),
+                text_cell("交货日"),
+            ]],
+            body: vec![
+                vec![
+                    text_cell("设备"),
+                    text_cell("12000"),
+                    text_cell("2026-10-31"),
+                ],
+                vec![
+                    text_cell("服务"),
+                    text_cell("8000"),
+                    text_cell("2026-11-15"),
+                ],
+            ],
+            ..TableSpec::default()
+        }));
+        let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+        body.push(Block::Image(ImageSpec {
+            image: mark,
+            width: Some(Positive::pt(8.0)?),
+            height: None,
+            align: Alignment::Start,
+        }));
+    }
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources,
+        limits: quire_pdf::Limits::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0)?),
+            footer: Some(BandSpec {
+                left: Some(BandSlot::Text(vec![
+                    TextRun::Literal("第 ".into()),
+                    TextRun::PageNumber,
+                    TextRun::Literal(" 页 / 共 ".into()),
+                    TextRun::PageCount,
+                    TextRun::Literal(" 页".into()),
+                ])),
+                ..BandSpec::default()
+            }),
+            body,
+            ..SectionSpec::default()
+        }],
     })
 }
 
+fn text_cell(text: &str) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(text.into())],
+        ..CellSpec::default()
+    }
+}
+
 fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
-    document(PageSize::A4, |doc| {
-        doc.font(MEASURE_FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
-        let tracks: Vec<Track> = (0..cols)
-            .map(|_| Track::Ratio(Ratio::new(1.0).expect("1 is positive")))
-            .collect();
-        doc.table(|table| {
-            table.tracks(tracks);
-            let header: Vec<String> = (0..cols).map(|c| format!("C{c}")).collect();
-            table.header(header.iter().map(String::as_str));
-            for r in 0..rows {
-                let cells: Vec<String> = (0..cols).map(|c| format!("r{r}c{c}")).collect();
-                table.row(cells.iter().map(String::as_str));
-            }
-        });
-        Ok(())
+    let tracks = (0..cols)
+        .map(|_| Track::Ratio(Ratio::new(1.0).expect("1 is positive")))
+        .collect();
+    let header = (0..cols).map(|c| text_cell(&format!("C{c}"))).collect();
+    let mut body = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let cells = (0..cols).map(|c| text_cell(&format!("r{r}c{c}"))).collect();
+        body.push(cells);
+    }
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::new(MEASURE_FONT.to_vec()),
+        limits: quire_pdf::Limits::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0)?),
+            body: vec![Block::Table(TableSpec {
+                header: vec![header],
+                body,
+                tracks: Some(tracks),
+                ..TableSpec::default()
+            })],
+            ..SectionSpec::default()
+        }],
     })
 }
 
 fn paragraphs_doc(count: usize) -> Result<Rendered> {
-    document(PageSize::A4, |doc| {
-        doc.font(MEASURE_FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
-        for i in 0..count {
-            let line = format!(
+    let body = (0..count)
+        .map(|i| {
+            Block::paragraph(format!(
                 "Paragraph {i}: the quick brown fox jumps over the lazy dog and back again."
-            );
-            doc.paragraph(|p| p.text(line));
-        }
-        Ok(())
+            ))
+        })
+        .collect();
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::new(MEASURE_FONT.to_vec()),
+        limits: quire_pdf::Limits::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0)?),
+            body,
+            ..SectionSpec::default()
+        }],
     })
 }
 

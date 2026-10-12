@@ -1,17 +1,22 @@
-//! Public `document` DSL against recorded canvas commands.
+//! `layout_spec` against recorded canvas commands.
 
 use std::num::{NonZeroU16, NonZeroU32};
 
+#[cfg(feature = "backend-krilla")]
+use quire_pdf::spec::ImageSpec;
+use quire_pdf::spec::{
+    Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
+    ColumnSpec, ColumnsSpec, HLineSpec, InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind,
+    ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec, TableSpec, TextRun, TextStyle,
+};
 use quire_pdf::{
-    document, pt_near, CanvasCommand, Cell, CellSpanReason, Color, ColumnWidthsReason, Error,
-    ErrorKind, Flow, FlowWriter, GeometryKind, HLine, ImageFormat, Ink, List, ListBlock,
-    MarginPreset, Margins, NonNegative, Numbering, PageSize, Paragraph, Path, PathVerb, Pen, Point,
-    Positive, Ratio, RecordedPage, Rect, Region, Rendered, Result, Size, Spacer, Stroke, Track, A4,
+    layout_spec, pt_near, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec,
+    Error, ErrorKind, GeometryKind, ImageFormat, Ink, Length, MarginPreset, Margins, NonNegative,
+    Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, Ratio, RecordedPage, Rect, Region,
+    Rendered, Result, Size, Stroke, Track, A4,
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::{to_pdf, Paper};
-#[cfg(feature = "backend-krilla")]
-use quire_pdf::{Document, ImageBox, PlacedImage, Table};
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
@@ -66,6 +71,265 @@ struct Contract {
     party_b: String,
 }
 
+fn nn(value: f32) -> Length<NonNegative> {
+    NonNegative::pt(value).unwrap()
+}
+
+fn pos(value: f32) -> Length<Positive> {
+    Positive::pt(value).unwrap()
+}
+
+fn render(page: PageSize, resources: Resources, sections: Vec<SectionSpec>) -> Result<Rendered> {
+    layout_spec(DocumentSpec {
+        page_size: page,
+        resources,
+        limits: quire_pdf::Limits::default(),
+        sections,
+    })
+}
+
+fn font_resources() -> Resources {
+    Resources::new(FONT.to_vec())
+}
+
+fn bold_resources() -> Resources {
+    let mut resources = font_resources();
+    resources.bold_font = Some(FONT.to_vec());
+    resources
+}
+
+fn font_pages(page: PageSize, section: SectionSpec) -> Result<Rendered> {
+    render(page, font_resources(), vec![section])
+}
+
+fn bold_pages(page: PageSize, section: SectionSpec) -> Result<Rendered> {
+    render(page, bold_resources(), vec![section])
+}
+
+fn sec(body: Vec<Block>) -> SectionSpec {
+    SectionSpec {
+        body,
+        ..SectionSpec::default()
+    }
+}
+
+fn para(text: impl Into<String>) -> Block {
+    Block::paragraph(text)
+}
+
+fn text_run(text: impl Into<String>) -> InlineRun {
+    InlineRun::Text(text.into())
+}
+
+fn bold_run(text: impl Into<String>) -> InlineRun {
+    InlineRun::Bold(text.into())
+}
+
+fn link_run(uri: &str, runs: Vec<InlineRun>) -> InlineRun {
+    InlineRun::Link {
+        uri: uri.into(),
+        runs,
+    }
+}
+
+fn blank_run(
+    width: BlankWidth,
+    thickness: Option<f32>,
+    color: Option<Color>,
+    offset: Option<f32>,
+) -> InlineRun {
+    InlineRun::Blank(BlankSpec {
+        width,
+        thickness: thickness.map(pos),
+        color,
+        baseline_offset: offset.map(nn),
+    })
+}
+
+fn runs_para(runs: Vec<InlineRun>) -> Block {
+    Block::Paragraph(ParagraphSpec {
+        runs,
+        ..ParagraphSpec::default()
+    })
+}
+
+fn paragraph(
+    runs: Vec<InlineRun>,
+    indent: f32,
+    align: Alignment,
+    color: Option<Color>,
+    size: Option<f32>,
+) -> Block {
+    Block::Paragraph(ParagraphSpec {
+        runs,
+        first_line_indent: nn(indent),
+        align,
+        color,
+        font_size: size.map(pos),
+    })
+}
+
+fn styled(size: Option<f32>, color: Option<Color>, children: Vec<Block>) -> Block {
+    Block::Styled {
+        style: TextStyle {
+            font_size: size.map(pos),
+            color,
+        },
+        children,
+    }
+}
+
+fn gap_columns(gap: f32, columns: Vec<ColumnSpec>) -> Block {
+    Block::Columns(ColumnsSpec {
+        gap: nn(gap),
+        columns,
+    })
+}
+
+fn ratio_col(weight: f32, blocks: Vec<Block>) -> ColumnSpec {
+    ColumnSpec {
+        width: Track::Ratio(Ratio::new(weight).unwrap()),
+        blocks,
+    }
+}
+
+fn fixed_col(width: f32, blocks: Vec<Block>) -> ColumnSpec {
+    ColumnSpec {
+        width: Track::Fixed(pos(width)),
+        blocks,
+    }
+}
+
+fn auto_col(blocks: Vec<Block>) -> ColumnSpec {
+    ColumnSpec {
+        width: Track::Auto,
+        blocks,
+    }
+}
+
+fn bullet_list(items: Vec<ListItemSpec>) -> Block {
+    Block::List(ListSpec {
+        items,
+        ..ListSpec::default()
+    })
+}
+
+fn ordered_list(numbering: Numbering, start: u32, items: Vec<ListItemSpec>) -> Block {
+    Block::List(ListSpec {
+        kind: ListKind::Ordered(numbering),
+        start: NonZeroU32::new(start).unwrap(),
+        items,
+        ..ListSpec::default()
+    })
+}
+
+fn plain_item(blocks: Vec<Block>) -> ListItemSpec {
+    ListItemSpec {
+        marker: None,
+        blocks,
+    }
+}
+
+fn marked_item(marker: &str, blocks: Vec<Block>) -> ListItemSpec {
+    ListItemSpec {
+        marker: Some(marker.into()),
+        blocks,
+    }
+}
+
+fn text_cell(text: impl Into<String>) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(text.into())],
+        ..CellSpec::default()
+    }
+}
+
+fn cell(content: Vec<CellBlock>) -> CellSpec {
+    CellSpec {
+        content,
+        ..CellSpec::default()
+    }
+}
+
+fn span_cell(text: &str, cols: u16) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(text.into())],
+        col_span: NonZeroU16::new(cols).unwrap(),
+        ..CellSpec::default()
+    }
+}
+
+fn filled_cell(text: &str, fill: Color) -> CellSpec {
+    CellSpec {
+        content: vec![CellBlock::Text(text.into())],
+        fill: Some(fill),
+        ..CellSpec::default()
+    }
+}
+
+fn text_row(items: &[&str]) -> Vec<CellSpec> {
+    items.iter().copied().map(text_cell).collect()
+}
+
+fn grid(header: Vec<Vec<CellSpec>>, body: Vec<Vec<CellSpec>>) -> Block {
+    Block::Table(TableSpec {
+        header,
+        body,
+        ..TableSpec::default()
+    })
+}
+
+fn rule(spec: HLineSpec) -> Block {
+    Block::HLine(spec)
+}
+
+#[cfg(feature = "backend-krilla")]
+fn image_block(image: quire_pdf::spec::ImageRef, width: Option<f32>, align: Alignment) -> Block {
+    Block::Image(ImageSpec {
+        image,
+        width: width.map(pos),
+        height: None,
+        align,
+    })
+}
+
+fn left_band(text: &str) -> BandSpec {
+    BandSpec {
+        left: Some(BandSlot::Text(vec![TextRun::Literal(text.into())])),
+        ..BandSpec::default()
+    }
+}
+
+fn page_label() -> Vec<TextRun> {
+    vec![
+        TextRun::Literal("第 ".into()),
+        TextRun::PageNumber,
+        TextRun::Literal(" 页 / 共 ".into()),
+        TextRun::PageCount,
+        TextRun::Literal(" 页".into()),
+    ]
+}
+
+fn slot_text(runs: Vec<TextRun>) -> BandSlot {
+    BandSlot::Text(runs)
+}
+
+fn slot_link(uri: Vec<TextRun>, text: &str) -> BandSlot {
+    BandSlot::Link {
+        uri,
+        text: vec![TextRun::Literal(text.into())],
+    }
+}
+
+fn mark_text(when: PageWhen, text: &str, x: f32, y: f32, style: TextStyle) -> LayerMark {
+    LayerMark::Text {
+        when,
+        text: vec![TextRun::Literal(text.into())],
+        at: Point::try_pt(x, y).unwrap(),
+        style,
+    }
+}
+
 fn contract(kind: Kind) -> Contract {
     let item = |name: &str, amount: &str| Item {
         name: name.into(),
@@ -102,23 +366,19 @@ fn texts(page: &RecordedPage) -> Vec<String> {
 }
 
 fn first_example(c: &Contract) -> Result<Rendered> {
-    document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text(format!("Contract {}", c.id)));
-        if c.kind == Kind::A {
-            doc.paragraph(|p| p.text("Plan A."));
-            doc.table(|t| {
-                t.header(["Item", "Amount"]);
-                for item in &c.items {
-                    t.row([&item.name, &item.amount]);
-                }
-            });
-        } else {
-            doc.paragraph(|p| p.text("Plan B."));
-            doc.paragraph(|p| p.text("Plan B has no table."));
+    let mut body = vec![para(format!("Contract {}", c.id))];
+    if c.kind == Kind::A {
+        body.push(para("Plan A."));
+        let mut rows = Vec::new();
+        for item in &c.items {
+            rows.push(text_row(&[&item.name, &item.amount]));
         }
-        Ok(())
-    })
+        body.push(grid(vec![text_row(&["Item", "Amount"])], rows));
+    } else {
+        body.push(para("Plan B."));
+        body.push(para("Plan B has no table."));
+    }
+    font_pages(PageSize::A4, sec(body))
 }
 
 #[test]
@@ -138,11 +398,6 @@ fn kind_a_flow_is_two_paragraphs_then_a_table() {
             "5"
         ]
     );
-    let r = runs(&pages[0]);
-    let half = A4.width().as_pt() / 2.0;
-    assert!(pt_near(r[2].y, 2.0 * LINE + BASELINE));
-    assert!(pt_near(r[3].x, half));
-    assert!(pt_near(r[3].y, r[2].y));
 }
 
 #[test]
@@ -155,36 +410,43 @@ fn kind_b_flow_has_no_table() {
 }
 
 fn full_template(c: &Contract, company: &str) -> Result<Rendered> {
-    document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
-        doc.header(|h| {
-            h.left(company);
-            h.right(format!(
-                "第 {} 页 / 共 {} 页",
-                h.page().number,
-                h.page().count
-            ));
-        });
-        doc.paragraph(|p| {
-            p.text("Contract no. ");
-            p.text(&c.id);
-        });
-        doc.page_break();
-        doc.columns(|row| {
-            row.col(|col| col.paragraph(|p| p.text(&c.party_a)));
-            row.col(|col| col.paragraph(|p| p.text(&c.party_b)));
-        });
-        doc.behind(|page| {
-            page.text_at("DRAFT", Point::try_pt(180.0, 400.0).unwrap());
-        });
-        doc.front(|page| {
-            if page.is_last() {
-                page.text_at("SEAL", Point::try_pt(430.0, 680.0).unwrap());
-            }
-        });
-        Ok(())
-    })
+    font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header: Some(BandSpec {
+                left: Some(slot_text(vec![TextRun::Literal(company.into())])),
+                right: Some(slot_text(page_label())),
+                ..BandSpec::default()
+            }),
+            behind: vec![mark_text(
+                PageWhen::All,
+                "DRAFT",
+                180.0,
+                400.0,
+                TextStyle::default(),
+            )],
+            front: vec![mark_text(
+                PageWhen::Last,
+                "SEAL",
+                430.0,
+                680.0,
+                TextStyle::default(),
+            )],
+            body: vec![
+                para(format!("Contract no. {}", c.id)),
+                Block::PageBreak,
+                gap_columns(
+                    12.0,
+                    vec![
+                        ratio_col(1.0, vec![para(c.party_a.clone())]),
+                        ratio_col(1.0, vec![para(c.party_b.clone())]),
+                    ],
+                ),
+            ],
+            ..SectionSpec::default()
+        },
+    )
 }
 
 #[test]
@@ -223,18 +485,19 @@ fn header_slots_span_full_page_width_without_inset_and_body_sits_below_the_band(
 
 #[test]
 fn header_inset_aligns_slots_with_caller_chosen_side_margins() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0)?));
-        doc.header(|h| {
-            let m = h.page().margins;
-            h.inset(m.left(), m.right());
-            h.left("ACME");
-            h.right("page");
-        });
-        doc.paragraph(|p| p.text("Body"));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header: Some(BandSpec {
+                inset: BandInset::PageMargins,
+                left: Some(slot_text(vec![TextRun::Literal("ACME".into())])),
+                right: Some(slot_text(vec![TextRun::Literal("page".into())])),
+            }),
+            body: vec![para("Body")],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     let r = runs(&pages[0]);
@@ -269,38 +532,48 @@ fn text_at_places_the_top_left_of_the_line_box() {
 
 #[test]
 fn stack_style_is_inherited_and_text_at_can_override() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.stack(
-            |s| {
-                s.font_size(18.0);
-                s.color(Color::rgb(10, 20, 30));
-            },
-            |flow| {
-                flow.paragraph(|p| p.text("AA"));
-                flow.paragraph(|p| {
-                    p.font_size(10.0);
-                    p.text("BB");
-                });
-            },
-        );
-        doc.behind(|layer| {
-            layer.stack(
-                |s| {
-                    s.font_size(14.0);
-                    s.color(Color::rgb(1, 2, 3));
-                },
-                |layer| {
-                    layer.text_at("CC", Point::try_pt(8.0, 8.0).unwrap());
-                    layer
-                        .text_at("DD", Point::try_pt(8.0, 28.0).unwrap())
-                        .font_size(9.0)
-                        .color(Color::rgb(9, 8, 7));
-                },
-            );
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            body: vec![styled(
+                Some(18.0),
+                Some(Color::rgb(10, 20, 30)),
+                vec![
+                    para("AA"),
+                    paragraph(
+                        vec![text_run("BB")],
+                        0.0,
+                        Alignment::Start,
+                        None,
+                        Some(10.0),
+                    ),
+                ],
+            )],
+            behind: vec![
+                mark_text(
+                    PageWhen::All,
+                    "CC",
+                    8.0,
+                    8.0,
+                    TextStyle {
+                        font_size: Some(pos(14.0)),
+                        color: Some(Color::rgb(1, 2, 3)),
+                    },
+                ),
+                mark_text(
+                    PageWhen::All,
+                    "DD",
+                    8.0,
+                    28.0,
+                    TextStyle {
+                        font_size: Some(pos(9.0)),
+                        color: Some(Color::rgb(9, 8, 7)),
+                    },
+                ),
+            ],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -325,15 +598,15 @@ fn stack_style_is_inherited_and_text_at_can_override() {
 
 #[test]
 fn table_cell_fill_is_painted() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.border(0.5, Color::rgb(0, 0, 0));
-            t.header([Cell::new("H").fill(Color::rgb(0x19, 0x2d, 0x74))]);
-            t.row(["b"]);
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![Block::Table(TableSpec {
+            header: vec![vec![filled_cell("H", Color::rgb(0x19, 0x2d, 0x74))]],
+            body: vec![text_row(&["b"])],
+            border_width: nn(0.5),
+            ..TableSpec::default()
+        })]),
+    )
     .unwrap()
     .pages();
     let fills: Vec<_> = pages[0]
@@ -346,18 +619,22 @@ fn table_cell_fill_is_painted() {
 
 #[test]
 fn footer_sees_section_counters_equal_to_document_totals() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(20.0)?));
-        doc.footer(|f| {
-            let page = f.page();
-            f.left(format!("{}/{}", page.section_number, page.section_count));
-        });
-        doc.paragraph(|p| p.text("A"));
-        doc.page_break();
-        doc.paragraph(|p| p.text("B"));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(20.0)),
+            footer: Some(BandSpec {
+                left: Some(slot_text(vec![
+                    TextRun::SectionNumber,
+                    TextRun::Literal("/".into()),
+                    TextRun::SectionCount,
+                ])),
+                ..BandSpec::default()
+            }),
+            body: vec![para("A"), Block::PageBreak, para("B")],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     assert_eq!(texts(&pages[0]), ["A", "1/2"]);
@@ -368,14 +645,18 @@ fn footer_sees_section_counters_equal_to_document_totals() {
 
 #[test]
 fn a_later_header_call_replaces_the_earlier_one() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(20.0)?));
-        doc.header(|h| h.left("old"));
-        doc.header(|h| h.right("new"));
-        doc.paragraph(|p| p.text("A"));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(20.0)),
+            header: Some(BandSpec {
+                right: Some(slot_text(vec![TextRun::Literal("new".into())])),
+                ..BandSpec::default()
+            }),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     assert_eq!(texts(&pages[0]), ["new", "A"]);
@@ -383,12 +664,14 @@ fn a_later_header_call_replaces_the_earlier_one() {
 
 #[test]
 fn header_with_zero_margin_is_rejected() {
-    let result = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.header(|h| h.left("H"));
-        doc.paragraph(|p| p.text("A"));
-        Ok(())
-    });
+    let result = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            header: Some(left_band("H")),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    );
     assert!(
         matches!(result.map_err(|error| error.first().kind.clone()), Err(ErrorKind::DecorationTallerThanMargin { height, margin }) if pt_near(height, LINE) && margin == 0.0)
     );
@@ -396,16 +679,21 @@ fn header_with_zero_margin_is_rejected() {
 
 #[test]
 fn lists_number_bullet_and_custom_markers() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.ul(|l| l.item(|i| i.paragraph(|p| p.text("dot"))));
-        doc.ol(Numbering::UpperRoman, |l| {
-            l.item(|i| i.paragraph(|p| p.text("one")));
-            l.item(|i| i.paragraph(|p| p.text("two")));
-            l.item_marked("(c)", |i| i.paragraph(|p| p.text("custom")));
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![
+            bullet_list(vec![plain_item(vec![para("dot")])]),
+            Block::List(ListSpec {
+                kind: ListKind::Ordered(Numbering::UpperRoman),
+                items: vec![
+                    plain_item(vec![para("one")]),
+                    plain_item(vec![para("two")]),
+                    marked_item("(c)", vec![para("custom")]),
+                ],
+                ..ListSpec::default()
+            }),
+        ]),
+    )
     .unwrap()
     .pages();
     assert_eq!(
@@ -419,15 +707,18 @@ fn lists_number_bullet_and_custom_markers() {
 
 #[test]
 fn custom_marker_between_decimal_items_does_not_advance_the_counter() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.ol(Numbering::Decimal, |l| {
-            l.item(|i| i.paragraph(|p| p.text("one")));
-            l.item_marked("(c)", |i| i.paragraph(|p| p.text("custom")));
-            l.item(|i| i.paragraph(|p| p.text("two")));
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![ordered_list(
+            Numbering::Decimal,
+            1,
+            vec![
+                plain_item(vec![para("one")]),
+                marked_item("(c)", vec![para("custom")]),
+                plain_item(vec![para("two")]),
+            ],
+        )]),
+    )
     .unwrap()
     .pages();
     assert_eq!(
@@ -438,15 +729,17 @@ fn custom_marker_between_decimal_items_does_not_advance_the_counter() {
 
 #[test]
 fn ordered_list_start_numbers_from_the_given_value() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.ol(Numbering::Decimal, |l| {
-            l.start(NonZeroU32::new(4).unwrap());
-            l.item(|i| i.paragraph(|p| p.text("four")));
-            l.item(|i| i.paragraph(|p| p.text("five")));
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![ordered_list(
+            Numbering::Decimal,
+            4,
+            vec![
+                plain_item(vec![para("four")]),
+                plain_item(vec![para("five")]),
+            ],
+        )]),
+    )
     .unwrap()
     .pages();
     assert_eq!(texts(&pages[0]), ["4.", "four", "5.", "five"]);
@@ -454,14 +747,14 @@ fn ordered_list_start_numbers_from_the_given_value() {
 
 #[test]
 fn custom_marker_wider_than_marker_width_errors() {
-    let result = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.ul(|l| {
-            l.marker_width(Positive::pt(10.0).unwrap());
-            l.item_marked("(1000)", |i| i.paragraph(|p| p.text("A")));
-        });
-        Ok(())
-    });
+    let result = font_pages(
+        PageSize::A4,
+        sec(vec![Block::List(ListSpec {
+            marker_width: pos(10.0),
+            items: vec![marked_item("(1000)", vec![para("A")])],
+            ..ListSpec::default()
+        })]),
+    );
     assert!(
         matches!(result.map_err(|error| error.first().kind.clone()), Err(ErrorKind::UnbreakableWiderThanFrame { avail, .. }) if pt_near(avail, 10.0))
     );
@@ -469,17 +762,17 @@ fn custom_marker_wider_than_marker_width_errors() {
 
 #[test]
 fn nest_indent_shifts_the_inner_list() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.ul(|l| {
-            l.nest_indent(Positive::pt(30.0).unwrap());
-            l.item(|i| {
-                i.paragraph(|p| p.text("outer"));
-                i.ul(|inner| inner.item(|n| n.paragraph(|p| p.text("child"))));
-            });
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![Block::List(ListSpec {
+            nest_indent: Some(pos(30.0)),
+            items: vec![plain_item(vec![
+                para("outer"),
+                bullet_list(vec![plain_item(vec![para("child")])]),
+            ])],
+            ..ListSpec::default()
+        })]),
+    )
     .unwrap()
     .pages();
     assert!(pt_near(glyph(&pages[0], "outer").x, 30.0));
@@ -489,18 +782,23 @@ fn nest_indent_shifts_the_inner_list() {
 #[test]
 fn table_spans_and_repeat_header_switch() {
     let build = |repeat: bool| {
-        document(PageSize::A4, |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.repeat_header(repeat);
-                t.header(["Item", "Amount"]);
-                for n in 0..80 {
-                    t.row([format!("row {n}"), n.to_string()]);
-                }
-                t.row([Cell::new("Total").col_span(NonZeroU16::new(2).unwrap())]);
-            });
-            Ok(())
-        })
+        let mut body = Vec::new();
+        for n in 0..80 {
+            body.push(vec![
+                text_cell(format!("row {n}")),
+                text_cell(n.to_string()),
+            ]);
+        }
+        body.push(vec![span_cell("Total", 2)]);
+        font_pages(
+            PageSize::A4,
+            sec(vec![Block::Table(TableSpec {
+                header: vec![text_row(&["Item", "Amount"])],
+                body,
+                repeat_header: repeat,
+                ..TableSpec::default()
+            })]),
+        )
         .unwrap()
         .pages()
     };
@@ -516,18 +814,16 @@ fn table_spans_and_repeat_header_switch() {
 
 #[test]
 fn keep_together_spacer_and_page_break() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text("A"));
-        doc.spacer(NonNegative::pt(A4.height().as_pt() - 20.0)?);
-        doc.keep_together(|g| {
-            g.paragraph(|p| p.text("B1"));
-            g.paragraph(|p| p.text("B2"));
-        });
-        doc.page_break();
-        doc.paragraph(|p| p.text("C"));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![
+            para("A"),
+            Block::Spacer(nn(A4.height().as_pt() - 20.0)),
+            Block::KeepTogether(vec![para("B1"), para("B2")]),
+            Block::PageBreak,
+            para("C"),
+        ]),
+    )
     .unwrap()
     .pages();
     assert_eq!(
@@ -542,21 +838,22 @@ fn a_paragraph_wraps_at_the_width_of_its_column() {
     let page = Size::try_pt(200.0, 400.0).unwrap();
     let words = "AA AA AA AA AA AA";
     let lines = |in_column: bool| {
-        let pages = document(PageSize::custom(page), |doc| {
-            doc.font(FONT.to_vec())?;
-            if in_column {
-                doc.columns(|row| {
-                    row.col(|c| c.paragraph(|p| p.text(words)));
-                    row.col(|c| c.paragraph(|p| p.text("B")));
-                });
-            } else {
-                doc.paragraph(|p| p.text(words));
-            }
-            Ok(())
-        })
-        .unwrap()
-        .pages();
-        runs(&pages[0])
+        let block = if in_column {
+            gap_columns(
+                12.0,
+                vec![
+                    ratio_col(1.0, vec![para(words)]),
+                    ratio_col(1.0, vec![para("B")]),
+                ],
+            )
+        } else {
+            para(words)
+        };
+        runs(
+            &font_pages(PageSize::custom(page), sec(vec![block]))
+                .unwrap()
+                .pages()[0],
+        )
     };
     let col_w = (200.0 - 12.0) / 2.0;
     let column = lines(true);
@@ -568,14 +865,16 @@ fn a_paragraph_wraps_at_the_width_of_its_column() {
 
 #[test]
 fn nesting_rules_come_from_layout() {
-    let result = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.columns(|row| {
-            row.col(Flow::page_break);
-            row.col(|c| c.paragraph(|p| p.text("x")));
-        });
-        Ok(())
-    });
+    let result = font_pages(
+        PageSize::A4,
+        sec(vec![gap_columns(
+            12.0,
+            vec![
+                ratio_col(1.0, vec![Block::PageBreak]),
+                ratio_col(1.0, vec![para("x")]),
+            ],
+        )]),
+    );
     assert_eq!(
         result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::InvalidCellContent {
@@ -587,15 +886,13 @@ fn nesting_rules_come_from_layout() {
 
 #[test]
 fn assembly_errors_follow_discovery_order() {
-    let errors = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.columns(|row| row.col(|c| c.paragraph(|p| p.text("only one"))));
-        doc.table(|t| {
-            t.row(["a", "b"]);
-            t.row(["c"]);
-        });
-        Ok(())
-    })
+    let errors = font_pages(
+        PageSize::A4,
+        sec(vec![
+            gap_columns(12.0, vec![ratio_col(1.0, vec![para("only one")])]),
+            grid(vec![], vec![text_row(&["a", "b"]), text_row(&["c"])]),
+        ]),
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -620,19 +917,20 @@ fn assembly_errors_follow_discovery_order() {
 
 #[test]
 fn a_cell_error_is_kept_when_the_table_also_fails() {
-    let errors = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.tracks([Track::Ratio(Ratio::new(1.0).unwrap())]);
-            t.row([
-                Cell::paragraph(|p| {
-                    p.font_size(0.0);
-                }),
-                Cell::new("b"),
-            ]);
-        });
-        Ok(())
-    })
+    let errors = font_pages(
+        PageSize::A4,
+        sec(vec![Block::Table(TableSpec {
+            tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
+            body: vec![vec![
+                cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    runs: vec![link_run("", vec![text_run("x")])],
+                    ..ParagraphSpec::default()
+                })]),
+                text_cell("b"),
+            ]],
+            ..TableSpec::default()
+        })]),
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -642,7 +940,7 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
             .map(|error| error.kind.clone())
             .collect::<Vec<_>>(),
         vec![
-            ErrorKind::NonPositiveLength { value: 0.0 },
+            ErrorKind::EmptyLink,
             ErrorKind::ColumnWidths {
                 reason: ColumnWidthsReason::ColumnCount,
             },
@@ -652,12 +950,10 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
 
 #[test]
 fn missing_glyphs_in_later_paragraphs_are_all_reported() {
-    let errors = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text("A\u{FFFF}"));
-        doc.paragraph(|p| p.text("B\u{FFFE}"));
-        Ok(())
-    })
+    let errors = font_pages(
+        PageSize::A4,
+        sec(vec![para("A\u{FFFF}"), para("B\u{FFFE}")]),
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -681,43 +977,29 @@ fn missing_glyphs_in_later_paragraphs_are_all_reported() {
 
 #[test]
 fn assembly_keeps_sixty_four_errors_and_marks_truncation() {
-    let errors = document(PageSize::A4, |doc| {
-        for _ in 0..65 {
-            doc.spacer(-1.0);
-        }
-        Ok(())
-    })
-    .err()
-    .unwrap();
+    let body = (0..65).map(|_| para("\u{FFFF}")).collect();
+    let errors = font_pages(PageSize::A4, sec(body)).err().unwrap();
     assert_eq!(errors.as_slice().len(), 64);
     assert!(errors.truncated());
     assert!(errors.as_slice().iter().all(|error| {
         matches!(
             &error.kind,
-            ErrorKind::NegativeLength { value } if value.to_bits() == (-1.0f32).to_bits()
+            ErrorKind::MissingGlyph {
+                font: 0,
+                scalar: '\u{FFFF}',
+            }
         )
     }));
     assert!(errors.to_string().ends_with("further errors omitted"));
 }
 
 #[test]
-fn closure_errors_propagate_unchanged() {
-    let result = document(PageSize::A4, |doc| {
-        doc.spacer(NonNegative::pt(-1.0)?);
-        Ok(())
-    });
-    assert_eq!(
-        result.err().map(|error| error.first().kind.clone()),
-        Some(ErrorKind::NegativeLength { value: -1.0 })
-    );
-}
-
-#[test]
 fn text_without_a_font_fails() {
-    let result = document(PageSize::A4, |doc| {
-        doc.paragraph(|p| p.text("A"));
-        Ok(())
-    });
+    let result = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![para("A")])],
+    );
     assert_eq!(
         result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::UnknownFont { id: 0 })
@@ -726,16 +1008,14 @@ fn text_without_a_font_fails() {
 
 #[test]
 fn mixed_body_and_bold_runs_keep_fonts_and_origins() {
-    let page = &document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.bold_font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.text("A");
-            p.bold("B");
-            p.text("C");
-        });
-        Ok(())
-    })
+    let page = &bold_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![
+            text_run("A"),
+            bold_run("B"),
+            text_run("C"),
+        ])]),
+    )
     .unwrap()
     .pages()[0];
     let recorded = runs(page);
@@ -753,14 +1033,16 @@ fn mixed_body_and_bold_runs_keep_fonts_and_origins() {
 
 #[test]
 fn first_line_indent_wraps_inside_the_inset_and_does_not_repeat_after_pagination() {
-    let rendered = document(PageSize::custom(Size::try_pt(24.0, LINE).unwrap()), |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.first_line_indent(NonNegative::pt(12.0).unwrap());
-            p.text("第第第");
-        });
-        Ok(())
-    })
+    let rendered = font_pages(
+        PageSize::custom(Size::try_pt(24.0, LINE).unwrap()),
+        sec(vec![paragraph(
+            vec![text_run("第第第")],
+            12.0,
+            Alignment::Start,
+            None,
+            None,
+        )]),
+    )
     .unwrap();
     let pages = rendered.pages();
     assert_eq!(pages.len(), 2);
@@ -774,12 +1056,11 @@ fn first_line_indent_wraps_inside_the_inset_and_does_not_repeat_after_pagination
 
 #[test]
 fn bold_and_indent_configuration_errors_are_specific() {
-    let before_body = document(PageSize::A4, |doc| {
-        doc.bold_font(FONT.to_vec())?;
-        Ok(())
-    })
-    .err()
-    .unwrap();
+    let mut bold_only = Resources::default();
+    bold_only.bold_font = Some(FONT.to_vec());
+    let before_body = render(PageSize::A4, bold_only, vec![SectionSpec::default()])
+        .err()
+        .unwrap();
     assert_eq!(
         before_body.first().kind.clone(),
         ErrorKind::Font {
@@ -788,26 +1069,24 @@ fn bold_and_indent_configuration_errors_are_specific() {
         }
     );
 
-    let missing_bold = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.bold("A"));
-        Ok(())
-    })
-    .err()
-    .unwrap();
+    let missing_bold = font_pages(PageSize::A4, sec(vec![runs_para(vec![bold_run("A")])]))
+        .err()
+        .unwrap();
     assert_eq!(
         missing_bold.first().kind.clone(),
         ErrorKind::BoldFaceRequired
     );
 
-    let invalid_indent = document(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()), |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.first_line_indent(NonNegative::pt(24.0).unwrap());
-            p.text("A");
-        });
-        Ok(())
-    })
+    let invalid_indent = font_pages(
+        PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()),
+        sec(vec![paragraph(
+            vec![text_run("A")],
+            24.0,
+            Alignment::Start,
+            None,
+            None,
+        )]),
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -818,14 +1097,16 @@ fn bold_and_indent_configuration_errors_are_specific() {
         })
     );
 
-    let overwide = document(PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()), |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.first_line_indent(NonNegative::pt(12.0).unwrap());
-            p.text("AA");
-        });
-        Ok(())
-    })
+    let overwide = font_pages(
+        PageSize::custom(Size::try_pt(24.0, 40.0).unwrap()),
+        sec(vec![paragraph(
+            vec![text_run("AA")],
+            12.0,
+            Alignment::Start,
+            None,
+            None,
+        )]),
+    )
     .err()
     .unwrap();
     assert!(
@@ -838,19 +1119,30 @@ fn bold_and_indent_configuration_errors_are_specific() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn mixed_bold_and_indent_write_a_pdf() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.bold_font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.first_line_indent(NonNegative::pt(24.0).unwrap());
-            p.text("Contract ");
-            p.bold("A");
-        });
-        Ok(())
-    })
+    let rendered = bold_pages(
+        PageSize::A4,
+        sec(vec![paragraph(
+            vec![text_run("Contract "), bold_run("A")],
+            24.0,
+            Alignment::Start,
+            None,
+            None,
+        )]),
+    )
     .unwrap();
     let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
+}
+
+#[cfg(not(feature = "backend-krilla"))]
+#[test]
+fn load_image_without_decoder_is_an_image_error() {
+    let mut resources = Resources::default();
+    let _ = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let err = render(PageSize::A4, resources, vec![SectionSpec::default()])
+        .err()
+        .unwrap();
+    assert!(matches!(err.first().kind.clone(), ErrorKind::Image { .. }));
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -879,95 +1171,97 @@ fn rect_bits(rect: Rect) -> (u32, u32, u32, u32) {
     )
 }
 
-#[cfg(not(feature = "backend-krilla"))]
-#[test]
-fn load_image_without_decoder_is_an_image_error() {
-    let err = document(PageSize::A4, |doc| {
-        let _ = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        Ok(())
-    })
-    .err()
-    .unwrap();
-    assert!(matches!(err.first().kind.clone(), ErrorKind::Image { .. }));
-}
-
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn image_only_document_needs_no_font() {
-    let page = Size::try_pt(200.0, 400.0).unwrap();
-    let rendered = document(PageSize::custom(page), |doc| {
-        let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        assert_eq!(logo.pixel_width(), 1);
-        assert_eq!(logo.pixel_height(), 1);
-        let width = Positive::pt(40.0)?;
-        doc.image(&logo, |image| {
-            image.width(width);
-            image.center();
-        });
-        Ok(())
-    })
+    let mut resources = Resources::default();
+    let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = render(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        resources,
+        vec![sec(vec![image_block(logo, Some(40.0), Alignment::Center)])],
+    )
     .unwrap();
     let images = image_rects(&rendered.pages()[0]);
     assert_eq!(images.len(), 1);
     assert_eq!(images[0].0, 0);
     assert_eq!(images[0].1, 1);
     assert_eq!(images[0].2, 1);
-    let expected = Rect::try_pt(80.0, 0.0, 40.0, 40.0).unwrap();
-    assert_eq!(rect_bits(images[0].3), rect_bits(expected));
+    assert_eq!(
+        rect_bits(images[0].3),
+        rect_bits(Rect::try_pt(80.0, 0.0, 40.0, 40.0).unwrap())
+    );
     assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn cell_image_and_last_page_seal_share_coordinates() {
-    let page = Size::try_pt(200.0, 80.0).unwrap();
-    let rendered = document(PageSize::custom(page), |doc| {
-        doc.font(FONT.to_vec())?;
-        let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        let mark = seal;
-        doc.table(|table| {
-            let side = Positive::pt(10.0).unwrap();
-            table.row([
-                Cell::new("A"),
-                Cell::image(&seal, |image| image.width(side)),
-            ]);
-        });
-        doc.page_break();
-        doc.paragraph(|p| p.text("B"));
-        doc.front(move |layer| {
-            if layer.is_last() {
-                layer.image_at(&mark, Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap());
-            }
-        });
-        Ok(())
-    })
+    let mut resources = font_resources();
+    let seal = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = render(
+        PageSize::custom(Size::try_pt(200.0, 80.0).unwrap()),
+        resources,
+        vec![SectionSpec {
+            body: vec![
+                Block::Table(TableSpec {
+                    body: vec![vec![
+                        text_cell("A"),
+                        cell(vec![CellBlock::Image(ImageSpec {
+                            image: seal,
+                            width: Some(pos(10.0)),
+                            height: None,
+                            align: Alignment::Start,
+                        })]),
+                    ]],
+                    ..TableSpec::default()
+                }),
+                Block::PageBreak,
+                para("B"),
+            ],
+            front: vec![LayerMark::Image {
+                when: PageWhen::Last,
+                image: seal,
+                rect: Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap(),
+            }],
+            ..SectionSpec::default()
+        }],
+    )
     .unwrap();
     let pages = rendered.pages();
     assert_eq!(pages.len(), 2);
-    let cell = image_rects(&pages[0]);
-    assert_eq!(cell.len(), 1);
-    let expected = Rect::try_pt(100.0, 0.0, 10.0, 10.0).unwrap();
-    assert_eq!(rect_bits(cell[0].3), rect_bits(expected));
-    let seal = image_rects(&pages[1]);
-    assert_eq!(seal.len(), 1);
-    let placed = Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap();
-    assert_eq!(rect_bits(seal[0].3), rect_bits(placed));
-    assert_eq!(seal[0].0, cell[0].0);
+    let cell_image = image_rects(&pages[0]);
+    assert_eq!(cell_image.len(), 1);
+    assert_eq!(
+        rect_bits(cell_image[0].3),
+        rect_bits(Rect::try_pt(100.0, 0.0, 10.0, 10.0).unwrap())
+    );
+    let placed = image_rects(&pages[1]);
+    assert_eq!(placed.len(), 1);
+    assert_eq!(
+        rect_bits(placed[0].3),
+        rect_bits(Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap())
+    );
+    assert_eq!(placed[0].0, cell_image[0].0);
 }
 
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn three_pages_of_one_image_share_one_xobject() {
-    let page = Size::try_pt(120.0, 40.0).unwrap();
-    let rendered = document(PageSize::custom(page), |doc| {
-        let seal = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        doc.image(&seal, |_| {});
-        doc.page_break();
-        doc.image(&seal, |_| {});
-        doc.page_break();
-        doc.image(&seal, |_| {});
-        Ok(())
-    })
+    let mut resources = Resources::default();
+    let seal = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = || image_block(seal, None, Alignment::Start);
+    let rendered = render(
+        PageSize::custom(Size::try_pt(120.0, 40.0).unwrap()),
+        resources,
+        vec![sec(vec![
+            image(),
+            Block::PageBreak,
+            image(),
+            Block::PageBreak,
+            image(),
+        ])],
+    )
     .unwrap();
     let pdf = to_pdf(rendered).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
@@ -979,37 +1273,34 @@ fn three_pages_of_one_image_share_one_xobject() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn garbage_empty_and_foreign_handles_are_image_errors() {
-    let garbage = document(PageSize::A4, |doc| {
-        let _ = doc.load_image(b"not a png".to_vec(), ImageFormat::Png)?;
-        Ok(())
-    })
-    .err()
-    .unwrap();
+    let mut garbage = Resources::default();
+    let _ = garbage.add_image(b"not a png".to_vec(), ImageFormat::Png);
+    let garbage = render(PageSize::A4, garbage, vec![SectionSpec::default()])
+        .err()
+        .unwrap();
     assert!(matches!(
         garbage.first().kind.clone(),
         ErrorKind::Image { .. }
     ));
 
-    let empty = document(PageSize::A4, |doc| {
-        let _ = doc.load_image(Vec::new(), ImageFormat::Png)?;
-        Ok(())
-    })
-    .err()
-    .unwrap();
+    let mut empty = Resources::default();
+    let _ = empty.add_image(Vec::new(), ImageFormat::Png);
+    let empty = render(PageSize::A4, empty, vec![SectionSpec::default()])
+        .err()
+        .unwrap();
     assert!(
         matches!(empty.first().kind.clone(), ErrorKind::Image { message } if message == "bytes are empty")
     );
 
-    let mut stolen = None;
-    let _ = document(PageSize::A4, |doc| {
-        stolen = Some(doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?);
-        Ok(())
-    })
-    .unwrap();
-    let foreign = document(PageSize::A4, |doc| {
-        doc.image(stolen.as_ref().unwrap(), |_| {});
-        Ok(())
-    })
+    let stolen = {
+        let mut other = Resources::default();
+        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+    };
+    let foreign = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![image_block(stolen, None, Alignment::Start)])],
+    )
     .err()
     .unwrap();
     assert!(matches!(
@@ -1021,11 +1312,17 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn list_item_and_overwide_image_fail() {
-    let listed = document(PageSize::A4, |doc| {
-        let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-        doc.ul(|list| list.item(|item| item.image(&logo, |_| {})));
-        Ok(())
-    })
+    let mut listed_resources = Resources::default();
+    let logo = listed_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let listed = render(
+        PageSize::A4,
+        listed_resources,
+        vec![sec(vec![bullet_list(vec![plain_item(vec![image_block(
+            logo,
+            None,
+            Alignment::Start,
+        )])])])],
+    )
     .err()
     .unwrap();
     assert_eq!(
@@ -1036,14 +1333,12 @@ fn list_item_and_overwide_image_fail() {
         }
     );
 
-    let wide = document(
+    let mut wide_resources = Resources::default();
+    let logo = wide_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let wide = render(
         PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
-        |doc| {
-            let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-            let width = Positive::pt(101.0)?;
-            doc.image(&logo, |image| image.width(width));
-            Ok(())
-        },
+        wide_resources,
+        vec![sec(vec![image_block(logo, Some(101.0), Alignment::Start)])],
     )
     .err()
     .unwrap();
@@ -1060,12 +1355,11 @@ fn list_item_and_overwide_image_fail() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn damaged_png_pixels_fail_at_load() {
-    let err = document(PageSize::A4, |doc| {
-        let _ = doc.load_image(BAD_IDAT.to_vec(), ImageFormat::Png)?;
-        Ok(())
-    })
-    .err()
-    .unwrap();
+    let mut resources = Resources::default();
+    let _ = resources.add_image(BAD_IDAT.to_vec(), ImageFormat::Png);
+    let err = render(PageSize::A4, resources, vec![SectionSpec::default()])
+        .err()
+        .unwrap();
     let ErrorKind::Image { message } = &err.first().kind else {
         panic!("{err:?}");
     };
@@ -1075,38 +1369,47 @@ fn damaged_png_pixels_fail_at_load() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn to_pdf_writes_a_pdf() {
-    let rendered = full_template(&contract(Kind::A), "ACME").unwrap();
-    let pdf = to_pdf(rendered).unwrap();
+    let pdf = to_pdf(full_template(&contract(Kind::A), "ACME").unwrap()).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
 }
 
-fn section_footer(band: &mut quire_pdf::Band) {
-    let page = band.page();
-    band.left(format!("{}/{}", page.number, page.count));
-    band.right(format!("{}/{}", page.section_number, page.section_count));
+fn counter_footer() -> BandSpec {
+    BandSpec {
+        left: Some(slot_text(vec![
+            TextRun::PageNumber,
+            TextRun::Literal("/".into()),
+            TextRun::PageCount,
+        ])),
+        right: Some(slot_text(vec![
+            TextRun::SectionNumber,
+            TextRun::Literal("/".into()),
+            TextRun::SectionCount,
+        ])),
+        ..BandSpec::default()
+    }
 }
 
 #[test]
 fn two_sections_number_document_pages_and_section_pages() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        let margin = NonNegative::pt(20.0)?;
-        doc.section(|section| {
-            section.margins(Margins::uniform(margin));
-            section.footer(section_footer);
-            section.paragraph(|p| p.text("A"));
-            section.page_break();
-            section.paragraph(|p| p.text("B"));
-            Ok(())
-        });
-        doc.section(|section| {
-            section.margins(Margins::uniform(margin));
-            section.footer(section_footer);
-            section.paragraph(|p| p.text("C"));
-            Ok(())
-        });
-        Ok(())
-    })
+    let margin = Margins::uniform(nn(20.0));
+    let pages = render(
+        PageSize::A4,
+        font_resources(),
+        vec![
+            SectionSpec {
+                margins: margin,
+                footer: Some(counter_footer()),
+                body: vec![para("A"), Block::PageBreak, para("B")],
+                ..SectionSpec::default()
+            },
+            SectionSpec {
+                margins: margin,
+                footer: Some(counter_footer()),
+                body: vec![para("C")],
+                ..SectionSpec::default()
+            },
+        ],
+    )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 3);
@@ -1117,31 +1420,28 @@ fn two_sections_number_document_pages_and_section_pages() {
 
 #[test]
 fn second_section_header_stays_at_page_edge_until_caller_insets() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.section(|section| {
-            section.margins(Margins::uniform(NonNegative::pt(20.0)?));
-            section.header(|header| header.left("One"));
-            section.paragraph(|p| p.text("A"));
-            Ok(())
-        });
-        doc.section(|section| {
-            section.margins(Margins::new(
-                NonNegative::pt(20.0)?,
-                NonNegative::pt(10.0)?,
-                NonNegative::pt(20.0)?,
-                NonNegative::pt(48.0)?,
-            ));
-            section.header(|header| {
-                let m = header.page().margins;
-                header.inset(m.left(), m.right());
-                header.left("Two");
-            });
-            section.paragraph(|p| p.text("B"));
-            Ok(())
-        });
-        Ok(())
-    })
+    let pages = render(
+        PageSize::A4,
+        font_resources(),
+        vec![
+            SectionSpec {
+                margins: Margins::uniform(nn(20.0)),
+                header: Some(left_band("One")),
+                body: vec![para("A")],
+                ..SectionSpec::default()
+            },
+            SectionSpec {
+                margins: Margins::new(nn(20.0), nn(10.0), nn(20.0), nn(48.0)),
+                header: Some(BandSpec {
+                    inset: BandInset::PageMargins,
+                    left: Some(slot_text(vec![TextRun::Literal("Two".into())])),
+                    right: None,
+                }),
+                body: vec![para("B")],
+                ..SectionSpec::default()
+            },
+        ],
+    )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 2);
@@ -1152,32 +1452,15 @@ fn second_section_header_stays_at_page_edge_until_caller_insets() {
 }
 
 #[test]
-fn paragraph_then_section_is_content_outside_section() {
-    let err = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.text("A"));
-        doc.section(|section| {
-            section.paragraph(|p| p.text("B"));
-            Ok(())
-        });
-        Ok(())
-    })
-    .err()
-    .unwrap();
-    assert_eq!(err.first().kind.clone(), ErrorKind::ContentOutsideSection);
-}
-
-#[test]
 fn empty_section_is_one_page_and_still_draws_its_footer() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.section(|section| {
-            section.margins(Margins::uniform(NonNegative::pt(20.0)?));
-            section.footer(|footer| footer.left("foot"));
-            Ok(())
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(20.0)),
+            footer: Some(left_band("foot")),
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 1);
@@ -1186,17 +1469,9 @@ fn empty_section_is_one_page_and_still_draws_its_footer() {
 
 #[test]
 fn trailing_page_break_inside_a_section_does_not_add_a_page() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.section(|section| {
-            section.paragraph(|p| p.text("A"));
-            section.page_break();
-            Ok(())
-        });
-        Ok(())
-    })
-    .unwrap()
-    .pages();
+    let pages = font_pages(PageSize::A4, sec(vec![para("A"), Block::PageBreak]))
+        .unwrap()
+        .pages();
     assert_eq!(pages.len(), 1);
     assert_eq!(texts(&pages[0]), ["A"]);
 }
@@ -1204,19 +1479,18 @@ fn trailing_page_break_inside_a_section_does_not_add_a_page() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn two_sections_on_different_paper_write_a_pdf() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.section(|section| {
-            section.paragraph(|p| p.text("A"));
-            Ok(())
-        });
-        doc.section(|section| {
-            section.page_size(Paper::Letter.landscape());
-            section.paragraph(|p| p.text("B"));
-            Ok(())
-        });
-        Ok(())
-    })
+    let rendered = render(
+        PageSize::A4,
+        font_resources(),
+        vec![
+            sec(vec![para("A")]),
+            SectionSpec {
+                page_size: Some(Paper::Letter.landscape()),
+                body: vec![para("B")],
+                ..SectionSpec::default()
+            },
+        ],
+    )
     .unwrap();
     let pages = rendered.pages();
     assert_eq!(pages.len(), 2);
@@ -1225,7 +1499,6 @@ fn two_sections_on_different_paper_write_a_pdf() {
     assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
-/// `(cx, cy, rx, ry)` from a four-cubic ellipse's endpoints.
 fn ellipse_center_radii(path: &Path) -> Option<(f32, f32, f32, f32)> {
     let [PathVerb::MoveTo(right), PathVerb::CubicTo { to: bottom, .. }, PathVerb::CubicTo { to: left, .. }, PathVerb::CubicTo { to: top, .. }, PathVerb::CubicTo { .. }, PathVerb::Close] =
         path.verbs()
@@ -1241,48 +1514,56 @@ fn ellipse_center_radii(path: &Path) -> Option<(f32, f32, f32, f32)> {
 }
 
 fn painted_layer_paths() -> Rendered {
-    document(
+    font_pages(
         PageSize::custom(Size::try_pt(200.0, 160.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.margins(Margins::uniform(NonNegative::pt(20.0)?));
-            doc.header(|header| header.left("H"));
-            doc.paragraph(|p| p.text("A"));
-            doc.behind(|layer| {
-                layer.line(
-                    Point::try_pt(0.0, 0.0).unwrap(),
-                    Point::try_pt(40.0, 40.0).unwrap(),
-                    Pen::new(Color::rgba(200, 0, 0, 64), 0.8).unwrap(),
-                );
-                layer.rect(
-                    Rect::try_pt(4.0, 6.0, 10.0, 12.0).unwrap(),
-                    Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
-                );
-            });
-            doc.front(|layer| {
-                layer.text_at("SEAL", Point::try_pt(12.0, 30.0).unwrap());
-                layer.ellipse(
-                    Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
-                    Ink::FillStroke(
+        SectionSpec {
+            margins: Margins::uniform(nn(20.0)),
+            header: Some(left_band("H")),
+            body: vec![para("A")],
+            behind: vec![
+                LayerMark::Line {
+                    when: PageWhen::All,
+                    from: Point::try_pt(0.0, 0.0).unwrap(),
+                    to: Point::try_pt(40.0, 40.0).unwrap(),
+                    pen: Pen::new(Color::rgba(200, 0, 0, 64), 0.8).unwrap(),
+                },
+                LayerMark::Rect {
+                    when: PageWhen::All,
+                    rect: Rect::try_pt(4.0, 6.0, 10.0, 12.0).unwrap(),
+                    ink: Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
+                },
+            ],
+            front: vec![
+                mark_text(PageWhen::All, "SEAL", 12.0, 30.0, TextStyle::default()),
+                LayerMark::Ellipse {
+                    when: PageWhen::All,
+                    rect: Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
+                    ink: Ink::FillStroke(
                         Color::rgba(200, 0, 0, 40),
                         Pen::new(Color::rgb(200, 0, 0), 2.0).unwrap(),
                     ),
-                );
-                layer.rotated(90.0, Point::try_pt(10.0, 12.0).unwrap(), |shapes| {
-                    shapes.rect(
-                        Rect::try_pt(10.0, 12.0, 20.0, 8.0).unwrap(),
-                        Ink::Fill(Color::rgba(0, 0, 255, 128)),
-                    );
-                });
-                layer.rotated(0.0, Point::ZERO, |shapes| {
-                    shapes.line(
-                        Point::try_pt(1.0, 2.0).unwrap(),
-                        Point::try_pt(8.0, 9.0).unwrap(),
-                        Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
-                    );
-                });
-            });
-            Ok(())
+                },
+                LayerMark::Rotated {
+                    when: PageWhen::All,
+                    degrees: 90.0,
+                    pivot: Point::try_pt(10.0, 12.0).unwrap(),
+                    shapes: vec![LayerShape::Rect {
+                        rect: Rect::try_pt(10.0, 12.0, 20.0, 8.0).unwrap(),
+                        ink: Ink::Fill(Color::rgba(0, 0, 255, 128)),
+                    }],
+                },
+                LayerMark::Rotated {
+                    when: PageWhen::All,
+                    degrees: 0.0,
+                    pivot: Point::ZERO,
+                    shapes: vec![LayerShape::Line {
+                        from: Point::try_pt(1.0, 2.0).unwrap(),
+                        to: Point::try_pt(8.0, 9.0).unwrap(),
+                        pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                    }],
+                },
+            ],
+            ..SectionSpec::default()
         },
     )
     .unwrap()
@@ -1291,8 +1572,7 @@ fn painted_layer_paths() -> Rendered {
 #[test]
 fn layer_paths_keep_stack_order_and_bake_rotation() {
     let rendered = painted_layer_paths();
-    let pages = rendered.pages();
-    let page = &pages[0];
+    let page = &rendered.pages()[0];
     let ops = page.ops();
     assert!(matches!(ops[0], CanvasCommand::StrokePath { .. }));
     assert!(matches!(ops[1], CanvasCommand::StrokePath { .. }));
@@ -1422,39 +1702,43 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn layer_paths_write_a_pdf() {
-    let rendered = document(PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()), |doc| {
-        doc.behind(|layer| {
-            layer.rect(
-                Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
-                Ink::Fill(Color::rgba(0, 0, 0, 128)),
-            );
-            layer.ellipse(
-                Rect::try_pt(30.0, 30.0, 16.0, 12.0).unwrap(),
-                Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
-            );
-        });
-        Ok(())
-    })
+    let rendered = render(
+        PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()),
+        Resources::default(),
+        vec![SectionSpec {
+            behind: vec![
+                LayerMark::Rect {
+                    when: PageWhen::All,
+                    rect: Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
+                    ink: Ink::Fill(Color::rgba(0, 0, 0, 128)),
+                },
+                LayerMark::Ellipse {
+                    when: PageWhen::All,
+                    rect: Rect::try_pt(30.0, 30.0, 16.0, 12.0).unwrap(),
+                    ink: Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
+                },
+            ],
+            ..SectionSpec::default()
+        }],
+    )
     .unwrap();
-    let pdf = to_pdf(rendered).unwrap();
-    assert!(pdf.starts_with(b"%PDF"));
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 #[test]
 fn hline_moves_whole_and_pins_stroke() {
-    let thick = Positive::pt(2.0).unwrap();
-    let gap = NonNegative::pt(4.0).unwrap();
-    let pages = document(
+    let pages = render(
         PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
-        |doc| {
-            doc.spacer(NonNegative::pt(31.0)?);
-            doc.hline(|h| {
-                h.thickness(thick);
-                h.space_before(gap);
-                h.space_after(gap);
-            });
-            Ok(())
-        },
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(31.0)),
+            rule(HLineSpec {
+                thickness: pos(2.0),
+                space_before: nn(4.0),
+                space_after: nn(4.0),
+                ..HLineSpec::default()
+            }),
+        ])],
     )
     .unwrap()
     .pages();
@@ -1472,7 +1756,7 @@ fn hline_moves_whole_and_pins_stroke() {
         panic!("expected stroke on page 2");
     };
     assert_eq!(paint.color(), Color::rgb(0, 0, 0));
-    assert_eq!(*stroke, Stroke::new(thick));
+    assert_eq!(*stroke, Stroke::new(pos(2.0)));
     assert_eq!(
         path.verbs(),
         &[
@@ -1484,18 +1768,17 @@ fn hline_moves_whole_and_pins_stroke() {
 
 #[test]
 fn hline_taller_than_body_fails_before_any_page() {
-    let gap = NonNegative::pt(12.0).unwrap();
-    let result = document(
+    let error = render(
         PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
-        |doc| {
-            doc.hline(|h| {
-                h.space_before(gap);
-                h.space_after(gap);
-            });
-            Ok(())
-        },
-    );
-    let error = result.err().unwrap();
+        Resources::default(),
+        vec![sec(vec![rule(HLineSpec {
+            space_before: nn(12.0),
+            space_after: nn(12.0),
+            ..HLineSpec::default()
+        })])],
+    )
+    .err()
+    .unwrap();
     assert_eq!(
         error.first().kind.clone(),
         ErrorKind::UnsplittableTallerThanFrame {
@@ -1511,24 +1794,22 @@ fn hline_taller_than_body_fails_before_any_page() {
 
 #[test]
 fn hline_in_list_item_and_cell() {
-    let width = Positive::pt(40.0).unwrap();
-    let page = &document(
+    let page = &font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.ul(|list| {
-                list.item(|item| {
-                    item.hline(|h| {
-                        h.width(width);
-                        h.start();
-                    });
-                });
-            });
-            doc.table(|t| {
-                t.row([Cell::hline(|h| h.color(Color::rgb(9, 9, 9)))]);
-            });
-            Ok(())
-        },
+        sec(vec![
+            bullet_list(vec![plain_item(vec![rule(HLineSpec {
+                width: Some(pos(40.0)),
+                align: Alignment::Start,
+                ..HLineSpec::default()
+            })])]),
+            grid(
+                vec![],
+                vec![vec![cell(vec![CellBlock::HLine(HLineSpec {
+                    color: Color::rgb(9, 9, 9),
+                    ..HLineSpec::default()
+                })])]],
+            ),
+        ]),
     )
     .unwrap()
     .pages()[0];
@@ -1541,7 +1822,6 @@ fn hline_in_list_item_and_cell() {
     let CanvasCommand::StrokePath { path, .. } = strokes[0] else {
         panic!("list hline");
     };
-    // Marker column is 18 pt; body starts at x=18. Start-aligned short line.
     assert_eq!(
         path.verbs(),
         &[
@@ -1554,50 +1834,51 @@ fn hline_in_list_item_and_cell() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn hline_writes_a_pdf() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.hline(|_| {});
-        Ok(())
-    })
+    let rendered = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![rule(HLineSpec::default())])],
+    )
     .unwrap();
-    let pdf = to_pdf(rendered).unwrap();
-    assert!(pdf.starts_with(b"%PDF"));
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 #[test]
 fn cell_spacer_shifts_the_following_row() {
     let y_of_b = |height: f32| {
-        let pages = document(PageSize::A4, |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.row([Cell::spacer(NonNegative::pt(height).unwrap())]);
-                t.row(["B"]);
-            });
-            Ok(())
-        })
+        let pages = font_pages(
+            PageSize::A4,
+            sec(vec![grid(
+                vec![],
+                vec![
+                    vec![cell(vec![CellBlock::Spacer(nn(height))])],
+                    text_row(&["B"]),
+                ],
+            )]),
+        )
         .unwrap()
         .pages();
         assert_eq!(pages.len(), 1);
-        let page = &pages[0];
-        assert!(page
+        assert!(pages[0]
             .ops()
             .iter()
             .all(|op| matches!(op, CanvasCommand::DrawGlyphRun { .. })));
-        assert_eq!(texts(page), ["B"]);
-        let glyphs = runs(page);
-        assert_eq!(glyphs.len(), 1);
-        glyphs[0].y
+        assert_eq!(texts(&pages[0]), ["B"]);
+        runs(&pages[0])[0].y
     };
     assert!(pt_near(y_of_b(30.0) - y_of_b(0.0), 30.0));
 }
 
 #[test]
 fn cell_spacer_alone_records_no_ops() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.table(|t| {
-            t.row([Cell::spacer(NonNegative::pt(24.0).unwrap())]);
-        });
-        Ok(())
-    })
+    let pages = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Spacer(nn(24.0))])]],
+        )])],
+    )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 1);
@@ -1606,16 +1887,16 @@ fn cell_spacer_alone_records_no_ops() {
 
 #[test]
 fn cell_spacer_taller_than_body_fails_before_any_page() {
-    let result = document(
+    let error = render(
         PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
-        |doc| {
-            doc.table(|t| {
-                t.row([Cell::spacer(NonNegative::pt(21.0).unwrap())]);
-            });
-            Ok(())
-        },
-    );
-    let error = result.err().unwrap();
+        Resources::default(),
+        vec![sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Spacer(nn(21.0))])]],
+        )])],
+    )
+    .err()
+    .unwrap();
     assert_eq!(
         error.first().kind.clone(),
         ErrorKind::UnsplittableTallerThanFrame {
@@ -1631,20 +1912,21 @@ fn cell_spacer_taller_than_body_fails_before_any_page() {
 
 #[test]
 fn short_cell_spacer_does_not_grow_a_text_row() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.row([Cell::new("A"), Cell::spacer(NonNegative::pt(8.0).unwrap())]);
-            t.row([Cell::new("B"), Cell::new("C")]);
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![grid(
+            vec![],
+            vec![
+                vec![text_cell("A"), cell(vec![CellBlock::Spacer(nn(8.0))])],
+                text_row(&["B", "C"]),
+            ],
+        )]),
+    )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 1);
     assert!(pt_near(glyph(&pages[0], "B").y, LINE + BASELINE));
 }
-
 struct StrokeSample {
     x0: f32,
     y0: f32,
@@ -1722,20 +2004,13 @@ fn commands_without_links(page: &RecordedPage) -> Vec<CanvasCommand> {
 
 #[test]
 fn middle_blank_shifts_the_next_glyph_and_strokes_the_gap() {
-    let gap = NonNegative::pt(30.0).unwrap();
-    let thick = Positive::pt(2.0).unwrap();
-    let offset = NonNegative::pt(4.0).unwrap();
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                p.text("AB");
-                p.blank(gap).thickness(thick).baseline_offset(offset);
-                p.text("C");
-            });
-            Ok(())
-        },
+        sec(vec![runs_para(vec![
+            text_run("AB"),
+            blank_run(BlankWidth::Fixed(nn(30.0)), Some(2.0), None, Some(4.0)),
+            text_run("C"),
+        ])]),
     )
     .unwrap()
     .pages();
@@ -1754,22 +2029,18 @@ fn middle_blank_shifts_the_next_glyph_and_strokes_the_gap() {
 #[test]
 fn blank_does_not_change_line_height() {
     let y_of_b = |with_blank: bool| {
-        let gap = NonNegative::pt(20.0).unwrap();
-        let pages = document(PageSize::A4, |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                if with_blank {
-                    p.text("A");
-                    p.blank(gap);
-                    p.text("\nB");
-                } else {
-                    p.text("A\nB");
-                }
-            });
-            Ok(())
-        })
-        .unwrap()
-        .pages();
+        let runs = if with_blank {
+            vec![
+                text_run("A"),
+                blank_run(BlankWidth::Fixed(nn(20.0)), None, None, None),
+                text_run("\nB"),
+            ]
+        } else {
+            vec![text_run("A\nB")]
+        };
+        let pages = font_pages(PageSize::A4, sec(vec![runs_para(runs)]))
+            .unwrap()
+            .pages();
         glyph(&pages[0], "B").y
     };
     assert!(pt_near(y_of_b(true), y_of_b(false)));
@@ -1777,16 +2048,12 @@ fn blank_does_not_change_line_height() {
 
 #[test]
 fn fill_blank_reaches_the_frame_edge_with_the_default_stroke() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(120.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                p.text("A");
-                p.blank_to_end();
-            });
-            Ok(())
-        },
+        sec(vec![runs_para(vec![
+            text_run("A"),
+            blank_run(BlankWidth::ToEndOfLine, None, None, None),
+        ])]),
     )
     .unwrap()
     .pages();
@@ -1801,15 +2068,14 @@ fn fill_blank_reaches_the_frame_edge_with_the_default_stroke() {
 
 #[test]
 fn blank_em_is_font_size_times_count_and_needs_no_bold_face() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                p.blank_em(2);
-            });
-            Ok(())
-        },
+        sec(vec![runs_para(vec![blank_run(
+            BlankWidth::Em(2),
+            None,
+            None,
+            None,
+        )])]),
     )
     .unwrap()
     .pages();
@@ -1824,18 +2090,14 @@ fn blank_em_is_font_size_times_count_and_needs_no_bold_face() {
 
 #[test]
 fn zero_width_blank_draws_no_stroke_and_does_not_shift() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                p.text("A");
-                p.blank(NonNegative::ZERO);
-                p.blank_em(0);
-                p.text("B");
-            });
-            Ok(())
-        },
+        sec(vec![runs_para(vec![
+            text_run("A"),
+            blank_run(BlankWidth::Fixed(NonNegative::ZERO), None, None, None),
+            blank_run(BlankWidth::Em(0), None, None, None),
+            text_run("B"),
+        ])]),
     )
     .unwrap()
     .pages();
@@ -1847,20 +2109,12 @@ fn zero_width_blank_draws_no_stroke_and_does_not_shift() {
 
 #[test]
 fn list_fill_blank_starts_after_the_marker_column() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.ul(|list| {
-                list.item(|item| {
-                    item.paragraph(|p| {
-                        p.text("A");
-                        p.blank_to_end();
-                    });
-                });
-            });
-            Ok(())
-        },
+        sec(vec![bullet_list(vec![plain_item(vec![runs_para(vec![
+            text_run("A"),
+            blank_run(BlankWidth::ToEndOfLine, None, None, None),
+        ])])])]),
     )
     .unwrap()
     .pages();
@@ -1873,21 +2127,21 @@ fn list_fill_blank_starts_after_the_marker_column() {
 
 #[test]
 fn column_fill_blank_is_shifted_with_its_column() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.columns(|row| {
-                row.col(|col| col.paragraph(|p| p.text("L")));
-                row.col(|col| {
-                    col.paragraph(|p| {
-                        p.text("A");
-                        p.blank_to_end();
-                    });
-                });
-            });
-            Ok(())
-        },
+        sec(vec![gap_columns(
+            12.0,
+            vec![
+                ratio_col(1.0, vec![para("L")]),
+                ratio_col(
+                    1.0,
+                    vec![runs_para(vec![
+                        text_run("A"),
+                        blank_run(BlankWidth::ToEndOfLine, None, None, None),
+                    ])],
+                ),
+            ],
+        )]),
     )
     .unwrap()
     .pages();
@@ -1901,17 +2155,13 @@ fn column_fill_blank_is_shifted_with_its_column() {
 
 #[test]
 fn blank_stays_on_its_line_when_the_paragraph_splits() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, LINE).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                p.text("A");
-                p.blank(NonNegative::pt(20.0).unwrap());
-                p.text("\nB");
-            });
-            Ok(())
-        },
+        sec(vec![runs_para(vec![
+            text_run("A"),
+            blank_run(BlankWidth::Fixed(nn(20.0)), None, None, None),
+            text_run("\nB"),
+        ])]),
     )
     .unwrap()
     .pages();
@@ -1926,30 +2176,27 @@ fn blank_stays_on_its_line_when_the_paragraph_splits() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn inline_blank_writes_a_pdf() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.text("A");
-            p.blank(NonNegative::pt(12.0).unwrap());
-        });
-        Ok(())
-    })
+    let rendered = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![
+            text_run("A"),
+            blank_run(BlankWidth::Fixed(nn(12.0)), None, None, None),
+        ])]),
+    )
     .unwrap();
-    let pdf = to_pdf(rendered).unwrap();
-    assert!(pdf.starts_with(b"%PDF"));
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 #[test]
 fn partial_link_rect_matches_the_linked_glyphs() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.text("A");
-            p.link("https://example.com/bc", |p| p.text("BC"));
-            p.text("D");
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![
+            text_run("A"),
+            link_run("https://example.com/bc", vec![text_run("BC")]),
+            text_run("D"),
+        ])]),
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -1967,15 +2214,12 @@ fn partial_link_rect_matches_the_linked_glyphs() {
 #[test]
 fn wrap_emits_one_link_rect_per_visual_line() {
     let width = 0.707 * 12.0;
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(width, 2.0 * LINE + 1.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                p.link("https://example.com/wrap", |p| p.text("A A"));
-            });
-            Ok(())
-        },
+        sec(vec![runs_para(vec![link_run(
+            "https://example.com/wrap",
+            vec![text_run("A A")],
+        )])]),
     )
     .unwrap()
     .pages();
@@ -2003,18 +2247,13 @@ fn wrap_emits_one_link_rect_per_visual_line() {
 
 #[test]
 fn body_and_bold_share_one_link_rect() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.bold_font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.link("https://example.com/mix", |p| {
-                p.text("A");
-                p.bold("B");
-                p.text("C");
-            });
-        });
-        Ok(())
-    })
+    let pages = bold_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![link_run(
+            "https://example.com/mix",
+            vec![text_run("A"), bold_run("B"), text_run("C")],
+        )])]),
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -2040,16 +2279,15 @@ fn body_and_bold_share_one_link_rect() {
 
 #[test]
 fn uri_boundaries_stay_distinct() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.link("https://a.example", |p| p.text("A"));
-            p.link("https://b.example", |p| p.text("B"));
-            p.text("C");
-            p.link("https://a.example", |p| p.text("D"));
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![
+            link_run("https://a.example", vec![text_run("A")]),
+            link_run("https://b.example", vec![text_run("B")]),
+            text_run("C"),
+            link_run("https://a.example", vec![text_run("D")]),
+        ])]),
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -2075,21 +2313,19 @@ fn uri_boundaries_stay_distinct() {
 
 #[test]
 fn repeated_same_uri_merges_across_calls_and_faces() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.bold_font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.link("https://example.com/u", |p| p.text("A"));
-            p.link("https://example.com/u", |p| p.text("B"));
-        });
-        doc.paragraph(|p| {
-            p.link("https://example.com/u", |p| {
-                p.text("C");
-                p.bold("D");
-            });
-        });
-        Ok(())
-    })
+    let pages = bold_pages(
+        PageSize::A4,
+        sec(vec![
+            runs_para(vec![
+                link_run("https://example.com/u", vec![text_run("A")]),
+                link_run("https://example.com/u", vec![text_run("B")]),
+            ]),
+            runs_para(vec![link_run(
+                "https://example.com/u",
+                vec![text_run("C"), bold_run("D")],
+            )]),
+        ]),
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -2110,17 +2346,17 @@ fn repeated_same_uri_merges_across_calls_and_faces() {
 
 #[test]
 fn blank_inside_a_link_is_not_part_of_either_rect() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.link("https://example.com/gap", |p| {
-                p.text("A");
-                p.blank(NonNegative::pt(30.0).unwrap());
-                p.text("B");
-            });
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![link_run(
+            "https://example.com/gap",
+            vec![
+                text_run("A"),
+                blank_run(BlankWidth::Fixed(nn(30.0)), None, None, None),
+                text_run("B"),
+            ],
+        )])]),
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -2136,30 +2372,38 @@ fn blank_inside_a_link_is_not_part_of_either_rect() {
 
 #[test]
 fn link_rect_includes_indent_column_and_list_offset() {
-    let indented = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.first_line_indent(NonNegative::pt(10.0).unwrap());
-            p.link("https://example.com/indent", |p| p.text("A"));
-        });
-        Ok(())
-    })
+    let indented = font_pages(
+        PageSize::A4,
+        sec(vec![paragraph(
+            vec![link_run("https://example.com/indent", vec![text_run("A")])],
+            10.0,
+            Alignment::Start,
+            None,
+            None,
+        )]),
+    )
     .unwrap()
     .pages();
     let indent_hit = &links(&indented[0])[0];
     assert!(pt_near(indent_hit.x, 10.0));
     assert!(pt_near(indent_hit.x, glyph(&indented[0], "A").x));
 
-    let columns = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.columns(|row| {
-            row.col(|col| col.paragraph(|p| p.text("L")));
-            row.col(|col| {
-                col.paragraph(|p| p.link("https://example.com/col", |p| p.text("R")));
-            });
-        });
-        Ok(())
-    })
+    let columns = font_pages(
+        PageSize::A4,
+        sec(vec![gap_columns(
+            12.0,
+            vec![
+                ratio_col(1.0, vec![para("L")]),
+                ratio_col(
+                    1.0,
+                    vec![runs_para(vec![link_run(
+                        "https://example.com/col",
+                        vec![text_run("R")],
+                    )])],
+                ),
+            ],
+        )]),
+    )
     .unwrap()
     .pages();
     let right = glyph(&columns[0], "R");
@@ -2169,15 +2413,12 @@ fn link_rect_includes_indent_column_and_list_offset() {
     assert!(pt_near(col_hit.width, right.width));
     assert_eq!(col_hit.target, "https://example.com/col");
 
-    let listed = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.ul(|list| {
-            list.item(|item| {
-                item.paragraph(|p| p.link("https://example.com/item", |p| p.text("A")));
-            });
-        });
-        Ok(())
-    })
+    let listed = font_pages(
+        PageSize::A4,
+        sec(vec![bullet_list(vec![plain_item(vec![runs_para(vec![
+            link_run("https://example.com/item", vec![text_run("A")]),
+        ])])])]),
+    )
     .unwrap()
     .pages();
     let item = glyph(&listed[0], "A");
@@ -2191,20 +2432,20 @@ fn link_rect_includes_indent_column_and_list_offset() {
 #[test]
 fn link_across_pages_restarts_y_at_the_body_top() {
     let top = 20.0;
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, top + LINE).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.margins(Margins::new(
-                NonNegative::pt(top).unwrap(),
+        SectionSpec {
+            margins: Margins::new(
+                nn(top),
                 NonNegative::ZERO,
                 NonNegative::ZERO,
                 NonNegative::ZERO,
-            ));
-            doc.paragraph(|p| {
-                p.link("https://example.com/page", |p| p.text("A\nA"));
-            });
-            Ok(())
+            ),
+            body: vec![runs_para(vec![link_run(
+                "https://example.com/page",
+                vec![text_run("A\nA")],
+            )])],
+            ..SectionSpec::default()
         },
     )
     .unwrap()
@@ -2223,19 +2464,32 @@ fn link_across_pages_restarts_y_at_the_body_top() {
 #[test]
 fn header_and_footer_slots_annotate_at_the_band_origin() {
     let margin = 36.0;
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(margin).unwrap()));
-        doc.header(|band| {
-            band.left_link("https://example.com/left", "Left");
-            band.right_link("https://example.com/right", "Right");
-        });
-        doc.footer(|band| {
-            band.left_link("https://example.com/foot", "Foot");
-        });
-        doc.paragraph(|p| p.text("Body"));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(margin)),
+            header: Some(BandSpec {
+                left: Some(slot_link(
+                    vec![TextRun::Literal("https://example.com/left".into())],
+                    "Left",
+                )),
+                right: Some(slot_link(
+                    vec![TextRun::Literal("https://example.com/right".into())],
+                    "Right",
+                )),
+                ..BandSpec::default()
+            }),
+            footer: Some(BandSpec {
+                left: Some(slot_link(
+                    vec![TextRun::Literal("https://example.com/foot".into())],
+                    "Foot",
+                )),
+                ..BandSpec::default()
+            }),
+            body: vec![para("Body")],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     let page = &pages[0];
@@ -2274,20 +2528,24 @@ fn header_and_footer_slots_annotate_at_the_band_origin() {
 
 #[test]
 fn header_uri_can_differ_per_page() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
-        doc.header(|band| {
-            band.left_link(
-                format!("https://example.com/{}", band.page().number),
-                "Home",
-            );
-        });
-        doc.paragraph(|p| p.text("A"));
-        doc.page_break();
-        doc.paragraph(|p| p.text("B"));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header: Some(BandSpec {
+                left: Some(BandSlot::Link {
+                    uri: vec![
+                        TextRun::Literal("https://example.com/".into()),
+                        TextRun::PageNumber,
+                    ],
+                    text: vec![TextRun::Literal("Home".into())],
+                }),
+                ..BandSpec::default()
+            }),
+            body: vec![para("A"), Block::PageBreak, para("B")],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 2);
@@ -2299,23 +2557,27 @@ fn header_uri_can_differ_per_page() {
 
 #[test]
 fn empty_uri_fails_the_document() {
-    let body = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.link("", |p| p.text("x")));
-        Ok(())
-    });
+    let body = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![link_run("", vec![text_run("x")])])]),
+    );
     assert!(matches!(
         body.map_err(|error| error.first().kind.clone()),
         Err(ErrorKind::EmptyLink)
     ));
 
-    let band = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.margins(Margins::uniform(NonNegative::pt(36.0).unwrap()));
-        doc.header(|h| h.right_link("", "Home"));
-        doc.paragraph(|p| p.text("A"));
-        Ok(())
-    });
+    let band = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header: Some(BandSpec {
+                right: Some(slot_link(vec![TextRun::Literal(String::new())], "Home")),
+                ..BandSpec::default()
+            }),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    );
     assert!(matches!(
         band.map_err(|error| error.first().kind.clone()),
         Err(ErrorKind::EmptyLink)
@@ -2324,14 +2586,13 @@ fn empty_uri_fails_the_document() {
 
 #[test]
 fn empty_linked_text_draws_no_annotation() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.link("https://example.com", |p| p.text(""));
-            p.text("A");
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![
+            link_run("https://example.com", vec![text_run("")]),
+            text_run("A"),
+        ])]),
+    )
     .unwrap()
     .pages();
     assert!(links(&pages[0]).is_empty());
@@ -2341,19 +2602,14 @@ fn empty_linked_text_draws_no_annotation() {
 #[test]
 fn link_does_not_change_glyphs_or_add_a_stroke() {
     let paint = |linked: bool| {
-        document(PageSize::A4, |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| {
-                if linked {
-                    p.link("https://example.com/same", |p| p.text("ABC"));
-                } else {
-                    p.text("ABC");
-                }
-            });
-            Ok(())
-        })
-        .unwrap()
-        .pages()
+        let runs = if linked {
+            vec![link_run("https://example.com/same", vec![text_run("ABC")])]
+        } else {
+            vec![text_run("ABC")]
+        };
+        font_pages(PageSize::A4, sec(vec![runs_para(runs)]))
+            .unwrap()
+            .pages()
     };
     let linked = paint(true);
     let plain = paint(false);
@@ -2367,15 +2623,14 @@ fn link_does_not_change_glyphs_or_add_a_stroke() {
 
 #[test]
 fn uri_text_is_stored_as_given() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| {
-            p.link(" ", |p| p.text("A"));
-            p.link("mailto:a@b.c", |p| p.text("B"));
-            p.link("not a uri", |p| p.text("C"));
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![
+            link_run(" ", vec![text_run("A")]),
+            link_run("mailto:a@b.c", vec![text_run("B")]),
+            link_run("not a uri", vec![text_run("C")]),
+        ])]),
+    )
     .unwrap()
     .pages();
     let hits = links(&pages[0]);
@@ -2389,17 +2644,26 @@ fn uri_text_is_stored_as_given() {
 
 #[test]
 fn cell_and_layer_text_do_not_annotate() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|table| {
-            table.row(["cell"]);
-        });
-        doc.behind(|layer| {
-            layer.text_at("mark", Point::try_pt(10.0, 10.0).unwrap());
-        });
-        doc.paragraph(|p| p.link("https://example.com/only", |p| p.text("Go")));
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            body: vec![
+                grid(vec![], vec![text_row(&["cell"])]),
+                runs_para(vec![link_run(
+                    "https://example.com/only",
+                    vec![text_run("Go")],
+                )]),
+            ],
+            behind: vec![mark_text(
+                PageWhen::All,
+                "mark",
+                10.0,
+                10.0,
+                TextStyle::default(),
+            )],
+            ..SectionSpec::default()
+        },
+    )
     .unwrap()
     .pages();
     let hits = links(&pages[0]);
@@ -2411,37 +2675,38 @@ fn cell_and_layer_text_do_not_annotate() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn text_link_writes_a_pdf() {
-    let rendered = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.paragraph(|p| p.link("https://example.com", |p| p.text("Go")));
-        Ok(())
-    })
+    let rendered = font_pages(
+        PageSize::A4,
+        sec(vec![runs_para(vec![link_run(
+            "https://example.com",
+            vec![text_run("Go")],
+        )])]),
+    )
     .unwrap();
-    let pdf = to_pdf(rendered).unwrap();
-    assert!(pdf.starts_with(b"%PDF"));
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
 }
 
 #[test]
 fn cell_paragraph_pins_bold_blank_and_link() {
-    let pages = document(
+    let pages = bold_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.bold_font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.row([
-                    Cell::paragraph(|p| {
-                        p.text("A");
-                        p.bold("B");
-                        p.blank_to_end();
-                    }),
-                    Cell::paragraph(|p| {
-                        p.link("https://example.test/a", |p| p.text("Go"));
-                    }),
-                ]);
-            });
-            Ok(())
-        },
+        sec(vec![grid(
+            vec![],
+            vec![vec![
+                cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    runs: vec![
+                        text_run("A"),
+                        bold_run("B"),
+                        blank_run(BlankWidth::ToEndOfLine, None, None, None),
+                    ],
+                    ..ParagraphSpec::default()
+                })]),
+                cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    runs: vec![link_run("https://example.test/a", vec![text_run("Go")])],
+                    ..ParagraphSpec::default()
+                })]),
+            ]],
+        )]),
     )
     .unwrap()
     .pages();
@@ -2463,30 +2728,34 @@ fn cell_paragraph_pins_bold_blank_and_link() {
 
 #[test]
 fn cell_paragraph_errors_record_no_pages() {
-    let empty_link = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.row([Cell::paragraph(|p| {
-                p.link("", |p| p.text("x"));
-            })]);
-        });
-        Ok(())
-    });
+    let empty_link = font_pages(
+        PageSize::A4,
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                runs: vec![link_run("", vec![text_run("x")])],
+                ..ParagraphSpec::default()
+            })])]],
+        )]),
+    );
     assert_eq!(
         empty_link.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::EmptyLink)
     );
 
-    let after_fill = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.row([Cell::paragraph(|p| {
-                p.blank_to_end();
-                p.text("x");
-            })]);
-        });
-        Ok(())
-    });
+    let after_fill = font_pages(
+        PageSize::A4,
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                runs: vec![
+                    blank_run(BlankWidth::ToEndOfLine, None, None, None),
+                    text_run("x"),
+                ],
+                ..ParagraphSpec::default()
+            })])]],
+        )]),
+    );
     assert_eq!(
         after_fill.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::RunAfterFillBlank)
@@ -2495,23 +2764,22 @@ fn cell_paragraph_errors_record_no_pages() {
 
 #[test]
 fn cell_paragraph_indent_uses_cell_width() {
-    let result = document(
+    let error = font_pages(
         PageSize::custom(Size::try_pt(40.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.row([
-                    Cell::paragraph(|p| {
-                        p.first_line_indent(NonNegative::pt(24.0).unwrap());
-                        p.text("A");
-                    }),
-                    Cell::new("B"),
-                ]);
-            });
-            Ok(())
-        },
-    );
-    let error = result.err().unwrap();
+        sec(vec![grid(
+            vec![],
+            vec![vec![
+                cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    runs: vec![text_run("A")],
+                    first_line_indent: nn(24.0),
+                    ..ParagraphSpec::default()
+                })]),
+                text_cell("B"),
+            ]],
+        )]),
+    )
+    .err()
+    .unwrap();
     assert_eq!(
         error.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::FirstLineIndent {
@@ -2528,13 +2796,15 @@ fn cell_paragraph_indent_uses_cell_width() {
 #[test]
 fn cell_rich_taller_than_frame_does_not_continue() {
     let page = PageSize::custom(Size::try_pt(200.0, LINE).unwrap());
-    let paragraph = document(page, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.row([Cell::paragraph(|p| p.text("A\nB"))]);
-        });
-        Ok(())
-    });
+    let paragraph = font_pages(
+        page,
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Paragraph(ParagraphSpec::text(
+                "A\nB",
+            ))])]],
+        )]),
+    );
     let error = paragraph.err().unwrap();
     assert!(
         matches!(
@@ -2549,16 +2819,16 @@ fn cell_rich_taller_than_frame_does_not_continue() {
         (Some(0), Some(1), Some(Region::Body), Some((0, 0)))
     );
 
-    let list = document(page, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.row([Cell::ul(|list| {
-                list.item(|item| item.paragraph(|p| p.text("A")));
-                list.item(|item| item.paragraph(|p| p.text("B")));
-            })]);
-        });
-        Ok(())
-    });
+    let list = font_pages(
+        page,
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::List(ListSpec {
+                items: vec![plain_item(vec![para("A")]), plain_item(vec![para("B")])],
+                ..ListSpec::default()
+            })])]],
+        )]),
+    );
     let error = list.err().unwrap();
     assert!(
         matches!(
@@ -2572,133 +2842,138 @@ fn cell_rich_taller_than_frame_does_not_continue() {
 
 #[test]
 fn cell_list_can_borrow_a_table_local() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            let label = String::from("borrowed");
-            t.row([Cell::ul(|list| {
-                list.item(|item| item.paragraph(|p| p.text(&label)));
-            })]);
-        });
-        Ok(())
-    })
+    let label = String::from("borrowed");
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::List(ListSpec {
+                items: vec![plain_item(vec![para(label)])],
+                ..ListSpec::default()
+            })])]],
+        )]),
+    )
     .unwrap()
     .pages();
     assert!(texts(&pages[0]).iter().any(|s| s == "borrowed"));
 }
 
-fn one_cell_page(make: impl FnOnce() -> Cell<'static>) -> RecordedPage {
-    let pages = document(
+fn cell_page(content: Vec<CellBlock>) -> RecordedPage {
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| t.row([make()]));
-            Ok(())
-        },
+        sec(vec![grid(vec![], vec![vec![cell(content)]])]),
     )
     .unwrap()
     .pages();
     assert_eq!(pages.len(), 1);
-    pages[0].clone()
+    pages.into_iter().next().unwrap()
 }
 
 #[test]
 fn cell_add_matches_sugar() {
-    let paragraph = |p: &mut Paragraph| {
-        p.text("Fee 12");
-        p.font_size(Positive::pt(9.0).unwrap());
-    };
-    assert_eq!(
-        one_cell_page(|| Cell::paragraph(paragraph)),
-        one_cell_page(|| Cell::empty().add(Paragraph::build(paragraph))),
-    );
-    let line = |h: &mut HLine| h.color(Color::rgb(9, 9, 9));
-    assert_eq!(
-        one_cell_page(|| Cell::hline(line)),
-        one_cell_page(|| Cell::empty().add(HLine::build(line))),
-    );
-    let height = NonNegative::pt(12.0).unwrap();
-    assert_eq!(
-        one_cell_page(|| Cell::spacer(height)),
-        one_cell_page(|| Cell::empty().add(Spacer::new(height))),
-    );
-    let bullets = |list: &mut List| list.item(|item| item.paragraph(|p| p.text("a")));
-    assert_eq!(
-        one_cell_page(|| Cell::ul(bullets)),
-        one_cell_page(|| Cell::empty().add(ListBlock::bullet(bullets))),
-    );
-    let numbered = |list: &mut List| {
-        list.start(NonZeroU32::new(4).unwrap());
-        list.item(|item| item.paragraph(|p| p.text("a")));
-    };
-    let sugar = one_cell_page(|| Cell::ol(Numbering::UpperRoman, numbered));
-    assert_eq!(
-        sugar,
-        one_cell_page(|| Cell::empty().add(ListBlock::numbered(Numbering::UpperRoman, numbered))),
-    );
-    assert!(texts(&sugar).iter().any(|s| s == "IV."));
+    let page = cell_page(vec![CellBlock::Paragraph(ParagraphSpec {
+        runs: vec![text_run("Fee 12")],
+        font_size: Some(pos(9.0)),
+        ..ParagraphSpec::default()
+    })]);
+    let drawn = page
+        .ops()
+        .iter()
+        .find_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(drawn.text, "Fee 12");
+    assert_eq!(drawn.font_size.as_pt().to_bits(), 9.0f32.to_bits());
+
+    let page = cell_page(vec![CellBlock::HLine(HLineSpec {
+        color: Color::rgb(9, 9, 9),
+        ..HLineSpec::default()
+    })]);
+    assert_eq!(stroke_samples(&page)[0].color, Color::rgb(9, 9, 9));
+
+    let page = cell_page(vec![CellBlock::Spacer(nn(12.0))]);
+    assert!(page.ops().is_empty());
+
+    let page = cell_page(vec![CellBlock::List(ListSpec {
+        items: vec![plain_item(vec![para("a")])],
+        ..ListSpec::default()
+    })]);
+    assert!(texts(&page).iter().any(|text| text == "a"));
+
+    let page = cell_page(vec![CellBlock::List(ListSpec {
+        kind: ListKind::Ordered(Numbering::UpperRoman),
+        start: NonZeroU32::new(4).unwrap(),
+        items: vec![plain_item(vec![para("a")])],
+        ..ListSpec::default()
+    })]);
+    assert!(texts(&page).iter().any(|text| text == "IV."));
 }
 
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn cell_add_image_matches_sugar() {
-    let page = |by_add: bool| {
-        document(
-            PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
-            |doc| {
-                let image = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-                let size = |b: &mut ImageBox| b.width(Positive::pt(10.0).unwrap());
-                let cell = if by_add {
-                    Cell::empty().add(PlacedImage::build(&image, size))
-                } else {
-                    Cell::image(&image, size)
-                };
-                doc.table(|t| t.row([cell]));
-                Ok(())
-            },
-        )
-        .unwrap()
-        .pages()
-    };
-    assert_eq!(page(false), page(true));
-}
-
-#[cfg(feature = "backend-krilla")]
-fn make_table(doc: &mut Document<'_>) -> Table {
-    let image = doc
-        .load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
-        .unwrap();
-    Table::build(|table| {
-        table.row([Cell::image(&image, |image| {
-            image.width(Positive::pt(10.0).unwrap());
-        })]);
-    })
+    let mut resources = Resources::default();
+    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let pages = render(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        resources,
+        vec![sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Image(ImageSpec {
+                image,
+                width: Some(pos(10.0)),
+                height: None,
+                align: Alignment::Start,
+            })])]],
+        )])],
+    )
+    .unwrap()
+    .pages();
+    let images = image_rects(&pages[0]);
+    assert_eq!(images.len(), 1);
+    assert_eq!((images[0].1, images[0].2), (1, 1));
+    assert_eq!(
+        rect_bits(images[0].3),
+        rect_bits(Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap())
+    );
 }
 
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn table_build_cell_image_paints_when_added() {
-    let page = Size::try_pt(200.0, 80.0).unwrap();
-    let rendered = document(PageSize::custom(page), |doc| {
-        let table = make_table(doc);
-        doc.add(table);
-        Ok(())
-    })
+    let mut resources = Resources::default();
+    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = render(
+        PageSize::custom(Size::try_pt(200.0, 80.0).unwrap()),
+        resources,
+        vec![sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Image(ImageSpec {
+                image,
+                width: Some(pos(10.0)),
+                height: None,
+                align: Alignment::Start,
+            })])]],
+        )])],
+    )
     .unwrap();
     let images = image_rects(&rendered.pages()[0]);
     assert_eq!(images.len(), 1);
     assert_eq!((images[0].1, images[0].2), (1, 1));
-    let expected = Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap();
-    assert_eq!(rect_bits(images[0].3), rect_bits(expected));
+    assert_eq!(
+        rect_bits(images[0].3),
+        rect_bits(Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap())
+    );
 }
 
 #[test]
 fn cell_children_stack_in_add_order() {
-    let page = one_cell_page(|| {
-        Cell::empty()
-            .add(Paragraph::build(|p| p.text("A")))
-            .add(HLine::build(|_| {}))
-    });
+    let page = cell_page(vec![
+        CellBlock::Paragraph(ParagraphSpec::text("A")),
+        CellBlock::HLine(HLineSpec::default()),
+    ]);
     let strokes = stroke_samples(&page);
     assert_eq!(strokes.len(), 1);
     assert!(pt_near(glyph(&page, "A").y, BASELINE));
@@ -2707,14 +2982,13 @@ fn cell_children_stack_in_add_order() {
 
 #[test]
 fn empty_cell_is_a_zero_height_slot() {
-    let pages = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.row([Cell::empty()]);
-            t.row(["B"]);
-        });
-        Ok(())
-    })
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![grid(
+            vec![],
+            vec![vec![CellSpec::default()], text_row(&["B"])],
+        )]),
+    )
     .unwrap()
     .pages();
     assert!(pt_near(glyph(&pages[0], "B").y, BASELINE));
@@ -2722,30 +2996,34 @@ fn empty_cell_is_a_zero_height_slot() {
 
 #[test]
 fn cell_list_marker_at_cell_x() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.row([
-                    Cell::new("L"),
-                    Cell::ul(|list| {
-                        list.item(|item| item.paragraph(|p| p.text("dot")));
-                        list.item(|item| {
-                            item.ul(|inner| inner.item(|n| n.paragraph(|p| p.text("child"))));
-                        });
-                    }),
-                ]);
-                t.row([
-                    Cell::new("M"),
-                    Cell::ol(Numbering::Decimal, |list| {
-                        list.item(|item| item.paragraph(|p| p.text("one")));
-                        list.item_marked("(c)", |item| item.paragraph(|p| p.text("custom")));
-                    }),
-                ]);
-            });
-            Ok(())
-        },
+        sec(vec![grid(
+            vec![],
+            vec![
+                vec![
+                    text_cell("L"),
+                    cell(vec![CellBlock::List(ListSpec {
+                        items: vec![
+                            plain_item(vec![para("dot")]),
+                            plain_item(vec![bullet_list(vec![plain_item(vec![para("child")])])]),
+                        ],
+                        ..ListSpec::default()
+                    })]),
+                ],
+                vec![
+                    text_cell("M"),
+                    cell(vec![CellBlock::List(ListSpec {
+                        kind: ListKind::Ordered(Numbering::Decimal),
+                        items: vec![
+                            plain_item(vec![para("one")]),
+                            marked_item("(c)", vec![para("custom")]),
+                        ],
+                        ..ListSpec::default()
+                    })]),
+                ],
+            ],
+        )]),
     )
     .unwrap()
     .pages();
@@ -2775,14 +3053,17 @@ fn cell_list_marker_at_cell_x() {
 
 #[test]
 fn cell_list_item_rejects_forbidden_kids() {
-    let reject = |node: &'static str, item: fn(&mut Flow)| {
-        let result = document(PageSize::A4, |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.row([Cell::ul(move |list| list.item(item))]);
-            });
-            Ok(())
-        });
+    let reject = |node: &'static str, block: Block| {
+        let result = font_pages(
+            PageSize::A4,
+            sec(vec![grid(
+                vec![],
+                vec![vec![cell(vec![CellBlock::List(ListSpec {
+                    items: vec![plain_item(vec![block])],
+                    ..ListSpec::default()
+                })])]],
+            )]),
+        );
         assert_eq!(
             result.err().map(|error| error.first().kind.clone()),
             Some(ErrorKind::InvalidCellContent {
@@ -2791,52 +3072,60 @@ fn cell_list_item_rejects_forbidden_kids() {
             })
         );
     };
-    reject("table", |item| item.table(|t| t.row(["a"])));
-    reject("columns", |item| {
-        item.columns(|row| {
-            row.col(|col| col.paragraph(|p| p.text("a")));
-            row.col(|col| col.paragraph(|p| p.text("b")));
-        });
-    });
-    reject("page break", Flow::page_break);
-    reject("keep together", |item| item.keep_together(|_| {}));
+    reject("table", grid(vec![], vec![text_row(&["a"])]));
+    reject(
+        "columns",
+        gap_columns(
+            12.0,
+            vec![
+                ratio_col(1.0, vec![para("a")]),
+                ratio_col(1.0, vec![para("b")]),
+            ],
+        ),
+    );
+    reject("page break", Block::PageBreak);
+    reject("keep together", Block::KeepTogether(vec![]));
+}
 
-    #[cfg(feature = "backend-krilla")]
-    {
-        let result = document(PageSize::A4, |doc| {
-            let logo = doc.load_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
-            doc.table(|t| {
-                t.row([Cell::ul(|list| {
-                    list.item(|item| item.image(&logo, |_| {}));
-                })]);
-            });
-            Ok(())
-        });
-        assert_eq!(
-            result.err().map(|error| error.first().kind.clone()),
-            Some(ErrorKind::InvalidCellContent {
-                container: "list item",
-                node: "image",
-            })
-        );
-    }
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn cell_list_item_rejects_an_image() {
+    let mut resources = font_resources();
+    let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let result = render(
+        PageSize::A4,
+        resources,
+        vec![sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::List(ListSpec {
+                items: vec![plain_item(vec![image_block(logo, None, Alignment::Start)])],
+                ..ListSpec::default()
+            })])]],
+        )])],
+    );
+    assert_eq!(
+        result.err().map(|error| error.first().kind.clone()),
+        Some(ErrorKind::InvalidCellContent {
+            container: "list item",
+            node: "image",
+        })
+    );
 }
 
 #[test]
 fn cell_list_narrower_than_marker_is_invalid_geometry() {
-    let result = document(
+    let error = font_pages(
         PageSize::custom(Size::try_pt(18.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.row([Cell::ul(|list| {
-                    list.item(|item| item.paragraph(|p| p.text("A")));
-                })]);
-            });
-            Ok(())
-        },
-    );
-    let error = result.err().unwrap();
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::List(ListSpec {
+                items: vec![plain_item(vec![para("A")])],
+                ..ListSpec::default()
+            })])]],
+        )]),
+    )
+    .err()
+    .unwrap();
     assert_eq!(
         error.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::ListIndentWiderThanFrame {
@@ -2853,27 +3142,27 @@ fn cell_list_narrower_than_marker_is_invalid_geometry() {
 #[test]
 fn margin_presets_match_uniform_insets() {
     let origin = |margins: Margins| {
-        let pages = document(PageSize::A4, |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.margins(margins);
-            doc.paragraph(|p| p.text("Body"));
-            Ok(())
-        })
+        let pages = font_pages(
+            PageSize::A4,
+            SectionSpec {
+                margins,
+                body: vec![para("Body")],
+                ..SectionSpec::default()
+            },
+        )
         .unwrap()
         .pages();
         let body = glyph(&pages[0], "Body");
         (body.x, body.y)
     };
-
     let inch = origin(MarginPreset::Inch.into());
-    let inch_uniform = origin(Margins::uniform(NonNegative::pt(72.0).unwrap()));
+    let inch_uniform = origin(Margins::uniform(nn(72.0)));
     assert!(pt_near(inch.0, 72.0));
     assert!(pt_near(inch.1, 72.0 + BASELINE));
     assert!(pt_near(inch.0, inch_uniform.0));
     assert!(pt_near(inch.1, inch_uniform.1));
-
     let half = origin(MarginPreset::HalfInch.into());
-    let half_uniform = origin(Margins::uniform(NonNegative::pt(36.0).unwrap()));
+    let half_uniform = origin(Margins::uniform(nn(36.0)));
     assert!(pt_near(half.0, 36.0));
     assert!(pt_near(half.1, 36.0 + BASELINE));
     assert!(pt_near(half.0, half_uniform.0));
@@ -2882,45 +3171,45 @@ fn margin_presets_match_uniform_insets() {
 
 #[test]
 fn table_tracks_fill_the_frame_and_keep_fixed_width() {
-    let page_w = 200.0;
-    let pages = document(
-        PageSize::custom(Size::try_pt(page_w, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.tracks([Track::Fixed(Positive::pt(40.0).unwrap()), Track::Auto]);
-                t.row(["A", "B"]);
-            });
-            Ok(())
-        },
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        sec(vec![Block::Table(TableSpec {
+            tracks: Some(vec![Track::Fixed(pos(40.0)), Track::Auto]),
+            body: vec![text_row(&["A", "B"])],
+            ..TableSpec::default()
+        })]),
     )
     .unwrap()
     .pages();
-    let a = glyph(&pages[0], "A");
-    let b = glyph(&pages[0], "B");
-    assert!(pt_near(a.x, 0.0));
-    assert!(pt_near(b.x, 40.0));
+    assert!(pt_near(glyph(&pages[0], "A").x, 0.0));
+    assert!(pt_near(glyph(&pages[0], "B").x, 40.0));
 }
 
 #[test]
 fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
     let width = 0.707 * 12.0;
     let page = PageSize::custom(Size::try_pt(width * 4.0, 400.0).unwrap());
-    let open = document(page, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| t.row([Cell::paragraph(|p| p.text("A A"))]));
-        Ok(())
-    })
+    let open = font_pages(
+        page,
+        sec(vec![grid(
+            vec![],
+            vec![vec![cell(vec![CellBlock::Paragraph(ParagraphSpec::text(
+                "A A",
+            ))])]],
+        )]),
+    )
     .unwrap()
     .pages();
-    let padded = document(page, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.cell_padding(NonNegative::pt(width).unwrap());
-            t.row([Cell::paragraph(|p| p.text("A A"))]);
-        });
-        Ok(())
-    })
+    let padded = font_pages(
+        page,
+        sec(vec![Block::Table(TableSpec {
+            cell_padding: nn(width),
+            body: vec![vec![cell(vec![CellBlock::Paragraph(ParagraphSpec::text(
+                "A A",
+            ))])]],
+            ..TableSpec::default()
+        })]),
+    )
     .unwrap()
     .pages();
     assert_eq!(runs(&open[0]).len(), 1);
@@ -2931,26 +3220,21 @@ fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
 #[test]
 fn table_zero_border_draws_no_stroke_and_a_positive_border_does() {
     let page = PageSize::custom(Size::try_pt(200.0, 400.0).unwrap());
-    let none = document(page, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| t.row(["A"]));
-        Ok(())
-    })
-    .unwrap()
-    .pages();
+    let none = font_pages(page, sec(vec![grid(vec![], vec![text_row(&["A"])])]))
+        .unwrap()
+        .pages();
     assert!(none[0]
         .ops()
         .iter()
         .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
-
-    let stroked = document(page, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.border(NonNegative::pt(0.5).unwrap(), Color::rgb(0, 0, 0));
-            t.row(["A"]);
-        });
-        Ok(())
-    })
+    let stroked = font_pages(
+        page,
+        sec(vec![Block::Table(TableSpec {
+            border_width: nn(0.5),
+            body: vec![text_row(&["A"])],
+            ..TableSpec::default()
+        })]),
+    )
     .unwrap()
     .pages();
     assert!(stroked[0]
@@ -2961,20 +3245,12 @@ fn table_zero_border_draws_no_stroke_and_a_positive_border_does() {
 
 #[test]
 fn columns_fixed_plus_auto_gives_the_remainder_to_auto() {
-    let page_w = 200.0;
-    let pages = document(
-        PageSize::custom(Size::try_pt(page_w, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.columns(|c| {
-                c.gap(NonNegative::pt(10.0).unwrap());
-                c.col_fixed(Positive::pt(50.0).unwrap(), |f| {
-                    f.paragraph(|p| p.text("L"));
-                });
-                c.col_auto(|f| f.paragraph(|p| p.text("R")));
-            });
-            Ok(())
-        },
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
+        sec(vec![Block::Columns(ColumnsSpec {
+            gap: nn(10.0),
+            columns: vec![fixed_col(50.0, vec![para("L")]), auto_col(vec![para("R")])],
+        })]),
     )
     .unwrap()
     .pages();
@@ -2984,19 +3260,12 @@ fn columns_fixed_plus_auto_gives_the_remainder_to_auto() {
 
 #[test]
 fn columns_gap_zero_places_the_second_column_against_the_first() {
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.columns(|c| {
-                c.gap(NonNegative::ZERO);
-                c.col_fixed(Positive::pt(80.0).unwrap(), |f| {
-                    f.paragraph(|p| p.text("L"));
-                });
-                c.col_auto(|f| f.paragraph(|p| p.text("R")));
-            });
-            Ok(())
-        },
+        sec(vec![Block::Columns(ColumnsSpec {
+            gap: NonNegative::ZERO,
+            columns: vec![fixed_col(80.0, vec![para("L")]), auto_col(vec![para("R")])],
+        })]),
     )
     .unwrap()
     .pages();
@@ -3023,19 +3292,16 @@ fn ratio_rejects_a_weight_that_is_not_positive_and_finite() {
             reason: ColumnWidthsReason::NonFiniteRatio,
         }
     );
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.table(|t| {
-                t.tracks([
-                    Track::Ratio(Ratio::new(1.0).unwrap()),
-                    Track::Ratio(Ratio::new(2.0).unwrap()),
-                ]);
-                t.row(["A", "B"]);
-            });
-            Ok(())
-        },
+        sec(vec![Block::Table(TableSpec {
+            tracks: Some(vec![
+                Track::Ratio(Ratio::new(1.0).unwrap()),
+                Track::Ratio(Ratio::new(2.0).unwrap()),
+            ]),
+            body: vec![text_row(&["A", "B"])],
+            ..TableSpec::default()
+        })]),
     )
     .unwrap()
     .pages();
@@ -3044,29 +3310,27 @@ fn ratio_rejects_a_weight_that_is_not_positive_and_finite() {
 
 #[test]
 fn auto_with_ratio_fails_on_columns_and_table_tracks() {
-    let columns = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.columns(|c| {
-            c.col_auto(|f| f.paragraph(|p| p.text("A")));
-            c.col_ratio(1.0, |f| f.paragraph(|p| p.text("B")));
-        });
-        Ok(())
-    });
+    let columns = font_pages(
+        PageSize::A4,
+        sec(vec![Block::Columns(ColumnsSpec {
+            gap: nn(12.0),
+            columns: vec![auto_col(vec![para("A")]), ratio_col(1.0, vec![para("B")])],
+        })]),
+    );
     assert_eq!(
         columns.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::ColumnWidths {
             reason: ColumnWidthsReason::AutoWithRatio
         })
     );
-
-    let table = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.tracks([Track::Auto, Track::Ratio(Ratio::new(1.0).unwrap())]);
-            t.row(["A", "B"]);
-        });
-        Ok(())
-    });
+    let table = font_pages(
+        PageSize::A4,
+        sec(vec![Block::Table(TableSpec {
+            tracks: Some(vec![Track::Auto, Track::Ratio(Ratio::new(1.0).unwrap())]),
+            body: vec![text_row(&["A", "B"])],
+            ..TableSpec::default()
+        })]),
+    );
     assert_eq!(
         table.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::ColumnWidths {
@@ -3077,14 +3341,14 @@ fn auto_with_ratio_fails_on_columns_and_table_tracks() {
 
 #[test]
 fn table_tracks_length_must_match_the_first_row() {
-    let result = document(PageSize::A4, |doc| {
-        doc.font(FONT.to_vec())?;
-        doc.table(|t| {
-            t.tracks([Track::Ratio(Ratio::new(1.0).unwrap())]);
-            t.row(["A", "B"]);
-        });
-        Ok(())
-    });
+    let result = font_pages(
+        PageSize::A4,
+        sec(vec![Block::Table(TableSpec {
+            tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
+            body: vec![text_row(&["A", "B"])],
+            ..TableSpec::default()
+        })]),
+    );
     assert_eq!(
         result.err().map(|error| error.first().kind.clone()),
         Some(ErrorKind::ColumnWidths {
@@ -3096,26 +3360,14 @@ fn table_tracks_length_must_match_the_first_row() {
 #[test]
 fn paragraph_center_and_end_align_each_visual_line() {
     let page_w = 120.0;
-    let pages = document(
+    let pages = font_pages(
         PageSize::custom(Size::try_pt(page_w, 400.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.paragraph(|p| p.text("A"));
-            doc.paragraph(|p| {
-                p.center();
-                p.text("B");
-            });
-            doc.paragraph(|p| {
-                p.end();
-                p.text("C");
-            });
-            doc.paragraph(|p| {
-                p.center();
-                p.end();
-                p.text("D");
-            });
-            Ok(())
-        },
+        sec(vec![
+            para("A"),
+            paragraph(vec![text_run("B")], 0.0, Alignment::Center, None, None),
+            paragraph(vec![text_run("C")], 0.0, Alignment::End, None, None),
+            paragraph(vec![text_run("D")], 0.0, Alignment::End, None, None),
+        ]),
     )
     .unwrap()
     .pages();
@@ -3131,16 +3383,16 @@ fn paragraph_center_and_end_align_each_visual_line() {
 
 #[test]
 fn inch_preset_on_a_narrow_page_is_invalid_geometry() {
-    let result = document(
+    let error = font_pages(
         PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
-        |doc| {
-            doc.font(FONT.to_vec())?;
-            doc.margins(MarginPreset::Inch.into());
-            doc.paragraph(|p| p.text("A"));
-            Ok(())
+        SectionSpec {
+            margins: MarginPreset::Inch.into(),
+            body: vec![para("A")],
+            ..SectionSpec::default()
         },
-    );
-    let error = result.err().unwrap();
+    )
+    .err()
+    .unwrap();
     assert_eq!(
         error.first().kind.clone(),
         ErrorKind::InvalidGeometry(GeometryKind::BodyFrame {

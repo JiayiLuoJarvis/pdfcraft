@@ -24,11 +24,7 @@ pub mod document;
 pub mod fonts;
 pub mod spec;
 
-pub use document::{
-    Band, Blank, Cell, Columns, Document, Flow, FlowWriter, HLine, Image, ImageBox, IntoCellItem,
-    IntoFlowItem, Layer, List, ListBlock, Numbering, Page, Paragraph, PlacedImage, Ratio, Rendered,
-    Section, Shapes, Spacer, Table, TextAt, TextProps, Track,
-};
+pub use document::{Document, Image, Numbering, Ratio, Rendered, Track};
 pub use spec::{layout_spec, DocumentSpec};
 
 #[cfg(feature = "test-utils")]
@@ -46,32 +42,11 @@ pub(crate) mod layout;
 #[cfg(feature = "backend-krilla")]
 pub(crate) mod backend;
 
-/// Lays out a document whose default paper is `page_size`.
-///
-/// `build` runs once. Builder mistakes and missing glyphs are collected, up to
-/// 64, and returned together. Any of them fails the whole document before a
-/// page is drawn. An `Err` returned from `build` is included and stops layout.
-///
-/// Text uses the first font passed to [`Document::font`] at 12 pt with line
-/// height 1.2, black, start-aligned. Margins default to zero.
-pub fn document<'a>(
-    page_size: PageSize,
-    build: impl FnOnce(&mut Document<'a>) -> Result<()>,
-) -> Result<Rendered> {
-    let mut doc = Document::new(page_size);
-    #[cfg(feature = "backend-krilla")]
-    {
-        doc.images = Box::new(backend::ImageTable::default());
-    }
-    let returned = build(&mut doc);
-    doc.render(returned)
-}
-
 /// Writes the pages of `rendered` as PDF bytes.
 ///
-/// JPEG, GIF, and WebP pixel data that [`Document::load_image`] accepted from the header
-/// can still fail here. That [`ErrorKind::Backend`] value has no page. PNG pixel data
-/// fails in `load_image` instead.
+/// JPEG, GIF, and WebP pixel data that passed header checks while the document
+/// was laid out can still fail here. That [`ErrorKind::Backend`] value has no
+/// page. PNG pixel data fails during [`layout_spec`] instead.
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
     backend::write_pdf(&rendered.recording, rendered.fonts, rendered.images).map_err(Errors::from)
