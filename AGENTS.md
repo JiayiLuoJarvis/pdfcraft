@@ -10,7 +10,7 @@
 
 冲突时：提案书 > 本文件 > 设计稿未确认部分。
 
-提案书 §1–§9 主线已确认（见提案书文末总表）。实现按层推进；预置边距枚举、分隔线最终方法名等小糖可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
 仍须遵守：未确认功能不「顺便」做；`publish = false` 直到限额与信件夹具通过。
 
@@ -24,7 +24,7 @@
 
 ## 这是什么库
 
-`quire`：调用方用 **Rust DSL** 描述文档；库做测量、断行、分页、表格、页眉页脚；经自有 `Canvas` 画出矢量 PDF。唯一后端是私有 **krilla** 适配器（相当于 pdfmake 下面的 pdfkit）。
+`quire` 的调用方用 `DocumentSpec` 描述文档。库做测量、断行、分页、表格、页眉页脚，经自有 `Canvas` 画出矢量 PDF。唯一后端是私有 **krilla** 适配器（相当于 pdfmake 下面的 pdfkit）。
 
 已钉死（见提案书「你已经定过的」）：
 
@@ -49,7 +49,7 @@
 
 和已定用法对齐的方向：流式正文用 text / stack / columns / table / ul / ol / image；水印用文档级 watermark（或 behind）；电子章用 **absolutePosition 这类属性**（或 front 逃逸），不是新节点类型。`canvas` 是流里的一块矢量，和页面固定坐标粘贴不是一回事。
 
-**第一版具体封装哪些元素，以提案书 §2 取舍为准；未取舍前不要在 `document` 里发明 API。**
+**第一版具体封装哪些元素，以提案书 §2 取舍为准。未取舍前不要在 `spec` 里发明 API。**
 
 ## 目录与模块
 
@@ -64,8 +64,7 @@ quire/
     error.rs geom.rs
     # limits.rs returns with the limits PR (not an empty pub shell)
     canvas.rs           Canvas / RecordingCanvas；无 krilla
-    spec/               公共 DocumentSpec；layout_spec 降成流和页饰
-    document/           crate 内降级，不向调用方提供闭包
+    spec/               公共文档面。DocumentSpec、Resources、layout_spec
     fonts.rs
     text/               cluster / measure / break_class / line_break
     layout/             frame flow nesting paragraph columns table list decorate paginate dump
@@ -81,21 +80,23 @@ quire/
 
 ```text
 geom
-error       → geom；不依赖 fonts / layout / document / backend
+error       → geom；不依赖 fonts / layout / spec / backend
 fonts       → error, geom
 canvas      → error, geom
 text        → fonts, error, geom
 layout      → text, fonts, canvas, error, geom
-document    → layout, canvas, fonts, error, geom     # 禁止 → backend
-backend     → canvas, fonts, error, geom, krilla     # 禁止 → layout / document
+spec        → layout, canvas, fonts, error, geom    # 公共文档面；禁止 → backend
+backend     → canvas, fonts, error, geom, krilla    # 禁止 → layout / spec
 ```
+
+`layout_spec` 在 `spec` 里把 `DocumentSpec` 降成 layout 节点。打开 `backend-krilla` 时，`lib.rs` 的 `image_registry` 构造 `ImageTable`。`spec` 不引用 `backend`。
 
 | 区域 | 可以 | 不可以 |
 | --- | --- | --- |
-| `layout/`、`text/`、`fonts/`、`document/` | 自有几何、Canvas、skrifa（测量 PR 起） | `use krilla::…`；`document` → `backend` |
-| `backend/` | krilla、把 Canvas 指令译成 PDF | 被 `layout` / `document` 反向依赖 |
+| `layout/`、`text/`、`fonts/`、`spec/` | 自有几何、Canvas、skrifa（测量 PR 起） | `use krilla::…`；这些模块 → `backend` |
+| `backend/` | krilla、把 Canvas 指令译成 PDF | 被 `layout` 或 `spec` 反向依赖 |
 | `error` | 自有 kind / Display | 依赖 `fonts::FontId` 等上层类型 |
-| `lib.rs` 重导出 | 公共 DSL / geom / error / Canvas | 任何 krilla 类型 |
+| `lib.rs` 重导出 | 公共 `spec`、geom、error、Canvas | 任何 krilla 类型 |
 | 测试 | 排版用 `RecordingCanvas` 断言坐标 | 用测试依赖反转生产 DAG；把 krilla 压缩字节当排版断言 |
 
 ## 代码与贡献规范
@@ -103,7 +104,7 @@ backend     → canvas, fonts, error, geom, krilla     # 禁止 → layout / doc
 按开源 Rust 库标准要求自己。权威优先级（与「文档优先级」正交：那边管产品，这边管怎么写代码）：
 
 1. [Rust Style Guide](https://doc.rust-lang.org/style-guide/) + 本仓库 `rustfmt.toml` / `clippy.toml` / `Cargo.toml` `[lints]`
-2. [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) — 公共 API 命名、文档、错误、trait；DSL 落地时按 [checklist](https://rust-lang.github.io/api-guidelines/checklist.html) 过一遍
+2. [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) 管公共 API 的命名、文档、错误、trait。`spec` 的公共类型落地时按 [checklist](https://rust-lang.github.io/api-guidelines/checklist.html) 过一遍
 3. 工程门禁气质对齐 [krilla](https://github.com/LaurenzV/krilla)（`-Dwarnings`、fmt、clippy、`cargo doc`、MSRV）；贡献粒度对齐 Typst（单主题、少改接口、新公共类型有文档）
 4. 评审纪律对齐 [Google Eng Practices](https://google.github.io/eng-practices/)：审行为与可测性，不为口味重写；改动范围保持单主题（见上「现阶段姿态」）
 
@@ -136,7 +137,7 @@ cargo doc --no-deps
 ### 风格、文档、错误
 
 - rustfmt / clippy 即风格；禁止大段 `#[allow(...)]`，必要时单点 + 一行理由。
-- `missing_docs`：当前 `warn`。公共 DSL / 稳定对外 API 落地后升为 `deny`。
+- `missing_docs`：当前 `warn`。公共 `spec` 与其余稳定对外 API 落地后升为 `deny`。
 - 公共项写 `///`（模块级说明 + 类型/方法）；`Errors` / `Panics` 按 API Guidelines。`pub(crate)` 与私有代码短注释即可。
 - 库代码用 `Result` + 本库 `Error`；公共路径不 `unwrap` / `expect`（测试与已证明的私有不变量除外）。
 
@@ -149,8 +150,8 @@ cargo doc --no-deps
 ## Agent 工作方式
 
 1. **先读**提案书里与当前任务相关的已确认条；再读设计稿里仍有效的技术核实（krilla/skrifa API 事实）。
-2. **主线已确认后**：按层实现；DSL / 元素签名以提案书为准。预置与搁置项见提案书总表，不提前做。
-3. 实现时按层推进：geom/error（含长度类型）→ canvas →（backend）→ fonts/measure → line break → flow/paginate → table/decorate → DSL 接线。
+2. **主线已确认后。** 按层实现。`spec` 类型和元素字段以提案书为准。预置与搁置项见提案书总表，不提前做。
+3. 实现时按层推进：geom/error（含长度类型）→ canvas →（backend）→ fonts/measure → line break → flow/paginate → table/decorate → `spec` 接线。
 4. 排版测试优先断言 `RecordingCanvas` 记录；`to_pdf` 冒烟只断言 `%PDF` 之类，不断言压缩内容流细节（内容流数字实验仅属于 backend 适配器测试）。
 5. 对话过长、上下文明显膨胀时，建议用户开新对话，并指向本文件与提案书。
 6. 改代码前读周边文件；提交前跑「门禁」一节命令；不擅自 `git commit` / push，除非用户明确要求。

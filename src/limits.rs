@@ -1,8 +1,9 @@
 //! Caps on caller-supplied bytes, decoded images, and document size.
 //!
 //! [`Limits::default`] matches the safety table in the design draft. A setter
-//! rejects `0` and any value above four times that default. [`Document::set_limits`](crate::Document::set_limits)
-//! installs a value for later registration and for layout.
+//! rejects `0` and any value above four times that default.
+//! [`DocumentSpec::limits`](crate::DocumentSpec::limits) supplies those caps
+//! when images are registered and when the document is laid out.
 
 use std::fmt;
 

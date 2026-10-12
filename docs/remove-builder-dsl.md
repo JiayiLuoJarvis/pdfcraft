@@ -3,10 +3,12 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-12 |
-| 状态 | **计划已确认，待按栈执行** |
+| 状态 | **工作区已完成（PR-A 到 PR-D），未提交，待操作者提交** |
 | 基线 | `drop-dsl-ready`（`c5196a9`）：公开入口已是 `DocumentSpec` + `layout_spec` |
 | 权威 | [`提案书.md`](提案书.md) §1；冲突时提案书优先 |
 | 相关 | [`AGENTS.md`](../AGENTS.md)、[`module-dependency.md`](module-dependency.md) |
+
+工作区里 PR-B、PR-C、PR-D 已落地，改动都未提交。`layout_spec` 直接构造 layout 节点。`src/document` 已删除。
 
 ## 目标
 
@@ -31,7 +33,6 @@ DocumentSpec（pub, owned）
 
 - `Paragraph::build` / `Table::build_on` / `Flow::nested(FnOnce)` 等
 - 公开空壳 `Document`（与 `Resources` 重复）
-- 提案书 §2 仍有大量「闭包 DSL」措辞
 
 ## 终态公共面（摘要）
 

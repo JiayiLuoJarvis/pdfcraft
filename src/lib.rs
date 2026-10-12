@@ -20,12 +20,10 @@ pub use geom::{
 pub use limits::{LimitKind, Limits};
 
 pub mod canvas;
-pub mod document;
 pub mod fonts;
 pub mod spec;
 
-pub use document::{Document, Image, Numbering, Ratio, Rendered, Track};
-pub use spec::{layout_spec, DocumentSpec};
+pub use spec::{layout_spec, DocumentSpec, Numbering, Ratio, Rendered, Track};
 
 #[cfg(feature = "test-utils")]
 pub use canvas::{pt_near, PT_ABS_TOLERANCE};
@@ -41,6 +39,17 @@ pub(crate) mod layout;
 
 #[cfg(feature = "backend-krilla")]
 pub(crate) mod backend;
+
+pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
+    #[cfg(feature = "backend-krilla")]
+    {
+        Box::new(backend::ImageTable::default())
+    }
+    #[cfg(not(feature = "backend-krilla"))]
+    {
+        Box::new(canvas::RejectingImageRegistry)
+    }
+}
 
 /// Writes the pages of `rendered` as PDF bytes.
 ///

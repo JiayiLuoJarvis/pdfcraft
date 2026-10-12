@@ -178,7 +178,7 @@ pub enum ErrorKind {
         /// Raw identifier that was not found.
         id: u32,
     },
-    /// Bold text was requested but no bold face was registered with `Document::bold_font`.
+    /// Bold text was requested but [`Resources::bold_font`](crate::spec::Resources::bold_font) was not set.
     BoldFaceRequired,
     /// skrifa and krilla read different units per em from the same bytes.
     FontMetricsMismatch {
@@ -671,7 +671,7 @@ pub struct CellIndex {
 
 /// One failure from a call that can only fail one way.
 ///
-/// Document assembly and [`crate::document`] return [`Result`], which is a list.
+/// Document assembly and [`crate::layout_spec`] return [`Result`], which is a list.
 pub(crate) type Fallible<T> = std::result::Result<T, Error>;
 
 const MAX_ERRORS: usize = 64;

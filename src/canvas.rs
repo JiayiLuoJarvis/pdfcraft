@@ -13,7 +13,7 @@ use crate::limits::Limits;
 
 /// Document metadata recorded by [`Canvas::set_document_info`].
 ///
-/// Defined in this module so `canvas` does not import `document`.
+/// Defined in this module so `canvas` does not depend on `spec`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[must_use]
 pub struct DocumentInfo {
@@ -52,7 +52,7 @@ impl LinkTarget {
     }
 }
 
-/// Encoded format of image bytes passed to [`crate::Document::load_image`].
+/// Encoded format of image bytes passed to [`crate::spec::Resources::add_image`].
 ///
 /// GIF and WebP draw their first frame as a still image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,6 +114,7 @@ pub(crate) trait ImageRegistry: Any + Send + Sync {
 }
 
 /// Registry for builds without a decoder. Every image fails.
+#[cfg_attr(feature = "backend-krilla", allow(dead_code))]
 pub(crate) struct RejectingImageRegistry;
 
 impl ImageRegistry for RejectingImageRegistry {

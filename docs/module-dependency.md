@@ -18,25 +18,27 @@
 
 ```text
 geom
-error          → geom（若需要）；不依赖 fonts / layout / document / backend
+error          → geom（若需要）；不依赖 fonts / layout / spec / backend
 fonts          → error, geom
 canvas         → error, geom
 text           → fonts, error, geom
 layout         → text, fonts, canvas, error, geom
-document       → layout, canvas, fonts, error, geom
+spec           → layout, canvas, fonts, error, geom
 backend        → canvas, fonts, error, geom, krilla
-lib / 薄 glue  → document, backend（仅组装 document() 入口与 to_pdf，不引入新业务环）
+lib / 薄 glue  → spec, backend（`layout_spec` 与 `to_pdf`，不引入新业务环）
 ```
+
+`spec` 是公共文档面。`layout_spec` 直接构造 layout 节点。没有 `document` 模块。
 
 **禁止：**
 
-- `document` → `backend`（含 `ImageTable`、`KrillaCanvas`）
-- `layout` → `document` 或 `backend`
-- `backend` → `layout` 或 `document`
+- `spec` → `backend`（含 `ImageTable`、`KrillaCanvas`）
+- `layout` → `spec` 或 `backend`
+- `backend` → `layout` 或 `spec`
 - `error` → `fonts`（`FontId` 由 fonts 拥有；错误里用 `u32` 或只在 Display 层格式化）
 - 任何模块 → krilla，除 `backend/`
 
-**图片注册缝：** document 只依赖 canvas（或同层）上的注册抽象与 `DecodedImage` / `ImageId`；krilla 解码表与 `to_pdf` 实现落在 `backend`。无 `backend-krilla` 时用拒绝实现，document 源码不 `use crate::backend`。
+**图片注册缝。** 注册抽象在 `canvas`，即 `ImageRegistry`、`DecodedImage`、`ImageId`。krilla 解码表和 `to_pdf` 在 `backend`。没有 `backend-krilla` 时用 `RejectingImageRegistry`。`lib.rs` 的 `image_registry` 在打开 `backend-krilla` 时构造 `ImageTable`，否则构造 `RejectingImageRegistry`。`spec` 只调用这个函数，源码不引用 `backend`。
 
 ## 目标 layout 内部 DAG
 
@@ -71,6 +73,7 @@ layout/paginate       → decorate, flow, …
 | `flow` ↔ 各节点 | 抽出 `layout/frame`；节点只依赖 frame | 组织工作项（可先于或后于 document↔backend） |
 | `decorate` 测试 → `paginate` | 测试挪走，生产边只保留 paginate→decorate | 同上组织工作项内 |
 | `document` → `backend` | Image 注册缝 + `to_pdf` 进 backend | **独立工作项**（评估 §7-B） |
+| `spec` 调用 `document`，并在 `spec` 里构造 `ImageTable` | `document` 已删除。`ImageTable` 的构造在 `lib.rs` 的 `image_registry` | **已落地** |
 | `lower` 名实 | 改名 `nesting` | 小工作项，可并组织工作项 |
 | 巨石 `document.rs` | 已拆模块 | **已缓解**，仅更新评估表述 |
 
@@ -84,7 +87,7 @@ layout/paginate       → decorate, flow, …
 | `lower` 名实 | 改名 `layout/nesting`；规则矩阵按 `NodeKind` 判断，不依赖 `FlowNode` |
 | `flow` ↔ 各节点 | `layout/frame` 持有 `Frame`、`Split<T>`、`Fragment`、`FragmentCommand`、`PlacedFragment`、`LayoutCtx`、`natural_height`、`stacked_height`、`draw_fragment`，以及库内 trait `Flowable`（split / stack / kind / nested）。叶子节点返回 `Split<Self>`；容器（栏、表、列表）对子节点类型泛型 `N: Flowable`。`flow` 持有 `FlowNode` 枚举，把各节点的 tail 映射回 `FlowNode`。静态分发，没有 trait 对象 |
 | `decorate` → `paginate` | `SectionSpan` 归 `decorate`；`decorate` 测试的页面夹具挪进 `layout/test_util` |
-| `document` → `backend` | `canvas::ImageRegistry`（`Any + Send + Sync`）是注册缝，`canvas::RejectingImageRegistry` 是无后端实现。`backend::ImageTable` 实现它；`backend::write_pdf` 把录制回放成 PDF。`lib.rs` 的 `document()` 在开 `backend-krilla` 时换上 `ImageTable`；`quire_pdf::to_pdf(rendered)` 调 `backend::write_pdf` |
+| 图片注册缝 | `canvas::ImageRegistry`（`Any + Send + Sync`）是注册缝，`canvas::RejectingImageRegistry` 是无后端实现。`backend::ImageTable` 实现它。`backend::write_pdf` 把录制回放成 PDF。`lib.rs` 的 `image_registry` 在开 `backend-krilla` 时用 `ImageTable`，否则用 `RejectingImageRegistry`。`spec` 调用 `image_registry`，不引用 `backend`。`quire_pdf::to_pdf(rendered)` 调 `backend::write_pdf` |
 
 **未清项：** 节点测试上的硬规则 3 已清。`paragraph`、`columns`、`table`、`list`、`image`、`hline` 的生产和测试代码都不引用 `crate::layout::flow`。原 `#[cfg(test)]` 在 `layout/node_tests/`，按节点分文件，可以依赖 `flow`、`paginate` 与 `test_util`。`layout/test_util` 仍使用 `flow` 与 `paginate`。调用方是 `node_tests`，以及 `paginate` 和 `flow` 的测试。
 

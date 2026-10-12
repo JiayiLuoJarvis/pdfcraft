@@ -14,7 +14,7 @@ Thank you for considering a contribution.
 
 - Formatting and lints: [Rust Style Guide](https://doc.rust-lang.org/style-guide/),
   plus this repo’s `rustfmt.toml` / `clippy.toml` / `Cargo.toml` `[lints]`.
-- Public API shape (when the DSL lands):
+- Public API shape (`spec` types):
   [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/).
 - Small, single-concern PRs; no drive-by refactors.
 - Exact dependency pins (`=x.y.z`); add `krilla` / `skrifa` /
