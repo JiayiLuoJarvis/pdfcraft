@@ -27,20 +27,26 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
 
-      - name: clippy (no default features)
-        run: cargo clippy --all-targets --no-default-features --features test-utils -- -D warnings
+      - name: clippy shells
+        run: cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
 
-      - name: clippy (backend-krilla)
-        run: cargo clippy --all-targets --features backend-krilla,test-utils -- -D warnings
+      - name: clippy quire-pdf (no default features)
+        run: cargo clippy -p quire-pdf --all-targets --no-default-features --features test-utils -- -D warnings
 
-      - name: test (no default features)
-        run: cargo test --no-default-features --features test-utils
+      - name: clippy quire-pdf (backend-krilla)
+        run: cargo clippy -p quire-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
 
-      - name: test (backend-krilla)
-        run: cargo test --features backend-krilla,test-utils
+      - name: test quire-pdf (no default features)
+        run: cargo test -p quire-pdf --no-default-features --features test-utils
 
-      - name: doc (no default features)
-        run: cargo doc --no-deps --no-default-features
+      - name: test quire-pdf (backend-krilla)
+        run: cargo test -p quire-pdf --features backend-krilla,test-utils
 
-      - name: doc (backend-krilla)
-        run: cargo doc --no-deps --features backend-krilla
+      - name: doc quire-pdf (no default features)
+        run: cargo doc -p quire-pdf --no-deps --no-default-features
+
+      - name: doc quire-pdf (backend-krilla)
+        run: cargo doc -p quire-pdf --no-deps --features backend-krilla
+
+      - name: doc shells
+        run: cargo doc -p quire-forms -p quire-orgchart --no-deps

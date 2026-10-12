@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Added
 
+- Repository is a Cargo workspace: `crates/quire-pdf` (existing layout library), plus empty shells `quire-forms` and `quire-orgchart`. Boundaries are in `docs/workspace-crates-spec.md`. Callers depend on the crate they need; forms must not depend on `quire-pdf`.
 - `Ratio::new` builds a column weight. A weight that is not finite, or is not above zero, fails with `ErrorKind::ColumnWidths` before a table or a column set is assembled.
 - `tests/fixtures/quire-letter.ttf` is an OFL subset of Noto Sans SC Regular with family name QuireLetter. `tests/letter_layout.rs` lays out a confirmation letter through `layout_spec` and checks the recorded canvas. `to_pdf` only checks that the bytes start with `%PDF`.
 - `Limits` caps font bytes, image bytes, image pixels, image edge, pages, blocks, table cells, and paragraph bytes. `DocumentSpec::limits` supplies the caps. Exceeding a cap fails the document with `ErrorKind::LimitExceeded`. Setters reject 0 and any value above four times the default.

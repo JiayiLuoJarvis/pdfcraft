@@ -24,12 +24,14 @@ Thank you for considering a contribution.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
+cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
+cargo test -p quire-pdf --features test-utils
+RUSTDOCFLAGS='-D warnings' cargo doc -p quire-pdf --no-deps
+cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
 ```
 
-MSRV is **1.92** (driven by krilla 0.8.2 once that dependency lands). CI uses
-the same toolchain and treats Rust/rustdoc warnings as errors.
+MSRV is **1.92** (driven by krilla 0.8.2). CI uses the same toolchain and
+treats Rust/rustdoc warnings as errors. Package layout:
+[`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md).
 
 User-visible behavior belongs in `CHANGELOG.md`.

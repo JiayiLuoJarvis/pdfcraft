@@ -93,6 +93,6 @@ layout/paginate       → decorate, flow, …
 
 ## 明确不做
 
-- 为「无环」拆成多个 crates（现阶段单 crate + 模块 DAG 即可）。
+- 为「无环」把 **`quire-pdf` 内部**再拆成多个 crates（模块 DAG 即可）。产品级旁挂（`quire-forms` / `quire-orgchart`）见 [`workspace-crates-spec.md`](workspace-crates-spec.md)，与消环无关。
 - 为消环把 `FlowNode` 改成 trait 对象热路径（除非测量证明必要）。
 - 在 AGENTS 里把 `document → backend` 写成合法例外。

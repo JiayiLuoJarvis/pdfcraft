@@ -6,9 +6,10 @@
 
 1. [`docs/提案书.md`](docs/提案书.md) — **已确认条目的唯一权威**。
 2. [`docs/quire-design.md`](docs/quire-design.md) — 设计草稿。其中**未经提案书确认**的决定先不算数（提案书抬头写明）。
-3. 本文件 — 工程约定与禁止项。
+3. [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md) — 仓库 workspace / 多 crate 边界。
+4. 本文件 — 工程约定与禁止项。
 
-冲突时：提案书 > 本文件 > 设计稿未确认部分。
+冲突时：提案书 > workspace 规格（包边界）> 本文件 > 设计稿未确认部分。
 
 提案书 §1 到 §9 主线已确认（见提案书文末总表）。实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
@@ -53,25 +54,32 @@
 
 ## 目录与模块
 
+单仓库 Cargo workspace。包边界见 [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
+
 ```text
 quire/
   AGENTS.md CONTRIBUTING.md README.md CHANGELOG.md
-  Cargo.toml rustfmt.toml clippy.toml
+  Cargo.toml              workspace 根（无业务 package）
+  rustfmt.toml clippy.toml
   LICENSE-MIT LICENSE-APACHE
-  docs/                 提案与设计（先定产品，再写接口）
-  src/
-    lib.rs              只挂模块；公共重导出随实现 PR 增加
-    error.rs geom.rs
-    # limits.rs returns with the limits PR (not an empty pub shell)
-    canvas.rs           Canvas / RecordingCanvas；无 krilla
-    spec/               公共文档面。DocumentSpec、Resources、layout_spec
-    fonts.rs
-    text/               cluster / measure / break_class / line_break
-    layout/             frame flow nesting paragraph columns table list decorate paginate dump
-    backend/            仅 feature backend-krilla；唯一可 use krilla 处
-  tests/                集成测试；fixtures/ 放字体与样张
-  examples/             可运行示例（API 稳定后再填）
-  .github/workflows/    CI
+  docs/                   提案与设计；含 workspace-crates-spec
+  crates/
+    quire-pdf/            主线排版库
+      Cargo.toml
+      src/
+        lib.rs            只挂模块；公共重导出随实现 PR 增加
+        error.rs geom.rs limits.rs
+        canvas.rs         Canvas / RecordingCanvas；无 krilla
+        spec/             公共文档面。DocumentSpec、Resources、layout_spec
+        fonts.rs
+        text/             cluster / measure / break_class / line_break
+        layout/           frame flow nesting paragraph columns table list decorate paginate
+        backend/          仅 feature backend-krilla；唯一可 use krilla 处
+      tests/              集成测试；fixtures/ 放字体与样张
+      examples/           可运行示例
+    quire-forms/          PDF 填表（空壳；禁止 → quire-pdf）
+    quire-orgchart/       股权架构图（空壳；未确认前不实现）
+  .github/workflows/      CI
 ```
 
 ### 依赖方向（禁止环）
@@ -114,14 +122,15 @@ backend     → canvas, fonts, error, geom, krilla    # 禁止 → layout / spec
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --features test-utils -- -D warnings
-cargo test --features test-utils
-cargo doc --no-deps
+cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
+cargo test -p quire-pdf --features test-utils
+cargo doc -p quire-pdf --no-deps
+cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
-# `--all-targets` / 集成测试需要 `test-utils`（根导出 `pt_near`）。
+# `--all-targets` / 集成测试需要 `test-utils`（quire-pdf 导出 `pt_near`）。
 #
 # feature 组合变多后再强制：
-#   cargo hack check --each-feature
+#   cargo hack check -p quire-pdf --each-feature
 ```
 
 ### 语言与依赖
@@ -158,11 +167,12 @@ cargo doc --no-deps
 
 ## 明确不要做
 
-- 第二 PDF 后端；生产代码依赖 pdf-writer / lopdf / printpdf。
+- **`quire-pdf`** 第二 PDF 后端；该 crate 生产代码依赖 pdf-writer / lopdf / printpdf。读第三方 PDF 填表只在 `quire-forms`，见 [`workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
 - 完整 UAX #14、bidi、阿文/印度系 shaping、竖排、kerning、连字。
 - 向调用方暴露 `Flowable` trait。
-- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。
+- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。`quire-orgchart` 空壳可保留，未确认前不写业务。
 - 用 JSON/serde 当主接口（设计稿旧表述已作废；serde 若将来做，也只是可选，不是主路径）。
 - 并行开页或并行画页。
 - 删除 `publish = false`，除非限额 PR 与信件夹具已通过。
 - 为「像大厂」堆流程：不建 viewer 视觉回归农场；不放宽成 `^` 依赖。
+- 把 forms / orgchart 做成 `quire-pdf` 的 feature，或让 `quire-forms` ↔ `quire-pdf` 互相依赖。

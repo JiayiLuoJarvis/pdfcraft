@@ -104,7 +104,11 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
     {
         let pdf = to_pdf(rendered).unwrap();
         assert!(pdf.starts_with(b"%PDF"));
-        std::fs::write("target/spec-parity.pdf", pdf).unwrap();
+        // Integration tests run with cwd = this crate; workspace `target/` is two levels up.
+        let out =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/spec-parity.pdf");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        std::fs::write(&out, pdf).unwrap();
     }
 }
 
