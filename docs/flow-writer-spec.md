@@ -3,9 +3,9 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-10 |
-| 状态 | **已落地**（`FlowWriter` + 模块拆分；Cell 对齐已在后续刀落地，见 §3「明确后续刀」）。 |
+| 状态 | **已落地**（`FlowWriter` + 模块拆分；Cell 对齐已在后续工作项落地，见 §3「明确后续工作项」）。 |
 | 权威决策 | [`docs/deref-flow-api.md`](deref-flow-api.md) |
-| 提案书 | 不改 § 已确认产品语义；本刀是公开面建模与模块组织。勿提前把未钉签名写进提案书。 |
+| 提案书 | 不改 § 已确认产品语义；本工作项是公开面建模与模块组织。勿提前把未钉签名写进提案书。 |
 | 现状代码 | 单体 `src/document.rs`（约 2600 行），`Document` / `Section` `Deref` → `Flow` |
 
 ## 1. 目标与非目标
@@ -21,7 +21,7 @@
 
 ### 非目标（本规格明确不做）
 
-- 不改 `Cell::*` 入口与 `Flow` 对齐（下一刀）。
+- 不改 `Cell::*` 入口与 `Flow` 对齐（下一工作项）。
 - 不改主 API 为「只教 `add`、废除糖」。
 - 不做 `doc.body().paragraph` 方案 B。
 - 不改 layout 分页/测量行为；不改 backend。
@@ -62,7 +62,7 @@ src/document/
   hline.rs        // HLine
   paragraph.rs    // Paragraph、Blank
   columns.rs      // Columns
-  table.rs        // Table、Track、Border、Cell（Cell 本刀只搬家，不改 API）
+  table.rs        // Table、Track、Border、Cell（Cell 本工作项只搬家，不改 API）
   list.rs         // List、Numbering
   page.rs         // Page
   band.rs         // Band
@@ -95,7 +95,7 @@ src/document/
 - 若有 README/examples：主路径只糖。
 - 增加或改一条测试：`fn make_…() -> Table` + `doc.add(...)`。
 
-### 明确后续刀（本规格外）
+### 明确后续工作项（本规格外）
 
 - Cell 入口与 `FlowWriter`/`add` 共享构建结果。**已落地**：密封 `IntoCellItem`（`Paragraph`、`HLine`、`PlacedImage`、`Spacer`、`ListBlock`）+ `Cell::add` / `Cell::empty`；`Cell::*` 糖即 `empty().add(…)`；格内非列表子项经 `IntoFlowItem::add_to` 降低；正文 `ul` / `ol` / `spacer` 改走 `ListBlock` / `Spacer`。`Cell` 不实现 `FlowWriter`。
 - 若 `document/` 某文件仍过大，再拆（如 `table/cell.rs`）。
@@ -195,4 +195,4 @@ pub trait FlowWriter {
 2. 做 **PR1 拆分**，绿测。
 3. 做 **PR2 语义**，绿测。
 4. 补 `add` 示例测与文档状态。
-5. 停。Cell 对齐另开会话/刀。
+5. 停。Cell 对齐另开会话/工作项。

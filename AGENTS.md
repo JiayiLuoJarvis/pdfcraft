@@ -76,7 +76,7 @@ quire/
 
 ### 依赖方向（禁止环）
 
-**不允许循环依赖**（含同 crate 模块之间）。边只许沿 DAG 向下；单 crate 能编译出环也不接受。目标图与拆环刀序见 [`docs/module-dependency.md`](docs/module-dependency.md)。
+**不允许循环依赖**（含同 crate 模块之间）。边只许沿 DAG 向下；单 crate 能编译出环也不接受。目标图与拆环工作项顺序见 [`docs/module-dependency.md`](docs/module-dependency.md)。
 
 ```text
 geom

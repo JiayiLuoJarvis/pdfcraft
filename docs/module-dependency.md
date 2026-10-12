@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-10 |
-| 状态 | **方向已确认，组织刀已落地。** 硬规则见 [`AGENTS.md`](../AGENTS.md)；本文是目标 DAG、拆环刀序与落地记录 |
+| 状态 | **方向已确认，组织工作项已落地。** 硬规则见 [`AGENTS.md`](../AGENTS.md)；本文是目标 DAG、拆环工作项顺序与落地记录 |
 | 相关 | [`code-quality-assessment.md`](code-quality-assessment.md) §7 |
 
 ## 硬规则
@@ -63,24 +63,24 @@ layout/paginate       → decorate, flow, …
 
 `lower` **改名为** `nesting`（或 `content_rules`），文档不再写「DSL lowering」。
 
-## 与现状的差（拆环刀）
+## 与现状的差（拆环工作项）
 
-| 环 / 偏离 | 处理 | 建议刀 |
+| 环 / 偏离 | 处理 | 建议工作项 |
 | --- | --- | --- |
-| `error` ↔ `fonts` | `Error`/`ErrorKind` 不引用 `FontId` 类型 | 随错误刀 1 |
-| `flow` ↔ 各节点 | 抽出 `layout/frame`；节点只依赖 frame | 组织刀（可先于或后于 document↔backend） |
-| `decorate` 测试 → `paginate` | 测试挪走，生产边只保留 paginate→decorate | 同上组织刀内 |
-| `document` → `backend` | Image 注册缝 + `to_pdf` 进 backend | **独立刀**（评估 §7-B） |
-| `lower` 名实 | 改名 `nesting` | 小刀，可并组织刀 |
+| `error` ↔ `fonts` | `Error`/`ErrorKind` 不引用 `FontId` 类型 | 随错误工作项 1 |
+| `flow` ↔ 各节点 | 抽出 `layout/frame`；节点只依赖 frame | 组织工作项（可先于或后于 document↔backend） |
+| `decorate` 测试 → `paginate` | 测试挪走，生产边只保留 paginate→decorate | 同上组织工作项内 |
+| `document` → `backend` | Image 注册缝 + `to_pdf` 进 backend | **独立工作项**（评估 §7-B） |
+| `lower` 名实 | 改名 `nesting` | 小工作项，可并组织工作项 |
 | 巨石 `document.rs` | 已拆模块 | **已缓解**，仅更新评估表述 |
 
 ## 落地记录
 
-全部拆环刀已落地，生产代码里没有反向边：
+全部拆环工作项已落地，生产代码里没有反向边：
 
 | 项 | 落地形态 |
 | --- | --- |
-| `error` ↔ `fonts` | 错误刀 1 已解；`ErrorKind::MissingGlyph.font` 是 `u32` |
+| `error` ↔ `fonts` | 错误工作项 1 已解；`ErrorKind::MissingGlyph.font` 是 `u32` |
 | `lower` 名实 | 改名 `layout/nesting`；规则矩阵按 `NodeKind` 判断，不依赖 `FlowNode` |
 | `flow` ↔ 各节点 | `layout/frame` 持有 `Frame`、`Split<T>`、`Fragment`、`FragmentCommand`、`PlacedFragment`、`LayoutCtx`、`natural_height`、`stacked_height`、`draw_fragment`，以及库内 trait `Flowable`（split / stack / kind / nested）。叶子节点返回 `Split<Self>`；容器（栏、表、列表）对子节点类型泛型 `N: Flowable`。`flow` 持有 `FlowNode` 枚举，把各节点的 tail 映射回 `FlowNode`。静态分发，没有 trait 对象 |
 | `decorate` → `paginate` | `SectionSpan` 归 `decorate`；`decorate` 测试的页面夹具挪进 `layout/test_util` |

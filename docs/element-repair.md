@@ -8,9 +8,9 @@
 
 ## 怎么读
 
-按刀序做。一刀一个可测状态。每刀先写失败的 `RecordingCanvas` 集成测试，再改 `src/document.rs` 的 lowering，最后只在引擎行为与提案书冲突时改 `src/layout/`。
+按工作项顺序做。一项一个可测状态。每个工作项先写失败的 `RecordingCanvas` 集成测试，再改 `src/document.rs` 的 lowering，最后只在引擎行为与提案书冲突时改 `src/layout/`。
 
-公共签名未在提案书钉死。本文钉第一版签名，使各刀不互相发明。实现时不要另起一套名字。
+公共签名未在提案书钉死。本文钉第一版签名，使各工作项不互相发明。实现时不要另起一套名字。
 
 不做：流内 canvas、qr、svg、toc、Justify、奇偶 `page_break`、具名 styles 或 images、`Layer::text_at` URI、仅图片可点、第二 PDF 后端、把 `layout` 改名为 `elements`。
 
@@ -47,7 +47,7 @@ pub struct Border {
 
 `TextAlign` 继续 `pub(crate)`。段落、图、线、页眉槽继续用方法设对齐，不把该枚举交给调用方。
 
-## 刀序
+## 工作项顺序
 
 ### R1. 页眉页脚按 §2.10 画满页宽
 
@@ -70,7 +70,7 @@ doc.header(|b| {
 
 **错误。** 带内装不下仍报错，不撑开正文。`header_with_zero_margin` 行为不变（带高 0 仍拒内容）。
 
-**不在本刀。** 带内自由 path / 图。左右双槽够用。不要把 `Band` 做成第二套 `Flow`。
+**不在本工作项。** 带内自由 path / 图。左右双槽够用。不要把 `Band` 做成第二套 `Flow`。
 
 **验收。** 左右 margin 非 0、调用方不写 `inset` 时，左槽原点 `x = 0`（测 `RecordingCanvas`）。写了 `inset(left, right)` 后，左槽原点等于 `left`。正文框坐标与有无页眉无关，现有测试继续过。
 
@@ -138,7 +138,7 @@ c.col_auto(|f| { … });
 c.col(|f| { … }); // Ratio(1)，保留
 ```
 
-**Auto 与 Ratio。** 提案书写 Auto 吃剩余，没有写与 Ratio 如何分。现在的 `0.5` 没有提案书依据。本刀规则：
+**Auto 与 Ratio。** 提案书写 Auto 吃剩余，没有写与 Ratio 如何分。现在的 `0.5` 没有提案书依据。本工作项规则：
 
 - 只有 Auto、没有 Ratio：Auto = `inner - sum(Fixed)`。已是这样。
 - Auto 与 Ratio 同时出现：组装期 `Error::ColumnWidths { reason: "auto-with-ratio" }`。调用方用纯 Ratio 或 Fixed+Auto。
@@ -191,18 +191,18 @@ doc.ol(Numbering::Decimal, |l| {
 
 **验收。** `cargo clippy --all-targets -- -D warnings` 与 `cargo test` 全绿。对外 rustdoc 不再出现 `quire_pdf::layout`。无公共签名变化。
 
-本刀可与产品刀并行，但不要和 R1–R6 挤在同一 diff。
+本工作项可与产品工作项并行，但不要和 R1–R6 挤在同一 diff。
 
 ## 刻意不做（审查里提过、本轮不修）
 
 - `Document` / `Section` 对 `Flow` 的 `Deref`。DSL 可用，不换。
-- `Error::InvalidGeometry` 拆变体、`ColumnWidths` 的 `&'static str` 改枚举。行为不变时再开刀，避免测试大面积改匹配。
+- `Error::InvalidGeometry` 拆变体、`ColumnWidths` 的 `&'static str` 改枚举。行为不变时再开工作项，避免测试大面积改匹配。
 - `paginate` / `split_stack` 的 `Vec::remove(0)`。行为正确，是性能债。
-- `Style` 补 `Copy`、`Positive` 的 const 工厂。顺手可以，不单开产品刀。
+- `Style` 补 `Copy`、`Positive` 的 const 工厂。顺手可以，不单开产品工作项。
 - 过宽错误统一成一种变体。先保持图 / 线走 `UnbreakableWiderThanFrame`，表与缩进走过宽几何。若 R3/R4 新路径能沿用已有变体就沿用，不要为统一而改旧测试。
 - 列表项放图片、栏内 `page_break`。提案书白名单没有它们。保持拒绝。
 
-## 每刀门禁
+## 每个工作项的门禁
 
 ```bash
 cargo fmt --all
@@ -214,7 +214,7 @@ cargo test
 
 排版断言只打 `RecordingCanvas` 坐标与命令。`to_pdf` 只冒烟 `%PDF`。不要在 `tests/document.rs` 再数 `/Subtype`。
 
-`document.rs` 继续放 lowering。不要为这七刀把 DSL 拆文件。
+`document.rs` 继续放 lowering。不要为这七个工作项把 DSL 拆文件。
 
 ## 原则对照
 

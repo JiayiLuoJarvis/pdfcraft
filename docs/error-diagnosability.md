@@ -2,8 +2,8 @@
 
 | 项 | 值 |
 | --- | --- |
-| 日期 | 2026-10-10（刀 1–3）；刀 4 落地 2026-10-12 |
-| 状态 | **刀 1–4 已落地**（`Error { kind, at }`、`Location`、`source()` 链、`Errors` 多错收集）。 |
+| 日期 | 2026-10-10（工作项 1–3）；工作项 4 落地 2026-10-12 |
+| 状态 | **工作项 1–4 已落地**（`Error { kind, at }`、`Location`、`source()` 链、`Errors` 多错收集）。 |
 | 相关 | [`code-quality-assessment.md`](code-quality-assessment.md) §1–§4；姿态见 [`AGENTS.md`](../AGENTS.md)「现阶段姿态」 |
 | 代码 | 主要 `src/error.rs`；构造点遍布 `document/`、`layout/`、`text/`、`fonts.rs`、`backend/` |
 
@@ -18,24 +18,24 @@
    ```
    `kind` = 是什么错；`at` = 在哪（未知则 `None`）。不为每个变体重复抄位置字段。
 2. **§1 变体结构化**：`GeometryKind` / `InvalidCellSpan` 带 kind+行列 / `UnsplittableTallerThanFrame { height, avail }` / `ColumnWidthsReason` 枚举。禁止再扩 `&'static str` reason。
-3. **§2**：本阶段承诺填 `Location`（节、表行列、页码、header/footer 等 layout/组装可知信息）。**不做**调用方源码行号。多错收集见刀 4（已落地）。
+3. **§2**：本阶段承诺填 `Location`（节、表行列、页码、header/footer 等 layout/组装可知信息）。**不做**调用方源码行号。多错收集见工作项 4（已落地）。
 4. **§3**：手写 `Error`，实现真正的 `source()`；不引入 `thiserror` / `anyhow`。依赖错误按下文「依赖错误约定」处理。
 5. **§4**：修正 `DecorationTallerThanMargin` 的 `height` 语义（禁止用 `page_h` 冒充内容高）；**删除**无构造点的 `UnsupportedCanvasOperation`。
-6. **粗体未注册**（评估 §6）：刀 1 增加独立 kind（如 `BoldFaceRequired`），禁止再报 `UnknownFont { id: 1 }`。
+6. **粗体未注册**（评估 §6）：工作项 1 增加独立 kind（如 `BoldFaceRequired`），禁止再报 `UnknownFont { id: 1 }`。
 7. **0.x 可 breaking**；主题内不将就。
 
-### 刀序
+### 工作项顺序
 
-| 刀 | 内容 |
+| 工作项 | 内容 |
 | --- | --- |
 | 1 | `Error` / `ErrorKind` / `Location` 骨架；§1 结构化；§4 删/修；`BoldFaceRequired`；测试跟 |
 | 2 | 组装与 layout 填 `Location` |
 | 3 | 依赖错误的 `source()` 链（Font / Image / Backend 等） |
 | 4 | 多错收集 API — **已落地** |
 
-`Location` / `ErrorKind` 的精确字段名与变体表在刀 1 实现 PR 定；勿提前冻进提案书。
+`Location` / `ErrorKind` 的精确字段名与变体表在工作项 1 实现 PR 定；勿提前冻进提案书。
 
-### 落地记录（刀 1–3）
+### 落地记录（工作项 1–3）
 
 - `Location { section, page, region, cell }`：`section` 从 0 计；`page` 是全文档 1 起的页码；`region` 为 `Body` / `Header` / `Footer` / `Behind` / `Front`；`cell` 为表格网格 0 起的行列（含表头行）。内层先写，外层不覆盖。
 - `InvalidCellSpan` 只带 `CellSpanReason`，行列放在 `at.cell`，不在变体里重复。
@@ -43,7 +43,7 @@
 - `Display` 不拼 source 文本，按 Rust 错误惯例留给 `source()` 链。
 - 仍为 `None` 的位置：组装期在单元格构造时就拒绝的内容（此时还没有网格行列），以及 `to_pdf` 收尾阶段的序列化失败。
 
-### 刀 4：多错收集（已落地）
+### 工作项 4：多错收集（已落地）
 
 1. **做不做 / 何时**  
    本里程碑做。不延后到限额或信件夹具之后。
@@ -62,7 +62,7 @@
    - `document` / `paint` / `render` 失败时，`Err` 即为完整列表（受上限截断）。无第二套「再取列表」入口。
 
 4. **与整份失败**  
-   有任一错即不产出 `Rendered` / PDF。刀 4 只增加诊断，不引入部分页成功。与提案书 §4「缺字整份失败」一致。
+   有任一错即不产出 `Rendered` / PDF。工作项 4 只增加诊断，不引入部分页成功。与提案书 §4「缺字整份失败」一致。
 
 5. **上限与排序**  
    - 最多收集 64 条。满则停止追加，并标明截断。  
@@ -83,11 +83,11 @@
    - `thiserror` / `anyhow` 进公共面；公共面泄漏 krilla/skrifa 错误类型  
    - 并行收集  
    - 部分页 / 部分 PDF  
-   - 未确认功能顺手塞进本刀  
+   - 未确认功能顺手塞进本工作项  
 
 实现提示（非 API 承诺）：改动重心是 `note` 与各 `error: Option<Error>` → 错误表、`Flow::push`、`List`/`Columns` 的 `collect`、`measure_text` 的缺字继续策略、`src/error.rs` 的 `Errors` 与 `Result`。遵守 [`module-dependency.md`](module-dependency.md)：`error` 不依赖 document/layout。
 
-### 落地记录（刀 4）
+### 落地记录（工作项 4）
 
 - 公共 `Result<T>` 是 `Result<T, Errors>`。`Errors` 非空，最多保留 64 条，顺序是发现序。访问器是 `first`、`as_slice`、`iter`、`truncated`。`From<Error> for Errors`。
 - 恰好一条且未截断时，`Display` 与该条 `Error` 相同。否则按编号逐条打印。截断时末行是 `further errors omitted`。
@@ -157,16 +157,16 @@ impl std::error::Error for Error {
 }
 ```
 
-`PartialEq`：对带 dyn source 的 kind，测试比「kind + 稳定字段」、忽略或单独比 source 的 `Display`——刀 3 实现时定，避免为 DynError 牺牲可测性。
+`PartialEq`：对带 dyn source 的 kind，测试比「kind + 稳定字段」、忽略或单独比 source 的 `Display`——工作项 3 实现时定，避免为 DynError 牺牲可测性。
 
 ### 明确不做
 
 - 公共 API `pub use` 依赖的错误类型。
-- 仅 `to_string()` 后丢掉底层 Error（现状；刀 3 要改掉）。
+- 仅 `to_string()` 后丢掉底层 Error（现状；工作项 3 要改掉）。
 - 为凑 `source()` 而引入 `anyhow::Error` 进公共面。
 
 ---
 
 ## 与评估原文的对照
 
-刀 1–4 的处理方式以上文为准，不再采用「Display 补丁」或「无限期字符串化」。失败时交出 `Errors`，不再只留首错。
+工作项 1–4 的处理方式以上文为准，不再采用「Display 补丁」或「无限期字符串化」。失败时交出 `Errors`，不再只留首错。

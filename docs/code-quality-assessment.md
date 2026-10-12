@@ -33,9 +33,9 @@
 
 下面按优先级粗排。真正动手顺序等逐条讨论后再定。
 
-### 1–4. 错误可诊断性 — **刀 1–4 已落地**
+### 1–4. 错误可诊断性 — **工作项 1–4 已落地**
 
-见 [`error-diagnosability.md`](error-diagnosability.md)。`Error { kind, at }`、结构化变体、`Location`、`source()` 链、`BoldFaceRequired`、删 `UnsupportedCanvasOperation`、修正 decoration 高度。**刀 4（多错收集）已落地。**
+见 [`error-diagnosability.md`](error-diagnosability.md)。`Error { kind, at }`、结构化变体、`Location`、`source()` 链、`BoldFaceRequired`、删 `UnsupportedCanvasOperation`、修正 decoration 高度。**工作项 4（多错收集）已落地。**
 
 ### 5–6. 公开面清理与隐性默认 — **已落地**
 
@@ -43,7 +43,7 @@
 | --- | --- |
 | `pt_near` / `PT_ABS_TOLERANCE` | 默认根 API 已撤；`feature = "test-utils"` 下从 crate 根导出 |
 | `limits` | 空 `pub mod` 已删；限额 PR 再公开完整模块 |
-| 粗体未注册 | `ErrorKind::BoldFaceRequired`（随错误刀 1） |
+| 粗体未注册 | `ErrorKind::BoldFaceRequired`（随错误工作项 1） |
 | `ImageBox` 默认尺寸 | rustdoc 已对齐 1 px = 1 pt；行为未改 |
 
 ### 7. 组织与依赖 — **已落地**
@@ -61,12 +61,12 @@
 | 环 | 不接受「单 crate 能编译就留环」；按目标 DAG 拆 |
 | `lower` | 改名为 `nesting`（或 `content_rules`），文档不再写 DSL lowering |
 | `document` → `backend` | **解除**：图片注册缝在 canvas 层；`to_pdf` 进 backend；document 不 `use backend` |
-| `error` ↔ `fonts` | 错误刀顺带：`Error` 不依赖 `FontId` 类型 |
+| `error` ↔ `fonts` | 错误工作项顺带：`Error` 不依赖 `FontId` 类型 |
 | `flow` ↔ 节点 | 抽出 `layout/frame`；节点只依赖 frame；`flow` 做枚举分发 |
 | `paginate` / `decorate` | 生产单向 `paginate` → `decorate`；测试勿反转 |
 | 巨石 document | **已缓解**；不再当开项 |
 
-刀序：改名/frame 拆环可与 document↔backend 分 PR；后者独立、在错误刀之后为宜。
+工作项顺序：改名/frame 拆环可与 document↔backend 分 PR；后者独立、在错误工作项之后为宜。
 
 ## 0.x 可暂留
 
@@ -84,7 +84,7 @@
 | --- | --- |
 | 模块组织 | 目标 DAG 已落地（[`module-dependency.md`](module-dependency.md)）：生产代码无环，document 不再依赖 backend |
 | 风格 | 机械层统一。API 三种形态 0.x 可接受，1.0 前宜收敛 |
-| 报错 / 批跑 | 刀 1–4 已落地（定位 + `source()` + `Errors` 多错收集） |
+| 报错 / 批跑 | 工作项 1–4 已落地（定位 + `source()` + `Errors` 多错收集） |
 | 对照官方 Rust | `Error` 已是 kind+location+source。正文入流为 `FlowWriter` |
 
 ## 两类读者分别要知道的
@@ -103,7 +103,7 @@
 
 ## 讨论顺序建议
 
-1. 报错可诊断性——**刀 1–4 已落地**。
+1. 报错可诊断性——**工作项 1–4 已落地**。
 2. 公开面清理——**已落地**。
 3. 组织与依赖——**已落地**，见 [`module-dependency.md`](module-dependency.md)「落地记录」。
 4. `Deref` 到 `Flow`——**已落地**。

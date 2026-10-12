@@ -72,7 +72,7 @@ doc.add(risk_table(&r));
 | `IntoFlowItem` 等名 | 实现 PR 再定；勿提前冻进提案书 |
 | rejecting | 同一套糖 / `add`，换底层 flow；不改为类型级禁止 |
 | 教法 | README / 示例只教糖；`use FlowWriter` 写进主示例如有需要 |
-| Cell 入口与 `add` 对齐 | **已落地**（独立一刀）：`Cell::add` 收密封 `IntoCellItem`，与正文共享 `Paragraph` / `HLine` / `PlacedImage` / `Spacer` / `ListBlock` 值；`Cell` 不是 `FlowWriter` |
+| Cell 入口与 `add` 对齐 | **已落地**（独立工作项）：`Cell::add` 收密封 `IntoCellItem`，与正文共享 `Paragraph` / `HLine` / `PlacedImage` / `Spacer` / `ListBlock` 值；`Cell` 不是 `FlowWriter` |
 
 迁移已完成。下文「现在用来干什么」保留为迁移前说明，便于对照。
 
