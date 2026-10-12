@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Documentation
 
+- Confirmed `quire-forms` in the proposal. The crate takes PDF bytes, fills existing AcroForm fields, and flattens on every successful call, including an empty field map. It does not depend on `quire-pdf`. The shell stays empty until a later implementation change.
 - `quire-pdf` ships a self-contained crates.io-style README, `docs/guide.md` usage guide, crate/module rustdoc, dual license files in the package, and `package.metadata.docs.rs`. Caller docs do not require reading internal proposal notes.
 
 ### Added

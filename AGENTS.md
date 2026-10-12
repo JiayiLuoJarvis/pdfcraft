@@ -11,7 +11,7 @@
 
 冲突时：提案书 > workspace 规格（包边界）> 本文件 > 设计稿未确认部分。
 
-提案书 §1 到 §9 主线已确认（见提案书文末总表）。实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。该 crate 仍是空壳。实现按后续 PR 写入 `quire-forms`。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
 仍须遵守：未确认功能不「顺便」做；`publish = false` 直到限额与信件夹具通过。
 
@@ -30,7 +30,7 @@
 已钉死（见提案书「你已经定过的」）：
 
 - 不做 FOP / XSL-FO；股权架构图不做。
-- 底座 krilla；不改用 pdf-writer / lopdf / printpdf。
+- 底座 krilla。`quire-pdf` 不改用 pdf-writer、lopdf、printpdf。`quire-forms` 用自有的 `lopdf =0.34.0` 与 `skrifa =0.47.0`，见提案书 §10。`quire-forms` 不依赖 `quire-pdf`。
 - 行宽用 **skrifa** 量，不靠 krilla 文字绘制反推。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
 - 排版坐标：**左上原点，y 向下**；与 krilla 0.8.2 Surface 一致，适配器里对几何做恒等映射，不预翻转。
@@ -77,7 +77,7 @@ quire/
         backend/          仅 feature backend-krilla；唯一可 use krilla 处
       tests/              集成测试；fixtures/ 放字体与样张
       examples/           可运行示例
-    quire-forms/          PDF 填表（空壳；禁止 → quire-pdf）
+    quire-forms/          读已有 AcroForm 并 flatten（§10 已确认；实现未写入；禁止依赖 quire-pdf；不用 krilla）
     quire-orgchart/       股权架构图（空壳；未确认前不实现）
   .github/workflows/      CI
 ```

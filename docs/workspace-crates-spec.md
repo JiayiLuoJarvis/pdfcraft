@@ -3,8 +3,8 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-12 |
-| 状态 | **结构已落地（空壳）**；`quire-forms` / `quire-orgchart` 无产品 API |
-| 相关 | [`提案书.md`](提案书.md) §9；[`module-dependency.md`](module-dependency.md)；[`AGENTS.md`](../AGENTS.md) |
+| 状态 | **结构已落地**。`quire-forms` 产品 API 已确认，实现留到后续 PR。`quire-orgchart` 仍无产品 API |
+| 相关 | [`提案书.md`](提案书.md) §9 与 §10；[`module-dependency.md`](module-dependency.md)；[`AGENTS.md`](../AGENTS.md) |
 
 ## 目标
 
@@ -24,7 +24,7 @@ quire/                              # workspace 根（无业务 package）
     quire-pdf/                      # 现有排版库（主线）
       Cargo.toml
       src/ tests/ examples/
-    quire-forms/                    # PDF 表单填写（空壳）
+    quire-forms/                    # 读已有 AcroForm 并 flatten（产品已确认，实现未写入）
       Cargo.toml
       src/lib.rs
     quire-orgchart/                 # 股权架构图（空壳）
@@ -37,7 +37,7 @@ quire/                              # workspace 根（无业务 package）
 | Crate | 职责 | 现状 |
 | --- | --- | --- |
 | `quire-pdf` | `DocumentSpec` → 排版 → Canvas → krilla 出 PDF | 主线实现 |
-| `quire-forms` | 读第三方 PDF → 填 AcroForm → 写出 | 空壳；`publish = false` |
+| `quire-forms` | 读第三方 PDF 字节，填写已有 AcroForm，写出已 flatten 的 PDF | 产品已确认，见提案书 §10。实现未开始。`publish = false` |
 | `quire-orgchart` | 股权架构图生成（独立公共面） | 空壳；提案书曾列为不做，未确认前不实现 |
 
 ## 依赖硬规则
@@ -52,7 +52,7 @@ quire-forms     ──X──→  quire-orgchart
 quire-orgchart  ──→  quire-pdf     # 图排完再 to_pdf；或只依赖将来极薄共享层
 ```
 
-- `quire-forms` 可引入**独立的** PDF 读写依赖；禁止为填表把第二套 PDF 栈引进 `quire-pdf`。
+- `quire-forms` 使用 `lopdf =0.34.0` 与 `skrifa =0.47.0`。`quire-forms` 不依赖 `krilla`。`quire-forms` 不依赖 `quire-pdf`。禁止为填表把第二套 PDF 栈引进 `quire-pdf`。
 - `quire-pdf` 内部模块 DAG 不变，见 [`module-dependency.md`](module-dependency.md)。不为「无环」再拆 `quire-pdf`。
 - 共享类型默认不抽包；重复到不可忍受再考虑极薄 `quire-geom` 类 crate。
 
@@ -86,7 +86,7 @@ CI 对 `quire-pdf` 保留原有 feature 矩阵；空壳至少 `cargo check` / `c
 ## 明确不做（本规格）
 
 - 拆多个 git 仓库。
-- 在空壳里预写填表或架构图 API。
+- 在本规格的结构落地里预写填表或架构图 API。填表 API 按提案书 §10，由后续 PR 写入 `quire-forms`。架构图在确认前不写。
 - 把 `lopdf` / `pdf-writer` 等引进 `quire-pdf`。
 - 未确认前实现股权架构图业务逻辑。
 
@@ -97,4 +97,4 @@ CI 对 `quire-pdf` 保留原有 feature 矩阵；空壳至少 `cargo check` / `c
 | 根 `[workspace]` + `crates/*` | 已落地 |
 | `quire-pdf` 迁入 `crates/quire-pdf` | 已落地 |
 | `quire-forms` / `quire-orgchart` 空壳 | 已落地 |
-| 产品 API / 填表依赖选型 | 未开始（另开提案书条目） |
+| `quire-forms` 产品 API 与依赖 | 已确认，见提案书 §10。依赖为 `lopdf =0.34.0` 与 `skrifa =0.47.0`。不引入 `krilla`。与 `quire-pdf` 无依赖边。实现留到后续 PR |
