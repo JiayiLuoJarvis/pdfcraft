@@ -819,7 +819,7 @@ fn lower_blocks(blocks: Vec<Block>, flow: &mut Flow, images: &LoweredImages) {
             Block::Table(spec) => lower_table(spec, flow, images),
             Block::List(spec) => lower_list(spec, flow, images),
             Block::Image(spec) => {
-                if let Ok(Some(image)) = image_for(spec.image, images) {
+                if let Some(image) = image_for(spec.image, images) {
                     flow.image(image, |box_| apply_image_box(spec, box_));
                 }
             }
@@ -932,7 +932,7 @@ fn lower_cell(spec: CellSpec, images: &LoweredImages) -> Cell<'_> {
             })),
             CellBlock::HLine(spec) => cell.add(HLine::build(|line| apply_hline(spec, line))),
             CellBlock::Image(spec) => {
-                if let Ok(Some(image)) = image_for(spec.image, images) {
+                if let Some(image) = image_for(spec.image, images) {
                     cell = cell.add(crate::document::PlacedImage::build(image, |box_| {
                         apply_image_box(spec, box_);
                     }));
@@ -1098,7 +1098,7 @@ fn apply_layer(marks: &[LayerMark], images: &LoweredImages, layer: &mut crate::d
                 }
             }
             LayerMark::Image { image, rect, .. } => {
-                if let Ok(Some(image)) = image_for(*image, images) {
+                if let Some(image) = image_for(*image, images) {
                     layer.image_at(image, *rect);
                 }
             }
@@ -1191,22 +1191,21 @@ fn validate_marks(marks: &[LayerMark], images: &LoweredImages, errors: &mut Erro
 }
 
 fn reject_image(image: ImageRef, images: &LoweredImages, errors: &mut ErrorBag) {
-    if let Err(error) = image_for(image, images) {
-        errors.record(error);
+    if unknown_image(image, images) {
+        errors.record(Error::from(ErrorKind::UnknownImage { id: image.index }));
     }
 }
 
-// `Ok(None)` is a decode failure already stored on the bag.
-// `Err` is a foreign or missing handle. `validate_section_images` records that error.
-fn image_for(
-    image: ImageRef,
-    images: &LoweredImages,
-) -> std::result::Result<Option<&Image>, Error> {
-    if image.resources != images.resources {
-        return Err(Error::from(ErrorKind::UnknownImage { id: image.index }));
+fn image_for(image: ImageRef, images: &LoweredImages) -> Option<&Image> {
+    if unknown_image(image, images) {
+        return None;
     }
-    match images.handles.get(image.index as usize) {
-        Some(slot) => Ok(slot.as_ref()),
-        None => Err(Error::from(ErrorKind::UnknownImage { id: image.index })),
-    }
+    images
+        .handles
+        .get(image.index as usize)
+        .and_then(Option::as_ref)
+}
+
+fn unknown_image(image: ImageRef, images: &LoweredImages) -> bool {
+    image.resources != images.resources || images.handles.get(image.index as usize).is_none()
 }
