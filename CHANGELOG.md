@@ -10,9 +10,13 @@ while remaining `0.x`.
 
 ### Documentation
 
+- `docs/quire-orgchart-spec.md` is the behavior contract for equity charts.
+
 - `quire-pdf` ships a self-contained crates.io-style README, `docs/guide.md` usage guide, crate/module rustdoc, dual license files in the package, and `package.metadata.docs.rs`. Caller docs do not require reading internal proposal notes.
 
 ### Added
+
+- `quire-orgchart` checks an equity chart with `validate_request` and builds a PDF info title with `document_title`. `top_n` of `None` or `Some(0)` leaves the request unchanged. A larger `top_n` folds extra shareholder children into one `其他股东(k家)` node. This step does not check the folded node count against `max_nodes`, and it does not draw a PDF.
 
 - Repository is a Cargo workspace: `crates/quire-pdf` (existing layout library), plus empty shells `quire-forms` and `quire-orgchart`. Boundaries are in `docs/workspace-crates-spec.md`. Callers depend on the crate they need; forms must not depend on `quire-pdf`.
 - `Ratio::new` builds a column weight. A weight that is not finite, or is not above zero, fails with `ErrorKind::ColumnWidths` before a table or a column set is assembled.
