@@ -1,8 +1,8 @@
-# Handoff: knives 7–19
+# Handoff: knives 7–15
 
 **Date:** 2026-10-10  
 **Repo:** /mnt/data/demo/quire  
-**Exit predicate:** knives 16–19 green locally (no remote/PR).
+**Exit predicate:** knife 15 green locally (no remote/PR; `gh` token invalid, no `git remote`).
 
 | Knife | Branch | Tip (feature) |
 | --- | --- | --- |
@@ -15,40 +15,19 @@
 | 13 style / bold / first-line indent | feat/style-builders | 5deb0df (feature tip aaf14bf) |
 | 14 §2.2 fill-in underscore | feat/inline-blank | b83712e |
 | 15 §8 text URI link | feat/text-uri-link | 16749da |
-| 16 Cell::spacer | feat/cell-spacer | c9c2af7 (audit a5ba3fb) |
-| 17 cell paragraph + list | feat/cell-rich | c3035df (audit 9b939b8) |
-| 18 §7 margin presets | feat/margin-presets | 3c9e3da |
-| 19 crate name / paper | feat/crate-rename | fefd346 (verify-only; stack tip) |
 
-## What callers get (knives 16–18)
+Knife 15 stacks on `feat/inline-blank` @ `a232ce1`. Feature tip `16749da`. Status commit `2269a11`. Design trail under `.audit/knife-15/` (how / arena / synthesis / implement-status).
 
-**16.** `Cell::spacer(height)` → empty vertical cell; too tall → `UnsplittableTallerThanFrame`.
+## What callers get (knife 15)
 
-**17.** `Cell::paragraph` (bold/blank/link at cell width). `Cell::ul` / `Cell::ol` with `'static` deferred closures. `Cell` drops `Clone`/`PartialEq`/`Eq`.
-
-**18.** `MarginPreset::{Inch, HalfInch}` → uniform 72/36 pt via `.into()` into existing `margins(Margins)`. Default margins still four zeros.
-
-## Knife 19 (verified, no code change)
-
-Measured on `feat/margin-presets` tip after knife 18:
-
-- `Cargo.toml` `name = "quire-pdf"`, `publish = false` already.
-- README title and body already say `quire-pdf`.
-- `Paper` / `PageSize` already expose A0–A6 (+ Letter/Legal). Geom unit tests pin mm sizes.
-- No A-series gap to fill this knife. Nothing to rename.
+`Paragraph::link(uri, |p| { … })` stamps `text` / `bold` inside the closure with one `LinkTarget`. Empty URI records `Error::EmptyLink` on the builder and skips the closure. `Band::left_link` / `right_link` attach a whole-slot URI. After break, each visual-line slice of linked text paints one `AnnotateLink` (line-box height, fragment-local then offset). No fetch, no scheme check, no auto underline/color. Cell strings, `Layer::text_at`, and images stay unlinkable.
 
 ## Gates (parent re-verified 2026-10-10)
 
-On `feat/crate-rename` @ `fefd346` (includes knife 18 feature tip `3c9e3da`): `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (200 lib + 1 ignored, 78 `tests/document.rs`). Code-changing tip for callers is still `3c9e3da`; later commits are audit only.
+On `feat/text-uri-link` @ `16749da`: `cargo fmt --check`, `clippy -D warnings`, `cargo test` green (197 lib + 1 ignored, 65 `tests/document.rs`). `backend-krilla` default; same suite. `text_link_writes_a_pdf` asserts `%PDF`.
 
 ## Next
 
-Empty for settled product work. Deferred / out (not blocking):
-
-- Named styles / images dictionary
-- Flow canvas; qr / svg / toc
-- In-doc jumps; image-only links; `Layer::text_at` URI
-- Electronic seal follows flow; per-page header/footer off
-- Second PDF backend; `use krilla` in layout
-- Open PR when remote and token exist
-- Optional: write `Inch`/`HalfInch` into 提案书「可再钉」list as now fixed
+- `Cell::spacer` (flow `spacer` already exists)
+- Named styles / flow canvas still out
+- Open PR when remote and token are available (`feat/text-uri-link` → stack base as desired)
