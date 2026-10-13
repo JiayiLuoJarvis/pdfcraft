@@ -160,7 +160,7 @@ v1 分期（实现顺序，不改变本节语义）：
 ### 4.3 字体与缺字
 
 - 至少一个将绘制的文本或 choice 字符串时，必须提供可用 TrueType（含 `glyf`）字体字节。
-- 未配置字体却需要画字 → `FontNotConfigured`。
+- 未配置字体或字体不可用 → `FontNotConfigured { reason: FontReason }`。解析失败是 `FontReason::Unreadable`，解析器错误留在 `source`。
 - 子集（或 v1 过渡期整份缩入）后，cmap 缺字 → `MissingGlyph`，不输出降级 PDF。
 - 无内置 CJK 回退字体。
 - 同一输入两次 `fill_and_flatten` 应得到相同字节（实现须清零字体时间戳或等价手段）。
@@ -181,6 +181,8 @@ v1 分期（实现顺序，不改变本节语义）：
 - `line_below`
 
 `absolute_lines` 不参与字段名检查。页号越界 → flatten/overlay 失败类错误。
+
+`missing = Ignore` 仍跳过未知名字。表单上存在的名字若字号或 `line_below` 不是有限数，仍是 `InvalidArgument`。
 
 ## 5. 错误模型
 
@@ -203,7 +205,7 @@ v1 分期（实现顺序，不改变本节语义）：
 | `InvalidArgument` | 非正字号等 |
 | `MissingGlyph` | 缺字 |
 | `BoxOverflow` | 最小字号仍超框 |
-| `FontNotConfigured` | 需字体而未提供 / 字体损坏 |
+| `FontNotConfigured { reason }` | 需字体而未提供，或字体不可用。原因是 `FontReason` |
 | `SignatureNotWritable` | 试图填写 Signature |
 | `WidgetUnsupported` | Radio / Push 等 |
 | `FlattenFailed` | overlay 合并或写出失败 |

@@ -6,7 +6,7 @@ use crate::inspect::PdfDoc;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider, Tag};
 
-use crate::error::{Error, ErrorKind, FontFault, Result};
+use crate::error::{font_unusable, FontReason, Result};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Glyph {
@@ -34,16 +34,16 @@ pub(crate) enum GlyphFault {
 impl<'a> Face<'a> {
     pub(crate) fn load(bytes: &'a [u8], index: u32) -> Result<Self> {
         let font = FontRef::from_index(bytes, index)
-            .map_err(|err| Error::from(ErrorKind::FontNotConfigured).with_source(err))?;
+            .map_err(|err| font_unusable(FontReason::Unreadable).with_source(err))?;
         if font.table_data(Tag::new(b"glyf")).is_none() {
-            return Err(unusable(FontFault::NoGlyf));
+            return Err(font_unusable(FontReason::NoGlyf));
         }
         let metrics = font.metrics(Size::unscaled(), LocationRef::default());
         if metrics.units_per_em == 0 {
-            return Err(unusable(FontFault::UpemZero));
+            return Err(font_unusable(FontReason::UpemZero));
         }
         if !metrics.ascent.is_finite() || !metrics.descent.is_finite() {
-            return Err(unusable(FontFault::Width));
+            return Err(font_unusable(FontReason::Width));
         }
         Ok(Self {
             font,
@@ -112,7 +112,7 @@ impl FontFile {
 
     pub(crate) fn zero_head_times(&mut self) -> Result<()> {
         if self.bytes.len() < 12 {
-            return Err(unusable(FontFault::Head));
+            return Err(font_unusable(FontReason::Head));
         }
         let tables = usize::from(u16::from_be_bytes([self.bytes[4], self.bytes[5]]));
         let mut head_off = None;
@@ -121,7 +121,7 @@ impl FontFile {
         for index in 0..tables {
             let at = 12 + index * 16;
             if at + 16 > self.bytes.len() {
-                return Err(unusable(FontFault::Head));
+                return Err(font_unusable(FontReason::Head));
             }
             if &self.bytes[at..at + 4] == b"head" {
                 head_off = Some(
@@ -132,10 +132,10 @@ impl FontFile {
             }
         }
         let Some(off) = head_off else {
-            return Err(unusable(FontFault::Head));
+            return Err(font_unusable(FontReason::Head));
         };
         if head_len < 54 || off.saturating_add(head_len) > self.bytes.len() {
-            return Err(unusable(FontFault::Head));
+            return Err(font_unusable(FontReason::Head));
         }
         self.bytes[off + 20..off + 36].fill(0);
         self.bytes[off + 8..off + 12].fill(0);
@@ -295,7 +295,7 @@ fn name(value: &str) -> Object {
 fn em1000(units: f32, upem: f32) -> Result<i64> {
     let rounded = (f64::from(units) * 1000.0 / f64::from(upem)).round();
     if !rounded.is_finite() || rounded < f64::from(i32::MIN) || rounded > f64::from(i32::MAX) {
-        return Err(unusable(FontFault::Width));
+        return Err(font_unusable(FontReason::Width));
     }
     #[allow(clippy::cast_possible_truncation)] // 已限制在 i32 范围内；Integer 是 i64
     Ok(rounded as i64)
@@ -305,26 +305,26 @@ fn em1000(units: f32, upem: f32) -> Result<i64> {
 /// collection, so the face is rebuilt rather than sliced.
 fn extract_collection_face(bytes: &[u8], index: u32) -> Result<Vec<u8>> {
     if bytes.len() < 12 {
-        return Err(unusable(FontFault::Collection));
+        return Err(font_unusable(FontReason::Collection));
     }
     let count = u32be(&bytes[8..12]);
     if index >= count {
-        return Err(unusable(FontFault::Collection));
+        return Err(font_unusable(FontReason::Collection));
     }
-    let index = usize::try_from(index).map_err(|_| unusable(FontFault::Collection))?;
+    let index = usize::try_from(index).map_err(|_| font_unusable(FontReason::Collection))?;
     let entry = 12 + index * 4;
     if entry + 4 > bytes.len() {
-        return Err(unusable(FontFault::Collection));
+        return Err(font_unusable(FontReason::Collection));
     }
     let sfnt = usize::try_from(u32be(&bytes[entry..entry + 4]))
-        .map_err(|_| unusable(FontFault::Collection))?;
+        .map_err(|_| font_unusable(FontReason::Collection))?;
     if sfnt + 12 > bytes.len() {
-        return Err(unusable(FontFault::Collection));
+        return Err(font_unusable(FontReason::Collection));
     }
     let tables = usize::from(u16::from_be_bytes([bytes[sfnt + 4], bytes[sfnt + 5]]));
     let dir = sfnt + 12;
     if dir + tables * 16 > bytes.len() {
-        return Err(unusable(FontFault::Head));
+        return Err(font_unusable(FontReason::Head));
     }
     let mut records = Vec::with_capacity(tables);
     for table in 0..tables {
@@ -334,15 +334,15 @@ fn extract_collection_face(bytes: &[u8], index: u32) -> Result<Vec<u8>> {
         tag.copy_from_slice(&bytes[at..at + 4]);
         checksum.copy_from_slice(&bytes[at + 4..at + 8]);
         let off = usize::try_from(u32be(&bytes[at + 8..at + 12]))
-            .map_err(|_| unusable(FontFault::Head))?;
+            .map_err(|_| font_unusable(FontReason::Head))?;
         let len = usize::try_from(u32be(&bytes[at + 12..at + 16]))
-            .map_err(|_| unusable(FontFault::Head))?;
+            .map_err(|_| font_unusable(FontReason::Head))?;
         if off.saturating_add(len) > bytes.len() {
-            return Err(unusable(FontFault::Head));
+            return Err(font_unusable(FontReason::Head));
         }
         records.push((tag, checksum, bytes[off..off + len].to_vec()));
     }
-    let count_tables = u16::try_from(records.len()).map_err(|_| unusable(FontFault::Head))?;
+    let count_tables = u16::try_from(records.len()).map_err(|_| font_unusable(FontReason::Head))?;
     let mut search_units = 1_u16;
     let mut entry_selector = 0_u16;
     while usize::from(search_units) * 2 <= records.len() {
@@ -365,18 +365,14 @@ fn extract_collection_face(bytes: &[u8], index: u32) -> Result<Vec<u8>> {
         let pad = (4 - (cursor % 4)) % 4;
         out.extend(std::iter::repeat_n(0, pad));
         cursor += pad;
-        let off = u32::try_from(cursor).map_err(|_| unusable(FontFault::Head))?;
-        let len = u32::try_from(data.len()).map_err(|_| unusable(FontFault::Head))?;
+        let off = u32::try_from(cursor).map_err(|_| font_unusable(FontReason::Head))?;
+        let len = u32::try_from(data.len()).map_err(|_| font_unusable(FontReason::Head))?;
         out[at + 8..at + 12].copy_from_slice(&off.to_be_bytes());
         out[at + 12..at + 16].copy_from_slice(&len.to_be_bytes());
         out.extend_from_slice(data);
         cursor = out.len();
     }
     Ok(out)
-}
-
-fn unusable(fault: FontFault) -> Error {
-    Error::from(ErrorKind::FontNotConfigured).with_source(fault)
 }
 
 fn u32be(bytes: &[u8]) -> u32 {
@@ -401,23 +397,27 @@ fn checksum(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::em1000;
-    use crate::error::{ErrorKind, FontFault};
+    use crate::error::{ErrorKind, FontReason};
 
     #[test]
     fn em1000_rejects_non_finite_and_out_of_i32_range() {
         let nan = em1000(f32::NAN, 2048.0).unwrap_err();
-        assert_eq!(nan.kind, ErrorKind::FontNotConfigured);
         assert_eq!(
-            std::error::Error::source(&nan).and_then(|source| source.downcast_ref::<FontFault>()),
-            Some(&FontFault::Width)
+            nan.kind,
+            ErrorKind::FontNotConfigured {
+                reason: FontReason::Width,
+            }
         );
+        assert!(std::error::Error::source(&nan).is_none());
 
         let huge = em1000(1.0e20, 1.0).unwrap_err();
-        assert_eq!(huge.kind, ErrorKind::FontNotConfigured);
         assert_eq!(
-            std::error::Error::source(&huge).and_then(|source| source.downcast_ref::<FontFault>()),
-            Some(&FontFault::Width)
+            huge.kind,
+            ErrorKind::FontNotConfigured {
+                reason: FontReason::Width,
+            }
         );
+        assert!(std::error::Error::source(&huge).is_none());
 
         assert_eq!(em1000(100_000.0, 1.0).unwrap(), 100_000_000);
     }

@@ -7,6 +7,10 @@ use crate::fields::{FieldInfo, FieldType, FieldValue};
 
 const MAX_DEREF: usize = 8;
 const MAX_PARENT: usize = 32;
+/// Nested arrays and dictionaries inside one PDF object. Deeper input fails
+/// instead of growing the call stack. A chain of indirect references does not
+/// count, because `reachable` already walks those in a loop.
+const MAX_OBJECT_DEPTH: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PdfRect {
@@ -371,8 +375,8 @@ impl PdfDoc {
     }
 
     /// Roots are `Root` and `Info`. `save_to` writes the rest of the trailer as-is, apart from `Size`.
-    pub(crate) fn prune(&mut self) {
-        let reachable = self.reachable();
+    pub(crate) fn prune(&mut self) -> Result<()> {
+        let reachable = self.reachable()?;
         let keys: Vec<Vec<u8>> = self.0.trailer.iter().map(|(key, _)| key.clone()).collect();
         for key in keys {
             if key.as_slice() == b"Prev" || key.as_slice() == b"XRefStm" {
@@ -382,16 +386,16 @@ impl PdfDoc {
             if key.as_slice() == b"Root" || key.as_slice() == b"Info" {
                 continue;
             }
-            let dangling = self
-                .0
-                .trailer
-                .get(key.as_slice())
-                .is_ok_and(|value| refs_dangle(value, &reachable));
+            let dangling = match self.0.trailer.get(key.as_slice()) {
+                Ok(value) => refs_dangle(value, &reachable)?,
+                Err(_) => false,
+            };
             if dangling {
                 self.0.trailer.remove(key.as_slice());
             }
         }
         self.0.objects.retain(|id, _| reachable.contains(id));
+        Ok(())
     }
 
     fn has_xfa(&self) -> Result<bool> {
@@ -479,11 +483,11 @@ impl PdfDoc {
         out
     }
 
-    fn reachable(&self) -> BTreeSet<ObjectId> {
+    fn reachable(&self) -> Result<BTreeSet<ObjectId>> {
         let mut stack = Vec::new();
         for key in [b"Root".as_slice(), b"Info".as_slice()] {
             if let Ok(obj) = self.0.trailer.get(key) {
-                push_refs(obj, &mut stack);
+                collect_refs(obj, &mut stack)?;
             }
         }
         let mut seen = BTreeSet::new();
@@ -492,10 +496,10 @@ impl PdfDoc {
                 continue;
             }
             if let Some(obj) = self.0.objects.get(&id) {
-                push_refs(obj, &mut stack);
+                collect_refs(obj, &mut stack)?;
             }
         }
-        seen
+        Ok(seen)
     }
 }
 
@@ -558,37 +562,100 @@ fn push_option(out: &mut Vec<String>, obj: &Object) {
     }
 }
 
-fn push_refs(obj: &Object, stack: &mut Vec<ObjectId>) {
-    match obj {
-        Object::Reference(id) => stack.push(*id),
-        Object::Array(items) => {
-            for item in items {
-                push_refs(item, stack);
+fn collect_refs(obj: &Object, out: &mut Vec<ObjectId>) -> Result<()> {
+    let mut stack = vec![(obj, 0_usize)];
+    while let Some((current, depth)) = stack.pop() {
+        if depth > MAX_OBJECT_DEPTH {
+            return Err(ErrorKind::FlattenFailed {
+                reason: FlattenReason::NestingTooDeep { depth },
             }
+            .into());
         }
-        Object::Dictionary(dict) => {
-            for (_, value) in dict {
-                push_refs(value, stack);
+        match current {
+            Object::Reference(id) => out.push(*id),
+            Object::Array(items) => {
+                for item in items {
+                    stack.push((item, depth + 1));
+                }
             }
-        }
-        Object::Stream(stream) => {
-            for (_, value) in &stream.dict {
-                push_refs(value, stack);
+            Object::Dictionary(dict) => {
+                for (_, value) in dict {
+                    stack.push((value, depth + 1));
+                }
             }
+            Object::Stream(stream) => {
+                for (_, value) in &stream.dict {
+                    stack.push((value, depth + 1));
+                }
+            }
+            _ => {}
         }
-        _ => {}
     }
+    Ok(())
 }
 
-fn refs_dangle(obj: &Object, seen: &BTreeSet<ObjectId>) -> bool {
-    match obj {
-        Object::Reference(id) => !seen.contains(id),
-        Object::Array(items) => items.iter().any(|item| refs_dangle(item, seen)),
-        Object::Dictionary(dict) => dict.iter().any(|(_, value)| refs_dangle(value, seen)),
-        Object::Stream(stream) => stream
-            .dict
-            .iter()
-            .any(|(_, value)| refs_dangle(value, seen)),
-        _ => false,
+fn refs_dangle(obj: &Object, seen: &BTreeSet<ObjectId>) -> Result<bool> {
+    let mut stack = vec![(obj, 0_usize)];
+    while let Some((current, depth)) = stack.pop() {
+        if depth > MAX_OBJECT_DEPTH {
+            return Err(ErrorKind::FlattenFailed {
+                reason: FlattenReason::NestingTooDeep { depth },
+            }
+            .into());
+        }
+        match current {
+            Object::Reference(id) => {
+                if !seen.contains(id) {
+                    return Ok(true);
+                }
+            }
+            Object::Array(items) => {
+                for item in items {
+                    stack.push((item, depth + 1));
+                }
+            }
+            Object::Dictionary(dict) => {
+                for (_, value) in dict {
+                    stack.push((value, depth + 1));
+                }
+            }
+            Object::Stream(stream) => {
+                for (_, value) in &stream.dict {
+                    stack.push((value, depth + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_refs;
+    use crate::error::{ErrorKind, FlattenReason};
+    use lopdf::Object;
+
+    #[test]
+    fn rejects_object_nesting_past_the_cap() {
+        let mut obj = Object::Integer(1);
+        for _ in 0..70 {
+            obj = Object::Array(vec![obj]);
+        }
+        let err = collect_refs(&obj, &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            err.kind,
+            ErrorKind::FlattenFailed {
+                reason: FlattenReason::NestingTooDeep { depth: 65 },
+            }
+        );
+    }
+
+    #[test]
+    fn collects_a_reference_inside_one_array() {
+        let obj = Object::Array(vec![Object::Reference((1, 0))]);
+        let mut refs = Vec::new();
+        collect_refs(&obj, &mut refs).unwrap();
+        assert_eq!(refs, vec![(1, 0)]);
     }
 }

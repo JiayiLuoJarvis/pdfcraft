@@ -3,14 +3,6 @@ use std::collections::HashMap;
 /// Starting font size in points.
 pub(crate) const DEFAULT_FONT_SIZE: f32 = 12.0;
 
-/// Smallest font size the fitter tries, in points.
-#[expect(dead_code)] // 字号搜索用毫点，不读这个 f32
-pub(crate) const MIN_FONT_SIZE: f32 = 7.0;
-
-/// How far the fitter drops the font size on each attempt, in points.
-#[expect(dead_code)] // 字号搜索用毫点，不读这个 f32
-pub(crate) const FONT_SIZE_STEP: f32 = 0.5;
-
 /// Line height as a multiple of the font size.
 pub(crate) const LINE_HEIGHT_FACTOR: f32 = 1.2;
 
@@ -109,7 +101,7 @@ pub enum HAlign {
 
 /// Vertical placement of the text block inside a widget rectangle.
 ///
-/// Metrics use the face ascent and descent. Ink-box alignment is a later change.
+/// Placement uses each line's glyph ink `yMin` and `yMax`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VAlign {
     /// Block sits on the bottom padding.

@@ -17,7 +17,7 @@ mod font;
 mod inspect;
 mod layout;
 
-pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason};
+pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason, FontReason};
 pub use fields::{
     AbsoluteLine, FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, HAlign, MissingName,
     VAlign,

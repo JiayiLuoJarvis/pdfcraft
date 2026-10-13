@@ -1,4 +1,4 @@
-use crate::error::{Error, ErrorKind, FontFault, Result};
+use crate::error::{font_unusable, Error, ErrorKind, FontReason, Result};
 use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP, PAD_X};
 use crate::font::{Face, GlyphFault};
 use crate::inspect::PdfRect;
@@ -107,9 +107,7 @@ fn fail(field_name: &str, err: &FitError) -> Error {
             scalar: *scalar,
         }
         .into(),
-        FitError::NoAdvance => {
-            Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::NoAdvance)
-        }
+        FitError::NoAdvance => font_unusable(FontReason::NoAdvance),
     }
 }
 

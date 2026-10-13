@@ -91,6 +91,13 @@ pub enum FlattenReason {
     FontNameTaken,
     /// `Document::save_to` failed.
     Write,
+    /// A PDF object nests deeper than this crate will walk.
+    ///
+    /// `depth` is the rejected level. The object where a walk starts is depth 0.
+    NestingTooDeep {
+        /// Rejected nesting depth.
+        depth: usize,
+    },
     /// 内容流数字不是有限值。建议表里没有这一项；`pdf_num` 不允许再写成 `0`，所以必须有。
     NonFinite,
 }
@@ -143,8 +150,14 @@ pub enum ErrorKind {
         /// Widget name.
         field_name: String,
     },
-    /// Text or a choice needs a font, and no usable font bytes were supplied.
-    FontNotConfigured,
+    /// Text or a choice needs a font, and the font is missing or unusable.
+    ///
+    /// [`FontReason::Unreadable`] keeps the parser error on [`Error::source`].
+    /// The other reasons have no source.
+    FontNotConfigured {
+        /// Why the font cannot be used.
+        reason: FontReason,
+    },
     /// `fields` names a signature widget.
     SignatureNotWritable {
         /// Widget name.
@@ -198,13 +211,16 @@ impl fmt::Display for ErrorKind {
                 }
                 FlattenReason::FontNameTaken => write!(f, "page font resource name is taken"),
                 FlattenReason::Write => write!(f, "could not write PDF"),
+                FlattenReason::NestingTooDeep { depth } => {
+                    write!(f, "PDF object nesting reached depth {depth}")
+                }
                 FlattenReason::NonFinite => write!(f, "non-finite number in page content"),
             },
             Self::MissingGlyph { field_name, scalar } => {
                 write!(f, "missing glyph {scalar:?} in {field_name}")
             }
             Self::BoxOverflow { field_name } => write!(f, "text does not fit in {field_name}"),
-            Self::FontNotConfigured => write!(f, "font is missing or unusable"),
+            Self::FontNotConfigured { reason } => write!(f, "{reason}"),
             Self::SignatureNotWritable { field_name } => {
                 write!(f, "signature field {field_name} cannot be filled")
             }
@@ -217,12 +233,16 @@ impl fmt::Display for ErrorKind {
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-/// Why a font could not be used. This is an [`Error`] source, not an [`ErrorKind`].
+/// Why [`ErrorKind::FontNotConfigured`] rejected a font.
+///
+/// [`Self::Unreadable`] keeps the parser error on [`Error::source`].
+/// The other variants have no source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FontFault {
-    /// Text is drawn and `FillOptions::font` is missing, or a later check found no face.
+#[non_exhaustive]
+pub enum FontReason {
+    /// Text is drawn and [`crate::FillOptions::font`] is missing, or a later check found no face.
     Missing,
-    /// The bytes start with `ttcf`.
+    /// A `ttcf` header or face offset could not be read.
     Collection,
     /// The face has no `glyf` table.
     NoGlyf,
@@ -234,20 +254,25 @@ pub(crate) enum FontFault {
     Head,
     /// A width in em-1000 units is non-finite or outside `i32`.
     Width,
+    /// The face bytes could not be parsed.
+    Unreadable,
 }
 
-impl fmt::Display for FontFault {
+impl fmt::Display for FontReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Missing => "font is missing",
-            Self::Collection => "font collections are not embedded",
+            Self::Collection => "font collection face could not be read",
             Self::NoGlyf => "font has no glyf table",
             Self::UpemZero => "units per em is 0",
             Self::NoAdvance => "glyph has no advance",
             Self::Head => "font head table could not be patched",
             Self::Width => "font width is not a finite i32",
+            Self::Unreadable => "font face could not be parsed",
         })
     }
 }
 
-impl StdError for FontFault {}
+pub(crate) fn font_unusable(reason: FontReason) -> Error {
+    ErrorKind::FontNotConfigured { reason }.into()
+}

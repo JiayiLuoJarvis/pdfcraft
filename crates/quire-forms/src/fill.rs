@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::content::{Mark, Stamp, Stroke};
-use crate::error::{ArgumentReason, Error, ErrorKind, FontFault, Result};
+use crate::error::{font_unusable, ArgumentReason, Error, ErrorKind, FontReason, Result};
 use crate::fields::{AbsoluteLine, FieldValue, FillOptions, HAlign, MissingName, VAlign};
 use crate::font::{FontFile, PreparedFont};
 use crate::inspect::{Draw, PdfDoc, WidgetSnap};
@@ -35,9 +35,10 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     let planned = plan(&snaps, fields, options)?;
     let needs_font = planned.values().any(|draw| matches!(draw, Draw::Text(_)));
     let font_file = if needs_font {
-        let font = options.font.as_ref().ok_or_else(|| {
-            Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
-        })?;
+        let font = options
+            .font
+            .as_ref()
+            .ok_or_else(|| font_unusable(FontReason::Missing))?;
         Some(FontFile::from_source(font.bytes, font.index)?)
     } else {
         None
@@ -62,8 +63,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
                 Draw::Check => Mark::Check,
                 Draw::Text(text) => {
                     let Some(font) = prepared.as_mut() else {
-                        return Err(Error::from(ErrorKind::FontNotConfigured)
-                            .with_source(FontFault::Missing));
+                        return Err(font_unusable(FontReason::Missing));
                     };
                     let v_align = v_align_for(options, snap.name.as_str());
                     let laid = LaidText::fit(
@@ -134,32 +134,38 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
                 .into());
             }
         }
-        if let Some(map) = options.font_size_overrides {
+    }
+    if let Some(map) = options.font_size_overrides {
+        if options.missing == MissingName::Error {
             if let Some(name) = first_unknown(&first, map.keys().map(String::as_str)) {
                 return Err(ErrorKind::UnknownField {
                     field_name: name.to_string(),
                 }
                 .into());
             }
-            for (name, size) in map {
+        }
+        for (name, size) in map {
+            if first.contains_key(name.as_str()) {
                 check_font_size_named(*size, Some(name.clone()))?;
             }
         }
-        if let Some(map) = options.line_below {
+    }
+    if let Some(map) = options.line_below {
+        if options.missing == MissingName::Error {
             if let Some(name) = first_unknown(&first, map.keys().map(String::as_str)) {
                 return Err(ErrorKind::UnknownField {
                     field_name: name.to_string(),
                 }
                 .into());
             }
-            for (name, offset) in map {
-                if !offset.is_finite() {
-                    return Err(ErrorKind::InvalidArgument {
-                        field_name: Some(name.clone()),
-                        reason: ArgumentReason::NonFinite { value: *offset },
-                    }
-                    .into());
+        }
+        for (name, offset) in map {
+            if first.contains_key(name.as_str()) && !offset.is_finite() {
+                return Err(ErrorKind::InvalidArgument {
+                    field_name: Some(name.clone()),
+                    reason: ArgumentReason::NonFinite { value: *offset },
                 }
+                .into());
             }
         }
     }
