@@ -17,6 +17,7 @@ while remaining `0.x`.
 ### Added
 
 - `quire-orgchart` checks an equity chart with `validate_request` and builds a PDF info title with `document_title`. `top_n` of `None` or `Some(0)` leaves the request unchanged. A larger `top_n` folds extra shareholder children into one `其他股东(k家)` node. This step does not check the folded node count against `max_nodes`, and it does not draw a PDF.
+- `quire-orgchart` builds in-box lines and page-chrome strings. A ratio stays outside the box. Shareholder and subject lines are the name and the legal person. Investment lines are the name, paid-in amount, location, and approval date. Page titles use `股权架构图`, `对外投资`, `续页`, and `附件`. The footer keeps `頁`. This step does not measure text or draw a PDF.
 
 - Repository is a Cargo workspace: `crates/quire-pdf` (existing layout library), plus empty shells `quire-forms` and `quire-orgchart`. Boundaries are in `docs/workspace-crates-spec.md`. Callers depend on the crate they need; forms must not depend on `quire-pdf`.
 - `Ratio::new` builds a column weight. A weight that is not finite, or is not above zero, fails with `ErrorKind::ColumnWidths` before a table or a column set is assembled.

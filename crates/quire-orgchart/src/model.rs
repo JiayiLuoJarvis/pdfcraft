@@ -172,8 +172,8 @@ pub fn document_title(request: &ChartRequest) -> Result<String, Error> {
             format!("subject_id={} not in nodes", request.subject_id),
         ));
     };
-    Ok(match &request.options.title {
-        Some(title) => title.clone(),
-        None => format!("{}股权架构图", node.name),
-    })
+    Ok(crate::captions::main_title(
+        &node.name,
+        request.options.title.as_deref(),
+    ))
 }

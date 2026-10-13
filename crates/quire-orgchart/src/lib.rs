@@ -7,6 +7,10 @@
 
 #![forbid(unsafe_code)]
 
+#[doc(hidden)]
+pub mod captions;
+#[doc(hidden)]
+pub mod display;
 mod error;
 mod graph;
 mod model;

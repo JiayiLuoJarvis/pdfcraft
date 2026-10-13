@@ -191,7 +191,7 @@ fn synthetic_id(parent_id: &str) -> String {
 }
 
 fn other_shareholders_name(count: usize) -> String {
-    format!("其他股东({count}家)")
+    crate::captions::other_shareholders_name(count)
 }
 
 #[cfg(test)]

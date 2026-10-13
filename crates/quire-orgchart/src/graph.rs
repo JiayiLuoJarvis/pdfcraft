@@ -465,24 +465,50 @@ fn reaches(
     found
 }
 
-/// Display percent for `node`.
+/// Where a display percent came from. `parent` is set only when the value is an edge ratio.
+pub(crate) struct RatioSource {
+    pub(crate) value: f64,
+    pub(crate) parent: Option<usize>,
+}
+
+/// Display percent for `node`, plus the parent edge when the percent came from that edge.
 ///
 /// A ratio stored on the node wins, and a diamond then does not need one parent.
 /// The subject has no display ratio. Otherwise the unique layout parent edge
 /// supplies the percent, or `None` when that edge has no ratio.
+pub(crate) fn ratio_source(
+    graph: &ValidatedGraph<'_>,
+    node: usize,
+    cache: &mut HashMap<(usize, usize), bool>,
+) -> Result<Option<RatioSource>, Error> {
+    if let Some(ratio) = graph.request.nodes[node].ratio {
+        return Ok(Some(RatioSource {
+            value: ratio,
+            parent: None,
+        }));
+    }
+    if node == graph.subject {
+        return Ok(None);
+    }
+    let Some(parent) = unique_layout_parent_edge(graph, node, cache)? else {
+        return Ok(None);
+    };
+    let Some(value) = graph.request.edges[parent].ratio else {
+        return Ok(None);
+    };
+    Ok(Some(RatioSource {
+        value,
+        parent: Some(parent),
+    }))
+}
+
+/// Display percent for `node`. See [`ratio_source`].
 pub(crate) fn resolve_display_ratio(
     graph: &ValidatedGraph<'_>,
     node: usize,
     cache: &mut HashMap<(usize, usize), bool>,
 ) -> Result<Option<f64>, Error> {
-    if let Some(ratio) = graph.request.nodes[node].ratio {
-        return Ok(Some(ratio));
-    }
-    if node == graph.subject {
-        return Ok(None);
-    }
-    let parent = unique_layout_parent_edge(graph, node, cache)?;
-    Ok(parent.and_then(|edge| graph.request.edges[edge].ratio))
+    Ok(ratio_source(graph, node, cache)?.map(|source| source.value))
 }
 
 #[cfg(test)]
