@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 
 use quire_forms::{
     fill_and_flatten, list_fields, AbsoluteLine, ArgumentReason, ErrorKind, FieldValue,
-    FillOptions, FlattenReason, FontBytes, HAlign, MissingName, VAlign,
+    FillOptions, FlattenReason, FontBytes, FontReason, HAlign, MissingName, VAlign,
 };
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -115,6 +115,40 @@ fn rejects_illegal_choice() {
 }
 
 #[test]
+fn rejects_a_checkbox_value_on_a_text_widget() {
+    let mut fields = HashMap::new();
+    fields.insert("employee_name".to_string(), FieldValue::CheckBox(true));
+    let err =
+        fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidArgument {
+            field_name: Some("employee_name".to_string()),
+            reason: ArgumentReason::CheckboxOnText,
+        }
+    );
+}
+
+#[test]
+fn rejects_any_value_on_a_radio_widget() {
+    let pdf = radio_widget_pdf();
+    for value in [
+        FieldValue::CheckBox(true),
+        FieldValue::Text("Ada".to_string()),
+    ] {
+        let mut fields = HashMap::new();
+        fields.insert("radio".to_string(), value);
+        let err = fill_and_flatten(&pdf, &fields, &FillOptions::default()).unwrap_err();
+        assert_eq!(
+            err.kind,
+            ErrorKind::WidgetUnsupported {
+                field_name: "radio".to_string(),
+            }
+        );
+    }
+}
+
+#[test]
 fn rejects_text_on_a_checkbox() {
     let font_bytes = font();
     let mut fields = HashMap::new();
@@ -138,8 +172,13 @@ fn rejects_a_missing_font_when_text_is_drawn() {
     );
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
-    assert_eq!(err.kind, ErrorKind::FontNotConfigured);
-    assert!(std::error::Error::source(&err).is_some());
+    assert_eq!(
+        err.kind,
+        ErrorKind::FontNotConfigured {
+            reason: FontReason::Missing,
+        }
+    );
+    assert!(std::error::Error::source(&err).is_none());
 }
 
 #[test]
@@ -149,14 +188,18 @@ fn rejects_unusable_font_bytes() {
         "employee_name".to_string(),
         FieldValue::Text("Ada".to_string()),
     );
-    for bytes in [b"ttcf".as_slice(), b"not a font".as_slice()] {
+    let cases = [
+        (b"ttcf".as_slice(), FontReason::Collection),
+        (b"not a font".as_slice(), FontReason::Head),
+    ];
+    for (bytes, reason) in cases {
         let options = FillOptions {
             font: Some(FontBytes { bytes, index: 0 }),
             ..FillOptions::default()
         };
         let err = fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options).unwrap_err();
-        assert_eq!(err.kind, ErrorKind::FontNotConfigured);
-        assert!(std::error::Error::source(&err).is_some());
+        assert_eq!(err.kind, ErrorKind::FontNotConfigured { reason });
+        assert!(std::error::Error::source(&err).is_none());
     }
 }
 
@@ -379,8 +422,46 @@ fn draws_a_line_below_without_filling_the_field() {
     };
     let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap();
     let text = page_stream(&pdf);
-    assert!(text.contains(" RG"), "{text}");
-    assert!(text.contains(" l\nS"), "{text}");
+    assert!(
+        text.contains("0 0 0 RG\n1 w\n100 707 m\n300 707 l\nS\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn rejects_non_finite_line_below_on_a_known_name_when_missing_is_ignore() {
+    let mut below = HashMap::new();
+    below.insert("employee_name".to_string(), f32::NAN);
+    let options = FillOptions {
+        missing: MissingName::Ignore,
+        line_below: Some(&below),
+        ..FillOptions::default()
+    };
+    let err = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap_err();
+    match err.kind {
+        ErrorKind::InvalidArgument {
+            field_name: Some(name),
+            reason: ArgumentReason::NonFinite { value },
+        } => {
+            assert_eq!(name, "employee_name");
+            assert!(value.is_nan());
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
+fn ignores_non_finite_line_below_on_an_unknown_name_when_missing_is_ignore() {
+    let mut below = HashMap::new();
+    below.insert("not_on_the_form".to_string(), f32::NAN);
+    let options = FillOptions {
+        missing: MissingName::Ignore,
+        line_below: Some(&below),
+        ..FillOptions::default()
+    };
+    let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+    assert!(list_fields(&pdf).unwrap().is_empty());
 }
 
 #[test]
@@ -494,6 +575,68 @@ fn drops_prev_xrefstm_and_trailer_keys_that_point_at_orphans() {
     assert!(out.trailer.get(b"QuireOrphan").is_err());
     assert!(out.trailer.get(b"Root").is_ok());
     assert!(out.get_object(orphan).is_err());
+}
+
+fn radio_widget_pdf() -> Vec<u8> {
+    let mut doc = lopdf::Document::with_version("1.4");
+    let page_tree = doc.new_object_id();
+    let page = doc.new_object_id();
+    let widget_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Annot".to_vec())),
+        ("Subtype", lopdf::Object::Name(b"Widget".to_vec())),
+        ("T", lopdf::Object::string_literal("radio")),
+        ("FT", lopdf::Object::Name(b"Btn".to_vec())),
+        ("Ff", lopdf::Object::Integer(1 << 15)),
+        (
+            "Rect",
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(10),
+                lopdf::Object::Integer(10),
+                lopdf::Object::Integer(30),
+                lopdf::Object::Integer(30),
+            ]),
+        ),
+    ]));
+    doc.set_object(
+        page,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(page_tree)),
+            (
+                "MediaBox",
+                lopdf::Object::Array(vec![
+                    lopdf::Object::Integer(0),
+                    lopdf::Object::Integer(0),
+                    lopdf::Object::Integer(200),
+                    lopdf::Object::Integer(200),
+                ]),
+            ),
+            (
+                "Annots",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(widget_id)]),
+            ),
+        ]),
+    );
+    doc.set_object(
+        page_tree,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Count", lopdf::Object::Integer(1)),
+            (
+                "Kids",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(page)]),
+            ),
+        ]),
+    );
+    let catalog_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(page_tree)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+    bytes
 }
 
 fn trailer_orphan_pdf() -> (Vec<u8>, lopdf::ObjectId) {

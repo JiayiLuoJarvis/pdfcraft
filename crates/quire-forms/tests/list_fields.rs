@@ -75,6 +75,12 @@ fn rejects_bytes_that_are_not_a_pdf() {
 }
 
 #[test]
+fn rejects_an_encrypted_pdf() {
+    let err = list_fields(&encrypted_pdf()).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Encrypted);
+}
+
+#[test]
 fn inherits_name_and_type_from_parent() {
     let fields = list_fields(&parent_field_pdf()).unwrap();
     assert_eq!(fields.len(), 1);
@@ -211,6 +217,46 @@ fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> lopdf::Object {
         lopdf::Object::Integer(x1),
         lopdf::Object::Integer(y1),
     ])
+}
+
+fn encrypted_pdf() -> Vec<u8> {
+    let mut doc = lopdf::Document::with_version("1.4");
+    let encrypt_id = doc.add_object(lopdf::Dictionary::from_iter([(
+        "Filter",
+        lopdf::Object::Name(b"Standard".to_vec()),
+    )]));
+    let page_tree = doc.new_object_id();
+    let page = doc.new_object_id();
+    doc.set_object(
+        page,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(page_tree)),
+            ("MediaBox", rect(0, 0, 200, 200)),
+        ]),
+    );
+    doc.set_object(
+        page_tree,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Count", lopdf::Object::Integer(1)),
+            (
+                "Kids",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(page)]),
+            ),
+        ]),
+    );
+    let catalog_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(page_tree)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+    doc.trailer
+        .set("Encrypt", lopdf::Object::Reference(encrypt_id));
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+    bytes
 }
 
 fn finish_page(doc: &mut lopdf::Document, annots: lopdf::Object) -> Vec<u8> {
