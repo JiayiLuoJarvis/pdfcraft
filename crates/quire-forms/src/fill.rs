@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 
+use crate::content::{Mark, Stamp};
 use crate::error::{ArgumentReason, Error, ErrorKind, FontFault, Result};
 use crate::fields::{FieldValue, FillOptions, MissingName};
-use crate::font::Face;
+use crate::font::{FontFile, PreparedFont};
 use crate::inspect::{Draw, PdfDoc, WidgetSnap};
 use crate::layout::{self, LaidText};
-use crate::overlay::{self, Mark, Stamp};
 
 /// Draws `fields` onto `pdf` and strips every widget plus the catalog `AcroForm` entry.
 ///
@@ -33,15 +33,27 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     let snaps = doc.widgets();
     let planned = plan(&snaps, fields, options.missing)?;
     let needs_font = planned.values().any(|draw| matches!(draw, Draw::Text(_)));
-    let face = if needs_font {
+    let font_file = if needs_font {
         let font = options.font.as_ref().ok_or_else(|| {
             Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
         })?;
-        Some(Face::load(font.bytes, font.index)?)
+        Some(FontFile::from_source(font.bytes)?)
     } else {
         None
     };
-    let mut used = BTreeMap::new();
+    let mut prepared = match font_file.as_ref() {
+        Some(file) => {
+            let index = options
+                .font
+                .as_ref()
+                .map(|font| font.index)
+                .ok_or_else(|| {
+                    Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
+                })?;
+            Some(PreparedFont::load(file, index)?)
+        }
+        None => None,
+    };
     let mut stamps = Vec::new();
     for snap in &snaps {
         let Some(draw) = planned.get(snap.name.as_str()) else {
@@ -50,12 +62,15 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
         let mark = match draw {
             Draw::Check => Mark::Check,
             Draw::Text(text) => {
-                let face = face.as_ref().ok_or_else(|| {
-                    Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
-                })?;
-                let laid = LaidText::fit(face, &snap.name, text, snap.rect, options.font_size)?;
+                let Some(font) = prepared.as_mut() else {
+                    return Err(
+                        Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
+                    );
+                };
+                let laid =
+                    LaidText::fit(font.face(), &snap.name, text, snap.rect, options.font_size)?;
                 for glyph in laid.glyphs() {
-                    used.entry(glyph.id).or_insert((glyph.scalar, glyph.units));
+                    font.record(glyph.id, glyph.scalar, glyph.units);
                 }
                 Mark::Text(laid)
             }
@@ -66,8 +81,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
             mark,
         });
     }
-    let font_bytes = options.font.as_ref().map(|font| font.bytes);
-    overlay::paint(&mut doc, &stamps, font_bytes, &used, face.as_ref())?;
+    doc.paint(&stamps, prepared.as_ref())?;
     doc.save()
 }
 

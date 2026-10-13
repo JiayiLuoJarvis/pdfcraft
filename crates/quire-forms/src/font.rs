@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt::Write;
 
 use lopdf::{Dictionary, Object, Stream};
 
@@ -42,6 +41,9 @@ impl<'a> Face<'a> {
         if metrics.units_per_em == 0 {
             return Err(unusable(FontFault::UpemZero));
         }
+        if !metrics.ascent.is_finite() || !metrics.descent.is_finite() {
+            return Err(unusable(FontFault::Width));
+        }
         Ok(Self {
             font,
             upem: f32::from(metrics.units_per_em),
@@ -76,33 +78,119 @@ impl<'a> Face<'a> {
     }
 }
 
-pub(crate) fn embed(
-    doc: &mut PdfDoc,
-    bytes: &[u8],
-    used: &BTreeMap<u16, (char, f32)>,
-    upem: f32,
-    ascent: f32,
-    descent: f32,
-) -> Result<ObjectId> {
-    let file = Stream::new(Dictionary::new(), stable_font_bytes(bytes)?).with_compression(false);
-    let file_id = doc.add_object(Object::Stream(file));
-    let descriptor = doc.add_object(Object::Dictionary(descriptor(
-        file_id, upem, ascent, descent,
-    )?));
-    let cid = doc.add_object(Object::Dictionary(cid_font(descriptor, used, upem)?));
-    let unicode = Stream::new(Dictionary::new(), to_unicode(used).into_bytes());
-    let unicode_id = doc.add_object(Object::Stream(unicode));
-    let mut font = Dictionary::new();
-    font.set("Type", name("Font"));
-    font.set("Subtype", name("Type0"));
-    font.set("BaseFont", name("QuireForms"));
-    font.set("Encoding", name("Identity-H"));
-    font.set(
-        "DescendantFonts",
-        Object::Array(vec![Object::Reference(cid)]),
-    );
-    font.set("ToUnicode", Object::Reference(unicode_id));
-    Ok(doc.add_object(Object::Dictionary(font)))
+pub(crate) struct FontFile {
+    bytes: Vec<u8>,
+}
+
+impl FontFile {
+    pub(crate) fn from_source(source: &[u8]) -> Result<Self> {
+        let mut file = Self {
+            bytes: source.to_vec(),
+        };
+        file.zero_head_times()?;
+        Ok(file)
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(crate) fn zero_head_times(&mut self) -> Result<()> {
+        if self.bytes.starts_with(b"ttcf") {
+            return Err(unusable(FontFault::Collection));
+        }
+        if self.bytes.len() < 12 {
+            return Err(unusable(FontFault::Head));
+        }
+        let tables = usize::from(u16::from_be_bytes([self.bytes[4], self.bytes[5]]));
+        let mut head_off = None;
+        let mut head_len = 0_usize;
+        let mut record = 0_usize;
+        for index in 0..tables {
+            let at = 12 + index * 16;
+            if at + 16 > self.bytes.len() {
+                return Err(unusable(FontFault::Head));
+            }
+            if &self.bytes[at..at + 4] == b"head" {
+                head_off = Some(
+                    usize::try_from(u32be(&self.bytes[at + 8..at + 12])).unwrap_or(usize::MAX),
+                );
+                head_len = usize::try_from(u32be(&self.bytes[at + 12..at + 16])).unwrap_or(0);
+                record = at;
+            }
+        }
+        let Some(off) = head_off else {
+            return Err(unusable(FontFault::Head));
+        };
+        if head_len < 54 || off.saturating_add(head_len) > self.bytes.len() {
+            return Err(unusable(FontFault::Head));
+        }
+        self.bytes[off + 20..off + 36].fill(0);
+        self.bytes[off + 8..off + 12].fill(0);
+        let sum = checksum(&self.bytes[off..off + head_len]);
+        self.bytes[record + 4..record + 8].copy_from_slice(&sum.to_be_bytes());
+        let whole = checksum(&self.bytes);
+        let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(whole);
+        self.bytes[off + 8..off + 12].copy_from_slice(&adjustment.to_be_bytes());
+        Ok(())
+    }
+}
+
+pub(crate) struct PreparedFont<'a> {
+    face: Face<'a>,
+    bytes: &'a [u8],
+    used: BTreeMap<u16, (char, f32)>,
+}
+
+impl<'a> PreparedFont<'a> {
+    pub(crate) fn load(file: &'a FontFile, index: u32) -> Result<Self> {
+        Ok(Self {
+            face: Face::load(file.bytes(), index)?,
+            bytes: file.bytes(),
+            used: BTreeMap::new(),
+        })
+    }
+
+    pub(crate) fn face(&self) -> &Face<'a> {
+        &self.face
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.used.is_empty()
+    }
+
+    pub(crate) fn record(&mut self, id: u16, scalar: char, units: f32) {
+        self.used.entry(id).or_insert((scalar, units));
+    }
+
+    pub(crate) fn embed(&self, doc: &mut PdfDoc) -> Result<ObjectId> {
+        let file = Stream::new(Dictionary::new(), self.bytes.to_vec()).with_compression(false);
+        let file_id = doc.add_object(Object::Stream(file));
+        let descriptor = doc.add_object(Object::Dictionary(descriptor(
+            file_id,
+            self.face.upem(),
+            self.face.ascent(),
+            self.face.descent(),
+        )?));
+        let cid = doc.add_object(Object::Dictionary(cid_font(
+            descriptor,
+            &self.used,
+            self.face.upem(),
+        )?));
+        let unicode = Stream::new(Dictionary::new(), to_unicode(&self.used).into_bytes());
+        let unicode_id = doc.add_object(Object::Stream(unicode));
+        let mut font = Dictionary::new();
+        font.set("Type", name("Font"));
+        font.set("Subtype", name("Type0"));
+        font.set("BaseFont", name("QuireForms"));
+        font.set("Encoding", name("Identity-H"));
+        font.set(
+            "DescendantFonts",
+            Object::Array(vec![Object::Reference(cid)]),
+        );
+        font.set("ToUnicode", Object::Reference(unicode_id));
+        Ok(doc.add_object(Object::Dictionary(font)))
+    }
 }
 
 type ObjectId = lopdf::ObjectId;
@@ -158,6 +246,7 @@ fn cid_font(
     Ok(dict)
 }
 
+#[allow(clippy::format_push_string)] // 规格要求 push_str / format!，不用丢弃 write! 的 Result
 fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     let mut body = String::from(
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /QuireForms def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
@@ -167,9 +256,9 @@ fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
         .map(|(gid, (scalar, _))| (*gid, *scalar))
         .collect();
     for chunk in entries.chunks(100) {
-        let _ = writeln!(body, "{} beginbfchar", chunk.len());
+        body.push_str(&format!("{} beginbfchar\n", chunk.len()));
         for (gid, scalar) in chunk {
-            let _ = writeln!(body, "<{gid:04X}> <{}>", utf16_hex(*scalar));
+            body.push_str(&format!("<{gid:04X}> <{}>\n", utf16_hex(*scalar)));
         }
         body.push_str("endbfchar\n");
     }
@@ -177,11 +266,12 @@ fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     body
 }
 
+#[allow(clippy::format_push_string)] // 规格要求 push_str / format!，不用丢弃 write! 的 Result
 fn utf16_hex(scalar: char) -> String {
     let mut buf = [0_u16; 2];
     let mut hex = String::new();
     for unit in scalar.encode_utf16(&mut buf) {
-        let _ = write!(hex, "{unit:04X}");
+        hex.push_str(&format!("{unit:04X}"));
     }
     hex
 }
@@ -199,53 +289,8 @@ fn em1000(units: f32, upem: f32) -> Result<i64> {
     Ok(rounded as i64)
 }
 
-fn stable_font_bytes(source: &[u8]) -> Result<Vec<u8>> {
-    let mut bytes = source.to_vec();
-    zero_head_times(&mut bytes)?;
-    Ok(bytes)
-}
-
 fn unusable(fault: FontFault) -> Error {
     Error::from(ErrorKind::FontNotConfigured).with_source(fault)
-}
-
-/// `head.checkSumAdjustment` is written last, after the table checksum treats that field as zero.
-fn zero_head_times(font: &mut [u8]) -> Result<()> {
-    if font.starts_with(b"ttcf") {
-        return Err(unusable(FontFault::Collection));
-    }
-    if font.len() < 12 {
-        return Err(unusable(FontFault::Head));
-    }
-    let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
-    let mut head_off = None;
-    let mut head_len = 0_usize;
-    let mut record = 0_usize;
-    for index in 0..tables {
-        let at = 12 + index * 16;
-        if at + 16 > font.len() {
-            return Err(unusable(FontFault::Head));
-        }
-        if &font[at..at + 4] == b"head" {
-            head_off = Some(usize::try_from(u32be(&font[at + 8..at + 12])).unwrap_or(usize::MAX));
-            head_len = usize::try_from(u32be(&font[at + 12..at + 16])).unwrap_or(0);
-            record = at;
-        }
-    }
-    let Some(off) = head_off else {
-        return Err(unusable(FontFault::Head));
-    };
-    if head_len < 54 || off.saturating_add(head_len) > font.len() {
-        return Err(unusable(FontFault::Head));
-    }
-    font[off + 20..off + 36].fill(0);
-    font[off + 8..off + 12].fill(0);
-    let sum = checksum(&font[off..off + head_len]);
-    font[record + 4..record + 8].copy_from_slice(&sum.to_be_bytes());
-    let whole = checksum(font);
-    let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(whole);
-    font[off + 8..off + 12].copy_from_slice(&adjustment.to_be_bytes());
-    Ok(())
 }
 
 fn u32be(bytes: &[u8]) -> u32 {

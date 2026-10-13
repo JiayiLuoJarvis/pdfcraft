@@ -65,8 +65,7 @@ fn fills_text_checkbox_and_choice_then_strips_the_form() {
     let text = pdftotext(&pdf);
     assert!(text.contains("Ada"), "{text:?}");
     assert!(text.contains("Senior"), "{text:?}");
-    let content = page_text(&doc);
-    assert!(content.contains(" m\n"), "{content}");
+    assert!(has_agree_mark(&doc), "{}", page_text(&doc));
 }
 
 #[test]
@@ -81,7 +80,7 @@ fn empty_map_strips_widgets() {
     let doc = lopdf::Document::load_mem(&pdf).unwrap();
     assert!(doc.catalog().unwrap().get(b"AcroForm").is_err());
     assert!(list_fields(&pdf).unwrap().is_empty());
-    assert!(!page_text(&doc).contains(" m\n"));
+    assert!(!has_agree_mark(&doc), "{}", page_text(&doc));
 }
 
 #[test]
@@ -91,7 +90,7 @@ fn unchecked_box_draws_no_mark() {
     fields.insert("agree".to_string(), FieldValue::CheckBox(false));
     let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options(&font_bytes)).unwrap();
     let doc = lopdf::Document::load_mem(&pdf).unwrap();
-    assert!(!page_text(&doc).contains(" m\n"));
+    assert!(!has_agree_mark(&doc), "{}", page_text(&doc));
 }
 
 #[test]
@@ -413,6 +412,19 @@ fn pdftotext(pdf: &[u8]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()
+}
+
+const AGREE_MARK: &[&str] = &[
+    "q", "100", "662", "30", "30", "re", "W", "n", "2.94", "w", "1", "J", "1", "j", "108.28",
+    "677.42", "m", "113.95", "671.12", "l", "122.14", "683.72", "l", "S", "Q",
+];
+
+fn has_agree_mark(doc: &lopdf::Document) -> bool {
+    let text = page_text(doc);
+    let tokens: Vec<_> = text.split_whitespace().collect();
+    tokens
+        .windows(AGREE_MARK.len())
+        .any(|window| window == AGREE_MARK)
 }
 
 fn page_text(doc: &lopdf::Document) -> String {
