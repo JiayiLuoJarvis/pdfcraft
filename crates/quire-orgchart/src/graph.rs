@@ -11,6 +11,15 @@ use crate::model::{
 /// User-supplied node ids must not use this prefix. Layout assigns these ids later.
 pub(crate) const OVERFLOW_ID_PREFIX: &str = "__overflow__:";
 
+/// Id of the stand-in for direct children moved off one page.
+///
+/// `first_moved_id` is the earliest moved child in input order, so one subject
+/// can overflow more than once.
+#[must_use]
+pub(crate) fn overflow_node_id(subject_id: &str, first_moved_id: &str) -> String {
+    format!("{OVERFLOW_ID_PREFIX}{subject_id}:{first_moved_id}")
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Visit {
     Unvisited,
@@ -56,6 +65,49 @@ impl<'a> ValidatedGraph<'a> {
 
     pub(crate) fn edge_to(&self, edge: usize) -> usize {
         self.ends[edge].to
+    }
+
+    pub(crate) fn index(&self, id: &str) -> Option<usize> {
+        self.index_of.get(id).copied()
+    }
+
+    /// Holders of `id` (`from` on an incoming edge), in edge order.
+    pub(crate) fn incoming_sources(&self, id: &str) -> Vec<&str> {
+        let Some(node) = self.index(id) else {
+            return Vec::new();
+        };
+        self.incoming[node]
+            .iter()
+            .map(|&edge| self.node_id(self.ends[edge].from))
+            .collect()
+    }
+
+    /// Nodes `id` holds (`to` on an outgoing edge), in edge order.
+    pub(crate) fn outgoing_targets(&self, id: &str) -> Vec<&str> {
+        let Some(node) = self.index(id) else {
+            return Vec::new();
+        };
+        self.outgoing[node]
+            .iter()
+            .map(|&edge| self.node_id(self.ends[edge].to))
+            .collect()
+    }
+
+    /// Endpoints of the unique layout-parent edge, or `None` when there is no parent.
+    ///
+    /// An ambiguous parent is [`ErrorCode::InvalidProtocol`].
+    pub(crate) fn layout_parent_ends(&self, id: &str) -> Result<Option<(&str, &str)>, Error> {
+        let Some(node) = self.index(id) else {
+            return Ok(None);
+        };
+        let mut cache = HashMap::new();
+        let Some(edge) = unique_layout_parent_edge(self, node, &mut cache)? else {
+            return Ok(None);
+        };
+        Ok(Some((
+            self.node_id(self.ends[edge].from),
+            self.node_id(self.ends[edge].to),
+        )))
     }
 }
 
@@ -361,7 +413,7 @@ fn reject_ambiguous_ratios(graph: &ValidatedGraph<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-fn unique_layout_parent_edge(
+pub(crate) fn unique_layout_parent_edge(
     graph: &ValidatedGraph<'_>,
     node: usize,
     cache: &mut HashMap<(usize, usize), bool>,

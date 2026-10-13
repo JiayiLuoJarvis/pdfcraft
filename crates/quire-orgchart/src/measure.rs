@@ -171,6 +171,18 @@ impl FontMetrics {
         pt_to_mm(self.descent / self.upem * size_pt)
     }
 
+    /// Face bytes passed to krilla. The same buffer skrifa measured.
+    #[must_use]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Units per em from `head`.
+    #[must_use]
+    pub(crate) fn units_per_em(&self) -> f64 {
+        self.upem
+    }
+
     /// Ascender plus descender, scaled, plus a 2 pt gap.
     #[must_use]
     pub fn line_height_mm(&self, size_pt: f64) -> f64 {
