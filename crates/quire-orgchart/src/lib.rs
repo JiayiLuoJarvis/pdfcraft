@@ -2,8 +2,8 @@
 //!
 //! [`validate_request`] checks a [`ChartRequest`], including a shareholder fold
 //! when `top_n` is set. [`document_title`] builds the string a caller can store
-//! as PDF document info. This crate does not draw a PDF yet, and it does not
-//! depend on `quire-pdf` or `quire-forms`.
+//! as PDF document info. [`FontBytes`] is measured with skrifa. This crate does
+//! not draw a PDF yet, and it does not depend on `quire-pdf` or `quire-forms`.
 
 #![forbid(unsafe_code)]
 
@@ -13,13 +13,16 @@ pub mod captions;
 pub mod display;
 mod error;
 mod graph;
+#[doc(hidden)]
+pub mod measure;
 mod model;
 mod prepare;
+mod units;
 
 pub use error::{Error, ErrorCode};
 pub use model::{
-    document_title, ChartOptions, ChartRequest, Edge, Node, NodeType, MAX_MARGIN_MM, MAX_NODES,
-    MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,
+    document_title, ChartOptions, ChartRequest, Edge, FontBytes, Node, NodeType, MAX_MARGIN_MM,
+    MAX_NODES, MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,
 };
 
 /// Check the chart protocol, including a `top_n` fold of shareholder children.

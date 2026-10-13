@@ -128,6 +128,21 @@ pub struct ChartOptions {
     pub top_n: Option<usize>,
 }
 
+/// Font file bytes. The caller owns the buffer. Paths are not accepted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontBytes {
+    /// TrueType or OpenType bytes for one face. A collection is rejected.
+    pub data: Vec<u8>,
+}
+
+impl FontBytes {
+    /// Wrap `data` without parsing it.
+    #[must_use]
+    pub fn new(data: impl Into<Vec<u8>>) -> Self {
+        Self { data: data.into() }
+    }
+}
+
 /// One equity chart: a subject, its nodes, its holding edges, and options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartRequest {

@@ -1,0 +1,9 @@
+SourceHanSerifHC-ExtraLight.ttf
+
+Copied from
+/mnt/data/dev/hcsw-pdfcraft/backend/assets/fonts/SourceHanSerifHC/SourceHanSerifHC-ExtraLight.ttf
+on 2026-10-13. The Python package measures this file. The bytes are the original
+file, not a subset.
+
+Source Han Serif is published by Adobe under the SIL Open Font License 1.1.
+HC is the Hong Kong / Macau region build used by pdfcraft-equity.

@@ -143,14 +143,25 @@ pub fn overflow_detail_line(target_page: usize) -> String {
     format!("详见附件{target_page}")
 }
 
+/// First continuation-cue line. The attachment line is separate.
+#[must_use]
+pub fn cont_cue_see(side: CueSide) -> &'static str {
+    match side {
+        CueSide::Shareholder => "股东详见",
+        CueSide::Investment => "对外投资详见",
+    }
+}
+
+/// Prefix of the attachment line, before the page number.
+pub const ATTACHMENT_PREFIX: &str = "附件";
+
 /// Two continuation-cue lines. They stay separate so glyph checks never see a newline.
 #[must_use]
 pub fn cont_cue_lines(target_page: usize, side: CueSide) -> (String, String) {
-    let see = match side {
-        CueSide::Shareholder => "股东详见",
-        CueSide::Investment => "对外投资详见",
-    };
-    (see.to_owned(), format!("附件{target_page}"))
+    (
+        cont_cue_see(side).to_owned(),
+        format!("{ATTACHMENT_PREFIX}{target_page}"),
+    )
 }
 
 /// Footer. The last character is `頁`.
