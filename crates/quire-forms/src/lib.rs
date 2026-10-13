@@ -14,6 +14,7 @@ mod fields;
 mod fill;
 mod font;
 mod inspect;
+mod layout;
 mod overlay;
 
 pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason};

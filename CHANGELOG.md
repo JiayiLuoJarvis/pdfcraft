@@ -66,6 +66,8 @@ while remaining `0.x`.
 
 ### Fixed
 
+- `quire-forms` no longer requires a U+0020 glyph for whitespace that is not drawn. Overflow comparison no longer allows an extra 0.05 pt. Font-size search uses millipoints and starts from the caller's size. A `font_size` above 256 pt fails before the PDF is opened.
+
 - `keep_together` and a table cell count paragraph spacing between their children. Two lines that fit in the frame, with spacing between them that does not, fail with `ErrorKind::UnsplittableTallerThanFrame`. Spacing after the last child is still outside the group. Ordinary pagination still drops spacing that does not fit, and does not push the next block to the next page for that spacing alone.
 - A PNG whose header is valid and whose pixel data is not fails while `layout_spec` registers that image, with `ErrorKind::Image`. JPEG, GIF, and WebP pixel errors can still fail in `to_pdf` with `ErrorKind::Backend` and no page.
 - `Layer::text_at` and a custom list marker fail with `ErrorKind::UnexpectedLineBreakInSingleLine` when the string contains a forced line break. Nothing is drawn. Header and footer paragraphs still break on that line break.

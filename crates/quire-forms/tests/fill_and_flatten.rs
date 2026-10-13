@@ -199,6 +199,33 @@ fn rejects_a_font_size_that_is_not_positive() {
 }
 
 #[test]
+fn rejects_a_font_size_above_256_pt_before_opening_the_pdf() {
+    for value in [1000.0_f32, 1.0e20] {
+        let options = FillOptions {
+            font_size: value,
+            ..FillOptions::default()
+        };
+        let err = fill_and_flatten(b"not a pdf", &HashMap::new(), &options).unwrap_err();
+        assert_ne!(err.kind, ErrorKind::NotAPdf);
+        match err.kind {
+            ErrorKind::InvalidArgument {
+                field_name: None,
+                reason: ArgumentReason::FontSize { value: got },
+            } => assert_eq!(got.to_bits(), value.to_bits()),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    for value in [256.0_f32, 0.0001] {
+        let options = FillOptions {
+            font_size: value,
+            ..FillOptions::default()
+        };
+        let err = fill_and_flatten(b"not a pdf", &HashMap::new(), &options).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotAPdf);
+    }
+}
+
+#[test]
 fn rejects_a_missing_glyph() {
     let font_bytes = font();
     let mut fields = HashMap::new();

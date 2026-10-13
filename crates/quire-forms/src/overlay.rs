@@ -4,21 +4,10 @@ use std::fmt::Write;
 use lopdf::{Dictionary, Document, Object};
 
 use crate::error::{Error, ErrorKind, FlattenReason, FontFault, Result};
-use crate::fields::{
-    FONT_SIZE_STEP, LINE_HEIGHT_FACTOR, MIN_FONT_SIZE, PAD_BOTTOM, PAD_TOP, PAD_X,
-};
-use crate::font::{self, Face, Glyph, GlyphFault};
+use crate::fields::PAD_X;
+use crate::font::{self, Face};
 use crate::inspect::{self, PdfRect};
-
-pub(crate) struct LaidText {
-    size: f32,
-    lines: Vec<PlacedLine>,
-}
-
-struct PlacedLine {
-    glyphs: Vec<u16>,
-    baseline: f32,
-}
+use crate::layout::LaidText;
 
 pub(crate) enum Mark {
     Text(LaidText),
@@ -29,292 +18,6 @@ pub(crate) struct Stamp {
     pub(crate) page_index: usize,
     pub(crate) rect: PdfRect,
     pub(crate) mark: Mark,
-}
-
-enum FitError {
-    Missing(char),
-    NoAdvance,
-    TooBig,
-}
-
-pub(crate) fn lay_text(
-    face: &Face<'_>,
-    field_name: &str,
-    text: &str,
-    rect: PdfRect,
-    start_size: f32,
-    used: &mut BTreeMap<u16, (char, f32)>,
-) -> Result<LaidText> {
-    if text.is_empty() {
-        return Ok(LaidText {
-            size: start_size,
-            lines: Vec::new(),
-        });
-    }
-    let mut size = start_size;
-    loop {
-        match lay_at(face, text, rect, size) {
-            Ok(laid) => {
-                remember(face, field_name, text, used)?;
-                return Ok(laid);
-            }
-            Err(FitError::Missing(scalar)) => {
-                return Err(ErrorKind::MissingGlyph {
-                    field_name: field_name.to_string(),
-                    scalar,
-                }
-                .into());
-            }
-            Err(FitError::NoAdvance) => {
-                return Err(
-                    Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::NoAdvance)
-                );
-            }
-            Err(FitError::TooBig) => {
-                if size <= MIN_FONT_SIZE + 0.001 {
-                    return Err(ErrorKind::BoxOverflow {
-                        field_name: field_name.to_string(),
-                    }
-                    .into());
-                }
-                let next = size - FONT_SIZE_STEP;
-                size = if next < MIN_FONT_SIZE {
-                    MIN_FONT_SIZE
-                } else {
-                    next
-                };
-            }
-        }
-    }
-}
-
-fn remember(
-    face: &Face<'_>,
-    field_name: &str,
-    text: &str,
-    used: &mut BTreeMap<u16, (char, f32)>,
-) -> Result<()> {
-    for scalar in text.chars() {
-        if scalar == '\n' || scalar.is_whitespace() {
-            continue;
-        }
-        let glyph = map_glyph(face.glyph(scalar), field_name)?;
-        used.entry(glyph.id).or_insert((scalar, glyph.units));
-    }
-    if text.chars().any(char::is_whitespace) {
-        let space = map_glyph(face.glyph(' '), field_name)?;
-        used.entry(space.id).or_insert((' ', space.units));
-    }
-    Ok(())
-}
-
-fn map_glyph(glyph: std::result::Result<Glyph, GlyphFault>, field_name: &str) -> Result<Glyph> {
-    match glyph {
-        Ok(glyph) => Ok(glyph),
-        Err(GlyphFault::Missing(scalar)) => Err(ErrorKind::MissingGlyph {
-            field_name: field_name.to_string(),
-            scalar,
-        }
-        .into()),
-        Err(GlyphFault::NoAdvance) => {
-            Err(Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::NoAdvance))
-        }
-    }
-}
-
-fn lay_at(
-    face: &Face<'_>,
-    text: &str,
-    rect: PdfRect,
-    size: f32,
-) -> std::result::Result<LaidText, FitError> {
-    let max_w = rect.width() - (PAD_X * 2.0);
-    let inner_h = rect.height() - PAD_TOP - PAD_BOTTOM;
-    if max_w <= 0.0 || inner_h <= 0.0 || face.upem() <= 0.0 {
-        return Err(FitError::TooBig);
-    }
-    let max_units = max_w * face.upem() / size;
-    let space = face.glyph(' ').map_err(fit_fault)?;
-    let mut built = Vec::new();
-    for para in text.split('\n') {
-        if para.is_empty() {
-            built.push(Vec::new());
-            continue;
-        }
-        let tokens = tokenize(face, para)?;
-        if tokens.is_empty() {
-            continue;
-        }
-        built.extend(wrap(&tokens, space, max_units)?);
-    }
-    place(face, rect, size, built)
-}
-
-fn fit_fault(fault: GlyphFault) -> FitError {
-    match fault {
-        GlyphFault::Missing(scalar) => FitError::Missing(scalar),
-        GlyphFault::NoAdvance => FitError::NoAdvance,
-    }
-}
-
-struct Token {
-    glyphs: Vec<Glyph>,
-    units: f32,
-    space_before: bool,
-}
-
-fn tokenize(face: &Face<'_>, para: &str) -> std::result::Result<Vec<Token>, FitError> {
-    let mut tokens = Vec::new();
-    let mut chars = para.chars().peekable();
-    let mut space_before = false;
-    while let Some(ch) = chars.next() {
-        if ch.is_whitespace() {
-            space_before = true;
-            continue;
-        }
-        if u32::from(ch) > 0x7F {
-            let glyph = face.glyph(ch).map_err(fit_fault)?;
-            tokens.push(Token {
-                units: glyph.units,
-                glyphs: vec![glyph],
-                space_before,
-            });
-            space_before = false;
-            continue;
-        }
-        let mut glyphs = vec![face.glyph(ch).map_err(fit_fault)?];
-        while let Some(next) = chars.peek().copied() {
-            if next.is_whitespace() || u32::from(next) > 0x7F {
-                break;
-            }
-            chars.next();
-            glyphs.push(face.glyph(next).map_err(fit_fault)?);
-        }
-        let units = glyphs.iter().map(|glyph| glyph.units).sum();
-        tokens.push(Token {
-            glyphs,
-            units,
-            space_before,
-        });
-        space_before = false;
-    }
-    Ok(tokens)
-}
-
-fn wrap(
-    tokens: &[Token],
-    space: Glyph,
-    max_units: f32,
-) -> std::result::Result<Vec<Vec<Glyph>>, FitError> {
-    let mut lines = Vec::new();
-    let mut current = Vec::new();
-    let mut units = 0.0_f32;
-    for token in tokens {
-        if token.units > max_units {
-            flush(&mut lines, &mut current);
-            let pieces = hard_break(&token.glyphs, max_units)?;
-            let last = pieces.len().saturating_sub(1);
-            for (index, piece) in pieces.into_iter().enumerate() {
-                if index == last {
-                    units = piece.iter().map(|glyph| glyph.units).sum();
-                    current = piece;
-                } else {
-                    lines.push(piece);
-                }
-            }
-            continue;
-        }
-        let gap = if token.space_before && !current.is_empty() {
-            space.units
-        } else {
-            0.0
-        };
-        if !current.is_empty() && units + gap + token.units > max_units {
-            flush(&mut lines, &mut current);
-            units = 0.0;
-        }
-        if token.space_before && !current.is_empty() {
-            current.push(space);
-            units += space.units;
-        }
-        units += token.units;
-        current.extend_from_slice(&token.glyphs);
-    }
-    flush(&mut lines, &mut current);
-    Ok(lines)
-}
-
-fn flush(lines: &mut Vec<Vec<Glyph>>, current: &mut Vec<Glyph>) {
-    if !current.is_empty() {
-        lines.push(std::mem::take(current));
-    }
-}
-
-fn hard_break(glyphs: &[Glyph], max_units: f32) -> std::result::Result<Vec<Vec<Glyph>>, FitError> {
-    let mut lines = Vec::new();
-    let mut current = Vec::new();
-    let mut units = 0.0_f32;
-    for glyph in glyphs {
-        if glyph.units > max_units {
-            return Err(FitError::TooBig);
-        }
-        if !current.is_empty() && units + glyph.units > max_units {
-            lines.push(std::mem::take(&mut current));
-            units = 0.0;
-        }
-        current.push(*glyph);
-        units += glyph.units;
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    Ok(lines)
-}
-
-fn place(
-    face: &Face<'_>,
-    rect: PdfRect,
-    size: f32,
-    lines: Vec<Vec<Glyph>>,
-) -> std::result::Result<LaidText, FitError> {
-    if lines.is_empty() {
-        return Ok(LaidText {
-            size,
-            lines: Vec::new(),
-        });
-    }
-    let Ok(count_u) = u16::try_from(lines.len()) else {
-        return Err(FitError::TooBig);
-    };
-    let scale = size / face.upem();
-    let ascent = face.ascent() * scale;
-    let descent = face.descent() * scale;
-    let line_h = size * LINE_HEIGHT_FACTOR;
-    let count = f32::from(count_u);
-    let block = (ascent - descent) + (count - 1.0) * line_h;
-    let inner_h = rect.height() - PAD_TOP - PAD_BOTTOM;
-    if block > inner_h + 0.05 {
-        return Err(FitError::TooBig);
-    }
-    let baseline_last = rect.y0 + PAD_BOTTOM - descent;
-    let baseline_first = baseline_last + (count - 1.0) * line_h;
-    if baseline_first + ascent > rect.y1 - PAD_TOP + 0.05 {
-        return Err(FitError::TooBig);
-    }
-    let mut placed = Vec::with_capacity(lines.len());
-    for (index, glyphs) in lines.into_iter().enumerate() {
-        let Ok(index) = u16::try_from(index) else {
-            return Err(FitError::TooBig);
-        };
-        placed.push(PlacedLine {
-            glyphs: glyphs.into_iter().map(|glyph| glyph.id).collect(),
-            baseline: baseline_first - f32::from(index) * line_h,
-        });
-    }
-    Ok(LaidText {
-        size,
-        lines: placed,
-    })
 }
 
 pub(crate) fn paint(
@@ -347,7 +50,7 @@ pub(crate) fn paint(
             })
         })?;
         let needs_font = page_stamps.iter().any(|stamp| {
-            matches!(&stamp.mark, Mark::Text(text) if text.lines.iter().any(|line| !line.glyphs.is_empty()))
+            matches!(&stamp.mark, Mark::Text(text) if text.lines().any(|(_, glyphs)| !glyphs.is_empty()))
         });
         let font_name = if needs_font {
             let font_id = font_id.ok_or_else(|| {
@@ -390,19 +93,14 @@ fn text_block(rect: PdfRect, text: &LaidText, font_name: &str) -> Result<String>
     let mut out = clip(rect)?;
     out.push_str("0 0 0 rg\nBT\n");
     let x = rect.x0 + PAD_X;
-    for line in &text.lines {
-        if line.glyphs.is_empty() {
+    for (baseline, glyphs) in text.lines() {
+        if glyphs.is_empty() {
             continue;
         }
-        let _ = writeln!(out, "/{font_name} {} Tf", pdf_num(text.size)?);
-        let _ = write!(
-            out,
-            "1 0 0 1 {} {} Tm\n<",
-            pdf_num(x)?,
-            pdf_num(line.baseline)?
-        );
-        for gid in &line.glyphs {
-            let _ = write!(out, "{gid:04X}");
+        let _ = writeln!(out, "/{font_name} {} Tf", pdf_num(text.size())?);
+        let _ = write!(out, "1 0 0 1 {} {} Tm\n<", pdf_num(x)?, pdf_num(baseline)?);
+        for glyph in glyphs {
+            let _ = write!(out, "{:04X}", glyph.id);
         }
         out.push_str("> Tj\n");
     }

@@ -4,6 +4,7 @@ use crate::error::{ArgumentReason, Error, ErrorKind, FontFault, Result};
 use crate::fields::{FieldType, FieldValue, FillOptions, MissingName};
 use crate::font::Face;
 use crate::inspect::{self, WidgetSnap};
+use crate::layout::{self, LaidText};
 use crate::overlay::{self, Mark, Stamp};
 
 /// Draws `fields` onto `pdf` and strips every widget plus the catalog `AcroForm` entry.
@@ -27,21 +28,11 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     fields: &HashMap<String, FieldValue, S>,
     options: &FillOptions<'_>,
 ) -> Result<Vec<u8>> {
-    if !options.font_size.is_finite() || options.font_size <= 0.0 {
-        return Err(ErrorKind::InvalidArgument {
-            field_name: None,
-            reason: ArgumentReason::FontSize {
-                value: options.font_size,
-            },
-        }
-        .into());
-    }
+    check_font_size(options.font_size)?;
     let mut doc = inspect::open(pdf)?;
     let snaps = inspect::widgets(&doc);
     let planned = plan(&snaps, fields, options.missing)?;
-    let needs_font = planned
-        .values()
-        .any(|draw| matches!(draw, Some(Draw::Text(_))));
+    let needs_font = planned.values().any(|draw| matches!(draw, Draw::Text(_)));
     let face = if needs_font {
         let font = options.font.as_ref().ok_or_else(|| {
             Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
@@ -53,7 +44,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     let mut used = BTreeMap::new();
     let mut stamps = Vec::new();
     for snap in &snaps {
-        let Some(draw) = planned.get(snap.name.as_str()).and_then(Option::as_ref) else {
+        let Some(draw) = planned.get(snap.name.as_str()) else {
             continue;
         };
         let mark = match draw {
@@ -62,14 +53,11 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
                 let face = face.as_ref().ok_or_else(|| {
                     Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
                 })?;
-                Mark::Text(overlay::lay_text(
-                    face,
-                    &snap.name,
-                    text,
-                    snap.rect,
-                    options.font_size,
-                    &mut used,
-                )?)
+                let laid = LaidText::fit(face, &snap.name, text, snap.rect, options.font_size)?;
+                for glyph in laid.glyphs() {
+                    used.entry(glyph.id).or_insert((glyph.scalar, glyph.units));
+                }
+                Mark::Text(laid)
             }
         };
         stamps.push(Stamp {
@@ -83,16 +71,16 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     overlay::save(&mut doc)
 }
 
-enum Draw {
-    Text(String),
+enum Draw<'a> {
+    Text(&'a str),
     Check,
 }
 
-fn plan<'a, S: std::hash::BuildHasher>(
-    snaps: &'a [WidgetSnap],
-    fields: &HashMap<String, FieldValue, S>,
+fn plan<'s, 'f, S: std::hash::BuildHasher>(
+    snaps: &'s [WidgetSnap],
+    fields: &'f HashMap<String, FieldValue, S>,
     missing: MissingName,
-) -> Result<BTreeMap<&'a str, Option<Draw>>> {
+) -> Result<BTreeMap<&'s str, Draw<'f>>> {
     let mut first: BTreeMap<&str, &WidgetSnap> = BTreeMap::new();
     for snap in snaps {
         first.entry(snap.name.as_str()).or_insert(snap);
@@ -120,12 +108,38 @@ fn plan<'a, S: std::hash::BuildHasher>(
     for name in names {
         let snap = first[name];
         let value = &fields[name];
-        planned.insert(snap.name.as_str(), classify(snap, value)?);
+        if let Some(draw) = classify(snap, value)? {
+            planned.insert(snap.name.as_str(), draw);
+        }
     }
     Ok(planned)
 }
 
-fn classify(snap: &WidgetSnap, value: &FieldValue) -> Result<Option<Draw>> {
+fn check_font_size(size: f32) -> Result<()> {
+    if !size.is_finite() || size <= 0.0 {
+        return Err(bad_font_size(size));
+    }
+    let mp = (f64::from(size) * 1000.0).round();
+    #[allow(clippy::cast_precision_loss)] // 比较的是毫点能否放进 i64，不是字号精度
+    if !mp.is_finite() || mp > i64::MAX as f64 {
+        return Err(bad_font_size(size));
+    }
+    #[allow(clippy::cast_precision_loss)] // 256_000 在 f64 里是精确值
+    if mp > layout::MAX_START_MP as f64 {
+        return Err(bad_font_size(size));
+    }
+    Ok(())
+}
+
+fn bad_font_size(value: f32) -> Error {
+    ErrorKind::InvalidArgument {
+        field_name: None,
+        reason: ArgumentReason::FontSize { value },
+    }
+    .into()
+}
+
+fn classify<'a>(snap: &WidgetSnap, value: &'a FieldValue) -> Result<Option<Draw<'a>>> {
     match snap.field_type {
         FieldType::Signature => Err(ErrorKind::SignatureNotWritable {
             field_name: snap.name.clone(),
@@ -145,7 +159,7 @@ fn classify(snap: &WidgetSnap, value: &FieldValue) -> Result<Option<Draw>> {
         },
         FieldType::Text => match value {
             FieldValue::Text(text) if text.is_empty() => Ok(None),
-            FieldValue::Text(text) => Ok(Some(Draw::Text(text.clone()))),
+            FieldValue::Text(text) => Ok(Some(Draw::Text(text))),
             FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
                 field_name: Some(snap.name.clone()),
                 reason: ArgumentReason::CheckboxOnText,
@@ -163,7 +177,7 @@ fn classify(snap: &WidgetSnap, value: &FieldValue) -> Result<Option<Draw>> {
                 if text.is_empty() {
                     Ok(None)
                 } else {
-                    Ok(Some(Draw::Text(text.clone())))
+                    Ok(Some(Draw::Text(text)))
                 }
             }
             FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
