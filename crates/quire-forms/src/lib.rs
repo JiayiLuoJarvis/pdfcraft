@@ -16,7 +16,7 @@ mod font;
 mod inspect;
 mod overlay;
 
-pub use error::{Error, ErrorKind};
+pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason};
 pub use fields::{
     FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, MissingName, DEFAULT_FONT_SIZE,
     FONT_SIZE_STEP, LINE_HEIGHT_FACTOR, MIN_FONT_SIZE, PAD_BOTTOM, PAD_TOP, PAD_X,

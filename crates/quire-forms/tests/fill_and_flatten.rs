@@ -6,7 +6,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use quire_forms::{fill_and_flatten, list_fields, ErrorKind, FieldValue, FillOptions, FontBytes};
+use quire_forms::{
+    fill_and_flatten, list_fields, ArgumentReason, ErrorKind, FieldValue, FillOptions, FontBytes,
+};
 
 fn fixture(name: &str) -> Vec<u8> {
     fs::read(
@@ -137,6 +139,63 @@ fn rejects_a_missing_font_when_text_is_drawn() {
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
     assert_eq!(err.kind, ErrorKind::FontNotConfigured);
+    assert!(std::error::Error::source(&err).is_some());
+}
+
+#[test]
+fn rejects_unusable_font_bytes() {
+    let mut fields = HashMap::new();
+    fields.insert(
+        "employee_name".to_string(),
+        FieldValue::Text("Ada".to_string()),
+    );
+    for bytes in [b"ttcf".as_slice(), b"not a font".as_slice()] {
+        let options = FillOptions {
+            font: Some(FontBytes { bytes, index: 0 }),
+            ..FillOptions::default()
+        };
+        let err = fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::FontNotConfigured);
+        assert!(std::error::Error::source(&err).is_some());
+    }
+}
+
+#[test]
+fn rejects_a_font_size_that_is_not_positive() {
+    for value in [0.0_f32, -2.5] {
+        let options = FillOptions {
+            font_size: value,
+            ..FillOptions::default()
+        };
+        let err = fill_and_flatten(b"not a pdf", &HashMap::new(), &options).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "font_size must be finite and greater than 0"
+        );
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidArgument {
+                field_name: None,
+                reason: ArgumentReason::FontSize { value },
+            }
+        );
+    }
+    let options = FillOptions {
+        font_size: f32::NAN,
+        ..FillOptions::default()
+    };
+    let err = fill_and_flatten(b"not a pdf", &HashMap::new(), &options).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "font_size must be finite and greater than 0"
+    );
+    match err.kind {
+        ErrorKind::InvalidArgument {
+            field_name: None,
+            reason: ArgumentReason::FontSize { value },
+        } => assert!(!value.is_finite()),
+        other => panic!("unexpected {other:?}"),
+    }
 }
 
 #[test]

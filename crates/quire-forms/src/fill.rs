@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::error::{ErrorKind, Result};
+use crate::error::{ArgumentReason, Error, ErrorKind, FontFault, Result};
 use crate::fields::{FieldType, FieldValue, FillOptions, MissingName};
 use crate::font::Face;
 use crate::inspect::{self, WidgetSnap};
@@ -29,7 +29,10 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
 ) -> Result<Vec<u8>> {
     if !options.font_size.is_finite() || options.font_size <= 0.0 {
         return Err(ErrorKind::InvalidArgument {
-            message: "font_size must be finite and greater than 0".to_string(),
+            field_name: None,
+            reason: ArgumentReason::FontSize {
+                value: options.font_size,
+            },
         }
         .into());
     }
@@ -40,7 +43,9 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
         .values()
         .any(|draw| matches!(draw, Some(Draw::Text(_))));
     let face = if needs_font {
-        let font = options.font.as_ref().ok_or(ErrorKind::FontNotConfigured)?;
+        let font = options.font.as_ref().ok_or_else(|| {
+            Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
+        })?;
         Some(Face::load(font.bytes, font.index)?)
     } else {
         None
@@ -54,7 +59,9 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
         let mark = match draw {
             Draw::Check => Mark::Check,
             Draw::Text(text) => {
-                let face = face.as_ref().ok_or(ErrorKind::FontNotConfigured)?;
+                let face = face.as_ref().ok_or_else(|| {
+                    Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
+                })?;
                 Mark::Text(overlay::lay_text(
                     face,
                     &snap.name,
@@ -140,7 +147,8 @@ fn classify(snap: &WidgetSnap, value: &FieldValue) -> Result<Option<Draw>> {
             FieldValue::Text(text) if text.is_empty() => Ok(None),
             FieldValue::Text(text) => Ok(Some(Draw::Text(text.clone()))),
             FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
-                message: format!("{} does not take a checkbox value", snap.name),
+                field_name: Some(snap.name.clone()),
+                reason: ArgumentReason::CheckboxOnText,
             }
             .into()),
         },
@@ -159,7 +167,8 @@ fn classify(snap: &WidgetSnap, value: &FieldValue) -> Result<Option<Draw>> {
                 }
             }
             FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
-                message: format!("{} does not take a checkbox value", snap.name),
+                field_name: Some(snap.name.clone()),
+                reason: ArgumentReason::CheckboxOnChoice,
             }
             .into()),
         },

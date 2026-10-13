@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::fmt::{self, Write};
+use std::fmt::Write;
 
 use lopdf::{Dictionary, Document, Object, Stream};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider, Tag};
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, FontFault, Result};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Glyph {
@@ -29,19 +29,16 @@ pub(crate) enum GlyphFault {
 impl<'a> Face<'a> {
     pub(crate) fn load(bytes: &'a [u8], index: u32) -> Result<Self> {
         if bytes.starts_with(b"ttcf") {
-            return Err(Error::from(ErrorKind::FontNotConfigured)
-                .with_source(FontFault("font collections are not embedded")));
+            return Err(unusable(FontFault::Collection));
         }
         let font = FontRef::from_index(bytes, index)
             .map_err(|err| Error::from(ErrorKind::FontNotConfigured).with_source(err))?;
         if font.table_data(Tag::new(b"glyf")).is_none() {
-            return Err(Error::from(ErrorKind::FontNotConfigured)
-                .with_source(FontFault("font has no glyf table")));
+            return Err(unusable(FontFault::NoGlyf));
         }
         let metrics = font.metrics(Size::unscaled(), LocationRef::default());
         if metrics.units_per_em == 0 {
-            return Err(Error::from(ErrorKind::FontNotConfigured)
-                .with_source(FontFault("units per em is 0")));
+            return Err(unusable(FontFault::UpemZero));
         }
         Ok(Self {
             font,
@@ -87,8 +84,8 @@ pub(crate) fn embed(
 ) -> Result<ObjectId> {
     let file = Stream::new(Dictionary::new(), stable_font_bytes(bytes)?).with_compression(false);
     let file_id = doc.add_object(file);
-    let descriptor = doc.add_object(descriptor(file_id, upem, ascent, descent));
-    let cid = doc.add_object(cid_font(descriptor, used, upem));
+    let descriptor = doc.add_object(descriptor(file_id, upem, ascent, descent)?);
+    let cid = doc.add_object(cid_font(descriptor, used, upem)?);
     let unicode = Stream::new(Dictionary::new(), to_unicode(used).into_bytes());
     let unicode_id = doc.add_object(unicode);
     let mut font = Dictionary::new();
@@ -106,9 +103,9 @@ pub(crate) fn embed(
 
 type ObjectId = lopdf::ObjectId;
 
-fn descriptor(file_id: ObjectId, upem: f32, ascent: f32, descent: f32) -> Dictionary {
-    let ascent = em1000(ascent, upem);
-    let descent = em1000(descent, upem);
+fn descriptor(file_id: ObjectId, upem: f32, ascent: f32, descent: f32) -> Result<Dictionary> {
+    let ascent = em1000(ascent, upem)?;
+    let descent = em1000(descent, upem)?;
     let mut dict = Dictionary::new();
     dict.set("Type", name("FontDescriptor"));
     dict.set("FontName", name("QuireForms"));
@@ -128,10 +125,14 @@ fn descriptor(file_id: ObjectId, upem: f32, ascent: f32, descent: f32) -> Dictio
     dict.set("CapHeight", ascent);
     dict.set("StemV", 80_i64);
     dict.set("FontFile2", Object::Reference(file_id));
-    dict
+    Ok(dict)
 }
 
-fn cid_font(descriptor: ObjectId, used: &BTreeMap<u16, (char, f32)>, upem: f32) -> Dictionary {
+fn cid_font(
+    descriptor: ObjectId,
+    used: &BTreeMap<u16, (char, f32)>,
+    upem: f32,
+) -> Result<Dictionary> {
     let mut system = Dictionary::new();
     system.set("Registry", Object::string_literal("Adobe"));
     system.set("Ordering", Object::string_literal("Identity"));
@@ -139,7 +140,7 @@ fn cid_font(descriptor: ObjectId, used: &BTreeMap<u16, (char, f32)>, upem: f32) 
     let mut widths = Vec::new();
     for (gid, (_, units)) in used {
         widths.push(Object::Integer(i64::from(*gid)));
-        widths.push(Object::Array(vec![Object::Integer(em1000(*units, upem))]));
+        widths.push(Object::Array(vec![Object::Integer(em1000(*units, upem)?)]));
     }
     let mut dict = Dictionary::new();
     dict.set("Type", name("Font"));
@@ -150,7 +151,7 @@ fn cid_font(descriptor: ObjectId, used: &BTreeMap<u16, (char, f32)>, upem: f32) 
     dict.set("CIDToGIDMap", name("Identity"));
     dict.set("DW", 1000_i64);
     dict.set("W", Object::Array(widths));
-    dict
+    Ok(dict)
 }
 
 fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
@@ -185,27 +186,32 @@ fn name(value: &str) -> Object {
     Object::Name(value.as_bytes().to_vec())
 }
 
-fn em1000(units: f32, upem: f32) -> i64 {
-    let rounded = (units * 1000.0 / upem).round();
-    if !rounded.is_finite() || !(f32::from(i16::MIN)..=f32::from(i16::MAX)).contains(&rounded) {
-        return 0;
+fn em1000(units: f32, upem: f32) -> Result<i64> {
+    let rounded = (f64::from(units) * 1000.0 / f64::from(upem)).round();
+    if !rounded.is_finite() || rounded < f64::from(i32::MIN) || rounded > f64::from(i32::MAX) {
+        return Err(unusable(FontFault::Width));
     }
-    #[allow(clippy::cast_possible_truncation)]
-    i64::from(rounded as i16)
+    #[allow(clippy::cast_possible_truncation)] // 已限制在 i32 范围内；Integer 是 i64
+    Ok(rounded as i64)
 }
 
 fn stable_font_bytes(source: &[u8]) -> Result<Vec<u8>> {
     let mut bytes = source.to_vec();
-    if !zero_head_times(&mut bytes) {
-        return Err(ErrorKind::FontNotConfigured.into());
-    }
+    zero_head_times(&mut bytes)?;
     Ok(bytes)
 }
 
+fn unusable(fault: FontFault) -> Error {
+    Error::from(ErrorKind::FontNotConfigured).with_source(fault)
+}
+
 /// `head.checkSumAdjustment` is written last, after the table checksum treats that field as zero.
-fn zero_head_times(font: &mut [u8]) -> bool {
-    if font.len() < 12 || font.starts_with(b"ttcf") {
-        return false;
+fn zero_head_times(font: &mut [u8]) -> Result<()> {
+    if font.starts_with(b"ttcf") {
+        return Err(unusable(FontFault::Collection));
+    }
+    if font.len() < 12 {
+        return Err(unusable(FontFault::Head));
     }
     let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
     let mut head_off = None;
@@ -214,7 +220,7 @@ fn zero_head_times(font: &mut [u8]) -> bool {
     for index in 0..tables {
         let at = 12 + index * 16;
         if at + 16 > font.len() {
-            return false;
+            return Err(unusable(FontFault::Head));
         }
         if &font[at..at + 4] == b"head" {
             head_off = Some(usize::try_from(u32be(&font[at + 8..at + 12])).unwrap_or(usize::MAX));
@@ -223,10 +229,10 @@ fn zero_head_times(font: &mut [u8]) -> bool {
         }
     }
     let Some(off) = head_off else {
-        return false;
+        return Err(unusable(FontFault::Head));
     };
     if head_len < 54 || off.saturating_add(head_len) > font.len() {
-        return false;
+        return Err(unusable(FontFault::Head));
     }
     font[off + 20..off + 36].fill(0);
     font[off + 8..off + 12].fill(0);
@@ -235,7 +241,7 @@ fn zero_head_times(font: &mut [u8]) -> bool {
     let whole = checksum(font);
     let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(whole);
     font[off + 8..off + 12].copy_from_slice(&adjustment.to_be_bytes());
-    true
+    Ok(())
 }
 
 fn u32be(bytes: &[u8]) -> u32 {
@@ -257,13 +263,27 @@ fn checksum(data: &[u8]) -> u32 {
     sum
 }
 
-#[derive(Debug)]
-struct FontFault(&'static str);
+#[cfg(test)]
+mod tests {
+    use super::em1000;
+    use crate::error::{ErrorKind, FontFault};
 
-impl fmt::Display for FontFault {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0)
+    #[test]
+    fn em1000_rejects_non_finite_and_out_of_i32_range() {
+        let nan = em1000(f32::NAN, 2048.0).unwrap_err();
+        assert_eq!(nan.kind, ErrorKind::FontNotConfigured);
+        assert_eq!(
+            std::error::Error::source(&nan).and_then(|source| source.downcast_ref::<FontFault>()),
+            Some(&FontFault::Width)
+        );
+
+        let huge = em1000(1.0e20, 1.0).unwrap_err();
+        assert_eq!(huge.kind, ErrorKind::FontNotConfigured);
+        assert_eq!(
+            std::error::Error::source(&huge).and_then(|source| source.downcast_ref::<FontFault>()),
+            Some(&FontFault::Width)
+        );
+
+        assert_eq!(em1000(100_000.0, 1.0).unwrap(), 100_000_000);
     }
 }
-
-impl std::error::Error for FontFault {}

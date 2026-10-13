@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use lopdf::{Dictionary, Document, Object};
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, FlattenReason, FontFault, Result};
 use crate::fields::{
     FONT_SIZE_STEP, LINE_HEIGHT_FACTOR, MIN_FONT_SIZE, PAD_BOTTOM, PAD_TOP, PAD_X,
 };
@@ -65,7 +65,11 @@ pub(crate) fn lay_text(
                 }
                 .into());
             }
-            Err(FitError::NoAdvance) => return Err(ErrorKind::FontNotConfigured.into()),
+            Err(FitError::NoAdvance) => {
+                return Err(
+                    Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::NoAdvance)
+                );
+            }
             Err(FitError::TooBig) => {
                 if size <= MIN_FONT_SIZE + 0.001 {
                     return Err(ErrorKind::BoxOverflow {
@@ -112,7 +116,9 @@ fn map_glyph(glyph: std::result::Result<Glyph, GlyphFault>, field_name: &str) ->
             scalar,
         }
         .into()),
-        Err(GlyphFault::NoAdvance) => Err(ErrorKind::FontNotConfigured.into()),
+        Err(GlyphFault::NoAdvance) => {
+            Err(Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::NoAdvance))
+        }
     }
 }
 
@@ -337,23 +343,25 @@ pub(crate) fn paint(
     for (index, page_stamps) in by_page {
         let page_id = pages.get(index).copied().ok_or_else(|| {
             Error::from(ErrorKind::FlattenFailed {
-                message: format!("page {index} is outside the document"),
+                reason: FlattenReason::PageOutOfRange { page_index: index },
             })
         })?;
         let needs_font = page_stamps.iter().any(|stamp| {
             matches!(&stamp.mark, Mark::Text(text) if text.lines.iter().any(|line| !line.glyphs.is_empty()))
         });
         let font_name = if needs_font {
-            let font_id = font_id.ok_or(ErrorKind::FontNotConfigured)?;
+            let font_id = font_id.ok_or_else(|| {
+                Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
+            })?;
             Some(attach_font(doc, page_id, font_id)?)
         } else {
             None
         };
-        let content = page_content(&page_stamps, font_name.as_deref());
+        let content = page_content(&page_stamps, font_name.as_deref())?;
         doc.add_page_contents(page_id, content.into_bytes())
             .map_err(|err| {
                 Error::from(ErrorKind::FlattenFailed {
-                    message: "could not append page content".to_string(),
+                    reason: FlattenReason::AppendContent,
                 })
                 .with_source(err)
             })?;
@@ -363,35 +371,35 @@ pub(crate) fn paint(
     Ok(())
 }
 
-fn page_content(stamps: &[&Stamp], font_name: Option<&str>) -> String {
+fn page_content(stamps: &[&Stamp], font_name: Option<&str>) -> Result<String> {
     let mut out = String::new();
     for stamp in stamps {
         match &stamp.mark {
-            Mark::Check => out.push_str(&check_mark(stamp.rect)),
+            Mark::Check => out.push_str(&check_mark(stamp.rect)?),
             Mark::Text(text) => {
                 if let Some(font_name) = font_name {
-                    out.push_str(&text_block(stamp.rect, text, font_name));
+                    out.push_str(&text_block(stamp.rect, text, font_name)?);
                 }
             }
         }
     }
-    out
+    Ok(out)
 }
 
-fn text_block(rect: PdfRect, text: &LaidText, font_name: &str) -> String {
-    let mut out = clip(rect);
+fn text_block(rect: PdfRect, text: &LaidText, font_name: &str) -> Result<String> {
+    let mut out = clip(rect)?;
     out.push_str("0 0 0 rg\nBT\n");
     let x = rect.x0 + PAD_X;
     for line in &text.lines {
         if line.glyphs.is_empty() {
             continue;
         }
-        let _ = writeln!(out, "/{font_name} {} Tf", pdf_num(text.size));
+        let _ = writeln!(out, "/{font_name} {} Tf", pdf_num(text.size)?);
         let _ = write!(
             out,
             "1 0 0 1 {} {} Tm\n<",
-            pdf_num(x),
-            pdf_num(line.baseline)
+            pdf_num(x)?,
+            pdf_num(line.baseline)?
         );
         for gid in &line.glyphs {
             let _ = write!(out, "{gid:04X}");
@@ -399,10 +407,10 @@ fn text_block(rect: PdfRect, text: &LaidText, font_name: &str) -> String {
         out.push_str("> Tj\n");
     }
     out.push_str("ET\nQ\n");
-    out
+    Ok(out)
 }
 
-fn check_mark(rect: PdfRect) -> String {
+fn check_mark(rect: PdfRect) -> Result<String> {
     let mark = rect.width().min(rect.height()) * 0.7;
     let mid_x = f32::midpoint(rect.x0, rect.x1);
     let mid_y = f32::midpoint(rect.y0, rect.y1);
@@ -413,35 +421,38 @@ fn check_mark(rect: PdfRect) -> String {
     let joint_y = mid_y - mark * 0.28;
     let right_y = mid_y + mark * 0.32;
     let stroke = (mark * 0.14).max(0.8);
-    let mut out = clip(rect);
+    let mut out = clip(rect)?;
     let _ = write!(
         out,
         "{} w\n1 J\n1 j\n{} {} m\n{} {} l\n{} {} l\nS\nQ\n",
-        pdf_num(stroke),
-        pdf_num(left_x),
-        pdf_num(left_y),
-        pdf_num(joint_x),
-        pdf_num(joint_y),
-        pdf_num(right_x),
-        pdf_num(right_y),
+        pdf_num(stroke)?,
+        pdf_num(left_x)?,
+        pdf_num(left_y)?,
+        pdf_num(joint_x)?,
+        pdf_num(joint_y)?,
+        pdf_num(right_x)?,
+        pdf_num(right_y)?,
     );
-    out
+    Ok(out)
 }
 
-fn clip(rect: PdfRect) -> String {
-    format!(
+fn clip(rect: PdfRect) -> Result<String> {
+    Ok(format!(
         "q\n{} {} {} {} re\nW\nn\n",
-        pdf_num(rect.x0),
-        pdf_num(rect.y0),
-        pdf_num(rect.width()),
-        pdf_num(rect.height())
-    )
+        pdf_num(rect.x0)?,
+        pdf_num(rect.y0)?,
+        pdf_num(rect.width())?,
+        pdf_num(rect.height())?
+    ))
 }
 
-fn pdf_num(value: f32) -> String {
+fn pdf_num(value: f32) -> Result<String> {
     let scaled = (value * 1000.0).round() / 1000.0;
     if !scaled.is_finite() {
-        return "0".to_string();
+        return Err(ErrorKind::FlattenFailed {
+            reason: FlattenReason::NonFinite,
+        }
+        .into());
     }
     let mut text = format!("{scaled:.3}");
     if text.contains('.') {
@@ -453,9 +464,9 @@ fn pdf_num(value: f32) -> String {
         }
     }
     if text == "-0" {
-        "0".to_string()
+        Ok("0".to_string())
     } else {
-        text
+        Ok(text)
     }
 }
 
@@ -482,7 +493,7 @@ fn attach_font(
         .and_then(Object::as_dict_mut)
         .map_err(|err| {
             Error::from(ErrorKind::FlattenFailed {
-                message: "could not update page resources".to_string(),
+                reason: FlattenReason::UpdateResources,
             })
             .with_source(err)
         })?;
@@ -502,7 +513,7 @@ fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
         }
     }
     Err(ErrorKind::FlattenFailed {
-        message: "page font resource name is taken".to_string(),
+        reason: FlattenReason::FontNameTaken,
     }
     .into())
 }
@@ -513,7 +524,7 @@ fn copied_resources(doc: &Document, page_id: lopdf::ObjectId) -> Result<Dictiona
         let found = {
             let dict = doc.get_dictionary(id).map_err(|err| {
                 Error::from(ErrorKind::FlattenFailed {
-                    message: "could not read a page".to_string(),
+                    reason: FlattenReason::ReadPage,
                 })
                 .with_source(err)
             })?;
@@ -525,7 +536,7 @@ fn copied_resources(doc: &Document, page_id: lopdf::ObjectId) -> Result<Dictiona
             return match inspect::deep_deref(doc, resources) {
                 Object::Dictionary(dict) => Ok(dict),
                 _ => Err(ErrorKind::FlattenFailed {
-                    message: "page resources are not a dictionary".to_string(),
+                    reason: FlattenReason::ResourcesNotDictionary,
                 }
                 .into()),
             };
@@ -547,7 +558,7 @@ fn strip_form(doc: &mut Document) -> Result<()> {
         let kept = {
             let page = doc.get_dictionary(page_id).map_err(|err| {
                 Error::from(ErrorKind::FlattenFailed {
-                    message: "could not read a page while stripping widgets".to_string(),
+                    reason: FlattenReason::ReadPage,
                 })
                 .with_source(err)
             })?;
@@ -564,7 +575,7 @@ fn strip_form(doc: &mut Document) -> Result<()> {
             .and_then(Object::as_dict_mut)
             .map_err(|err| {
                 Error::from(ErrorKind::FlattenFailed {
-                    message: "could not update page annotations".to_string(),
+                    reason: FlattenReason::UpdateAnnotations,
                 })
                 .with_source(err)
             })?;
@@ -645,9 +656,28 @@ pub(crate) fn save(doc: &mut Document) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     doc.save_to(&mut bytes).map_err(|err| {
         Error::from(ErrorKind::FlattenFailed {
-            message: "could not write PDF".to_string(),
+            reason: FlattenReason::Write,
         })
         .with_source(err)
     })?;
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pdf_num;
+    use crate::error::{ErrorKind, FlattenReason};
+
+    #[test]
+    fn pdf_num_rejects_nan_and_formats_finite_values() {
+        let err = pdf_num(f32::NAN).unwrap_err();
+        assert_eq!(
+            err.kind,
+            ErrorKind::FlattenFailed {
+                reason: FlattenReason::NonFinite,
+            }
+        );
+        assert_eq!(pdf_num(1.5).unwrap(), "1.5");
+        assert_eq!(pdf_num(-0.0).unwrap(), "0");
+    }
 }

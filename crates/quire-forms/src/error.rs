@@ -46,6 +46,50 @@ impl StdError for Error {
     }
 }
 
+/// Why [`ErrorKind::InvalidArgument`] rejected the call.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum ArgumentReason {
+    /// `font_size` 不是有限正数、毫点不是有限值或放不进 `i64`，或大于 256 pt。
+    ///
+    /// `Display` 不区分这几种。句子故意仍是 `font_size must be finite and greater than 0`。
+    FontSize {
+        /// Rejected `font_size`, in points.
+        value: f32,
+    },
+    /// 文本 widget 收到了 `FieldValue::CheckBox`。
+    CheckboxOnText,
+    /// 列表或组合框收到了 `FieldValue::CheckBox`。
+    CheckboxOnChoice,
+}
+
+/// Why [`ErrorKind::FlattenFailed`] could not finish the PDF.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FlattenReason {
+    /// The stamp names a page index this document does not have.
+    PageOutOfRange {
+        /// Index into the document page list.
+        page_index: usize,
+    },
+    /// The page content stream could not be extended.
+    AppendContent,
+    /// The page `Resources` entry could not be replaced.
+    UpdateResources,
+    /// A page `Resources` value was present and was not a dictionary.
+    ResourcesNotDictionary,
+    /// A page dictionary could not be read.
+    ReadPage,
+    /// A page `Annots` array could not be written back.
+    UpdateAnnotations,
+    /// `QuireForms` through `QuireForms64` are already used on the page.
+    FontNameTaken,
+    /// `Document::save_to` failed.
+    Write,
+    /// 内容流数字不是有限值。建议表里没有这一项；`pdf_num` 不允许再写成 `0`，所以必须有。
+    NonFinite,
+}
+
 /// What went wrong.
 ///
 /// Field variants carry the widget name from `/T`.
@@ -73,10 +117,14 @@ pub enum ErrorKind {
         /// Widget name.
         field_name: String,
     },
-    /// A size or value is not usable.
+    /// A size or a value is not usable.
     InvalidArgument {
-        /// What was rejected.
-        message: String,
+        /// Widget name when the failure is about one field.
+        ///
+        /// `None` when `reason` is [`ArgumentReason::FontSize`].
+        field_name: Option<String>,
+        /// Why the argument was rejected.
+        reason: ArgumentReason,
     },
     /// `scalar` has no glyph in the supplied font.
     MissingGlyph {
@@ -104,8 +152,8 @@ pub enum ErrorKind {
     },
     /// Overlay merge or PDF write failed.
     FlattenFailed {
-        /// What the writer could not finish.
-        message: String,
+        /// Which step failed.
+        reason: FlattenReason,
     },
 }
 
@@ -120,9 +168,32 @@ impl fmt::Display for ErrorKind {
             Self::InvalidCheckbox { field_name } => {
                 write!(f, "invalid checkbox value for {field_name}")
             }
-            Self::InvalidArgument { message } | Self::FlattenFailed { message } => {
-                write!(f, "{message}")
-            }
+            Self::InvalidArgument { field_name, reason } => match reason {
+                ArgumentReason::FontSize { .. } => {
+                    write!(f, "font_size must be finite and greater than 0")
+                }
+                ArgumentReason::CheckboxOnText | ArgumentReason::CheckboxOnChoice => {
+                    let name = field_name.as_deref().unwrap_or("field");
+                    write!(f, "{name} does not take a checkbox value")
+                }
+            },
+            Self::FlattenFailed { reason } => match reason {
+                FlattenReason::PageOutOfRange { page_index } => {
+                    write!(f, "page {page_index} is outside the document")
+                }
+                FlattenReason::AppendContent => write!(f, "could not append page content"),
+                FlattenReason::UpdateResources => write!(f, "could not update page resources"),
+                FlattenReason::ResourcesNotDictionary => {
+                    write!(f, "page resources are not a dictionary")
+                }
+                FlattenReason::ReadPage => write!(f, "could not read a page"),
+                FlattenReason::UpdateAnnotations => {
+                    write!(f, "could not update page annotations")
+                }
+                FlattenReason::FontNameTaken => write!(f, "page font resource name is taken"),
+                FlattenReason::Write => write!(f, "could not write PDF"),
+                FlattenReason::NonFinite => write!(f, "non-finite number in page content"),
+            },
             Self::MissingGlyph { field_name, scalar } => {
                 write!(f, "missing glyph {scalar:?} in {field_name}")
             }
@@ -139,3 +210,38 @@ impl fmt::Display for ErrorKind {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
+
+/// Why a font could not be used. This is an [`Error`] source, not an [`ErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FontFault {
+    /// Text is drawn and `FillOptions::font` is missing, or a later check found no face.
+    Missing,
+    /// The bytes start with `ttcf`.
+    Collection,
+    /// The face has no `glyf` table.
+    NoGlyf,
+    /// `units_per_em` is 0.
+    UpemZero,
+    /// The glyph has no advance, or its id does not fit in `u16`.
+    NoAdvance,
+    /// The `head` table is missing, too short, or its checksum could not be written.
+    Head,
+    /// A width in em-1000 units is non-finite or outside `i32`.
+    Width,
+}
+
+impl fmt::Display for FontFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Missing => "font is missing",
+            Self::Collection => "font collections are not embedded",
+            Self::NoGlyf => "font has no glyf table",
+            Self::UpemZero => "units per em is 0",
+            Self::NoAdvance => "glyph has no advance",
+            Self::Head => "font head table could not be patched",
+            Self::Width => "font width is not a finite i32",
+        })
+    }
+}
+
+impl StdError for FontFault {}
