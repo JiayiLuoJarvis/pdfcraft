@@ -7,10 +7,8 @@ use crate::fields::{FieldInfo, FieldType, FieldValue};
 
 const MAX_DEREF: usize = 8;
 const MAX_PARENT: usize = 32;
-/// Nested arrays and dictionaries inside one PDF object. Deeper input fails
-/// instead of growing the call stack. A chain of indirect references does not
-/// count, because `reachable` already walks those in a loop.
-const MAX_OBJECT_DEPTH: usize = 64;
+/// How deep arrays, dictionaries, and stream dictionaries may nest inside one object.
+const MAX_INLINE_DEPTH: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PdfRect {
@@ -565,7 +563,7 @@ fn push_option(out: &mut Vec<String>, obj: &Object) {
 fn collect_refs(obj: &Object, out: &mut Vec<ObjectId>) -> Result<()> {
     let mut stack = vec![(obj, 0_usize)];
     while let Some((current, depth)) = stack.pop() {
-        if depth > MAX_OBJECT_DEPTH {
+        if depth > MAX_INLINE_DEPTH {
             return Err(ErrorKind::FlattenFailed {
                 reason: FlattenReason::NestingTooDeep { depth },
             }
@@ -597,7 +595,7 @@ fn collect_refs(obj: &Object, out: &mut Vec<ObjectId>) -> Result<()> {
 fn refs_dangle(obj: &Object, seen: &BTreeSet<ObjectId>) -> Result<bool> {
     let mut stack = vec![(obj, 0_usize)];
     while let Some((current, depth)) = stack.pop() {
-        if depth > MAX_OBJECT_DEPTH {
+        if depth > MAX_INLINE_DEPTH {
             return Err(ErrorKind::FlattenFailed {
                 reason: FlattenReason::NestingTooDeep { depth },
             }
