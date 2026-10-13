@@ -1,23 +1,25 @@
 /// Starting font size in points.
-pub const DEFAULT_FONT_SIZE: f32 = 12.0;
+pub(crate) const DEFAULT_FONT_SIZE: f32 = 12.0;
 
 /// Smallest font size the fitter tries, in points.
-pub const MIN_FONT_SIZE: f32 = 7.0;
+#[expect(dead_code)] // 字号搜索用毫点，不读这个 f32
+pub(crate) const MIN_FONT_SIZE: f32 = 7.0;
 
 /// How far the fitter drops the font size on each attempt, in points.
-pub const FONT_SIZE_STEP: f32 = 0.5;
+#[expect(dead_code)] // 字号搜索用毫点，不读这个 f32
+pub(crate) const FONT_SIZE_STEP: f32 = 0.5;
 
 /// Line height as a multiple of the font size.
-pub const LINE_HEIGHT_FACTOR: f32 = 1.2;
+pub(crate) const LINE_HEIGHT_FACTOR: f32 = 1.2;
 
 /// Left and right padding inside a widget rectangle, in points.
-pub const PAD_X: f32 = 1.0;
+pub(crate) const PAD_X: f32 = 1.0;
 
 /// Bottom padding inside a widget rectangle, in points.
-pub const PAD_BOTTOM: f32 = 1.0;
+pub(crate) const PAD_BOTTOM: f32 = 1.0;
 
 /// Top padding inside a widget rectangle, in points.
-pub const PAD_TOP: f32 = 0.5;
+pub(crate) const PAD_TOP: f32 = 0.5;
 
 /// Kind of `AcroForm` widget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +102,7 @@ pub struct FillOptions<'a> {
     ///
     /// Checkbox marks do not use this font. An empty string does not use it either.
     pub font: Option<FontBytes<'a>>,
-    /// Starting size in points. The fitter may step down to [`MIN_FONT_SIZE`].
+    /// Starting size in points. The fitter may step down to 7 pt.
     pub font_size: f32,
     /// Behavior for names that are not in the PDF.
     pub missing: MissingName,

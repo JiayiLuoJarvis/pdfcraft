@@ -32,6 +32,7 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `quire-forms` no longer exports `DEFAULT_FONT_SIZE`, `MIN_FONT_SIZE`, `FONT_SIZE_STEP`, `LINE_HEIGHT_FACTOR`, `PAD_X`, `PAD_BOTTOM`, or `PAD_TOP`. The values are unchanged.
 - **Breaking.** `quire-forms` `ErrorKind::InvalidArgument` carries `field_name` and `reason: ArgumentReason` instead of `message`. `ErrorKind::FlattenFailed` carries `reason: FlattenReason` instead of `message`. The variant names are unchanged. `FontNotConfigured` always has a `source`. A non-finite content-stream number and an out-of-range font width fail instead of being written as 0.
 
 - Contract. Callers assemble a document as values. `DocumentSpec` holds the sections and blocks. Headers and footers are `BandSpec`. `behind` and `front` are `LayerMark` lists. `layout_spec` lays that value out. The library substitutes page numbers into `TextRun` when it paints a page. `PageWhen` chooses the pages for a `LayerMark`. A style scope is `Block::Styled`. Callers do not pass closures for the body, the header, the footer, `behind`, or `front`.
