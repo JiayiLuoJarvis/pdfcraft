@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-12 |
-| 状态 | **结构已落地（空壳）**；`quire-forms` / `quire-orgchart` 无产品 API |
+| 状态 | **结构已落地**；`quire-forms` 仍为空壳；`quire-orgchart` 已有协议、测量与 `generate_pdf` |
 | 相关 | [`提案书.md`](提案书.md) §9；[`module-dependency.md`](module-dependency.md)；[`AGENTS.md`](../AGENTS.md) |
 
 ## 目标
@@ -27,9 +27,9 @@ quire/                              # workspace 根（无业务 package）
     quire-forms/                    # PDF 表单填写（空壳）
       Cargo.toml
       src/lib.rs
-    quire-orgchart/                 # 股权架构图（空壳）
+    quire-orgchart/                 # 股权架构图（独立于 quire-pdf）
       Cargo.toml
-      src/lib.rs
+      src/ tests/ examples/
 ```
 
 ## Crate 职责
@@ -38,7 +38,7 @@ quire/                              # workspace 根（无业务 package）
 | --- | --- | --- |
 | `quire-pdf` | `DocumentSpec` → 排版 → Canvas → krilla 出 PDF | 主线实现 |
 | `quire-forms` | 读第三方 PDF → 填 AcroForm → 写出 | 空壳；`publish = false` |
-| `quire-orgchart` | 股权架构图生成（独立公共面） | 空壳；提案书曾列为不做，未确认前不实现 |
+| `quire-orgchart` | 股权架构图。`FontBytes` + skrifa `0.48.0` 测量，krilla `0.8.2` 绘制 | 已实现 `validate_request`、`document_title`、`generate_pdf`。不依赖 `quire-pdf` |
 
 ## 依赖硬规则
 
@@ -47,9 +47,7 @@ quire-forms     ──X──→  quire-pdf
 quire-pdf       ──X──→  quire-forms
 quire-orgchart  ──X──→  quire-forms
 quire-forms     ──X──→  quire-orgchart
-
-# 可选（产品确认后）：
-quire-orgchart  ──→  quire-pdf     # 图排完再 to_pdf；或只依赖将来极薄共享层
+quire-orgchart  ──X──→  quire-pdf
 ```
 
 - `quire-forms` 可引入**独立的** PDF 读写依赖；禁止为填表把第二套 PDF 栈引进 `quire-pdf`。
@@ -78,17 +76,20 @@ cargo fmt --all -- --check
 cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
 cargo test -p quire-pdf --features test-utils
 cargo doc -p quire-pdf --no-deps
-cargo check -p quire-forms -p quire-orgchart
+cargo check -p quire-forms
+cargo clippy -p quire-orgchart --all-targets -- -D warnings
+cargo test -p quire-orgchart
+cargo doc -p quire-orgchart --no-deps
 ```
 
-CI 对 `quire-pdf` 保留原有 feature 矩阵；空壳至少 `cargo check` / `clippy`。
+CI 对 `quire-pdf` 保留原有 feature 矩阵。`quire-forms` 仍为空壳，至少 `cargo check` / `clippy`。`quire-orgchart` 跑测试与文档。
 
 ## 明确不做（本规格）
 
 - 拆多个 git 仓库。
-- 在空壳里预写填表或架构图 API。
+- 在 `quire-forms` 空壳里预写填表 API。
 - 把 `lopdf` / `pdf-writer` 等引进 `quire-pdf`。
-- 未确认前实现股权架构图业务逻辑。
+- 让 `quire-orgchart` 依赖 `quire-pdf`，或把架构图做成 `quire-pdf` 的 feature。
 
 ## 落地记录
 
@@ -96,5 +97,6 @@ CI 对 `quire-pdf` 保留原有 feature 矩阵；空壳至少 `cargo check` / `c
 | --- | --- |
 | 根 `[workspace]` + `crates/*` | 已落地 |
 | `quire-pdf` 迁入 `crates/quire-pdf` | 已落地 |
-| `quire-forms` / `quire-orgchart` 空壳 | 已落地 |
-| 产品 API / 填表依赖选型 | 未开始（另开提案书条目） |
+| `quire-forms` 空壳 | 已落地 |
+| `quire-orgchart` 协议、测量、`generate_pdf` | 已落地。行为见 `quire-orgchart-spec.md` |
+| 填表产品 API | 未开始（另开提案书条目） |
