@@ -62,13 +62,18 @@ pub(crate) struct InlineBlank {
     pub(crate) baseline_offset: Length<NonNegative>,
 }
 
+const DEFAULT_BLANK_THICKNESS_PT: f32 = 1.0;
+const DEFAULT_BLANK_BASELINE_OFFSET_PT: f32 = 1.0;
+
 impl InlineBlank {
     pub(crate) fn new(width: BlankWidth) -> Self {
         Self {
             width,
-            thickness: Positive::pt(1.0).expect("1 pt is positive"),
+            thickness: Positive::pt(DEFAULT_BLANK_THICKNESS_PT)
+                .expect("default blank thickness is positive"),
             color: None,
-            baseline_offset: NonNegative::pt(1.0).expect("1 pt is non-negative"),
+            baseline_offset: NonNegative::pt(DEFAULT_BLANK_BASELINE_OFFSET_PT)
+                .expect("default blank baseline offset is non-negative"),
         }
     }
 }

@@ -7,6 +7,10 @@ use crate::geom::{Length, NonNegative, Positive};
 use crate::layout::frame::{Flowable, Fragment, Frame, LayoutCtx, Split};
 use crate::layout::nesting::{check_content, Container};
 
+pub(crate) const MIN_COLUMN_COUNT: usize = 2;
+pub(crate) const MAX_AUTO_TRACKS: usize = 1;
+const DEFAULT_COLUMN_GAP_PT: f32 = 12.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ColumnWidth {
     Fixed(Length<Positive>),
@@ -20,6 +24,8 @@ pub(crate) enum ColumnWidth {
 pub(crate) struct Ratio(f32);
 
 impl Ratio {
+    pub(crate) const ONE: Self = Self(1.0);
+
     pub(crate) fn new(weight: f32) -> Result<Self> {
         if !weight.is_finite() {
             return Err(Error::from(ErrorKind::ColumnWidths {
@@ -45,7 +51,7 @@ pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result
         .iter()
         .filter(|s| matches!(s, ColumnWidth::Auto))
         .count();
-    if autos > 1 {
+    if autos > MAX_AUTO_TRACKS {
         return fail(ColumnWidthsReason::MoreThanOneAuto);
     }
     let mut fixed = 0.0f32;
@@ -83,7 +89,7 @@ pub(crate) fn resolve_column_widths(specs: &[ColumnWidth], inner: f32) -> Result
 }
 
 pub(crate) fn default_column_gap() -> Length<NonNegative> {
-    NonNegative::pt(12.0).expect("12 pt is non-negative")
+    NonNegative::pt(DEFAULT_COLUMN_GAP_PT).expect("default column gap is non-negative")
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,7 +104,7 @@ impl<N: Flowable> ColumnsNode<N> {
         gap: Length<NonNegative>,
         columns: Vec<(ColumnWidth, Vec<N>)>,
     ) -> Result<Self> {
-        if columns.len() < 2 {
+        if columns.len() < MIN_COLUMN_COUNT {
             return Err(Error::from(ErrorKind::ColumnWidths {
                 reason: ColumnWidthsReason::ColumnCount,
             }));

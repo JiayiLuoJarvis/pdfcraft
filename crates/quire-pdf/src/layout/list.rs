@@ -22,6 +22,10 @@ pub(crate) enum MarkerKind {
     LowerRoman,
 }
 
+const MIN_MARKER_NUMBER: u64 = 1;
+const MAX_ALPHA_MARKER: u64 = 26;
+const MAX_ROMAN_MARKER: u64 = 3999;
+
 impl MarkerKind {
     /// Letters stop at Z and roman numerals at 3999; past that is [`GeometryKind::MarkerOutOfRange`].
     pub(crate) fn label(self, number: u64) -> Result<String> {
@@ -38,8 +42,8 @@ impl MarkerKind {
 
 fn alpha(number: u64) -> Result<char> {
     match number {
-        1..=26 => Ok(char::from(
-            b'A' + u8::try_from(number - 1).expect("below 26"),
+        MIN_MARKER_NUMBER..=MAX_ALPHA_MARKER => Ok(char::from(
+            b'A' + u8::try_from(number - 1).expect("below MAX_ALPHA_MARKER"),
         )),
         _ => Err(GeometryKind::MarkerOutOfRange { number }.into()),
     }
@@ -61,7 +65,7 @@ fn roman(mut number: u64) -> Result<String> {
         (4, "IV"),
         (1, "I"),
     ];
-    if !(1..=3999).contains(&number) {
+    if !(MIN_MARKER_NUMBER..=MAX_ROMAN_MARKER).contains(&number) {
         return Err(GeometryKind::MarkerOutOfRange { number }.into());
     }
     let mut out = String::new();

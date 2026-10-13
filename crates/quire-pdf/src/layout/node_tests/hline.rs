@@ -142,7 +142,7 @@ fn overflowing_spaces_are_taller_than_frame() {
 #[test]
 fn column_offsets_the_line() {
     let line = node(None, TextAlign::Start, 1.0, 0.0, 0.0);
-    let even = ColumnWidth::Ratio(Ratio::new(1.0).unwrap());
+    let even = ColumnWidth::Ratio(Ratio::ONE);
     let cols = ColumnsNode::new(
         NonNegative::ZERO,
         vec![

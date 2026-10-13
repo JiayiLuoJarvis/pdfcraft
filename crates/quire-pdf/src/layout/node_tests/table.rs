@@ -29,8 +29,8 @@ fn span(cols: u16, rows: u16) -> (NonZeroU16, NonZeroU16) {
 
 fn halves() -> Vec<ColumnWidth> {
     vec![
-        ColumnWidth::Ratio(Ratio::new(1.0).unwrap()),
-        ColumnWidth::Ratio(Ratio::new(1.0).unwrap()),
+        ColumnWidth::Ratio(Ratio::ONE),
+        ColumnWidth::Ratio(Ratio::ONE),
     ]
 }
 

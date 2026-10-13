@@ -590,7 +590,7 @@ mod tests {
     }
 
     fn two_columns(left: Vec<FlowNode>, right: Vec<FlowNode>) -> FlowNode {
-        let even = ColumnWidth::Ratio(Ratio::new(1.0).unwrap());
+        let even = ColumnWidth::Ratio(Ratio::ONE);
         FlowNode::Columns(
             ColumnsNode::new(NonNegative::ZERO, vec![(even, left), (even, right)]).unwrap(),
         )

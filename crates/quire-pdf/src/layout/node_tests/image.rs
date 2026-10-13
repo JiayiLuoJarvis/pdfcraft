@@ -156,7 +156,7 @@ fn column_offsets_the_image() {
         TextAlign::Start,
     )
     .unwrap();
-    let even = ColumnWidth::Ratio(Ratio::new(1.0).unwrap());
+    let even = ColumnWidth::Ratio(Ratio::ONE);
     let cols = ColumnsNode::new(
         NonNegative::ZERO,
         vec![

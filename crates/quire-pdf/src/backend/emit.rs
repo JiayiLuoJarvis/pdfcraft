@@ -191,8 +191,10 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
     Ok(())
 }
 
+const UPEM_ABS_TOLERANCE: f32 = 0.01;
+
 fn check_upem(skrifa_upem: f32, krilla_upem: f32) -> Result<()> {
-    if (skrifa_upem - krilla_upem).abs() >= 0.01 {
+    if (skrifa_upem - krilla_upem).abs() >= UPEM_ABS_TOLERANCE {
         Err(Error::from(ErrorKind::FontMetricsMismatch {
             skrifa_upem,
             krilla_upem,

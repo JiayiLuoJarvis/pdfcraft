@@ -40,6 +40,7 @@ while remaining `0.x`.
 
 ### Changed
 
+- Layout and backend policy thresholds (column counts, marker ranges, upem tolerance) and product defaults (column gap, blank stroke) are named constants next to the code that owns them. Behavior is unchanged.
 - Bump the workspace `skrifa` pin from `0.47.0` to `0.48.0` in `quire-pdf` and `quire-forms`. `krilla` still pulls its own `skrifa` 0.42.x copy.
 - **Breaking.** `quire-forms` `FillOptions` is no longer `Copy` (alignment override maps are borrowed). Struct-update sites that relied on `Copy` need `Clone` or a fresh `FillOptions`.
 - **Breaking.** `quire-forms` no longer exports `DEFAULT_FONT_SIZE`, `MIN_FONT_SIZE`, `FONT_SIZE_STEP`, `LINE_HEIGHT_FACTOR`, `PAD_X`, `PAD_BOTTOM`, or `PAD_TOP`. The values are unchanged.
