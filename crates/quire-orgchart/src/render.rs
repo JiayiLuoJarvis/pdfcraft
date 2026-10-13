@@ -296,7 +296,24 @@ fn draw_node(
     } else {
         PADDING_Y_MM
     };
-    let mut y = y0 + pad_y;
+    if let Some(path) = round_path(x, y0, node.width_mm, node.height_mm) {
+        surface.push_clip_path(&path, &FillRule::NonZero);
+        let drawn = paint_node_lines(surface, node, x, y0 + pad_y, font, face);
+        surface.pop();
+        drawn
+    } else {
+        paint_node_lines(surface, node, x, y0 + pad_y, font, face)
+    }
+}
+
+fn paint_node_lines(
+    surface: &mut Surface<'_>,
+    node: &NodeBox,
+    x: f64,
+    mut y: f64,
+    font: &FontMetrics,
+    face: &Font,
+) -> Result<(), Error> {
     for line in &node.lines {
         if !line.text.is_empty() {
             draw_text(
