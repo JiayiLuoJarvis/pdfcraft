@@ -78,7 +78,7 @@ quire/
       tests/              集成测试；fixtures/ 放字体与样张
       examples/           可运行示例
     quire-forms/          读已有 AcroForm 并 flatten（§10 已确认；基础填写已实现；禁止依赖 quire-pdf；不用 krilla）
-    quire-orgchart/       股权架构图（空壳；未确认前不实现）
+    quire-orgchart/       股权架构图。不依赖 quire-pdf。FontBytes；skrifa 0.48.0 测量；krilla 0.8.2 绘制
   .github/workflows/      CI
 ```
 
@@ -107,6 +107,8 @@ backend     → canvas, fonts, error, geom, krilla    # 禁止 → layout / spec
 | `lib.rs` 重导出 | 公共 `spec`、geom、error、Canvas | 任何 krilla 类型 |
 | 测试 | 排版用 `RecordingCanvas` 断言坐标 | 用测试依赖反转生产 DAG；把 krilla 压缩字节当排版断言 |
 
+上表是 `quire-pdf` 内部模块。`quire-orgchart` 在自己的 crate 里使用 krilla `0.8.2` 与 skrifa `0.48.0`，不引用 `quire-pdf`。
+
 ## 代码与贡献规范
 
 按开源 Rust 库标准要求自己。权威优先级（与「文档优先级」正交：那边管产品，这边管怎么写代码）：
@@ -128,6 +130,8 @@ cargo doc -p quire-pdf --no-deps
 cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
 cargo test -p quire-forms
 cargo doc -p quire-forms --no-deps
+cargo test -p quire-orgchart
+cargo doc -p quire-orgchart --no-deps
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
 # 集成测试用 `quire_pdf::canvas::pt_near`，不依赖 `test-utils`。
 # 该 feature 只把同一函数再导出到 crate 根。
@@ -175,7 +179,7 @@ cargo doc -p quire-forms --no-deps
 - **`quire-pdf`** 第二 PDF 后端；该 crate 生产代码依赖 pdf-writer / lopdf / printpdf。读第三方 PDF 填表只在 `quire-forms`，见 [`workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
 - 完整 UAX #14、bidi、阿文/印度系 shaping、竖排、kerning、连字。
 - 向调用方暴露 `Flowable` trait。
-- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。`quire-orgchart` 空壳可保留，未确认前不写业务。
+- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。股权架构图在 `quire-orgchart`，行为以 `docs/quire-orgchart-spec.md` 为准，不进 `quire-pdf`。
 - 用 JSON/serde 当主接口（设计稿旧表述已作废；serde 若将来做，也只是可选，不是主路径）。
 - 并行开页或并行画页。
 - 删除 `publish = false`，除非限额 PR 与信件夹具已通过。

@@ -6,7 +6,7 @@ Cargo workspace for PDF tools. Depend on the crate you need:
 | --- | --- | --- |
 | **quire-pdf** | [`crates/quire-pdf`](crates/quire-pdf) | Document layout → vector PDF (main line) |
 | **quire-forms** | [`crates/quire-forms`](crates/quire-forms) | Fill AcroForm fields in an existing PDF and flatten the result |
-| **quire-orgchart** | [`crates/quire-orgchart`](crates/quire-orgchart) | Equity ownership charts (shell) |
+| **quire-orgchart** | [`crates/quire-orgchart`](crates/quire-orgchart) | Equity ownership charts. `FontBytes`, skrifa 0.48.0, krilla 0.8.2. Independent of quire-pdf |
 
 ## quire-pdf
 

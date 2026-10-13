@@ -3,13 +3,16 @@ name = "quire-orgchart"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Equity ownership chart generation (workspace shell; API not started)"
+description = "Equity ownership charts. Callers pass FontBytes. Measurement uses skrifa; drawing uses krilla."
 license.workspace = true
 publish.workspace = true
 keywords = ["pdf", "org-chart", "ownership"]
 categories = ["graphics"]
 
 [dependencies]
+read-fonts = { version = "=0.45.0", default-features = false, features = ["std"] }
+skrifa = { version = "=0.48.0", default-features = false, features = ["std"] }
+krilla = { version = "=0.8.2", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"
