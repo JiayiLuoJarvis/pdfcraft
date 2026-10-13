@@ -32,7 +32,8 @@ quire-pdf = { path = "crates/quire-pdf" }
 Default features enable the krilla backend (`to_pdf`).
 
 ```toml
-# Layout tests only — floating helpers:
+# Optional. Re-exports `pt_near` and `PT_ABS_TOLERANCE` at the crate root.
+# `canvas::pt_near` is available without this feature.
 quire-pdf = { path = "crates/quire-pdf", features = ["test-utils"] }
 ```
 

@@ -1,5 +1,6 @@
 //! Behavior checks for the data-only document specification path.
 
+use quire_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::spec::{Alignment, CellBlock, CellSpec, ImageRef, ImageSpec, TableSpec};
 use quire_pdf::spec::{
@@ -7,9 +8,7 @@ use quire_pdf::spec::{
 };
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::to_pdf;
-use quire_pdf::{
-    layout_spec, pt_near, CanvasCommand, DocumentSpec, Margins, NonNegative, PageSize, Point,
-};
+use quire_pdf::{layout_spec, CanvasCommand, DocumentSpec, Margins, NonNegative, PageSize, Point};
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::{ErrorKind, ImageFormat};
 

@@ -2,6 +2,7 @@
 
 use std::num::{NonZeroU16, NonZeroU32};
 
+use quire_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use quire_pdf::spec::ImageSpec;
 use quire_pdf::spec::{
@@ -10,8 +11,8 @@ use quire_pdf::spec::{
     ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec, TableSpec, TextRun, TextStyle,
 };
 use quire_pdf::{
-    layout_spec, pt_near, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec,
-    Error, ErrorKind, GeometryKind, ImageFormat, Ink, Length, MarginPreset, Margins, NonNegative,
+    layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
+    ErrorKind, GeometryKind, ImageFormat, Ink, Length, MarginPreset, Margins, NonNegative,
     Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, Ratio, RecordedPage, Rect, Region,
     Rendered, Result, Size, Stroke, Track, A4,
 };

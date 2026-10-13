@@ -1,3 +1,0 @@
-# Integration tests import `pt_near` from feature `test-utils`.
-[cargo]
-features = ["test-utils"]

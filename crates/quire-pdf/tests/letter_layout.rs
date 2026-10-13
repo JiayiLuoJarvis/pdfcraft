@@ -2,13 +2,14 @@
 
 #![cfg(feature = "backend-krilla")]
 
+use quire_pdf::canvas::pt_near;
 use quire_pdf::spec::{
     Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, ImageSpec, Resources, SectionSpec,
     TableSpec, TextRun,
 };
 use quire_pdf::{
-    layout_spec, pt_near, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative,
-    PageSize, Positive, RecordedPage, Result, A4,
+    layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
+    Positive, RecordedPage, Result, A4,
 };
 
 const FONT: &[u8] = include_bytes!("fixtures/quire-letter.ttf");

@@ -409,13 +409,9 @@ Any error fails the document; there is no “partial PDF on failure” path.
 
 Assert on the recording canvas, not on compressed PDF operators:
 
-```toml
-[dev-dependencies]
-quire-pdf = { path = "crates/quire-pdf", features = ["test-utils"] }
-```
-
 ```rust
-use quire_pdf::{layout_spec, pt_near, CanvasCommand, DocumentSpec /* … */};
+use quire_pdf::canvas::pt_near;
+use quire_pdf::{layout_spec, CanvasCommand, DocumentSpec /* … */};
 
 let rendered = layout_spec(spec)?;
 let pages = rendered.pages();
@@ -423,9 +419,9 @@ let pages = rendered.pages();
 assert!(pt_near(x, expected_x));
 ```
 
-For PDF smoke tests, checking that bytes start with `%PDF` is enough.
-`rust-analyzer.toml` at the workspace root enables `test-utils` so the IDE
-resolves `pt_near` in integration tests.
+`canvas::pt_near` is available without extra features. Feature `test-utils`
+re-exports the same function at the crate root. For PDF smoke tests, checking
+that bytes start with `%PDF` is enough.
 
 ---
 

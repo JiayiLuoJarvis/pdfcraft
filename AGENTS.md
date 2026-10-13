@@ -129,7 +129,8 @@ cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
 cargo test -p quire-forms
 cargo doc -p quire-forms --no-deps
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
-# `--all-targets` / 集成测试需要 `test-utils`（quire-pdf 导出 `pt_near`）。
+# 集成测试用 `quire_pdf::canvas::pt_near`，不依赖 `test-utils`。
+# 该 feature 只把同一函数再导出到 crate 根。
 #
 # feature 组合变多后再强制：
 #   cargo hack check -p quire-pdf --each-feature

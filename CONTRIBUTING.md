@@ -36,8 +36,8 @@ MSRV is **1.92** (driven by krilla 0.8.2). CI uses the same toolchain and
 treats Rust/rustdoc warnings as errors. Package layout:
 [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md).
 
-Integration tests import `pt_near` from feature `test-utils`. Workspace
-[`rust-analyzer.toml`](rust-analyzer.toml) enables that feature for
-rust-analyzer; without it, `tests/` shows unresolved-import noise in the IDE.
+Integration tests compare coordinates with `quire_pdf::canvas::pt_near`.
+That function is always public. Feature `test-utils` only re-exports it
+at the crate root.
 
 User-visible behavior belongs in `CHANGELOG.md`.
