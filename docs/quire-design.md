@@ -15,7 +15,7 @@
 
 调用方给出一份类型化的文档结构（页面、样式、页眉页脚、段落、表格、图片等）。`quire` 负责测量字形、断行、分页、表格切分和页眉页脚，然后把已经定位好的绘制指令交给自有的 `Canvas`。唯一的 PDF 后端是一个私有适配器，它把这些指令翻译成 `krilla` 0.8.2 的页面、路径、字形、图片、链接和文档信息。上层排版代码不出现任何 `krilla` 类型，公共 API 也不重新导出 `krilla`。
 
-文本只有一条管线。测量使用 `skrifa` 0.47.0 的 `Charmap` 和 `GlyphMetrics::advance_width`（名义字形前进宽度，不是 kerning，也不是 shaping）。绘制使用同一批 glyph id 和同一批归一化 advance，通过 `Surface::draw_glyphs` 画到页面上。禁止走 `Surface::draw_text`：那条高阶 API 会在 `krilla` 内部做简单整形，量出来的宽度和画出来的宽度会对不上。
+文本只有一条管线。测量使用 `skrifa` 0.48.0 的 `Charmap` 和 `GlyphMetrics::advance_width`（名义字形前进宽度，不是 kerning，也不是 shaping）。绘制使用同一批 glyph id 和同一批归一化 advance，通过 `Surface::draw_glyphs` 画到页面上。禁止走 `Surface::draw_text`：那条高阶 API 会在 `krilla` 内部做简单整形，量出来的宽度和画出来的宽度会对不上。
 
 公共 API 采用混合模型：对外是 pdfmake 风格的可序列化文档定义（Rust enum，`serde` 为可选 feature）；对内把定义降低成 `pub(crate)` 的 `FlowNode`。节点协议是消耗自身的 `split` 和只画 `Fragment` 的 `draw`。需要自然高度时，对整框调用一次 `split`：`Fit` 的高度就是自然高度。v1 不向调用方暴露 `Flowable` trait。
 
@@ -32,7 +32,7 @@
 
 ### 已核实事实（2026-09-30）
 
-下列内容来自当天的 crates.io、docs.rs 与 0.8.2 / 0.47.0 源码，不是记忆中的旧版本。
+下列内容来自 crates.io、docs.rs 与 0.8.2 / 0.48.0 源码核对；钉版本以 `Cargo.toml` 为准。
 
 **krilla**
 
@@ -60,17 +60,17 @@
 - `SerializeSettings::Default` 把 `enable_tagging`、`xmp_metadata`、`compress_content_streams` 都设为 `true`。只覆盖 `pretty` 和 `compress_content_streams` 时，tagging 仍然开着。当前的 dummy validator 不会因此让 `finish` 失败，但以后若换上 PDF/UA validator，会碰到 `MissingTagging`。实验必须显式 `enable_tagging: false`。
 - `krilla::paint::Fill` 是 `{ paint: Paint, opacity: NormalizedF32, rule: FillRule }`。`krilla::paint::Stroke` 是 `{ paint, width, miter_limit, line_cap, line_join, opacity, dash: Option<StrokeDash> }`。`Stroke::default()` 的宽度是 1、miter limit 10、`LineCap::Butt`、`LineJoin::Miter`、opacity `ONE`、dash `None`。`Paint` 不能由 `rgb::Color` 直接充当字段类型；`From<rgb::Color> for Paint` 存在，用 `.into()`。`krilla::num::NormalizedF32::new(f32) -> Option<Self>`。文档注释写 “Panics if the number is not normalized”，**实现并不 panic**：`num.rs` 是 `tiny_skia_path::NormalizedF32::new(num)?`，范围外得到 `None`。`u8 as f32 / 255.0` 落在 `0..=1`，对合法 `Color` 会得到 `Some`。
 - 有两个 `TextDirection`。`krilla::text::TextDirection` 只在 `simple-text` 开启时存在。`krilla::metadata::TextDirection`（`LeftToRight` / `RightToLeft`）始终编译。适配器不使用前者。v1 也不设置后者。
-- Feature：`simple-text` 是默认 feature，拉入 `rustybuzz`，只为 `draw_text` 服务。`raster-images` 也是默认 feature。`rayon` 的说明是 “Allow for multi-threaded PDF creation”；代码路径是给 `Deferred` 工作派发线程。我们仍不打开它，因为 `start_page` 可变借用 `Document`。`pdf` feature 依赖 `hayro-write`，用于嵌入已有 PDF 的页，v1 不用。0.8.2 的直接依赖包含 `skrifa ^0.42.0`（不是 optional）。这和我们直接依赖的 `skrifa` 0.47.0 是两份拷贝。
+- Feature：`simple-text` 是默认 feature，拉入 `rustybuzz`，只为 `draw_text` 服务。`raster-images` 也是默认 feature。`rayon` 的说明是 “Allow for multi-threaded PDF creation”；代码路径是给 `Deferred` 工作派发线程。我们仍不打开它，因为 `start_page` 可变借用 `Document`。`pdf` feature 依赖 `hayro-write`，用于嵌入已有 PDF 的页，v1 不用。0.8.2 的直接依赖包含 `skrifa ^0.42.0`（不是 optional）。这和我们直接依赖的 `skrifa` 0.48.0 是两份拷贝。
 
 **skrifa**
 
-- crates.io 最新版是 **0.47.0**（2026-09-08 发布）。Minimum Rust version **1.85.0**。文档在 <https://docs.rs/skrifa/0.47.0>。它 re-export 的 `FontRef` 来自 `read-fonts` 0.44.0。本库只直接依赖 `skrifa`，不另写 `read-fonts` 依赖。
+- crates.io 钉版是 **0.48.0**。Minimum Rust version **1.85.0**。文档在 <https://docs.rs/skrifa/0.48.0>。它 re-export 的 `FontRef` 来自 `read-fonts` 0.45.0。本库只直接依赖 `skrifa`，不另写 `read-fonts` 依赖。
 - `FontRef::new(&[u8]) -> Result<FontRef, ReadError>` 只接受单个字体，集合体会被拒绝。`FontRef::from_index(&[u8], index: u32) -> Result<FontRef, ReadError>` 接受 TTC 或单个字体；单个字体时 index 必须是 0。
 - `MetadataProvider` 为 `FontRef` 实现了 `charmap()`、`metrics(size, location)`、`glyph_metrics(size, location)`。
-- `Charmap::map(ch) -> Option<GlyphId>` 是码位到 **名义** glyph id。模块文档写明：这是 shaping 之前的一步，对复杂文字和连字不够。0.47.0 的 `CodepointSubtable::map_impl` 使用 `(gid != GlyphId::NOTDEF).then_some(gid)`。**`map` 不会返回 glyph 0**。`None` 同时表示「cmap 没有这项」和「这项指向 `.notdef`」。没有第二条 glyph 0 策略。
+- `Charmap::map(ch) -> Option<GlyphId>` 是码位到 **名义** glyph id。模块文档写明：这是 shaping 之前的一步，对复杂文字和连字不够。0.48.0 的 `CodepointSubtable::map_impl` 使用 `(gid != GlyphId::NOTDEF).then_some(gid)`。**`map` 不会返回 glyph 0**。`None` 同时表示「cmap 没有这项」和「这项指向 `.notdef`」。没有第二条 glyph 0 策略。
 - `GlyphMetrics::advance_width(glyph_id) -> Option<f32>`：hmtx 前进宽度；若构造时给了归一化 variation 坐标且存在 `HVAR`，会加上 delta。文档没有把它说成 GPOS kerning 或 shaping。glyph id 越界或字体数据无效时返回 `None`。
 - `Metrics` 含 `units_per_em: u16`、`ascent`、`descent`、`leading`。字段文档对 `descent` 的英文是 “Distance from the baseline to the bottom of the alignment box.”，**没有写符号**。`Metrics::new` 原样复制 hhea / typo 的 descender（保留 OpenType 符号），并把 `usWinDescent` **取负**，以便返回的 descent 一致。在 skrifa 视为一致的字体上，descent 为负。测量 PR 用夹具断言 `descent < 0`，`line_metrics` 只有一个公式，不按符号再分一支。
-- skrifa 0.47.0 的 crate 根是 `#![forbid(unsafe_code)]`。它**没有**声明「损坏字体不应 panic」。`ReadError` 和 `advance_width` 的 `None` 由我们变成 `Error`。不使用 `catch_unwind`。若上游仍然 panic，原样传播。`read-fonts` 里是否还有 `unsafe` 不在本库的承诺范围内；我们不直接依赖它。
+- skrifa 0.48.0 的 crate 根是 `#![forbid(unsafe_code)]`。它**没有**声明「损坏字体不应 panic」。`ReadError` 和 `advance_width` 的 `None` 由我们变成 `Error`。不使用 `catch_unwind`。若上游仍然 panic，原样传播。`read-fonts` 里是否还有 `unsafe` 不在本库的承诺范围内；我们不直接依赖它。
 - `Size::unscaled()` 给出字体单位（`linear_scale` 对 unscaled 返回 1.0）。`Size::new(ppem)` 会把度量缩放到该字号。v1 测量用 unscaled，自己乘 `font_size / units_per_em`，以便和 `KrillaGlyph` 的归一化 advance 是同一个数。
 - `skrifa::GlyphId` 与 `krilla::text::GlyphId` 是不同类型。两边都有 `new(u32)` / `to_u32()`。适配器只传 `u32`。不把 0.47 的 `GlyphId` 传进 krilla 0.42 那份 skrifa。
 
@@ -112,11 +112,11 @@
 1. **公共 API 是文档定义，内部才是 flow 协议。** 作者要的是「给出结构」，并且会用 AI 改这份结构。enum 可以被构造、diff 和可选地 serde。分页和拆表用消耗自身的 `split` 与只画 `Fragment` 的 `draw`，降低层是 `pub(crate)`。否决了把 Platypus trait 当作公共 API：LLM 和非 Rust 调用方写不出 trait object，而 v1 又没有必须由调用方提供的自定义流式对象。
 2. **一条字形管线。** 字素簇 → 簇内每个 Unicode scalar → `Charmap::map` → unscaled `advance_width` → 断行 → `KrillaGlyph`（advance 除以 upem，offset 为 0）→ `draw_glyphs(..., outlined: false)`。不整形。这样子集化嵌入的就是被测量的 glyph。`cur_x` 的增量是 `advance_norm * font_size`。
 3. **断行以「上一类 × 下一类」决策表为准，原子是扩展字素簇。** 允许在 `OP` 之前和 `CL` 之后断开，禁止在 `OP` 之后和 `CL` 之前断开。`好（世` 可以在 `（` 前换行，不是三个簇绑成一段不可断文本。溢出时只向左找最近的允许断点；放不下的那个簇进入下一行。放不下的 U+0020 会成为下一行行首，然后被丢掉。扩展 B、兼容表意文字和全角字母数字是 `Other`，不按 `ID` 逐字断。
-4. **缺字即错误。** `Charmap::map` 返回 `None` 就是 `MissingGlyph`。0.47.0 不会交出 glyph 0：未映射和指向 `.notdef` 都是 `None`。不另判 glyph 0，不画豆腐块，没有回退字体。
+4. **缺字即错误。** `Charmap::map` 返回 `None` 就是 `MissingGlyph`。0.48.0 不会交出 glyph 0：未映射和指向 `.notdef` 都是 `None`。不另判 glyph 0，不画豆腐块，没有回退字体。
 5. **页眉页脚画在页边距带里，不挤占正文框。** “Page X of Y” 在正文分页结束、页数已知之后再测量，不第二次回流。每个槽单独和正文宽度比；左槽贴正文左缘，中槽居中，右槽贴正文右缘。行盒高度用 `line_metrics.line_height`。
 6. **坐标系在适配器边界做恒等变换。** krilla 0.8.2 的 `Surface` 已是左上角、y 向下。`page_root_transform` 发生在 krilla 写内容流和注释的时候。转换函数不预翻转。内容流实验记录 krilla 写出的数字。
 7. **单 crate，适配器模块私有，`backend-krilla` 默认开启。** 发布物是一个库。关掉该 feature 时排版测试不必编译 krilla；`to_pdf` 在 feature 关闭时不存在。这是为了作者本地慢慢改排版，不是为了支持第二个后端。该 feature 从适配器 PR 起才存在，CI 也从那里开始传 `--features backend-krilla`。
-8. **MSRV 钉在 1.92。** 这是 krilla 0.8.2 的 MSRV，高于 skrifa 0.47.0 和 unicode-segmentation 1.13.3 的 1.85。在依赖 krilla 0.8.2 期间不承诺 stable-minus-two。
+8. **MSRV 钉在 1.92。** 这是 krilla 0.8.2 的 MSRV，高于 skrifa 0.48.0 和 unicode-segmentation 1.13.3 的 1.85。在依赖 krilla 0.8.2 期间不承诺 stable-minus-two。
 9. **表格 v1：列宽是 Fixed / Ratio / 至多一列 Auto；行不在行内拆开；可选重复表头；没有单元格合并。** 内容宽度是 `列宽 - 2 * cell_padding - border_width`。`Auto` 只吃剩余宽度，不按内容收缩。
 10. **版本策略：保持 0.x。** krilla 或 skrifa 的精确版本只在专用 PR 里改，并且必须重跑坐标测试和字形绘制测试。`publish = false` 保留到限额 PR 和信件夹具都通过之后。
 11. **`PageBreak` 用三态，不用一个布尔。** 文档开头的 `PageBreak` 是 no-op。内容之后的第一个 `PageBreak` 结束当前页，并挂起一张未提交的空页。紧接着的第二个 `PageBreak` 才提交一页空白正文；该页仍画页眉页脚，并计入页数。文档结束时丢掉仍未提交的挂起页，所以单独一个尾随 `PageBreak` 不会多出空白页。
@@ -211,7 +211,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 krilla = { version = "=0.8.2", optional = true, default-features = false, features = ["raster-images"] }
-skrifa = { version = "=0.47.0" }
+skrifa = { version = "=0.48.0" }
 unicode-segmentation = { version = "=1.13.3" }
 # "1" 是兼容 1.x 的要求，不是精确的 1.0.0。不要写成 version = "=1"。
 serde = { version = "1", optional = true, features = ["derive"] }
@@ -1420,7 +1420,7 @@ pub struct LineBox {
 
 | 威胁 | 严重性 | v1 行为 |
 | --- | --- | --- |
-| 损坏字体导致 panic | 中 | `FontRef::from_index` 的 `ReadError` 和 `advance_width` 的 `None` 变成 `Error::Font`。skrifa 0.47.0 禁止 `unsafe`，但没有承诺损坏字体不 panic。本库不包 `catch_unwind`。若仍然 panic，视为上游缺陷，原样传播 |
+| 损坏字体导致 panic | 中 | `FontRef::from_index` 的 `ReadError` 和 `advance_width` 的 `None` 变成 `Error::Font`。skrifa 0.48.0 禁止 `unsafe`，但没有承诺损坏字体不 panic。本库不包 `catch_unwind`。若仍然 panic，视为上游缺陷，原样传播 |
 | 损坏或解压炸弹图片 | 中 | 先拒绝超过 `max_image_bytes`（默认 32 MiB）的编码，这一步在 `Image::from_*` 之前。未开 `rayon` 时解码在 `from_*` 里同步发生，晚于这次检查的像素上限拦不住分配。解码成功后若 `(width as u64).saturating_mul(height as u64) > max_image_pixels as u64`（默认 4,000 万）或任一边大于 8192，返回 `Error::ImageTooLarge { width, height }` 并丢掉句柄。`u32` 相乘会在接近 `u32::MAX` 时回绕，所以用 `u64` 与 `saturating_mul`。解码过程中的过量分配仍是残余风险 |
 | 巨大的文档树 | 中 | 默认 `max_blocks` 100_000、`max_table_cells` 50_000、`max_paragraph_bytes` 1_000_000、`max_pages` 10_000。超过即 `Error::LimitExceeded`。块、单元格、段落字节、字体字节、图片字节在分页之前检查。页数在分页循环里检查。调用方可以降低限额。提高到默认值 4 倍以上也被拒绝 |
 | 超长不可断字符串 | 低 | 不循环尝试。`UnbreakableWiderThanFrame` |
@@ -1542,7 +1542,7 @@ crate 级 rustdoc 必须包含，而且要短：
 - crates.io krilla 0.8.2（MSRV 1.92.0）：<https://crates.io/crates/krilla/0.8.2>
 - 核实过的类型：`Document`、`Surface`、`Page`、`PageSettings`、`geom::Size::from_wh`、`text::Font`、`text::Glyph`、`text::KrillaGlyph`、`text::GlyphId`、`image::Image::from_png`（含 `interpolate: bool`）、`metadata::Metadata`、`metadata::TextDirection`、`annotation` 的 `page_root_transform`、`SerializeSettings`、`paint::Fill`、`paint::Stroke`、`num::NormalizedF32`、`color::rgb::Color`
 - krilla 0.8.2 源码：`num.rs` 的 `NormalizedF32::new` 返回 `Option`；`graphics/paint.rs` 的 `From<rgb::Color> for Paint`；`content.rs` 的 glyph `cur_x` / `cur_y` 与 `draw_image` 的 `from_row(width, 0, 0, -height, 0, height)`；`interactive/annotation.rs` 的 `page_root_transform`
-- skrifa 0.47.0：<https://docs.rs/skrifa/0.47.0> 。`Charmap::map` 过滤 glyph 0；`Metrics::new` 保留 hhea/typo 符号并取负 `usWinDescent`
+- skrifa 0.48.0：<https://docs.rs/skrifa/0.48.0> 。`Charmap::map` 过滤 glyph 0；`Metrics::new` 保留 hhea/typo 符号并取负 `usWinDescent`
 - unicode-segmentation 1.13.3：<https://crates.io/crates/unicode-segmentation/1.13.3>
 - ReportLab Platypus 第 5 章：<https://docs.reportlab.com/reportlab/userguide/ch5_platypus/>
 - Unicode 标准附件 #29（字素簇）与 #14（行断行）。v1 实现前者的 crate，只使用后者的一小部分思想，不声称兼容

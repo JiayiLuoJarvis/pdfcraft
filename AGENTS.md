@@ -30,7 +30,7 @@
 已钉死（见提案书「你已经定过的」）：
 
 - 不做 FOP / XSL-FO；股权架构图不做。
-- 底座 krilla。`quire-pdf` 不改用 pdf-writer、lopdf、printpdf。`quire-forms` 用自有的 `lopdf =0.34.0` 与 `skrifa =0.47.0`，见提案书 §10。`quire-forms` 不依赖 `quire-pdf`。
+- 底座 krilla。`quire-pdf` 不改用 pdf-writer、lopdf、printpdf。`quire-forms` 用自有的 `lopdf =0.34.0` 与 `skrifa =0.48.0`，见提案书 §10。`quire-forms` 不依赖 `quire-pdf`。
 - 行宽用 **skrifa** 量，不靠 krilla 文字绘制反推。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
 - 排版坐标：**左上原点，y 向下**；与 krilla 0.8.2 Surface 一致，适配器里对几何做恒等映射，不预翻转。
@@ -142,7 +142,7 @@ cargo doc -p quire-forms --no-deps
 
 - **Edition** `2021`，**MSRV** `1.92`（跟 krilla 0.8.2）；CI 用同一 toolchain。
 - **禁止** `unsafe`（`Cargo.toml` / `#![forbid(unsafe_code)]`）。
-- 依赖**按需引入、精确钉版本**（`=x.y.z`）。计划中的钉：`krilla =0.8.2`（`default-features = false`，开 `raster-images`）、`skrifa =0.47.0`、`unicode-segmentation =1.13.3`。未用到的依赖不要写进清单。
+- 依赖**按需引入、精确钉版本**（`=x.y.z`）。计划中的钉：`krilla =0.8.2`（`default-features = false`，开 `raster-images`）、`skrifa =0.48.0`、`unicode-segmentation =1.13.3`。未用到的依赖不要写进清单。
 - 不启用 krilla 的 `simple-text` / `rayon`；禁止 `Surface::draw_text`。
 - 测量与绘制同一条字形管线：charmap → advance → 断行 → 同一批 glyph id 再画。
 - 缺字策略以提案书 §4 为准（设计稿默认「缺字即错」；未确认前不要实现回退字体）。

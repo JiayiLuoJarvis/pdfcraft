@@ -215,7 +215,7 @@ v1 分期（实现顺序，不改变本节语义）：
 | 角色 | 拟定 | 备注 |
 | --- | --- | --- |
 | 读结构 / merge / 剥表 | `lopdf = "=0.34.0"` | 已用夹具验证可列字段 |
-| 量宽 / cmap | `skrifa = "=0.47.0"` | 与 `quire-pdf` 同钉，不依赖该 package |
+| 量宽 / glyphs | `skrifa = "=0.48.0"` | 与 `quire-pdf` 同钉，不依赖该 package |
 | overlay 绘制 | `lopdf` 拼内容流 | **不**默认引入 `pdf-writer` / `printpdf` |
 | 字体子集 | 可后置 | 先允许嵌整份 TTF 跑通 CJK；体积问题再单开 PR 钉 subsetter |
 

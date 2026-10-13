@@ -65,7 +65,7 @@
 - 不改勾的几何。不改默认字号 12、步长 0.5、最小字号 7、padding、行高系数这些数值，只改它们的可见性（R5）。字号搜索改为毫点，从调用方的字号起步；四舍五入后的毫点大于 256 pt 则在 `open` 之前拒绝。溢出比较去掉 0.05 pt。这两处循环改动与 0.05 pt 见「有意变化」，不要理解成只许删掉 `0.001`。
 - HTTP、写加密、写签名、XFA 运行时。
 - 日志框架、指标、feature flag。见 Observability。
-- 新依赖、`unsafe`、`thiserror`。`lopdf =0.34.0`、`skrifa =0.47.0`、`publish = false` 不动。
+- 新依赖、`unsafe`、`thiserror`。`lopdf =0.34.0`、`skrifa =0.48.0`、`publish = false` 不动。
 - 不把 UAX #14 引进 `layout.rs`。
 - 不把 U+00A0 / U+3000 折成 U+0020 当成 bug 修掉。这是 v1 已接受的规则。
 
@@ -915,7 +915,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
 - 不记录 PDF 字节，不记录字体字节，不把字节放进 `Error` 的 `Display`。
 - 加密输入仍拒绝。`prune` 不把 `/Encrypt` 当根，避免在已经拒绝的语义上再把加密字典保活。本 crate 不写加密，不调用 `Document::decrypt`。
 - 不增加「宽容模式」去嵌入缺表、缺字或修不好 head 的字体。该失败仍整份失败。
-- 依赖仍是钉死的 `lopdf =0.34.0` 与 `skrifa =0.47.0`。不引入解析器或网络库。
+- 依赖仍是钉死的 `lopdf =0.34.0` 与 `skrifa =0.48.0`。不引入解析器或网络库。
 
 ## Observability
 

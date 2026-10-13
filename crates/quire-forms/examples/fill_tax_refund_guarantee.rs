@@ -65,14 +65,8 @@ fn main() {
     }
     if env::var_os("QUIRE_FORMS_FONT").is_some() {
         for (name, value) in [
-            (
-                "companyName",
-                "香港恒盛國際貿易投資顧問有限公司",
-            ),
-            (
-                "recipientName",
-                "新懋企業管理顧問及公司秘書服務有限公司",
-            ),
+            ("companyName", "香港恒盛國際貿易投資顧問有限公司"),
+            ("recipientName", "新懋企業管理顧問及公司秘書服務有限公司"),
             ("address", "香港中環"),
             ("idTypeName", "中國"),
         ] {

@@ -52,7 +52,7 @@ quire-forms     ──X──→  quire-orgchart
 quire-orgchart  ──→  quire-pdf     # 图排完再 to_pdf；或只依赖将来极薄共享层
 ```
 
-- `quire-forms` 使用 `lopdf =0.34.0` 与 `skrifa =0.47.0`。`quire-forms` 不依赖 `krilla`。`quire-forms` 不依赖 `quire-pdf`。禁止为填表把第二套 PDF 栈引进 `quire-pdf`。
+- `quire-forms` 使用 `lopdf =0.34.0` 与 `skrifa =0.48.0`。`quire-forms` 不依赖 `krilla`。`quire-forms` 不依赖 `quire-pdf`。禁止为填表把第二套 PDF 栈引进 `quire-pdf`。
 - `quire-pdf` 内部模块 DAG 不变，见 [`module-dependency.md`](module-dependency.md)。不为「无环」再拆 `quire-pdf`。
 - 共享类型默认不抽包；重复到不可忍受再考虑极薄 `quire-geom` 类 crate。
 
@@ -99,4 +99,4 @@ CI 对 `quire-pdf` 保留原有 feature 矩阵。`quire-forms` 跑 `cargo test`�
 | 根 `[workspace]` + `crates/*` | 已落地 |
 | `quire-pdf` 迁入 `crates/quire-pdf` | 已落地 |
 | `quire-orgchart` 空壳 | 已落地 |
-| `quire-forms` 产品 API 与依赖 | 已确认，见提案书 §10。依赖为 `lopdf =0.34.0` 与 `skrifa =0.47.0`。不引入 `krilla`。与 `quire-pdf` 无依赖边。基础 `list_fields` 与 `fill_and_flatten` 已落地 |
+| `quire-forms` 产品 API 与依赖 | 已确认，见提案书 §10。依赖为 `lopdf =0.34.0` 与 `skrifa =0.48.0`。不引入 `krilla`。与 `quire-pdf` 无依赖边。基础 `list_fields` 与 `fill_and_flatten` 已落地 |
