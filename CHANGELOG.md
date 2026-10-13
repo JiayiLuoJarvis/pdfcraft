@@ -15,7 +15,8 @@ while remaining `0.x`.
 
 ### Added
 
-- `quire-forms` lists AcroForm widgets with `list_fields` and fills ASCII text, checkboxes, and choices with `fill_and_flatten`. A successful call removes every widget annotation and the catalog `AcroForm` entry. An empty field map still removes the form. Font bytes are an argument on `FillOptions`. The crate pins `lopdf` 0.34.0 and `skrifa` 0.47.0. It does not depend on `quire-pdf`. CJK fill, OTF fonts, alignment overrides, `line_below`, and `absolute_lines` are not in this change.
+- `quire-forms` `FillOptions` now covers production fill options. `h_align` / `v_align` and their overrides, `font_size_overrides`, `line_below`, and `absolute_lines` (`AbsoluteLine`, default red 0.8 pt). Unknown names in those maps follow `missing`. Vertical placement uses glyph ink. A last line of one glyph may drop the size by up to 2 pt. A TrueType collection is reduced to `FontBytes.index` before embed. CJK text fills when the caller supplies a `glyf` font. `QUIRE_FORMS_FONT` turns on the Chinese fixture test. Subsetting and OTF are still out.
+- `quire-forms` lists AcroForm widgets with `list_fields` and fills ASCII text, checkboxes, and choices with `fill_and_flatten`. A successful call removes every widget annotation and the catalog `AcroForm` entry. An empty field map still removes the form. Font bytes are an argument on `FillOptions`. The crate pins `lopdf` 0.34.0 and `skrifa` 0.47.0. It does not depend on `quire-pdf`. CJK fill, OTF fonts, `line_below`, and `absolute_lines` are not in this change.
 - Repository is a Cargo workspace: `crates/quire-pdf` (existing layout library), plus empty shells `quire-forms` and `quire-orgchart`. Boundaries are in `docs/workspace-crates-spec.md`. Callers depend on the crate they need; forms must not depend on `quire-pdf`.
 - `Ratio::new` builds a column weight. A weight that is not finite, or is not above zero, fails with `ErrorKind::ColumnWidths` before a table or a column set is assembled.
 - `tests/fixtures/quire-letter.ttf` is an OFL subset of Noto Sans SC Regular with family name QuireLetter. `tests/letter_layout.rs` lays out a confirmation letter through `layout_spec` and checks the recorded canvas. `to_pdf` only checks that the bytes start with `%PDF`.
@@ -32,6 +33,7 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `quire-forms` `FillOptions` is no longer `Copy` (alignment override maps are borrowed). Struct-update sites that relied on `Copy` need `Clone` or a fresh `FillOptions`.
 - **Breaking.** `quire-forms` no longer exports `DEFAULT_FONT_SIZE`, `MIN_FONT_SIZE`, `FONT_SIZE_STEP`, `LINE_HEIGHT_FACTOR`, `PAD_X`, `PAD_BOTTOM`, or `PAD_TOP`. The values are unchanged.
 - **Breaking.** `quire-forms` `ErrorKind::InvalidArgument` carries `field_name` and `reason: ArgumentReason` instead of `message`. `ErrorKind::FlattenFailed` carries `reason: FlattenReason` instead of `message`. The variant names are unchanged. `FontNotConfigured` always has a `source`. A non-finite content-stream number and an out-of-range font width fail instead of being written as 0.
 

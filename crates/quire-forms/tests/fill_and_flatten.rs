@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use quire_forms::{
-    fill_and_flatten, list_fields, ArgumentReason, ErrorKind, FieldValue, FillOptions, FontBytes,
+    fill_and_flatten, list_fields, AbsoluteLine, ArgumentReason, ErrorKind, FieldValue,
+    FillOptions, FlattenReason, FontBytes, HAlign, MissingName, VAlign,
 };
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -294,6 +295,178 @@ fn rejects_an_unknown_name() {
 }
 
 #[test]
+fn rejects_an_unknown_h_align_override() {
+    let font_bytes = font();
+    let mut overrides = HashMap::new();
+    overrides.insert("nope".to_string(), HAlign::Center);
+    let options = FillOptions {
+        font: Some(FontBytes {
+            bytes: &font_bytes,
+            index: 0,
+        }),
+        h_align_overrides: Some(&overrides),
+        ..FillOptions::default()
+    };
+    let err = fill_and_flatten(&fixture("basic_form.pdf"), &basic_fields(), &options).unwrap_err();
+    assert_eq!(
+        err.kind,
+        ErrorKind::UnknownField {
+            field_name: "nope".to_string(),
+        }
+    );
+}
+
+#[test]
+fn ignores_an_unknown_v_align_override_when_missing_is_ignore() {
+    let font_bytes = font();
+    let mut overrides = HashMap::new();
+    overrides.insert("nope".to_string(), VAlign::Top);
+    let options = FillOptions {
+        font: Some(FontBytes {
+            bytes: &font_bytes,
+            index: 0,
+        }),
+        missing: MissingName::Ignore,
+        v_align_overrides: Some(&overrides),
+        ..FillOptions::default()
+    };
+    let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &basic_fields(), &options).unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+}
+
+#[test]
+fn fills_with_center_align_and_a_left_override() {
+    let font_bytes = font();
+    let mut overrides = HashMap::new();
+    overrides.insert("level".to_string(), HAlign::Left);
+    let options = FillOptions {
+        font: Some(FontBytes {
+            bytes: &font_bytes,
+            index: 0,
+        }),
+        h_align: HAlign::Center,
+        h_align_overrides: Some(&overrides),
+        v_align: VAlign::Bottom,
+        ..FillOptions::default()
+    };
+    let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &basic_fields(), &options).unwrap();
+    let text = pdftotext(&pdf);
+    assert!(text.contains("Ada"), "{text:?}");
+    assert!(text.contains("Senior"), "{text:?}");
+    let left = fill_and_flatten(
+        &fixture("basic_form.pdf"),
+        &basic_fields(),
+        &FillOptions {
+            font: Some(FontBytes {
+                bytes: &font_bytes,
+                index: 0,
+            }),
+            h_align: HAlign::Left,
+            ..FillOptions::default()
+        },
+    )
+    .unwrap();
+    assert_ne!(pdf, left);
+}
+
+#[test]
+fn draws_a_line_below_without_filling_the_field() {
+    let mut below = HashMap::new();
+    below.insert("employee_name".to_string(), 5.0);
+    let options = FillOptions {
+        line_below: Some(&below),
+        ..FillOptions::default()
+    };
+    let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap();
+    let text = page_stream(&pdf);
+    assert!(text.contains(" RG"), "{text}");
+    assert!(text.contains(" l\nS"), "{text}");
+}
+
+#[test]
+fn rejects_an_unknown_line_below_name() {
+    let mut below = HashMap::new();
+    below.insert("nope".to_string(), 5.0);
+    let options = FillOptions {
+        line_below: Some(&below),
+        ..FillOptions::default()
+    };
+    let err = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap_err();
+    assert_eq!(
+        err.kind,
+        ErrorKind::UnknownField {
+            field_name: "nope".to_string(),
+        }
+    );
+}
+
+#[test]
+fn draws_an_absolute_line_and_rejects_a_missing_page() {
+    let font_bytes = font();
+    let line = AbsoluteLine::new(10.0, 20.0, 30.0, 20.0);
+    let options = FillOptions {
+        font: Some(FontBytes {
+            bytes: &font_bytes,
+            index: 0,
+        }),
+        absolute_lines: &[line],
+        ..FillOptions::default()
+    };
+    let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &basic_fields(), &options).unwrap();
+    let text = page_stream(&pdf);
+    assert!(text.contains("1 0 0 RG"), "{text}");
+    let missing = AbsoluteLine {
+        page_index: 9,
+        ..line
+    };
+    let options = FillOptions {
+        absolute_lines: &[missing],
+        ..FillOptions::default()
+    };
+    let err = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap_err();
+    assert_eq!(
+        err.kind,
+        ErrorKind::FlattenFailed {
+            reason: FlattenReason::PageOutOfRange { page_index: 9 },
+        }
+    );
+}
+
+#[test]
+fn font_size_override_changes_the_drawn_size() {
+    let font_bytes = font();
+    let mut overrides = HashMap::new();
+    overrides.insert("employee_name".to_string(), 8.0);
+    let options = FillOptions {
+        font: Some(FontBytes {
+            bytes: &font_bytes,
+            index: 0,
+        }),
+        font_size_overrides: Some(&overrides),
+        ..FillOptions::default()
+    };
+    let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &basic_fields(), &options).unwrap();
+    let text = page_stream(&pdf);
+    assert!(text.contains("8 Tf") || text.contains("8.0 Tf"), "{text}");
+}
+
+#[test]
+fn fills_chinese_text_when_quire_forms_font_is_set() {
+    let Some(path) = std::env::var_os("QUIRE_FORMS_FONT") else {
+        return;
+    };
+    let font_bytes = fs::read(path).unwrap();
+    let mut fields = HashMap::new();
+    fields.insert(
+        "employee_name_zh".to_string(),
+        FieldValue::Text("王".to_string()),
+    );
+    let pdf =
+        fill_and_flatten(&fixture("chinese_form.pdf"), &fields, &options(&font_bytes)).unwrap();
+    assert!(pdftotext(&pdf).contains('王'));
+}
+
+#[test]
 #[ignore = "CJK fill is deferred; this branch does not ship a CJK font"]
 fn fills_chinese_text() {
     let font_bytes = font();
@@ -425,6 +598,11 @@ fn has_agree_mark(doc: &lopdf::Document) -> bool {
     tokens
         .windows(AGREE_MARK.len())
         .any(|window| window == AGREE_MARK)
+}
+
+fn page_stream(pdf: &[u8]) -> String {
+    let doc = lopdf::Document::load_mem(pdf).unwrap();
+    page_text(&doc)
 }
 
 fn page_text(doc: &lopdf::Document) -> String {

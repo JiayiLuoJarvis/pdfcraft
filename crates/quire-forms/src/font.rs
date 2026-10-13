@@ -12,6 +12,10 @@ use crate::error::{Error, ErrorKind, FontFault, Result};
 pub(crate) struct Glyph {
     pub(crate) id: u16,
     pub(crate) units: f32,
+    /// Glyph ink `yMin` in font units. `0` when the face has no bounds.
+    pub(crate) y_min: f32,
+    /// Glyph ink `yMax` in font units. `0` when the face has no bounds.
+    pub(crate) y_max: f32,
 }
 
 pub(crate) struct Face<'a> {
@@ -29,9 +33,6 @@ pub(crate) enum GlyphFault {
 
 impl<'a> Face<'a> {
     pub(crate) fn load(bytes: &'a [u8], index: u32) -> Result<Self> {
-        if bytes.starts_with(b"ttcf") {
-            return Err(unusable(FontFault::Collection));
-        }
         let font = FontRef::from_index(bytes, index)
             .map_err(|err| Error::from(ErrorKind::FontNotConfigured).with_source(err))?;
         if font.table_data(Tag::new(b"glyf")).is_none() {
@@ -69,12 +70,22 @@ impl<'a> Face<'a> {
             return Err(GlyphFault::Missing(scalar));
         };
         let id = u16::try_from(gid.to_u32()).map_err(|_| GlyphFault::NoAdvance)?;
-        let units = self
+        let metrics = self
             .font
-            .glyph_metrics(Size::unscaled(), LocationRef::default())
-            .advance_width(gid)
-            .ok_or(GlyphFault::NoAdvance)?;
-        Ok(Glyph { id, units })
+            .glyph_metrics(Size::unscaled(), LocationRef::default());
+        let units = metrics.advance_width(gid).ok_or(GlyphFault::NoAdvance)?;
+        let (y_min, y_max) = match metrics.bounds(gid) {
+            Some(bounds) if bounds.y_min.is_finite() && bounds.y_max.is_finite() => {
+                (bounds.y_min, bounds.y_max)
+            }
+            _ => (0.0, 0.0),
+        };
+        Ok(Glyph {
+            id,
+            units,
+            y_min,
+            y_max,
+        })
     }
 }
 
@@ -83,10 +94,14 @@ pub(crate) struct FontFile {
 }
 
 impl FontFile {
-    pub(crate) fn from_source(source: &[u8]) -> Result<Self> {
-        let mut file = Self {
-            bytes: source.to_vec(),
+    /// Copies one TrueType face. A collection is reduced to the face at `index`.
+    pub(crate) fn from_source(source: &[u8], index: u32) -> Result<Self> {
+        let bytes = if source.starts_with(b"ttcf") {
+            extract_collection_face(source, index)?
+        } else {
+            source.to_vec()
         };
+        let mut file = Self { bytes };
         file.zero_head_times()?;
         Ok(file)
     }
@@ -96,9 +111,6 @@ impl FontFile {
     }
 
     pub(crate) fn zero_head_times(&mut self) -> Result<()> {
-        if self.bytes.starts_with(b"ttcf") {
-            return Err(unusable(FontFault::Collection));
-        }
         if self.bytes.len() < 12 {
             return Err(unusable(FontFault::Head));
         }
@@ -289,6 +301,80 @@ fn em1000(units: f32, upem: f32) -> Result<i64> {
     Ok(rounded as i64)
 }
 
+/// Copies one `sfnt` out of a `ttcf` collection. Table bytes are shared in the
+/// collection, so the face is rebuilt rather than sliced.
+fn extract_collection_face(bytes: &[u8], index: u32) -> Result<Vec<u8>> {
+    if bytes.len() < 12 {
+        return Err(unusable(FontFault::Collection));
+    }
+    let count = u32be(&bytes[8..12]);
+    if index >= count {
+        return Err(unusable(FontFault::Collection));
+    }
+    let index = usize::try_from(index).map_err(|_| unusable(FontFault::Collection))?;
+    let entry = 12 + index * 4;
+    if entry + 4 > bytes.len() {
+        return Err(unusable(FontFault::Collection));
+    }
+    let sfnt = usize::try_from(u32be(&bytes[entry..entry + 4]))
+        .map_err(|_| unusable(FontFault::Collection))?;
+    if sfnt + 12 > bytes.len() {
+        return Err(unusable(FontFault::Collection));
+    }
+    let tables = usize::from(u16::from_be_bytes([bytes[sfnt + 4], bytes[sfnt + 5]]));
+    let dir = sfnt + 12;
+    if dir + tables * 16 > bytes.len() {
+        return Err(unusable(FontFault::Head));
+    }
+    let mut records = Vec::with_capacity(tables);
+    for table in 0..tables {
+        let at = dir + table * 16;
+        let mut tag = [0_u8; 4];
+        let mut checksum = [0_u8; 4];
+        tag.copy_from_slice(&bytes[at..at + 4]);
+        checksum.copy_from_slice(&bytes[at + 4..at + 8]);
+        let off = usize::try_from(u32be(&bytes[at + 8..at + 12]))
+            .map_err(|_| unusable(FontFault::Head))?;
+        let len = usize::try_from(u32be(&bytes[at + 12..at + 16]))
+            .map_err(|_| unusable(FontFault::Head))?;
+        if off.saturating_add(len) > bytes.len() {
+            return Err(unusable(FontFault::Head));
+        }
+        records.push((tag, checksum, bytes[off..off + len].to_vec()));
+    }
+    let count_tables = u16::try_from(records.len()).map_err(|_| unusable(FontFault::Head))?;
+    let mut search_units = 1_u16;
+    let mut entry_selector = 0_u16;
+    while usize::from(search_units) * 2 <= records.len() {
+        search_units *= 2;
+        entry_selector += 1;
+    }
+    let search_range = search_units.saturating_mul(16);
+    let range_shift = count_tables.saturating_mul(16).saturating_sub(search_range);
+    let mut out = vec![0_u8; 12 + records.len() * 16];
+    out[0..4].copy_from_slice(&bytes[sfnt..sfnt + 4]);
+    out[4..6].copy_from_slice(&count_tables.to_be_bytes());
+    out[6..8].copy_from_slice(&search_range.to_be_bytes());
+    out[8..10].copy_from_slice(&entry_selector.to_be_bytes());
+    out[10..12].copy_from_slice(&range_shift.to_be_bytes());
+    let mut cursor = out.len();
+    for (table, (tag, checksum, data)) in records.iter().enumerate() {
+        let at = 12 + table * 16;
+        out[at..at + 4].copy_from_slice(tag);
+        out[at + 4..at + 8].copy_from_slice(checksum);
+        let pad = (4 - (cursor % 4)) % 4;
+        out.extend(std::iter::repeat_n(0, pad));
+        cursor += pad;
+        let off = u32::try_from(cursor).map_err(|_| unusable(FontFault::Head))?;
+        let len = u32::try_from(data.len()).map_err(|_| unusable(FontFault::Head))?;
+        out[at + 8..at + 12].copy_from_slice(&off.to_be_bytes());
+        out[at + 12..at + 16].copy_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(data);
+        cursor = out.len();
+    }
+    Ok(out)
+}
+
 fn unusable(fault: FontFault) -> Error {
     Error::from(ErrorKind::FontNotConfigured).with_source(fault)
 }
@@ -334,5 +420,20 @@ mod tests {
         );
 
         assert_eq!(em1000(100_000.0, 1.0).unwrap(), 100_000_000);
+    }
+
+    #[test]
+    fn extracts_one_face_from_a_collection_when_present() {
+        let path = std::path::Path::new(
+            "/mnt/data/dev/hcsw-pdfcraft/backend/assets/fonts/SourceHanSerifHK/SourceHanSerifHK-Regular.ttc",
+        );
+        if !path.is_file() {
+            return;
+        }
+        let bytes = std::fs::read(path).unwrap();
+        let file = super::FontFile::from_source(&bytes, 0).unwrap();
+        assert!(!file.bytes().starts_with(b"ttcf"));
+        let face = super::Face::load(file.bytes(), 0).unwrap();
+        assert!(face.glyph('中').is_ok());
     }
 }

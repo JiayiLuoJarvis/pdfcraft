@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// Starting font size in points.
 pub(crate) const DEFAULT_FONT_SIZE: f32 = 12.0;
 
@@ -73,7 +75,8 @@ pub enum FieldValue {
 
 /// Bytes of one TrueType font with a `glyf` table.
 ///
-/// There is no process-wide default font. A font collection is rejected.
+/// There is no process-wide default font. `index` selects a face. A collection
+/// is reduced to that face before it is embedded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontBytes<'a> {
     /// Font file bytes.
@@ -92,11 +95,79 @@ pub enum MissingName {
     Ignore,
 }
 
+/// Horizontal placement of a text line inside a widget rectangle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HAlign {
+    /// Line starts at the left padding.
+    #[default]
+    Left,
+    /// Line is centered in the full widget width.
+    Center,
+    /// Line ends at the right padding.
+    Right,
+}
+
+/// Vertical placement of the text block inside a widget rectangle.
+///
+/// Metrics use the face ascent and descent. Ink-box alignment is a later change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VAlign {
+    /// Block sits on the bottom padding.
+    #[default]
+    Bottom,
+    /// Block is centered between the top and bottom padding.
+    Center,
+    /// Block hangs from the top padding.
+    Top,
+}
+
+/// A stroke in PDF user space. The origin is the page bottom-left.
+///
+/// Defaults match the production decorative line: red, 0.8 pt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AbsoluteLine {
+    /// Start x, in points.
+    pub x1: f32,
+    /// Start y, in points.
+    pub y1: f32,
+    /// End x, in points.
+    pub x2: f32,
+    /// End y, in points.
+    pub y2: f32,
+    /// Zero-based page index.
+    pub page_index: usize,
+    /// Stroke width in points.
+    pub stroke_width: f32,
+    /// Red channel in `0.0..=1.0`.
+    pub red: f32,
+    /// Green channel in `0.0..=1.0`.
+    pub green: f32,
+    /// Blue channel in `0.0..=1.0`.
+    pub blue: f32,
+}
+
+impl AbsoluteLine {
+    /// A red 0.8 pt stroke on page 0.
+    #[must_use]
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self {
+            x1,
+            y1,
+            x2,
+            y2,
+            page_index: 0,
+            stroke_width: 0.8,
+            red: 1.0,
+            green: 0.0,
+            blue: 0.0,
+        }
+    }
+}
+
 /// Settings for one [`crate::fill_and_flatten`] call.
 ///
-/// Text is left aligned and bottom aligned. Per-field alignment, `line_below`,
-/// and `absolute_lines` are not part of this version.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Default text alignment is left and bottom.
+#[derive(Debug, Clone, PartialEq)]
 pub struct FillOptions<'a> {
     /// Font used when a text or choice string is drawn.
     ///
@@ -105,7 +176,25 @@ pub struct FillOptions<'a> {
     /// Starting size in points. The fitter may step down to 7 pt.
     pub font_size: f32,
     /// Behavior for names that are not in the PDF.
+    ///
+    /// Also applies to names in [`Self::h_align_overrides`] and
+    /// [`Self::v_align_overrides`].
     pub missing: MissingName,
+    /// Default horizontal alignment for text and choice fields.
+    pub h_align: HAlign,
+    /// Default vertical alignment for text and choice fields.
+    pub v_align: VAlign,
+    /// Per-field horizontal alignment. Unknown names follow [`Self::missing`].
+    pub h_align_overrides: Option<&'a HashMap<String, HAlign>>,
+    /// Per-field vertical alignment. Unknown names follow [`Self::missing`].
+    pub v_align_overrides: Option<&'a HashMap<String, VAlign>>,
+    /// Starting size per field name, in points. Unknown names follow [`Self::missing`].
+    pub font_size_overrides: Option<&'a HashMap<String, f32>>,
+    /// Field name to a point offset below the widget bottom. Draws a 1 pt black rule
+    /// the width of the widget. The line does not need a font.
+    pub line_below: Option<&'a HashMap<String, f32>>,
+    /// Page-absolute strokes. Names here are not field names.
+    pub absolute_lines: &'a [AbsoluteLine],
 }
 
 impl Default for FillOptions<'_> {
@@ -114,6 +203,13 @@ impl Default for FillOptions<'_> {
             font: None,
             font_size: DEFAULT_FONT_SIZE,
             missing: MissingName::Error,
+            h_align: HAlign::Left,
+            v_align: VAlign::Bottom,
+            h_align_overrides: None,
+            v_align_overrides: None,
+            font_size_overrides: None,
+            line_below: None,
+            absolute_lines: &[],
         }
     }
 }

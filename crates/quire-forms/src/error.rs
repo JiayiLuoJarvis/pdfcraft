@@ -61,6 +61,11 @@ pub enum ArgumentReason {
     CheckboxOnText,
     /// 列表或组合框收到了 `FieldValue::CheckBox`。
     CheckboxOnChoice,
+    /// A coordinate or offset is not finite.
+    NonFinite {
+        /// Rejected number.
+        value: f32,
+    },
 }
 
 /// Why [`ErrorKind::FlattenFailed`] could not finish the PDF.
@@ -176,6 +181,7 @@ impl fmt::Display for ErrorKind {
                     let name = field_name.as_deref().unwrap_or("field");
                     write!(f, "{name} does not take a checkbox value")
                 }
+                ArgumentReason::NonFinite { .. } => write!(f, "value must be finite"),
             },
             Self::FlattenFailed { reason } => match reason {
                 FlattenReason::PageOutOfRange { page_index } => {

@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, ErrorKind, FlattenReason, FontFault, Result};
-use crate::fields::PAD_X;
+use crate::fields::{HAlign, PAD_X};
 use crate::font::PreparedFont;
 use crate::inspect::{PdfDoc, PdfRect};
 use crate::layout::LaidText;
@@ -17,14 +17,33 @@ const CHECK_STROKE_RATIO: f32 = 0.14;
 const CHECK_STROKE_MIN: f32 = 0.8;
 
 pub(crate) enum Mark {
-    Text(LaidText),
+    Text {
+        laid: LaidText,
+        h_align: HAlign,
+    },
     Check,
+    /// Black 1 pt rule `offset` points below the widget bottom.
+    LineBelow {
+        offset: f32,
+    },
 }
 
 pub(crate) struct Stamp {
     pub(crate) page_index: usize,
     pub(crate) rect: PdfRect,
     pub(crate) mark: Mark,
+}
+
+pub(crate) struct Stroke {
+    pub(crate) page_index: usize,
+    pub(crate) x1: f32,
+    pub(crate) y1: f32,
+    pub(crate) x2: f32,
+    pub(crate) y2: f32,
+    pub(crate) width: f32,
+    pub(crate) red: f32,
+    pub(crate) green: f32,
+    pub(crate) blue: f32,
 }
 
 struct Content {
@@ -68,14 +87,24 @@ impl Content {
         Ok(())
     }
 
-    fn text(&mut self, rect: PdfRect, laid: &LaidText, font_name: &str) -> Result<()> {
+    fn text(
+        &mut self,
+        rect: PdfRect,
+        laid: &LaidText,
+        h_align: HAlign,
+        font_name: &str,
+    ) -> Result<()> {
         self.clip(rect)?;
         self.push("0 0 0 rg\nBT\n");
-        let x = rect.x0 + PAD_X;
-        for (baseline, glyphs) in laid.lines() {
+        for (baseline, width, glyphs) in laid.lines() {
             if glyphs.is_empty() {
                 continue;
             }
+            let x = match h_align {
+                HAlign::Left => rect.x0 + PAD_X,
+                HAlign::Right => rect.x1 - PAD_X - width,
+                HAlign::Center => rect.x0 + (rect.width() - width) / 2.0,
+            };
             self.push(&format!("/{font_name} {} Tf\n", pdf_num(laid.size())?));
             self.push(&format!(
                 "1 0 0 1 {} {} Tm\n<",
@@ -88,6 +117,33 @@ impl Content {
             self.push("> Tj\n");
         }
         self.push("ET\nQ\n");
+        Ok(())
+    }
+
+    fn line_below(&mut self, rect: PdfRect, offset: f32) -> Result<()> {
+        let y = rect.y0 - offset;
+        self.push(&format!(
+            "q\n0 0 0 RG\n1 w\n{} {} m\n{} {} l\nS\nQ\n",
+            pdf_num(rect.x0)?,
+            pdf_num(y)?,
+            pdf_num(rect.x1)?,
+            pdf_num(y)?,
+        ));
+        Ok(())
+    }
+
+    fn stroke(&mut self, stroke: &Stroke) -> Result<()> {
+        self.push(&format!(
+            "q\n{} {} {} RG\n{} w\n{} {} m\n{} {} l\nS\nQ\n",
+            pdf_num(stroke.red)?,
+            pdf_num(stroke.green)?,
+            pdf_num(stroke.blue)?,
+            pdf_num(stroke.width)?,
+            pdf_num(stroke.x1)?,
+            pdf_num(stroke.y1)?,
+            pdf_num(stroke.x2)?,
+            pdf_num(stroke.y2)?,
+        ));
         Ok(())
     }
 
@@ -104,6 +160,7 @@ impl PdfDoc {
     pub(crate) fn paint(
         &mut self,
         stamps: &[Stamp],
+        strokes: &[Stroke],
         font: Option<&PreparedFont<'_>>,
     ) -> Result<()> {
         let font_id = match font {
@@ -115,14 +172,30 @@ impl PdfDoc {
         for stamp in stamps {
             by_page.entry(stamp.page_index).or_default().push(stamp);
         }
-        for (index, page_stamps) in by_page {
+        let mut strokes_by_page: BTreeMap<usize, Vec<&Stroke>> = BTreeMap::new();
+        for stroke in strokes {
+            strokes_by_page
+                .entry(stroke.page_index)
+                .or_default()
+                .push(stroke);
+        }
+        let mut pages_to_paint = BTreeSet::new();
+        pages_to_paint.extend(by_page.keys().copied());
+        pages_to_paint.extend(strokes_by_page.keys().copied());
+        for index in pages_to_paint {
+            let page_stamps = by_page.get(&index).map_or(&[][..], Vec::as_slice);
+            let page_strokes = strokes_by_page.get(&index).map_or(&[][..], Vec::as_slice);
             let page_id = pages.get(index).copied().ok_or_else(|| {
                 Error::from(ErrorKind::FlattenFailed {
                     reason: FlattenReason::PageOutOfRange { page_index: index },
                 })
             })?;
             let needs_font = page_stamps.iter().any(|stamp| {
-                matches!(&stamp.mark, Mark::Text(text) if text.lines().any(|(_, glyphs)| !glyphs.is_empty()))
+                matches!(
+                    &stamp.mark,
+                    Mark::Text { laid, .. }
+                        if laid.lines().any(|(_, _, glyphs)| !glyphs.is_empty())
+                )
             });
             let font_name = if needs_font {
                 let font_id = font_id.ok_or_else(|| {
@@ -132,7 +205,7 @@ impl PdfDoc {
             } else {
                 None
             };
-            let content = page_bytes(&page_stamps, font_name.as_deref())?;
+            let content = page_bytes(page_stamps, page_strokes, font_name.as_deref())?;
             self.add_page_contents(page_id, content)?;
         }
         self.strip_form()?;
@@ -141,17 +214,21 @@ impl PdfDoc {
     }
 }
 
-fn page_bytes(stamps: &[&Stamp], font_name: Option<&str>) -> Result<Vec<u8>> {
+fn page_bytes(stamps: &[&Stamp], strokes: &[&Stroke], font_name: Option<&str>) -> Result<Vec<u8>> {
     let mut content = Content { buf: Vec::new() };
     for stamp in stamps {
         match &stamp.mark {
             Mark::Check => content.check(stamp.rect)?,
-            Mark::Text(text) => {
+            Mark::Text { laid, h_align } => {
                 if let Some(font_name) = font_name {
-                    content.text(stamp.rect, text, font_name)?;
+                    content.text(stamp.rect, laid, *h_align, font_name)?;
                 }
             }
+            Mark::LineBelow { offset } => content.line_below(stamp.rect, *offset)?,
         }
+    }
+    for stroke in strokes {
+        content.stroke(stroke)?;
     }
     Ok(content.into_bytes())
 }

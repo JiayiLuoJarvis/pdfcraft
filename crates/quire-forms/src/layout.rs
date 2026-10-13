@@ -1,5 +1,5 @@
 use crate::error::{Error, ErrorKind, FontFault, Result};
-use crate::fields::{LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP, PAD_X};
+use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP, PAD_X};
 use crate::font::{Face, GlyphFault};
 use crate::inspect::PdfRect;
 
@@ -12,12 +12,16 @@ pub(crate) struct GlyphUse {
     pub(crate) id: u16,
     pub(crate) scalar: char,
     pub(crate) units: f32,
+    pub(crate) y_min: f32,
+    pub(crate) y_max: f32,
 }
 
 #[derive(Debug)]
 struct PlacedLine {
     glyphs: Vec<GlyphUse>,
     baseline: f32,
+    /// Advance width of the line in points.
+    width: f32,
 }
 
 #[derive(Debug)]
@@ -39,6 +43,7 @@ impl LaidText {
         text: &str,
         rect: PdfRect,
         start_size: f32,
+        v_align: VAlign,
     ) -> Result<Self> {
         if text.is_empty() {
             return Ok(Self {
@@ -48,7 +53,9 @@ impl LaidText {
         }
         let rounded = (f64::from(start_size) * 1000.0).round();
         if rounded < 1.0 {
-            return lay_at(face, text, rect, start_size).map_err(|err| fail(field_name, &err));
+            return lay_at(face, text, rect, start_size, v_align)
+                .map(|laid| shrink_orphan(face, text, rect, v_align, 0, laid))
+                .map_err(|err| fail(field_name, &err));
         }
         #[allow(clippy::cast_possible_truncation)] // 第 2 步已拒绝放不进 i64 的值
         let mut mp = rounded as i64;
@@ -56,8 +63,8 @@ impl LaidText {
             #[allow(clippy::cast_precision_loss)]
             // 上限 256_000，f32 能精确表示；不要改除法来躲 lint
             let size = mp as f32 / 1000.0;
-            match lay_at(face, text, rect, size) {
-                Ok(laid) => return Ok(laid),
+            match lay_at(face, text, rect, size, v_align) {
+                Ok(laid) => return Ok(shrink_orphan(face, text, rect, v_align, mp, laid)),
                 Err(FitError::TooBig) => {
                     if mp <= MIN_MP {
                         return Err(fail(field_name, &FitError::TooBig));
@@ -74,11 +81,11 @@ impl LaidText {
         self.size
     }
 
-    /// 每一行的基线，以及该行字形（空行的切片为空）。`Content::text` 用这个。
-    pub(crate) fn lines(&self) -> impl Iterator<Item = (f32, &[GlyphUse])> + '_ {
+    /// 每一行的基线、进宽（pt）、以及该行字形（空行的切片为空）。`Content::text` 用这个。
+    pub(crate) fn lines(&self) -> impl Iterator<Item = (f32, f32, &[GlyphUse])> + '_ {
         self.lines
             .iter()
-            .map(|line| (line.baseline, line.glyphs.as_slice()))
+            .map(|line| (line.baseline, line.width, line.glyphs.as_slice()))
     }
 
     /// 展平所有行。只给 `record` 折叠 `used`。不要拿它画 `Tm`。
@@ -111,6 +118,7 @@ fn lay_at(
     text: &str,
     rect: PdfRect,
     size: f32,
+    v_align: VAlign,
 ) -> std::result::Result<LaidText, FitError> {
     let max_w = rect.width() - (PAD_X * 2.0);
     let inner_h = rect.height() - PAD_TOP - PAD_BOTTOM;
@@ -130,7 +138,7 @@ fn lay_at(
         }
         built.extend(wrap(face, &tokens, max_units)?);
     }
-    place(face, rect, size, built)
+    place(face, rect, size, v_align, built)
 }
 
 fn fit_fault(fault: GlyphFault) -> FitError {
@@ -146,6 +154,8 @@ fn map_scalar(face: &Face<'_>, scalar: char) -> std::result::Result<GlyphUse, Fi
         id: glyph.id,
         scalar,
         units: glyph.units,
+        y_min: glyph.y_min,
+        y_max: glyph.y_max,
     })
 }
 
@@ -280,10 +290,58 @@ fn hard_break(
     Ok(lines)
 }
 
+/// `(yMin, yMax)` of a line in font units. An empty line is `(0, 0)`.
+fn line_ink(glyphs: &[GlyphUse]) -> (f32, f32) {
+    let mut bottom = 0.0_f32;
+    let mut top = 0.0_f32;
+    for glyph in glyphs {
+        bottom = bottom.min(glyph.y_min);
+        top = top.max(glyph.y_max);
+    }
+    (bottom, top)
+}
+
+/// Python drops the size by up to 2 pt when the last line is a single glyph, if that
+/// yields fewer lines. `chosen_mp` is the size that already fit, in millipoints.
+fn shrink_orphan(
+    face: &Face<'_>,
+    text: &str,
+    rect: PdfRect,
+    v_align: VAlign,
+    chosen_mp: i64,
+    laid: LaidText,
+) -> LaidText {
+    let Some(last) = laid.lines.last() else {
+        return laid;
+    };
+    let visible = last
+        .glyphs
+        .iter()
+        .filter(|glyph| !glyph.scalar.is_whitespace())
+        .count();
+    if laid.lines.len() < 2 || visible != 1 || chosen_mp <= MIN_MP {
+        return laid;
+    }
+    let floor = (chosen_mp - 2_000).max(MIN_MP);
+    let mut probe = chosen_mp - STEP_MP;
+    while probe >= floor {
+        #[allow(clippy::cast_precision_loss)]
+        let size = probe as f32 / 1000.0;
+        if let Ok(candidate) = lay_at(face, text, rect, size, v_align) {
+            if candidate.lines.len() < laid.lines.len() {
+                return candidate;
+            }
+        }
+        probe -= STEP_MP;
+    }
+    laid
+}
+
 fn place(
     face: &Face<'_>,
     rect: PdfRect,
     size: f32,
+    v_align: VAlign,
     lines: Vec<Vec<GlyphUse>>,
 ) -> std::result::Result<LaidText, FitError> {
     if lines.is_empty() {
@@ -296,18 +354,23 @@ fn place(
         return Err(FitError::TooBig);
     };
     let scale = size / face.upem();
-    let ascent = face.ascent() * scale;
-    let descent = face.descent() * scale;
     let line_h = size * LINE_HEIGHT_FACTOR;
     let count = f32::from(count_u);
-    let block = (ascent - descent) + (count - 1.0) * line_h;
-    let inner_h = rect.height() - PAD_TOP - PAD_BOTTOM;
-    if block > inner_h {
-        return Err(FitError::TooBig);
-    }
-    let baseline_last = rect.y0 + PAD_BOTTOM - descent;
+    let ink_top = line_ink(lines.first().map(Vec::as_slice).unwrap_or_default()).1;
+    let ink_bottom = line_ink(lines.last().map(Vec::as_slice).unwrap_or_default()).0;
+    let block = scale * (ink_top - ink_bottom) + (count - 1.0) * line_h;
+    let baseline_last = match v_align {
+        VAlign::Bottom => rect.y0 + PAD_BOTTOM - scale * ink_bottom,
+        VAlign::Top => rect.y1 - PAD_TOP - scale * ink_top - (count - 1.0) * line_h,
+        VAlign::Center => {
+            let block_bottom = f32::midpoint(rect.y0, rect.y1) - block / 2.0;
+            block_bottom - scale * ink_bottom
+        }
+    };
     let baseline_first = baseline_last + (count - 1.0) * line_h;
-    if baseline_first + ascent > rect.y1 - PAD_TOP {
+    let block_bottom = baseline_last + scale * ink_bottom;
+    let block_top = baseline_first + scale * ink_top;
+    if block_bottom < rect.y0 + PAD_BOTTOM - 0.01 || block_top > rect.y1 - PAD_TOP + 0.01 {
         return Err(FitError::TooBig);
     }
     let mut placed = Vec::with_capacity(lines.len());
@@ -315,7 +378,9 @@ fn place(
         let Ok(index) = u16::try_from(index) else {
             return Err(FitError::TooBig);
         };
+        let width_units: f32 = glyphs.iter().map(|glyph| glyph.units).sum();
         placed.push(PlacedLine {
+            width: width_units * scale,
             glyphs,
             baseline: baseline_first - f32::from(index) * line_h,
         });
@@ -330,7 +395,7 @@ fn place(
 mod tests {
     use super::{GlyphUse, LaidText};
     use crate::error::ErrorKind;
-    use crate::fields::{LINE_HEIGHT_FACTOR, PAD_BOTTOM};
+    use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP};
     use crate::font::Face;
     use crate::inspect::PdfRect;
 
@@ -353,7 +418,7 @@ mod tests {
         rect: PdfRect,
         size: f32,
     ) -> crate::error::Result<LaidText> {
-        LaidText::fit(face, "employee_name", text, rect, size)
+        LaidText::fit(face, "employee_name", text, rect, size, VAlign::Bottom)
     }
 
     #[test]
@@ -366,7 +431,7 @@ mod tests {
                 12.0,
             )
             .unwrap();
-            let lines: Vec<_> = laid.lines().map(|(_, glyphs)| scalars(glyphs)).collect();
+            let lines: Vec<_> = laid.lines().map(|(_, _, glyphs)| scalars(glyphs)).collect();
             assert_eq!(
                 lines,
                 vec![vec!['h', 'e', 'l', 'l', 'o'], vec!['w', 'o', 'r', 'l', 'd']]
@@ -380,7 +445,7 @@ mod tests {
     fn breaks_an_overwide_ascii_word_per_glyph() {
         with_face(|face| {
             let laid = fit(face, "xxxx", PdfRect::new(0.0, 0.0, 10.0, 80.0), 12.0).unwrap();
-            let lines: Vec<_> = laid.lines().map(|(_, glyphs)| scalars(glyphs)).collect();
+            let lines: Vec<_> = laid.lines().map(|(_, _, glyphs)| scalars(glyphs)).collect();
             assert_eq!(lines, vec![vec!['x'], vec!['x'], vec!['x'], vec!['x']]);
             assert_eq!(laid.size().to_bits(), 12.0_f32.to_bits());
         });
@@ -391,8 +456,8 @@ mod tests {
         with_face(|face| {
             let laid = fit(face, "a\nb", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
             let lines: Vec<_> = laid.lines().collect();
-            assert_eq!(scalars(lines[0].1), vec!['a']);
-            assert_eq!(scalars(lines[1].1), vec!['b']);
+            assert_eq!(scalars(lines[0].2), vec!['a']);
+            assert_eq!(scalars(lines[1].2), vec!['b']);
             let gap = lines[0].0 - lines[1].0;
             assert_eq!(gap.to_bits(), (12.0 * LINE_HEIGHT_FACTOR).to_bits());
         });
@@ -436,9 +501,52 @@ mod tests {
         with_face(|face| {
             let rect = PdfRect::new(0.0, 100.0, 200.0, 200.0);
             let laid = fit(face, "a", rect, 12.0).unwrap();
-            let (baseline, _) = laid.lines().next().unwrap();
+            let (baseline, _, glyphs) = laid.lines().next().unwrap();
             let scale = laid.size() / face.upem();
-            let expected = rect.y0 + PAD_BOTTOM - face.descent() * scale;
+            let ink_bottom = glyphs
+                .iter()
+                .map(|glyph| glyph.y_min)
+                .fold(0.0_f32, f32::min);
+            let expected = rect.y0 + PAD_BOTTOM - scale * ink_bottom;
+            assert_eq!(baseline.to_bits(), expected.to_bits());
+        });
+    }
+
+    #[test]
+    fn aligns_a_single_line_to_the_top() {
+        with_face(|face| {
+            let rect = PdfRect::new(0.0, 100.0, 200.0, 200.0);
+            let laid = LaidText::fit(face, "employee_name", "a", rect, 12.0, VAlign::Top).unwrap();
+            let (baseline, _, glyphs) = laid.lines().next().unwrap();
+            let scale = laid.size() / face.upem();
+            let ink_top = glyphs
+                .iter()
+                .map(|glyph| glyph.y_max)
+                .fold(0.0_f32, f32::max);
+            let expected = rect.y1 - PAD_TOP - scale * ink_top;
+            assert_eq!(baseline.to_bits(), expected.to_bits());
+        });
+    }
+
+    #[test]
+    fn aligns_a_single_line_to_the_vertical_center() {
+        with_face(|face| {
+            let rect = PdfRect::new(0.0, 100.0, 200.0, 200.0);
+            let laid =
+                LaidText::fit(face, "employee_name", "a", rect, 12.0, VAlign::Center).unwrap();
+            let (baseline, _, glyphs) = laid.lines().next().unwrap();
+            let scale = laid.size() / face.upem();
+            let ink_bottom = glyphs
+                .iter()
+                .map(|glyph| glyph.y_min)
+                .fold(0.0_f32, f32::min);
+            let ink_top = glyphs
+                .iter()
+                .map(|glyph| glyph.y_max)
+                .fold(0.0_f32, f32::max);
+            let block = scale * (ink_top - ink_bottom);
+            let block_bottom = f32::midpoint(rect.y0, rect.y1) - block / 2.0;
+            let expected = block_bottom - scale * ink_bottom;
             assert_eq!(baseline.to_bits(), expected.to_bits());
         });
     }

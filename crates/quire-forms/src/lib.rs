@@ -18,7 +18,10 @@ mod inspect;
 mod layout;
 
 pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason};
-pub use fields::{FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, MissingName};
+pub use fields::{
+    AbsoluteLine, FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, HAlign, MissingName,
+    VAlign,
+};
 pub use fill::fill_and_flatten;
 pub use inspect::list_fields;
 

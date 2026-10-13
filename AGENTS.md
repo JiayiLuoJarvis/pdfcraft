@@ -11,7 +11,7 @@
 
 冲突时：提案书 > workspace 规格（包边界）> 本文件 > 设计稿未确认部分。
 
-提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 ASCII `fill_and_flatten` 已在 `crates/quire-forms`。中文填写、OTF、对齐覆盖、`line_below`、`absolute_lines` 仍未做。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/quire-forms`，含对齐、按字段字号、`line_below`、`absolute_lines` 与 TTC 拆面。OTF 与字体子集仍未做。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
 仍须遵守：未确认功能不「顺便」做；`publish = false` 直到限额与信件夹具通过。
 
