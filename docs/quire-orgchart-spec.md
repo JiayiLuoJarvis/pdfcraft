@@ -366,6 +366,7 @@ overflow 链择优（页数、降级、续页利用率 0.35、留下孩子数等
 
 - 圆角半径 `NODE_CORNER_RADIUS_MM`（2.2 mm）。填充与描边各画一次。虚线只包描边（overflow）。
 - 文字裁切用同一圆角。链接命中区用外接矩形。
+- 框内每一行在框宽内**水平居中**（折行宽仍按 `内容宽 = 框宽 − 2 * PADDING_X_MM` 测量）。
 - 主体描边更粗（`SUBJECT_BORDER_PT` 1.5 vs `NORMAL_BORDER_PT` 0.8）。
 
 ### 11.3 坐标

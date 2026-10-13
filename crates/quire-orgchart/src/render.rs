@@ -22,9 +22,9 @@ use crate::page::{PageSpec, PlacedNode};
 use crate::units::{
     mm_to_pt, ARROW_SIZE_PT, COMPANY_SHADE, CONT_CUE_DASH_OFF_PT, CONT_CUE_DASH_ON_PT,
     CONT_CUE_LINE_GAP_MM, CONT_CUE_PAD_MM, CONT_CUE_TEXT_PT, EDGE_WIDTH_PT, FOOTER_TEXT_PT,
-    MAIN_TITLE_PT, NODE_CORNER_RADIUS_MM, NORMAL_BORDER_PT, PADDING_X_MM, PADDING_Y_MM,
-    PAGE_NUMBER_INSET_MM, RATIO_FONT_PT, RATIO_LABEL_GAP_Y_MM, RATIO_LABEL_OFFSET_X_MM,
-    SUBJECT_BORDER_PT, SUBJECT_PADDING_Y_MM, SUB_TITLE_PT,
+    MAIN_TITLE_PT, NODE_CORNER_RADIUS_MM, NORMAL_BORDER_PT, PADDING_Y_MM, PAGE_NUMBER_INSET_MM,
+    RATIO_FONT_PT, RATIO_LABEL_GAP_Y_MM, RATIO_LABEL_OFFSET_X_MM, SUBJECT_BORDER_PT,
+    SUBJECT_PADDING_Y_MM, SUB_TITLE_PT,
 };
 
 /// Paint `pages` into PDF bytes. Does not write document info.
@@ -171,6 +171,7 @@ fn draw_titles(
         font,
         face,
         MAIN_TITLE_PT,
+        0.0,
         width,
         y,
     )?;
@@ -181,6 +182,7 @@ fn draw_titles(
         font,
         face,
         SUB_TITLE_PT,
+        0.0,
         width,
         sub_y,
     )?;
@@ -316,13 +318,14 @@ fn paint_node_lines(
 ) -> Result<(), Error> {
     for line in &node.lines {
         if !line.text.is_empty() {
-            draw_text(
+            center_text(
                 surface,
                 &line.text,
                 font,
                 face,
                 line.font_size_pt,
-                x + PADDING_X_MM,
+                x,
+                node.width_mm,
                 y,
             )?;
         }
@@ -390,14 +393,15 @@ fn center_text(
     font: &FontMetrics,
     face: &Font,
     size_pt: f64,
-    page_width_mm: f64,
+    left_mm: f64,
+    width_mm: f64,
     y_mm: f64,
 ) -> Result<(), Error> {
     if text.is_empty() {
         return Ok(());
     }
-    let width = font.string_width_mm(text, size_pt)?;
-    let x = (page_width_mm - width) / 2.0;
+    let text_width = font.string_width_mm(text, size_pt)?;
+    let x = left_mm + (width_mm - text_width) / 2.0;
     draw_text(surface, text, font, face, size_pt, x, y_mm)
 }
 
