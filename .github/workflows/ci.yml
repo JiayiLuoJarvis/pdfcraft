@@ -27,7 +27,7 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
 
-      - name: clippy shells
+      - name: clippy forms and orgchart
         run: cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
 
       - name: clippy quire-pdf (no default features)
@@ -35,6 +35,9 @@ jobs:
 
       - name: clippy quire-pdf (backend-krilla)
         run: cargo clippy -p quire-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
+
+      - name: test quire-orgchart
+        run: cargo test -p quire-orgchart
 
       - name: test quire-pdf (no default features)
         run: cargo test -p quire-pdf --no-default-features --features test-utils

@@ -37,12 +37,8 @@ fn a_small_chart_starts_with_pdf_and_names_the_role() {
     let Ok(text) = text else {
         return;
     };
-    if !text.status.success() {
-        return;
-    }
+    assert!(text.status.success(), "pdftotext failed");
     let body = String::from_utf8_lossy(&text.stdout);
-    assert!(
-        body.contains("股权架构图") || body.contains("主体公司"),
-        "{body}"
-    );
+    assert!(body.contains("股权架构图"), "{body}");
+    assert!(body.contains("主体公司"), "{body}");
 }
