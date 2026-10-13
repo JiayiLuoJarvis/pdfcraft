@@ -66,6 +66,7 @@ while remaining `0.x`.
 
 ### Fixed
 
+- `quire-forms` drops `Prev` and `XRefStm` from the trailer when it rewrites a PDF, and drops trailer keys that point at deleted objects.
 - `quire-forms` no longer requires a U+0020 glyph for whitespace that is not drawn. Overflow comparison no longer allows an extra 0.05 pt. Font-size search uses millipoints and starts from the caller's size. A `font_size` above 256 pt fails before the PDF is opened.
 
 - `keep_together` and a table cell count paragraph spacing between their children. Two lines that fit in the frame, with spacing between them that does not, fail with `ErrorKind::UnsplittableTallerThanFrame`. Spacing after the last child is still outside the group. Ordinary pagination still drops spacing that does not fit, and does not push the next block to the next page for that spacing alone.

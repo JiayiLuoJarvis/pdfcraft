@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use lopdf::{Dictionary, Document, Object, Stream};
+use lopdf::{Dictionary, Object, Stream};
+
+use crate::inspect::PdfDoc;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider, Tag};
 
@@ -75,7 +77,7 @@ impl<'a> Face<'a> {
 }
 
 pub(crate) fn embed(
-    doc: &mut Document,
+    doc: &mut PdfDoc,
     bytes: &[u8],
     used: &BTreeMap<u16, (char, f32)>,
     upem: f32,
@@ -83,11 +85,13 @@ pub(crate) fn embed(
     descent: f32,
 ) -> Result<ObjectId> {
     let file = Stream::new(Dictionary::new(), stable_font_bytes(bytes)?).with_compression(false);
-    let file_id = doc.add_object(file);
-    let descriptor = doc.add_object(descriptor(file_id, upem, ascent, descent)?);
-    let cid = doc.add_object(cid_font(descriptor, used, upem)?);
+    let file_id = doc.add_object(Object::Stream(file));
+    let descriptor = doc.add_object(Object::Dictionary(descriptor(
+        file_id, upem, ascent, descent,
+    )?));
+    let cid = doc.add_object(Object::Dictionary(cid_font(descriptor, used, upem)?));
     let unicode = Stream::new(Dictionary::new(), to_unicode(used).into_bytes());
-    let unicode_id = doc.add_object(unicode);
+    let unicode_id = doc.add_object(Object::Stream(unicode));
     let mut font = Dictionary::new();
     font.set("Type", name("Font"));
     font.set("Subtype", name("Type0"));
@@ -98,7 +102,7 @@ pub(crate) fn embed(
         Object::Array(vec![Object::Reference(cid)]),
     );
     font.set("ToUnicode", Object::Reference(unicode_id));
-    Ok(doc.add_object(font))
+    Ok(doc.add_object(Object::Dictionary(font)))
 }
 
 type ObjectId = lopdf::ObjectId;

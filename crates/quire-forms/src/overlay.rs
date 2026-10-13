@@ -1,12 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write;
-
-use lopdf::{Dictionary, Document, Object};
 
 use crate::error::{Error, ErrorKind, FlattenReason, FontFault, Result};
 use crate::fields::PAD_X;
 use crate::font::{self, Face};
-use crate::inspect::{self, PdfRect};
+use crate::inspect::{PdfDoc, PdfRect};
 use crate::layout::LaidText;
 
 pub(crate) enum Mark {
@@ -21,7 +19,7 @@ pub(crate) struct Stamp {
 }
 
 pub(crate) fn paint(
-    doc: &mut Document,
+    doc: &mut PdfDoc,
     stamps: &[Stamp],
     font_bytes: Option<&[u8]>,
     used: &BTreeMap<u16, (char, f32)>,
@@ -38,7 +36,7 @@ pub(crate) fn paint(
         )?),
         _ => None,
     };
-    let pages: Vec<_> = doc.page_iter().collect();
+    let pages = doc.page_ids();
     let mut by_page: BTreeMap<usize, Vec<&Stamp>> = BTreeMap::new();
     for stamp in stamps {
         by_page.entry(stamp.page_index).or_default().push(stamp);
@@ -56,21 +54,15 @@ pub(crate) fn paint(
             let font_id = font_id.ok_or_else(|| {
                 Error::from(ErrorKind::FontNotConfigured).with_source(FontFault::Missing)
             })?;
-            Some(attach_font(doc, page_id, font_id)?)
+            Some(doc.attach_font(page_id, font_id)?)
         } else {
             None
         };
         let content = page_content(&page_stamps, font_name.as_deref())?;
-        doc.add_page_contents(page_id, content.into_bytes())
-            .map_err(|err| {
-                Error::from(ErrorKind::FlattenFailed {
-                    reason: FlattenReason::AppendContent,
-                })
-                .with_source(err)
-            })?;
+        doc.add_page_contents(page_id, content.into_bytes())?;
     }
-    strip_form(doc)?;
-    prune(doc);
+    doc.strip_form()?;
+    doc.prune();
     Ok(())
 }
 
@@ -166,199 +158,6 @@ fn pdf_num(value: f32) -> Result<String> {
     } else {
         Ok(text)
     }
-}
-
-/// A page `Resources` dictionary replaces an inherited one, so the copy keeps the old keys.
-fn attach_font(
-    doc: &mut Document,
-    page_id: lopdf::ObjectId,
-    font_id: lopdf::ObjectId,
-) -> Result<String> {
-    let mut resources = copied_resources(doc, page_id)?;
-    let mut fonts = match resources.get(b"Font").ok().cloned() {
-        Some(obj) => match inspect::deep_deref(doc, obj) {
-            Object::Dictionary(dict) => dict,
-            _ => Dictionary::new(),
-        },
-        None => Dictionary::new(),
-    };
-    let resource_name = fresh_font_name(&fonts)?;
-    fonts.set(resource_name.as_str(), Object::Reference(font_id));
-    resources.set("Font", Object::Dictionary(fonts));
-    let resources_id = doc.add_object(Object::Dictionary(resources));
-    let page = doc
-        .get_object_mut(page_id)
-        .and_then(Object::as_dict_mut)
-        .map_err(|err| {
-            Error::from(ErrorKind::FlattenFailed {
-                reason: FlattenReason::UpdateResources,
-            })
-            .with_source(err)
-        })?;
-    page.set("Resources", Object::Reference(resources_id));
-    Ok(resource_name)
-}
-
-fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
-    for n in 0..64 {
-        let candidate = if n == 0 {
-            "QuireForms".to_string()
-        } else {
-            format!("QuireForms{}", n + 1)
-        };
-        if !fonts.has(candidate.as_bytes()) {
-            return Ok(candidate);
-        }
-    }
-    Err(ErrorKind::FlattenFailed {
-        reason: FlattenReason::FontNameTaken,
-    }
-    .into())
-}
-
-fn copied_resources(doc: &Document, page_id: lopdf::ObjectId) -> Result<Dictionary> {
-    let mut id = page_id;
-    for _ in 0..32 {
-        let found = {
-            let dict = doc.get_dictionary(id).map_err(|err| {
-                Error::from(ErrorKind::FlattenFailed {
-                    reason: FlattenReason::ReadPage,
-                })
-                .with_source(err)
-            })?;
-            let resources = dict.get(b"Resources").ok().cloned();
-            let parent = dict.get(b"Parent").and_then(Object::as_reference).ok();
-            (resources, parent)
-        };
-        if let Some(resources) = found.0 {
-            return match inspect::deep_deref(doc, resources) {
-                Object::Dictionary(dict) => Ok(dict),
-                _ => Err(ErrorKind::FlattenFailed {
-                    reason: FlattenReason::ResourcesNotDictionary,
-                }
-                .into()),
-            };
-        }
-        let Some(parent) = found.1 else {
-            break;
-        };
-        id = parent;
-    }
-    Ok(Dictionary::new())
-}
-
-fn strip_form(doc: &mut Document) -> Result<()> {
-    if let Ok(catalog) = doc.catalog_mut() {
-        catalog.remove(b"AcroForm");
-    }
-    let pages: Vec<_> = doc.page_iter().collect();
-    for page_id in pages {
-        let kept = {
-            let page = doc.get_dictionary(page_id).map_err(|err| {
-                Error::from(ErrorKind::FlattenFailed {
-                    reason: FlattenReason::ReadPage,
-                })
-                .with_source(err)
-            })?;
-            match page.get(b"Annots").ok().cloned() {
-                Some(annots) => filter_annots(doc, annots),
-                None => None,
-            }
-        };
-        let Some(kept) = kept else {
-            continue;
-        };
-        let page = doc
-            .get_object_mut(page_id)
-            .and_then(Object::as_dict_mut)
-            .map_err(|err| {
-                Error::from(ErrorKind::FlattenFailed {
-                    reason: FlattenReason::UpdateAnnotations,
-                })
-                .with_source(err)
-            })?;
-        if kept.is_empty() {
-            page.remove(b"Annots");
-        } else {
-            page.set("Annots", Object::Array(kept));
-        }
-    }
-    Ok(())
-}
-
-fn filter_annots(doc: &Document, annots: Object) -> Option<Vec<Object>> {
-    let Object::Array(items) = inspect::deep_deref(doc, annots) else {
-        return None;
-    };
-    Some(
-        items
-            .into_iter()
-            .filter(|annot| keep_annot(doc, annot))
-            .collect(),
-    )
-}
-
-fn keep_annot(doc: &Document, annot: &Object) -> bool {
-    let Object::Dictionary(dict) = inspect::deep_deref(doc, annot.clone()) else {
-        return true;
-    };
-    dict.get(b"Subtype").and_then(Object::as_name_str).ok() != Some("Widget")
-}
-
-fn prune(doc: &mut Document) {
-    let mut stack = Vec::new();
-    for key in [
-        b"Root".as_slice(),
-        b"Info".as_slice(),
-        b"Encrypt".as_slice(),
-    ] {
-        if let Ok(obj) = doc.trailer.get(key) {
-            push_refs(obj, &mut stack);
-        }
-    }
-    let mut seen = BTreeSet::new();
-    while let Some(id) = stack.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        if let Some(obj) = doc.objects.get(&id) {
-            push_refs(obj, &mut stack);
-        }
-    }
-    doc.objects.retain(|id, _| seen.contains(id));
-}
-
-fn push_refs(obj: &Object, stack: &mut Vec<lopdf::ObjectId>) {
-    match obj {
-        Object::Reference(id) => stack.push(*id),
-        Object::Array(items) => {
-            for item in items {
-                push_refs(item, stack);
-            }
-        }
-        Object::Dictionary(dict) => {
-            for (_, value) in dict {
-                push_refs(value, stack);
-            }
-        }
-        Object::Stream(stream) => {
-            for (_, value) in &stream.dict {
-                push_refs(value, stack);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub(crate) fn save(doc: &mut Document) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    doc.save_to(&mut bytes).map_err(|err| {
-        Error::from(ErrorKind::FlattenFailed {
-            reason: FlattenReason::Write,
-        })
-        .with_source(err)
-    })?;
-    Ok(bytes)
 }
 
 #[cfg(test)]

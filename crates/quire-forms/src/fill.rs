@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::error::{ArgumentReason, Error, ErrorKind, FontFault, Result};
-use crate::fields::{FieldType, FieldValue, FillOptions, MissingName};
+use crate::fields::{FieldValue, FillOptions, MissingName};
 use crate::font::Face;
-use crate::inspect::{self, WidgetSnap};
+use crate::inspect::{Draw, PdfDoc, WidgetSnap};
 use crate::layout::{self, LaidText};
 use crate::overlay::{self, Mark, Stamp};
 
@@ -29,8 +29,8 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     options: &FillOptions<'_>,
 ) -> Result<Vec<u8>> {
     check_font_size(options.font_size)?;
-    let mut doc = inspect::open(pdf)?;
-    let snaps = inspect::widgets(&doc);
+    let mut doc = PdfDoc::open(pdf)?;
+    let snaps = doc.widgets();
     let planned = plan(&snaps, fields, options.missing)?;
     let needs_font = planned.values().any(|draw| matches!(draw, Draw::Text(_)));
     let face = if needs_font {
@@ -68,12 +68,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     }
     let font_bytes = options.font.as_ref().map(|font| font.bytes);
     overlay::paint(&mut doc, &stamps, font_bytes, &used, face.as_ref())?;
-    overlay::save(&mut doc)
-}
-
-enum Draw<'a> {
-    Text(&'a str),
-    Check,
+    doc.save()
 }
 
 fn plan<'s, 'f, S: std::hash::BuildHasher>(
@@ -108,7 +103,7 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
     for name in names {
         let snap = first[name];
         let value = &fields[name];
-        if let Some(draw) = classify(snap, value)? {
+        if let Some(draw) = snap.accept(value)? {
             planned.insert(snap.name.as_str(), draw);
         }
     }
@@ -137,54 +132,4 @@ fn bad_font_size(value: f32) -> Error {
         reason: ArgumentReason::FontSize { value },
     }
     .into()
-}
-
-fn classify<'a>(snap: &WidgetSnap, value: &'a FieldValue) -> Result<Option<Draw<'a>>> {
-    match snap.field_type {
-        FieldType::Signature => Err(ErrorKind::SignatureNotWritable {
-            field_name: snap.name.clone(),
-        }
-        .into()),
-        FieldType::RadioButton | FieldType::PushButton => Err(ErrorKind::WidgetUnsupported {
-            field_name: snap.name.clone(),
-        }
-        .into()),
-        FieldType::CheckBox => match value {
-            FieldValue::CheckBox(true) => Ok(Some(Draw::Check)),
-            FieldValue::CheckBox(false) => Ok(None),
-            FieldValue::Text(_) => Err(ErrorKind::InvalidCheckbox {
-                field_name: snap.name.clone(),
-            }
-            .into()),
-        },
-        FieldType::Text => match value {
-            FieldValue::Text(text) if text.is_empty() => Ok(None),
-            FieldValue::Text(text) => Ok(Some(Draw::Text(text))),
-            FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
-                field_name: Some(snap.name.clone()),
-                reason: ArgumentReason::CheckboxOnText,
-            }
-            .into()),
-        },
-        FieldType::ListBox | FieldType::ComboBox => match value {
-            FieldValue::Text(text) => {
-                if !snap.options.iter().any(|option| option == text) {
-                    return Err(ErrorKind::IllegalChoice {
-                        field_name: snap.name.clone(),
-                    }
-                    .into());
-                }
-                if text.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(Draw::Text(text)))
-                }
-            }
-            FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
-                field_name: Some(snap.name.clone()),
-                reason: ArgumentReason::CheckboxOnChoice,
-            }
-            .into()),
-        },
-    }
 }

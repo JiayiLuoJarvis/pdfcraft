@@ -1,7 +1,12 @@
-use lopdf::{Document, Object};
+use std::collections::BTreeSet;
 
-use crate::error::{Error, ErrorKind, Result};
-use crate::fields::{FieldInfo, FieldType};
+use lopdf::{Dictionary, Document, Object, ObjectId};
+
+use crate::error::{ArgumentReason, Error, ErrorKind, FlattenReason, Result};
+use crate::fields::{FieldInfo, FieldType, FieldValue};
+
+const MAX_DEREF: usize = 8;
+const MAX_PARENT: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PdfRect {
@@ -25,6 +30,34 @@ impl PdfRect {
     pub(crate) fn height(self) -> f32 {
         self.y1 - self.y0
     }
+
+    fn parse(obj: &Object) -> Option<Self> {
+        let items = obj.as_array().ok()?;
+        if items.len() < 4 {
+            return None;
+        }
+        let mut n = [0.0_f32; 4];
+        for (index, item) in items.iter().take(4).enumerate() {
+            let value = item.as_float().ok()?;
+            if !value.is_finite() {
+                return None;
+            }
+            n[index] = value;
+        }
+        Some(Self::new(n[0], n[1], n[2], n[3]))
+    }
+}
+
+pub(crate) struct PdfDoc(Document);
+
+enum Lookup {
+    Found(Object),
+    Missing,
+}
+
+pub(crate) enum Draw<'a> {
+    Text(&'a str),
+    Check,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +82,92 @@ impl WidgetSnap {
             options,
         }
     }
+
+    fn from_annot(doc: &PdfDoc, page_index: usize, annot: &Object) -> Option<Self> {
+        let Lookup::Found(Object::Dictionary(dict)) = doc.lookup(annot.clone()) else {
+            return None;
+        };
+        let is_widget = dict.get(b"Subtype").is_ok_and(|subtype| {
+            matches!(
+                doc.lookup(subtype.clone()),
+                Lookup::Found(found) if found.as_name_str().ok() == Some("Widget")
+            )
+        });
+        if !is_widget {
+            return None;
+        }
+        let name = doc
+            .inherited(&dict, b"T")
+            .and_then(|obj| lopdf::decode_text_string(&obj).ok())?;
+        let rect = doc
+            .inherited(&dict, b"Rect")
+            .and_then(|obj| PdfRect::parse(&obj))?;
+        let ft = doc
+            .inherited(&dict, b"FT")
+            .and_then(|obj| obj.as_name_str().ok().map(str::to_string));
+        let flags = doc.inherited(&dict, b"Ff").map_or(0, |obj| flags_of(&obj));
+        let field_type = field_type_of(ft.as_deref(), flags);
+        let options = doc
+            .inherited(&dict, b"Opt")
+            .map_or_else(Vec::new, |obj| doc.read_options(&obj));
+        Some(Self {
+            name,
+            field_type,
+            page_index,
+            rect,
+            options,
+        })
+    }
+
+    pub(crate) fn accept<'a>(&self, value: &'a FieldValue) -> Result<Option<Draw<'a>>> {
+        match self.field_type {
+            FieldType::Signature => Err(ErrorKind::SignatureNotWritable {
+                field_name: self.name.clone(),
+            }
+            .into()),
+            FieldType::RadioButton | FieldType::PushButton => Err(ErrorKind::WidgetUnsupported {
+                field_name: self.name.clone(),
+            }
+            .into()),
+            FieldType::CheckBox => match value {
+                FieldValue::CheckBox(true) => Ok(Some(Draw::Check)),
+                FieldValue::CheckBox(false) => Ok(None),
+                FieldValue::Text(_) => Err(ErrorKind::InvalidCheckbox {
+                    field_name: self.name.clone(),
+                }
+                .into()),
+            },
+            FieldType::Text => match value {
+                FieldValue::Text(text) if text.is_empty() => Ok(None),
+                FieldValue::Text(text) => Ok(Some(Draw::Text(text))),
+                FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
+                    field_name: Some(self.name.clone()),
+                    reason: ArgumentReason::CheckboxOnText,
+                }
+                .into()),
+            },
+            FieldType::ListBox | FieldType::ComboBox => match value {
+                FieldValue::Text(text) => {
+                    if !self.options.iter().any(|option| option == text) {
+                        return Err(ErrorKind::IllegalChoice {
+                            field_name: self.name.clone(),
+                        }
+                        .into());
+                    }
+                    if text.is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(Draw::Text(text)))
+                    }
+                }
+                FieldValue::CheckBox(_) => Err(ErrorKind::InvalidArgument {
+                    field_name: Some(self.name.clone()),
+                    reason: ArgumentReason::CheckboxOnChoice,
+                }
+                .into()),
+            },
+        }
+    }
 }
 
 /// Lists `AcroForm` widgets in `pdf`.
@@ -62,140 +181,352 @@ impl WidgetSnap {
 /// Returns [`ErrorKind::NotAPdf`] when the bytes are not a PDF, [`ErrorKind::Encrypted`]
 /// when the file is encrypted, and [`ErrorKind::HasXfa`] when `/XFA` is present.
 pub fn list_fields(pdf: &[u8]) -> Result<Vec<FieldInfo>> {
-    let doc = open(pdf)?;
-    Ok(widgets(&doc).iter().map(WidgetSnap::info).collect())
+    let doc = PdfDoc::open(pdf)?;
+    Ok(doc.widgets().iter().map(WidgetSnap::info).collect())
 }
 
-pub(crate) fn open(pdf: &[u8]) -> Result<Document> {
-    let doc = Document::load_mem(pdf).map_err(|err| match err {
-        lopdf::Error::Decryption(_) => Error::from(ErrorKind::Encrypted).with_source(err),
-        other => Error::from(ErrorKind::NotAPdf).with_source(other),
-    })?;
-    if doc.is_encrypted() {
-        return Err(ErrorKind::Encrypted.into());
+impl PdfDoc {
+    pub(crate) fn open(pdf: &[u8]) -> Result<Self> {
+        let doc = Document::load_mem(pdf).map_err(|err| match err {
+            lopdf::Error::Decryption(_) => Error::from(ErrorKind::Encrypted).with_source(err),
+            other => Error::from(ErrorKind::NotAPdf).with_source(other),
+        })?;
+        if doc.is_encrypted() {
+            return Err(ErrorKind::Encrypted.into());
+        }
+        let doc = Self(doc);
+        if doc.has_xfa()? {
+            return Err(ErrorKind::HasXfa.into());
+        }
+        Ok(doc)
     }
-    if has_xfa(&doc)? {
-        return Err(ErrorKind::HasXfa.into());
-    }
-    Ok(doc)
-}
 
-pub(crate) fn widgets(doc: &Document) -> Vec<WidgetSnap> {
-    let mut found = Vec::new();
-    for (page_index, page_id) in doc.page_iter().enumerate() {
-        for annot in page_annots(doc, page_id) {
-            let Some(snap) = widget_snap(doc, page_index, &annot) else {
+    pub(crate) fn widgets(&self) -> Vec<WidgetSnap> {
+        let mut found = Vec::new();
+        for (page_index, page_id) in self.0.page_iter().enumerate() {
+            for annot in self.page_annots(page_id) {
+                let Some(snap) = WidgetSnap::from_annot(self, page_index, &annot) else {
+                    continue;
+                };
+                found.push(snap);
+            }
+        }
+        found
+    }
+
+    pub(crate) fn save(mut self) -> Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        self.0.save_to(&mut bytes).map_err(|err| {
+            Error::from(ErrorKind::FlattenFailed {
+                reason: FlattenReason::Write,
+            })
+            .with_source(err)
+        })?;
+        Ok(bytes)
+    }
+
+    pub(crate) fn add_object(&mut self, object: Object) -> ObjectId {
+        self.0.add_object(object)
+    }
+
+    pub(crate) fn page_ids(&self) -> Vec<ObjectId> {
+        self.0.page_iter().collect()
+    }
+
+    pub(crate) fn add_page_contents(&mut self, page: ObjectId, bytes: Vec<u8>) -> Result<()> {
+        self.0.add_page_contents(page, bytes).map_err(|err| {
+            Error::from(ErrorKind::FlattenFailed {
+                reason: FlattenReason::AppendContent,
+            })
+            .with_source(err)
+        })
+    }
+
+    fn page_annots(&self, page_id: ObjectId) -> Vec<Object> {
+        let Ok(page) = self.0.get_dictionary(page_id) else {
+            return Vec::new();
+        };
+        let Ok(annots) = page.get(b"Annots") else {
+            return Vec::new();
+        };
+        match self.lookup(annots.clone()) {
+            Lookup::Found(Object::Array(items)) => items,
+            _ => Vec::new(),
+        }
+    }
+
+    fn inherited(&self, inline: &Dictionary, key: &[u8]) -> Option<Object> {
+        if let Ok(value) = inline.get(key) {
+            return match self.lookup(value.clone()) {
+                Lookup::Found(obj) => Some(obj),
+                Lookup::Missing => None,
+            };
+        }
+        let mut id = inline.get(b"Parent").and_then(Object::as_reference).ok()?;
+        for _ in 0..MAX_PARENT {
+            let step = {
+                let dict = self.0.get_dictionary(id).ok()?;
+                if let Ok(value) = dict.get(key) {
+                    match self.lookup(value.clone()) {
+                        Lookup::Found(obj) => Step::Found(obj),
+                        Lookup::Missing => Step::Stop,
+                    }
+                } else if let Ok(parent) = dict.get(b"Parent").and_then(Object::as_reference) {
+                    Step::Parent(parent)
+                } else {
+                    Step::Stop
+                }
+            };
+            match step {
+                Step::Found(obj) => return Some(obj),
+                Step::Parent(parent) => id = parent,
+                Step::Stop => return None,
+            }
+        }
+        None
+    }
+
+    fn lookup(&self, mut obj: Object) -> Lookup {
+        for _ in 0..MAX_DEREF {
+            let Object::Reference(id) = obj else {
+                return Lookup::Found(obj);
+            };
+            match self.0.get_object(id) {
+                Ok(next) => obj = next.clone(),
+                Err(_) => return Lookup::Missing,
+            }
+        }
+        if matches!(obj, Object::Reference(_)) {
+            Lookup::Missing
+        } else {
+            Lookup::Found(obj)
+        }
+    }
+
+    pub(crate) fn attach_font(&mut self, page_id: ObjectId, font_id: ObjectId) -> Result<String> {
+        let mut resources = self.copied_resources(page_id)?;
+        let mut fonts = match resources.get(b"Font").ok().cloned() {
+            Some(obj) => match self.lookup(obj) {
+                Lookup::Found(Object::Dictionary(dict)) => dict,
+                _ => Dictionary::new(),
+            },
+            None => Dictionary::new(),
+        };
+        let resource_name = fresh_font_name(&fonts)?;
+        fonts.set(resource_name.as_str(), Object::Reference(font_id));
+        resources.set("Font", Object::Dictionary(fonts));
+        let resources_id = self.add_object(Object::Dictionary(resources));
+        let page = self
+            .0
+            .get_object_mut(page_id)
+            .and_then(Object::as_dict_mut)
+            .map_err(|err| {
+                Error::from(ErrorKind::FlattenFailed {
+                    reason: FlattenReason::UpdateResources,
+                })
+                .with_source(err)
+            })?;
+        page.set("Resources", Object::Reference(resources_id));
+        Ok(resource_name)
+    }
+
+    pub(crate) fn strip_form(&mut self) -> Result<()> {
+        if let Ok(catalog) = self.0.catalog_mut() {
+            catalog.remove(b"AcroForm");
+        }
+        let pages = self.page_ids();
+        for page_id in pages {
+            let kept = {
+                let page = self.0.get_dictionary(page_id).map_err(|err| {
+                    Error::from(ErrorKind::FlattenFailed {
+                        reason: FlattenReason::ReadPage,
+                    })
+                    .with_source(err)
+                })?;
+                match page.get(b"Annots").ok().cloned() {
+                    Some(annots) => self.filter_annots(annots),
+                    None => None,
+                }
+            };
+            let Some(kept) = kept else {
                 continue;
             };
-            found.push(snap);
-        }
-    }
-    found
-}
-
-fn has_xfa(doc: &Document) -> Result<bool> {
-    let catalog = doc
-        .catalog()
-        .map_err(|err| Error::from(ErrorKind::NotAPdf).with_source(err))?;
-    let Ok(acro) = catalog.get(b"AcroForm") else {
-        return Ok(false);
-    };
-    let Object::Dictionary(acro) = deep_deref(doc, acro.clone()) else {
-        return Ok(false);
-    };
-    Ok(acro.has(b"XFA"))
-}
-
-fn page_annots(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Object> {
-    let Ok(page) = doc.get_dictionary(page_id) else {
-        return Vec::new();
-    };
-    let Ok(annots) = page.get(b"Annots") else {
-        return Vec::new();
-    };
-    match deep_deref(doc, annots.clone()) {
-        Object::Array(items) => items,
-        _ => Vec::new(),
-    }
-}
-
-fn widget_snap(doc: &Document, page_index: usize, annot: &Object) -> Option<WidgetSnap> {
-    let dict = annot_dict(doc, annot)?;
-    let subtype = dict.get(b"Subtype").ok().cloned();
-    let subtype = subtype.map(|obj| deep_deref(doc, obj));
-    if subtype.as_ref().and_then(|obj| obj.as_name_str().ok()) != Some("Widget") {
-        return None;
-    }
-    let name = inherited(doc, &dict, b"T").and_then(|obj| lopdf::decode_text_string(&obj).ok())?;
-    let rect = inherited(doc, &dict, b"Rect").and_then(|obj| read_rect(&obj))?;
-    let ft =
-        inherited(doc, &dict, b"FT").and_then(|obj| obj.as_name_str().ok().map(str::to_string));
-    let flags = inherited(doc, &dict, b"Ff").map_or(0, |obj| flags_of(&obj));
-    let field_type = classify(ft.as_deref(), flags);
-    let options =
-        inherited(doc, &dict, b"Opt").map_or_else(Vec::new, |obj| read_options(doc, &obj));
-    Some(WidgetSnap {
-        name,
-        field_type,
-        page_index,
-        rect,
-        options,
-    })
-}
-
-fn annot_dict(doc: &Document, annot: &Object) -> Option<lopdf::Dictionary> {
-    match deep_deref(doc, annot.clone()) {
-        Object::Dictionary(dict) => Some(dict),
-        _ => None,
-    }
-}
-
-fn inherited(doc: &Document, inline: &lopdf::Dictionary, key: &[u8]) -> Option<Object> {
-    if let Some(value) = inline.get(key).ok().cloned() {
-        return Some(deep_deref(doc, value));
-    }
-    let mut id = inline.get(b"Parent").and_then(Object::as_reference).ok()?;
-    for _ in 0..32 {
-        let step = {
-            let dict = doc.get_dictionary(id).ok()?;
-            if let Some(value) = dict.get(key).ok().cloned() {
-                Step::Found(value)
-            } else if let Ok(parent) = dict.get(b"Parent").and_then(Object::as_reference) {
-                Step::Parent(parent)
+            let page = self
+                .0
+                .get_object_mut(page_id)
+                .and_then(Object::as_dict_mut)
+                .map_err(|err| {
+                    Error::from(ErrorKind::FlattenFailed {
+                        reason: FlattenReason::UpdateAnnotations,
+                    })
+                    .with_source(err)
+                })?;
+            if kept.is_empty() {
+                page.remove(b"Annots");
             } else {
-                Step::Stop
+                page.set("Annots", Object::Array(kept));
             }
+        }
+        Ok(())
+    }
+
+    /// Roots are `Root` and `Info`. `save_to` writes the rest of the trailer as-is, apart from `Size`.
+    pub(crate) fn prune(&mut self) {
+        let reachable = self.reachable();
+        let keys: Vec<Vec<u8>> = self.0.trailer.iter().map(|(key, _)| key.clone()).collect();
+        for key in keys {
+            if key.as_slice() == b"Prev" || key.as_slice() == b"XRefStm" {
+                self.0.trailer.remove(key.as_slice());
+                continue;
+            }
+            if key.as_slice() == b"Root" || key.as_slice() == b"Info" {
+                continue;
+            }
+            let dangling = self
+                .0
+                .trailer
+                .get(key.as_slice())
+                .is_ok_and(|value| refs_dangle(value, &reachable));
+            if dangling {
+                self.0.trailer.remove(key.as_slice());
+            }
+        }
+        self.0.objects.retain(|id, _| reachable.contains(id));
+    }
+
+    fn has_xfa(&self) -> Result<bool> {
+        let catalog = self
+            .0
+            .catalog()
+            .map_err(|err| Error::from(ErrorKind::NotAPdf).with_source(err))?;
+        let Ok(acro) = catalog.get(b"AcroForm") else {
+            return Ok(false);
         };
-        match step {
-            Step::Found(value) => return Some(deep_deref(doc, value)),
-            Step::Parent(parent) => id = parent,
-            Step::Stop => return None,
+        match self.lookup(acro.clone()) {
+            Lookup::Found(Object::Dictionary(acro)) => Ok(acro.has(b"XFA")),
+            _ => Ok(false),
         }
     }
-    None
+
+    fn copied_resources(&self, page_id: ObjectId) -> Result<Dictionary> {
+        let mut id = page_id;
+        for _ in 0..MAX_PARENT {
+            let found = {
+                let dict = self.0.get_dictionary(id).map_err(|err| {
+                    Error::from(ErrorKind::FlattenFailed {
+                        reason: FlattenReason::ReadPage,
+                    })
+                    .with_source(err)
+                })?;
+                let resources = dict.get(b"Resources").ok().cloned();
+                let parent = dict.get(b"Parent").and_then(Object::as_reference).ok();
+                (resources, parent)
+            };
+            if let Some(resources) = found.0 {
+                return match self.lookup(resources) {
+                    Lookup::Found(Object::Dictionary(dict)) => Ok(dict),
+                    _ => Err(ErrorKind::FlattenFailed {
+                        reason: FlattenReason::ResourcesNotDictionary,
+                    }
+                    .into()),
+                };
+            }
+            let Some(parent) = found.1 else {
+                break;
+            };
+            id = parent;
+        }
+        Ok(Dictionary::new())
+    }
+
+    fn filter_annots(&self, annots: Object) -> Option<Vec<Object>> {
+        let Lookup::Found(Object::Array(items)) = self.lookup(annots) else {
+            return None;
+        };
+        Some(
+            items
+                .into_iter()
+                .filter(|annot| self.keep_annot(annot))
+                .collect(),
+        )
+    }
+
+    fn keep_annot(&self, annot: &Object) -> bool {
+        let Lookup::Found(Object::Dictionary(dict)) = self.lookup(annot.clone()) else {
+            return true;
+        };
+        dict.get(b"Subtype").and_then(Object::as_name_str).ok() != Some("Widget")
+    }
+
+    fn read_options(&self, obj: &Object) -> Vec<String> {
+        let Lookup::Found(Object::Array(items)) = self.lookup(obj.clone()) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for item in items {
+            match self.lookup(item) {
+                Lookup::Found(Object::Array(pair)) => {
+                    for part in pair {
+                        if let Lookup::Found(obj) = self.lookup(part) {
+                            push_option(&mut out, &obj);
+                        }
+                    }
+                }
+                Lookup::Found(other) => push_option(&mut out, &other),
+                Lookup::Missing => {}
+            }
+        }
+        out
+    }
+
+    fn reachable(&self) -> BTreeSet<ObjectId> {
+        let mut stack = Vec::new();
+        for key in [b"Root".as_slice(), b"Info".as_slice()] {
+            if let Ok(obj) = self.0.trailer.get(key) {
+                push_refs(obj, &mut stack);
+            }
+        }
+        let mut seen = BTreeSet::new();
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(obj) = self.0.objects.get(&id) {
+                push_refs(obj, &mut stack);
+            }
+        }
+        seen
+    }
 }
 
 enum Step {
     Found(Object),
-    Parent(lopdf::ObjectId),
+    Parent(ObjectId),
     Stop,
 }
 
-pub(crate) fn deep_deref(doc: &Document, mut obj: Object) -> Object {
-    for _ in 0..8 {
-        let Object::Reference(id) = obj else {
-            break;
+fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
+    for n in 0..64 {
+        let candidate = if n == 0 {
+            "QuireForms".to_string()
+        } else {
+            format!("QuireForms{}", n + 1)
         };
-        obj = doc.get_object(id).cloned().unwrap_or(Object::Null);
+        if !fonts.has(candidate.as_bytes()) {
+            return Ok(candidate);
+        }
     }
-    obj
+    Err(ErrorKind::FlattenFailed {
+        reason: FlattenReason::FontNameTaken,
+    }
+    .into())
 }
 
 fn flags_of(obj: &Object) -> i64 {
     obj.as_i64().unwrap_or(0)
 }
 
-fn classify(ft: Option<&str>, flags: i64) -> FieldType {
+fn field_type_of(ft: Option<&str>, flags: i64) -> FieldType {
     const PUSH: i64 = 1 << 16;
     const RADIO: i64 = 1 << 15;
     const COMBO: i64 = 1 << 17;
@@ -210,22 +541,6 @@ fn classify(ft: Option<&str>, flags: i64) -> FieldType {
     }
 }
 
-fn read_rect(obj: &Object) -> Option<PdfRect> {
-    let items = obj.as_array().ok()?;
-    if items.len() < 4 {
-        return None;
-    }
-    let mut n = [0.0_f32; 4];
-    for (index, item) in items.iter().take(4).enumerate() {
-        let value = item.as_float().ok()?;
-        if !value.is_finite() {
-            return None;
-        }
-        n[index] = value;
-    }
-    Some(PdfRect::new(n[0], n[1], n[2], n[3]))
-}
-
 fn ordered(a: f32, b: f32) -> (f32, f32) {
     if a <= b {
         (a, b)
@@ -234,29 +549,46 @@ fn ordered(a: f32, b: f32) -> (f32, f32) {
     }
 }
 
-fn read_options(doc: &Document, obj: &Object) -> Vec<String> {
-    let Object::Array(items) = obj else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for item in items {
-        match deep_deref(doc, item.clone()) {
-            Object::Array(pair) => {
-                for part in pair {
-                    push_option(&mut out, &deep_deref(doc, part));
-                }
-            }
-            other => push_option(&mut out, &other),
-        }
-    }
-    out
-}
-
 fn push_option(out: &mut Vec<String>, obj: &Object) {
     let Ok(text) = lopdf::decode_text_string(obj) else {
         return;
     };
     if !out.contains(&text) {
         out.push(text);
+    }
+}
+
+fn push_refs(obj: &Object, stack: &mut Vec<ObjectId>) {
+    match obj {
+        Object::Reference(id) => stack.push(*id),
+        Object::Array(items) => {
+            for item in items {
+                push_refs(item, stack);
+            }
+        }
+        Object::Dictionary(dict) => {
+            for (_, value) in dict {
+                push_refs(value, stack);
+            }
+        }
+        Object::Stream(stream) => {
+            for (_, value) in &stream.dict {
+                push_refs(value, stack);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn refs_dangle(obj: &Object, seen: &BTreeSet<ObjectId>) -> bool {
+    match obj {
+        Object::Reference(id) => !seen.contains(id),
+        Object::Array(items) => items.iter().any(|item| refs_dangle(item, seen)),
+        Object::Dictionary(dict) => dict.iter().any(|(_, value)| refs_dangle(value, seen)),
+        Object::Stream(stream) => stream
+            .dict
+            .iter()
+            .any(|(_, value)| refs_dangle(value, seen)),
+        _ => false,
     }
 }

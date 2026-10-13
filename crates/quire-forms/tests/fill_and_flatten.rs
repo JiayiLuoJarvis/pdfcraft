@@ -308,6 +308,94 @@ fn fills_chinese_text() {
     assert!(pdftotext(&pdf).contains('王'));
 }
 
+#[test]
+fn drops_prev_xrefstm_and_trailer_keys_that_point_at_orphans() {
+    let (input, orphan) = trailer_orphan_pdf();
+    let before = lopdf::Document::load_mem(&input).unwrap();
+    assert!(before.trailer.get(b"Prev").is_ok());
+    assert!(before.trailer.get(b"XRefStm").is_ok());
+    assert!(before.get_object(orphan).is_ok());
+    let pdf = fill_and_flatten(&input, &HashMap::new(), &FillOptions::default()).unwrap();
+    let out = lopdf::Document::load_mem(&pdf).unwrap();
+    assert!(out.trailer.get(b"Prev").is_err());
+    assert!(out.trailer.get(b"XRefStm").is_err());
+    assert!(out.trailer.get(b"QuireOrphan").is_err());
+    assert!(out.trailer.get(b"Root").is_ok());
+    assert!(out.get_object(orphan).is_err());
+}
+
+fn trailer_orphan_pdf() -> (Vec<u8>, lopdf::ObjectId) {
+    let mut doc = lopdf::Document::with_version("1.4");
+    let orphan = doc.add_object(lopdf::Object::string_literal("orphan"));
+    let page_tree = doc.new_object_id();
+    let page = doc.new_object_id();
+    doc.set_object(
+        page,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(page_tree)),
+            (
+                "MediaBox",
+                lopdf::Object::Array(vec![
+                    lopdf::Object::Integer(0),
+                    lopdf::Object::Integer(0),
+                    lopdf::Object::Integer(200),
+                    lopdf::Object::Integer(200),
+                ]),
+            ),
+        ]),
+    );
+    doc.set_object(
+        page_tree,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Count", lopdf::Object::Integer(1)),
+            (
+                "Kids",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(page)]),
+            ),
+        ]),
+    );
+    let catalog_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(page_tree)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+    doc.trailer
+        .set("QuireOrphan", lopdf::Object::Reference(orphan));
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+    let start = startxref_offset(&bytes);
+    let dict = bytes[start..]
+        .windows(2)
+        .position(|window| window == b"<<")
+        .unwrap();
+    let at = start + dict + 2;
+    // A literal `Prev` is not an offset, so lopdf keeps `XRefStm` while loading.
+    let extra = format!("/Prev (0) /XRefStm {start}");
+    let mut with_offsets = Vec::with_capacity(bytes.len() + extra.len());
+    with_offsets.extend_from_slice(&bytes[..at]);
+    with_offsets.extend_from_slice(extra.as_bytes());
+    with_offsets.extend_from_slice(&bytes[at..]);
+    (with_offsets, orphan)
+}
+
+fn startxref_offset(bytes: &[u8]) -> usize {
+    let marker = b"startxref\n";
+    let at = bytes
+        .windows(marker.len())
+        .rposition(|window| window == marker)
+        .unwrap()
+        + marker.len();
+    let digits = bytes[at..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .copied()
+        .collect::<Vec<_>>();
+    String::from_utf8(digits).unwrap().parse().unwrap()
+}
+
 fn pdftotext(pdf: &[u8]) -> String {
     let mut child = Command::new("pdftotext")
         .arg("-")
