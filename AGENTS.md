@@ -11,9 +11,9 @@
 
 冲突时：提案书 > workspace 规格（包边界）> 本文件 > 设计稿未确认部分。
 
-提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/pdfcraft-forms`，含对齐、按字段字号、`line_below`、`absolute_lines` 与 TTC 拆面。OTF 与字体子集仍未做。不要把填表写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/pdfcraft-forms`，含对齐、按字段字号、`line_below`、`absolute_lines` 与 TTC 拆面。OTF 与字体子集仍未做。不要把填表写进 `pdfcraft-pdf`。§11 确认 `pdfcraft-post`：对已有 PDF 字节做 `SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`Pipeline`。Watermark 与输入限额延后。不要把加密、合并、后处理写 Info 写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
-仍须遵守：未确认功能不「顺便」做。三包版本是 `0.1.0`，可以发布。
+仍须遵守：未确认功能不「顺便」做。四包版本是 `0.1.0`，可以发布。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
 
 ## 现阶段姿态（无生产包袱）
 
@@ -30,12 +30,12 @@
 已钉死（见提案书「你已经定过的」）：
 
 - 不做 FOP / XSL-FO；股权架构图不做。
-- 底座 krilla。`pdfcraft-pdf` 不改用 pdf-writer、lopdf、printpdf。`pdfcraft-forms` 用自有的 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）与 `skrifa =0.48.0`，见提案书 §10。`pdfcraft-forms` 不依赖 `pdfcraft-pdf`。
+- 底座 krilla。`pdfcraft-pdf` 不改用 pdf-writer、lopdf、printpdf。`pdfcraft-forms` 与 `pdfcraft-post` 用自有的 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）；forms 另用 `skrifa =0.48.0`，见提案书 §10 与 §11。二者都不依赖 `pdfcraft-pdf`。
 - 行宽用 **skrifa** 量，不靠 krilla 文字绘制反推。
 - 直依 `skrifa =0.48.0` 与 `krilla =0.8.2` 传递的 `skrifa ^0.42.0` 是两份库。2026-10-14 的解析结果是 `0.42.1`。当天 crates.io 上 krilla 最新仍是 0.8.2，升 krilla 消不掉这两份。上游 `main` 钉 `skrifa 0.44.0`，尚未发布，也不是 0.48.0。不要 fork krilla，不要改成 git 依赖。`emit` 的 `check_upem` 拒绝 units per em 不一致，夹具字形的 `TJ` 调整量锁住两边的 hmtx。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
 - 排版坐标：**左上原点，y 向下**；与 krilla 0.8.2 Surface 一致，适配器里对几何做恒等映射，不预翻转。
-- 版本保持 `0.x`。三包当前是 `0.1.0`，可以发布。
+- 版本保持 `0.x`。四包当前是 `0.1.0`，可以发布。
 
 调用方式（提案书 §1，已定）：`DocumentSpec` 值，经 `layout_spec` 排版。正文流式。页眉、页脚、`behind` / `front` 在每一页绘制时由库填页码。调用方不提供闭包。`Flowable` 只在库内部，不向调用方暴露。
 
@@ -80,6 +80,7 @@ pdfcraft/                 # git 仓库 / workspace 根（无业务 package）
       examples/           可运行示例
     pdfcraft-forms/          读已有 AcroForm 并 flatten（§10 已确认；基础填写已实现；禁止依赖 pdfcraft-pdf；不用 krilla）
     pdfcraft-orgchart/       股权与对外投资图。不依赖 pdfcraft-pdf。FontBytes；skrifa 0.48.0 测量；krilla 0.8.2 绘制
+    pdfcraft-post/           已有 PDF 后处理（§11 已确认；实现按层推进；禁止依赖 pdf / forms / orgchart；不用 krilla）
   .github/workflows/      CI
 ```
 
@@ -110,7 +111,7 @@ lib         → spec, backend, canvas, fonts, error, geom, limits
 | `lib.rs` 重导出 | 公共 `spec`、geom、error、Canvas | 任何 krilla 类型 |
 | 测试 | 排版用 `RecordingCanvas` 断言坐标 | 用测试依赖反转生产 DAG；把 krilla 压缩字节当排版断言 |
 
-上表是 `pdfcraft-pdf` 内部模块。`pdfcraft-orgchart` 在自己的 crate 里使用 krilla `0.8.2` 与 skrifa `0.48.0`，不引用 `pdfcraft-pdf`。
+上表是 `pdfcraft-pdf` 内部模块。`pdfcraft-orgchart` 在自己的 crate 里使用 krilla `0.8.2` 与 skrifa `0.48.0`，不引用 `pdfcraft-pdf`。`pdfcraft-post` 在自己的 crate 里使用 lopdf，不引用 `pdfcraft-pdf` / forms / orgchart。
 
 ## 代码与贡献规范
 
@@ -136,6 +137,7 @@ cargo test -p pdfcraft-forms
 cargo doc -p pdfcraft-forms --no-deps
 cargo test -p pdfcraft-orgchart
 cargo doc -p pdfcraft-orgchart --no-deps
+# pdfcraft-post 落地后另加 clippy / test / doc -p pdfcraft-post
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
 # 集成测试用 `pdfcraft_pdf::canvas::pt_near`，不依赖 `test-utils`。
 # 该 feature 只把同一函数再导出到 crate 根。
@@ -161,9 +163,9 @@ cargo doc -p pdfcraft-orgchart --no-deps
 - rustfmt / clippy 即风格；禁止大段 `#[allow(...)]`，必要时单点 + 一行理由。
 - `missing_docs`：当前 `warn`。公共 `spec` 与其余稳定对外 API 落地后升为 `deny`。
 - 公共项写 `///`（模块级说明 + 类型/方法）；`Errors` / `Panics` 按 API Guidelines。`pub(crate)` 与私有代码短注释即可。
-- 库代码返回本 crate 的 `Result`。三个 crate 不共用一个 error crate。
+- 库代码返回本 crate 的 `Result`。各 crate 不共用一个 error crate。
 - `pdfcraft-pdf` 的失败是 `Error` 或 `Errors`。位置放在可选的 `Location`。依赖失败通过 `source()` 取出。
-- `pdfcraft-forms` 的失败是单条 `Error`，没有字段级 `Location`。依赖失败通过 `source()` 取出。
+- `pdfcraft-forms` 与 `pdfcraft-post` 的失败是单条 `Error`（`Error` + `ErrorKind`），没有字段级 `Location`。依赖失败通过 `source()` 取出。
 - `pdfcraft-orgchart` 的失败是 `ErrorCode` 加 `message`。调用方匹配 `ErrorCode::as_str`。`message` 只给日志。依赖失败映射到稳定码。`crates/pdfcraft-orgchart/src` 的生产路径不用 `expect` 或 `unwrap`。`#[cfg(test)]` 模块和 `tests/` 可以。
 
 ### PR 纪律
@@ -183,11 +185,12 @@ cargo doc -p pdfcraft-orgchart --no-deps
 
 ## 明确不要做
 
-- **`pdfcraft-pdf`** 第二 PDF 后端；该 crate 生产代码依赖 pdf-writer / lopdf / printpdf。读第三方 PDF 填表只在 `pdfcraft-forms`，见 [`workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
+- **`pdfcraft-pdf`** 第二 PDF 后端；该 crate 生产代码依赖 pdf-writer / lopdf / printpdf。读第三方 PDF 填表只在 `pdfcraft-forms`。已有 PDF 的加密、合并、后处理写 `/Info` 只在 `pdfcraft-post`。见 [`workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
 - 完整 UAX #14、bidi、阿文/印度系 shaping、竖排、kerning、连字。
 - 向调用方暴露 `Flowable` trait。
-- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。股权架构图在 `pdfcraft-orgchart`，行为以 `docs/pdfcraft-orgchart-spec.md` 为准，不进 `pdfcraft-pdf`。
+- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / `pdfcraft-pdf` 内加密 / 标签 PDF / `pdfcraft-post` 的 Watermark 与输入限额等；单元格合并等**已确认要做的**按对应层实现。股权架构图在 `pdfcraft-orgchart`，行为以 `docs/pdfcraft-orgchart-spec.md` 为准，不进 `pdfcraft-pdf`。后处理以提案书 §11 与 `docs/pdfcraft-post-spec.md` 为准。
 - 用 JSON/serde 当主接口（设计稿旧表述已作废；serde 若将来做，也只是可选，不是主路径）。
 - 并行开页或并行画页。
 - 为「像大厂」堆流程：不建 viewer 视觉回归农场；不放宽成 `^` 依赖。
-- 把 forms / orgchart 做成 `pdfcraft-pdf` 的 feature，或让 `pdfcraft-forms` ↔ `pdfcraft-pdf` 互相依赖。
+- 把 forms / orgchart / post 做成 `pdfcraft-pdf` 的 feature，或让 `pdfcraft-forms` ↔ `pdfcraft-pdf`、`pdfcraft-post` ↔ 任一兄弟 crate 互相依赖。
+- 修改 hcsw 工程（含 `/mnt/data/dev/hcsw-pdfcraft`）里的任何文件。

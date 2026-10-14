@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Documentation
 
+- Confirmed `pdfcraft-post` in the proposal (§11), workspace crate map, and `AGENTS.md`. The crate post-processes existing PDF bytes: `SetMetadata`, `Encrypt` (presets `READ_ONLY`, `READ_ONLY_PRINTABLE`, `FULL_PERMISSIONS`), `StampAndEncrypt`, `merge_pdfs` (`preserve_outlines`), and `Pipeline`. Watermark and input limits are deferred. HTTP mapping and finalize orchestration stay out. `SetMetadata` may set Creator and Producer; that differs from `DocumentSpec.info`, which keeps Creator fixed and does not expose Producer. No dependency edges to or from `pdfcraft-pdf`, `pdfcraft-forms`, or `pdfcraft-orgchart`. Pins workspace `lopdf =0.45.0`. Errors are `Error` + `ErrorKind`. Version `0.1.0` may publish. Implementation stays in this repository; hcsw trees are read-only for behavior reference.
 - Each of `pdfcraft-pdf`, `pdfcraft-forms`, and `pdfcraft-orgchart` ships a Diátaxis set: crates.io README (install / quick start), package `docs/guide.md` (how-to), and crate-root rustdoc (overview + example). `pdfcraft-forms` and `pdfcraft-orgchart` guides cover mental model, options, fonts, errors, and testing. Published packages include `docs/**/*`. The workspace root README indexes Guide / API for every crate.
 
 ### Changed
