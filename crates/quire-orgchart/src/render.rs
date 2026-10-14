@@ -1,5 +1,6 @@
 //! Draw placed pages with krilla. Layout stays y-down. Glyphs use the skrifa advances.
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use krilla::annotation::{LinkAnnotation, Target};
@@ -16,7 +17,7 @@ use krilla::{Data, Document, SerializeSettings};
 use crate::captions::{cont_cue_lines, footer};
 use crate::display::LabelHug;
 use crate::error::{Error, ErrorCode};
-use crate::graph::OVERFLOW_ID_PREFIX;
+use crate::ids::NodeId;
 use crate::measure::{FontMetrics, GlyphUse, NodeBox};
 use crate::page::{PageSpec, PlacedNode};
 use crate::units::{
@@ -32,7 +33,7 @@ use crate::units::{
 /// # Errors
 ///
 /// Returns [`ErrorCode::FontError`] when krilla rejects the face, and glyph errors.
-pub(crate) fn render(pages: &[PageSpec], font: &FontMetrics) -> Result<Vec<u8>, Error> {
+pub(crate) fn render(pages: &[PageSpec], font: &mut FontMetrics) -> Result<Vec<u8>, Error> {
     let mut document = Document::new_with(SerializeSettings {
         enable_tagging: false,
         ..SerializeSettings::default()
@@ -54,7 +55,7 @@ fn draw_page(
     document: &mut Document,
     page: &PageSpec,
     page_count: usize,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
     index: usize,
 ) -> Result<(), Error> {
@@ -75,13 +76,23 @@ fn draw_page(
                 .collect();
             stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, false);
         }
+        let box_by_id: HashMap<NodeId, &NodeBox> =
+            page.boxes.iter().map(|box_| (box_.id, box_)).collect();
         for node in &page.layout.nodes {
-            let Some(box_) = page.boxes.iter().find(|box_| box_.id == node.id) else {
-                continue;
-            };
+            let box_ = box_by_id
+                .get(&node.id)
+                .expect("placed node has a measured box");
             draw_node(&mut surface, node, box_, origin_x, origin_y, font, face)?;
         }
-        draw_ratios(&mut surface, page, origin_x, origin_y, font, face)?;
+        draw_ratios(
+            &mut surface,
+            page,
+            &box_by_id,
+            origin_x,
+            origin_y,
+            font,
+            face,
+        )?;
         draw_cues(&mut surface, page, origin_x, origin_y, font, face)?;
         draw_footer(&mut surface, page, page_count, index, font, face)?;
         surface.finish();
@@ -114,7 +125,7 @@ fn draw_page(
             .layout
             .nodes
             .iter()
-            .find(|node| node.id == link.node_id)
+            .find(|node| node.protocol_id == link.node_id)
         {
             if let Some(rect) = rect_pt(
                 node.x + origin_x,
@@ -160,7 +171,7 @@ fn pt_f32(value: f64) -> f32 {
 fn draw_titles(
     surface: &mut Surface<'_>,
     page: &PageSpec,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
     let width = page.geometry.page_width_mm;
@@ -194,7 +205,7 @@ fn draw_cues(
     page: &PageSpec,
     origin_x: f64,
     origin_y: f64,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
     for cue in &page.cont_cues {
@@ -246,7 +257,7 @@ fn draw_footer(
     page: &PageSpec,
     page_count: usize,
     index: usize,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
     let text = footer(index + 1, page_count);
@@ -263,12 +274,12 @@ fn draw_node(
     node: &NodeBox,
     origin_x: f64,
     origin_y: f64,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
     let x = placed.x + origin_x;
     let y0 = placed.y + origin_y;
-    let dashed = node.id.starts_with(OVERFLOW_ID_PREFIX);
+    let dashed = node.is_overflow;
     let shade = if node.is_company { COMPANY_SHADE } else { 1.0 };
     let byte = gray_byte(shade);
     fill_round(
@@ -313,7 +324,7 @@ fn paint_node_lines(
     node: &NodeBox,
     x: f64,
     mut y: f64,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
     for line in &node.lines {
@@ -354,25 +365,23 @@ fn gray_byte(shade: f64) -> u8 {
 fn draw_ratios(
     surface: &mut Surface<'_>,
     page: &PageSpec,
+    box_by_id: &HashMap<NodeId, &NodeBox>,
     origin_x: f64,
     origin_y: f64,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
+    let node_by_id: HashMap<NodeId, &PlacedNode> = page
+        .layout
+        .nodes
+        .iter()
+        .map(|node| (node.id, node))
+        .collect();
     for fact in &page.ratio_facts {
-        let Some(node) = page
-            .layout
-            .nodes
-            .iter()
-            .find(|node| node.id == fact.node_id)
-        else {
-            continue;
-        };
-        if page
-            .boxes
-            .iter()
-            .any(|box_| box_.id == node.id && box_.is_subject)
-        {
+        let node = node_by_id
+            .get(&fact.node_id)
+            .expect("ratio fact node is placed on the page");
+        if box_by_id.get(&node.id).is_some_and(|box_| box_.is_subject) {
             continue;
         }
         let x = node.x + origin_x + node.width / 2.0 + RATIO_LABEL_OFFSET_X_MM;
@@ -390,7 +399,7 @@ fn draw_ratios(
 fn center_text(
     surface: &mut Surface<'_>,
     text: &str,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
     size_pt: f64,
     left_mm: f64,
@@ -408,7 +417,7 @@ fn center_text(
 fn draw_text(
     surface: &mut Surface<'_>,
     text: &str,
-    font: &FontMetrics,
+    font: &mut FontMetrics,
     face: &Font,
     size_pt: f64,
     x_mm: f64,

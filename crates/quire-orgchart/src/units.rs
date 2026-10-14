@@ -76,7 +76,8 @@ pub(crate) fn node_height_limit_mm(printable_height_mm: f64) -> f64 {
 
 /// A4 page. Landscape swaps the page edges and keeps the margin and bands.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PageGeometry {
+#[allow(clippy::struct_field_names)] // `mm` keeps page lengths distinct from points
+pub(crate) struct PageGeometry {
     /// Page width in mm.
     pub page_width_mm: f64,
     /// Page height in mm.

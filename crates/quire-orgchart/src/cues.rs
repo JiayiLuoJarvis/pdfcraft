@@ -51,11 +51,14 @@ pub(crate) struct CueAnchorSize {
     pub(crate) height_mm: f64,
 }
 
-pub(crate) fn absorb_cue_slots(
+pub(crate) fn absorb_cue_slots<F>(
     anchors: &[CueAnchorSize],
-    relayout: &mut dyn FnMut(f64) -> Result<LayoutResult, Error>,
+    mut relayout: F,
     geometry: PageGeometry,
-) -> Result<Option<LayoutResult>, Error> {
+) -> Result<Option<LayoutResult>, Error>
+where
+    F: FnMut(f64) -> Result<LayoutResult, Error>,
+{
     if anchors.is_empty() {
         return Ok(Some(relayout(ROW_GAP_MM)?));
     }
@@ -103,7 +106,11 @@ fn nodes_only(layout: LayoutResult) -> Result<LayoutResult, Error> {
 fn required_row_gap(anchors: &[CueAnchorSize], layout: &LayoutResult) -> f64 {
     let mut required = 0.0_f64;
     for anchor in anchors {
-        let Some(node) = layout.nodes.iter().find(|node| node.id == anchor.anchor_id) else {
+        let Some(node) = layout
+            .nodes
+            .iter()
+            .find(|node| node.protocol_id == anchor.anchor_id)
+        else {
             continue;
         };
         let zone = clearance(preferred_rect(anchor, node));
@@ -138,8 +145,14 @@ fn place_all(
 ) -> Option<Vec<CueSlot>> {
     let mut ordered: Vec<&CueAnchorSize> = anchors.iter().collect();
     ordered.sort_by(|left, right| {
-        let left_node = layout.nodes.iter().find(|node| node.id == left.anchor_id);
-        let right_node = layout.nodes.iter().find(|node| node.id == right.anchor_id);
+        let left_node = layout
+            .nodes
+            .iter()
+            .find(|node| node.protocol_id == left.anchor_id);
+        let right_node = layout
+            .nodes
+            .iter()
+            .find(|node| node.protocol_id == right.anchor_id);
         let left_key = left_node.map_or((f64::INFINITY, f64::INFINITY), |node| (node.y, node.x));
         let right_key = right_node.map_or((f64::INFINITY, f64::INFINITY), |node| (node.y, node.x));
         left_key
@@ -153,7 +166,7 @@ fn place_all(
         let node = layout
             .nodes
             .iter()
-            .find(|node| node.id == anchor.anchor_id)?;
+            .find(|node| node.protocol_id == anchor.anchor_id)?;
         let slot = place_one(anchor, node, layout, &placed, geometry)?;
         placed.push(slot);
     }
@@ -325,7 +338,7 @@ fn overlaps_x(left: &PlacedNode, right: &PlacedNode) -> bool {
 pub(crate) fn direct_count(boxes: &[NodeBox], direct_ids: &[&str]) -> usize {
     boxes
         .iter()
-        .filter(|box_| direct_ids.contains(&box_.id.as_str()))
+        .filter(|box_| direct_ids.contains(&box_.protocol_id.as_str()))
         .count()
 }
 
@@ -333,7 +346,7 @@ pub(crate) fn finalize_pages(
     pages: &[UnnumberedPage],
     cues: &[PendingCue],
     links: &[PendingLink],
-    measurer: &dyn Measurer,
+    measurer: &mut dyn Measurer,
 ) -> Result<Vec<PageSpec>, Error> {
     let page_count = pages.len();
     let mut cues_by_source: Vec<Vec<ContCue>> = vec![Vec::new(); page_count];
@@ -374,7 +387,7 @@ pub(crate) fn finalize_pages(
         for box_ in &page.boxes {
             if let Some((_, text)) = detail_by_source[index]
                 .iter()
-                .find(|(id, _)| id == &box_.id)
+                .find(|(id, _)| id == &box_.protocol_id)
             {
                 boxes.push(write_overflow_line(box_, text, measurer)?);
             } else {
@@ -407,7 +420,7 @@ pub(crate) fn finalize_pages(
 fn require_numbered_line_fits(
     cues: &[ContCue],
     layout: &LayoutResult,
-    measurer: &dyn Measurer,
+    measurer: &mut dyn Measurer,
 ) -> Result<(), Error> {
     for cue in cues {
         let Some(slot) = layout
@@ -458,7 +471,7 @@ fn require_forward(
 fn write_overflow_line(
     box_: &NodeBox,
     text: &str,
-    measurer: &dyn Measurer,
+    measurer: &mut dyn Measurer,
 ) -> Result<NodeBox, Error> {
     let Some(last) = box_.lines.last() else {
         return Err(Error::new(

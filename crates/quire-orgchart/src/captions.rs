@@ -253,3 +253,7 @@ mod tests {
         assert_eq!(overflow_detail_line(12), "详见附件12");
     }
 }
+
+#[cfg(test)]
+#[path = "captions_tests.rs"]
+mod captions_tests;

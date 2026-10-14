@@ -33,10 +33,8 @@ fn a_small_chart_starts_with_pdf_and_names_the_role() {
         .arg("-layout")
         .arg(&path)
         .arg("-")
-        .output();
-    let Ok(text) = text else {
-        return;
-    };
+        .output()
+        .expect("pdftotext is required");
     assert!(text.status.success(), "pdftotext failed");
     let body = String::from_utf8_lossy(&text.stdout);
     assert!(body.contains("股权架构图"), "{body}");

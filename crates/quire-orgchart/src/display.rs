@@ -3,11 +3,16 @@
 //! A ratio never enters the box. Company gray fill is decided here and stored
 //! on the box when measuring runs.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::error::{Error, ErrorCode};
-use crate::graph::{self, ratio_source, ValidatedGraph};
-use crate::model::{ChartRequest, Node, NodeType};
+use crate::graph::{self, ratio_source, Graph};
+use crate::ids::{NodeId, NodeRec};
+#[cfg(test)]
+use crate::model::ChartRequest;
+#[cfg(test)]
+use crate::model::Node;
+use crate::model::NodeType;
 
 /// Which cone a node belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,18 +23,6 @@ pub enum DisplayRole {
     Shareholder,
     /// A node reached by walking investments downward.
     Investment,
-}
-
-impl DisplayRole {
-    /// `SUBJECT`, `SHAREHOLDER`, or `INVESTMENT`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Subject => "SUBJECT",
-            Self::Shareholder => "SHAREHOLDER",
-            Self::Investment => "INVESTMENT",
-        }
-    }
 }
 
 /// What an in-box line is for. Measuring uses this to pick a font size.
@@ -43,18 +36,6 @@ pub enum LineKind {
     Detail,
 }
 
-impl LineKind {
-    /// `NAME`, `LEGAL_PERSON`, or `DETAIL`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Name => "NAME",
-            Self::LegalPerson => "LEGAL_PERSON",
-            Self::Detail => "DETAIL",
-        }
-    }
-}
-
 /// One drawn line inside a node box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogicalLine {
@@ -64,11 +45,10 @@ pub struct LogicalLine {
     pub text: String,
 }
 
-/// Lines and role for every node, in request order.
+/// Lines and role for every node, indexed by [`NodeId`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeDisplays {
     nodes: Vec<NodeContent>,
-    index_of: HashMap<String, usize>,
 }
 
 /// In-box content for one node.
@@ -81,13 +61,14 @@ pub struct NodeContent {
 }
 
 impl NodeDisplays {
-    /// Content for `id`, or `None` when the id is not in the request.
+    /// Content for `id`.
+    #[cfg(test)]
     #[must_use]
-    pub fn get(&self, id: &str) -> Option<&NodeContent> {
-        self.index_of.get(id).map(|&index| &self.nodes[index])
+    pub fn get(&self, id: NodeId) -> Option<&NodeContent> {
+        self.nodes.get(id.index())
     }
 
-    /// Content parallel to `request.nodes`.
+    /// Content parallel to graph nodes.
     #[must_use]
     pub fn nodes(&self) -> &[NodeContent] {
         &self.nodes
@@ -103,17 +84,6 @@ pub enum LabelHug {
     Top,
 }
 
-impl LabelHug {
-    /// `BOTTOM` or `TOP`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Bottom => "BOTTOM",
-            Self::Top => "TOP",
-        }
-    }
-}
-
 /// The holding edge a ratio was copied from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParentEdge {
@@ -127,7 +97,9 @@ pub struct ParentEdge {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RatioFact {
     /// Node id.
-    pub node_id: String,
+    pub node_id: NodeId,
+    /// Protocol id for page filtering and PDF text keys.
+    pub protocol_id: String,
     /// Percent in `0..=100`.
     pub ratio: f64,
     /// `xx.xx%`.
@@ -145,38 +117,37 @@ pub struct RatioFact {
 /// # Errors
 ///
 /// Returns [`Error`] when `request` breaks the chart protocol.
+#[cfg(test)]
 pub fn build_display(request: &ChartRequest) -> Result<NodeDisplays, Error> {
     let graph = graph::validate(request)?;
     Ok(display_of(&graph))
 }
 
-pub(crate) fn display_of(graph: &ValidatedGraph<'_>) -> NodeDisplays {
+pub(crate) fn display_of(graph: &Graph) -> NodeDisplays {
     let shareholders = graph::shareholder_ids(graph);
     let investments = graph::investment_ids(graph);
-    let mut nodes = Vec::with_capacity(graph.request.nodes.len());
-    let mut index_of = HashMap::with_capacity(graph.request.nodes.len());
-    for (index, node) in graph.request.nodes.iter().enumerate() {
-        let role = role_of(index, graph.subject, &shareholders, &investments);
-        index_of.insert(node.id.clone(), index);
+    let mut nodes = Vec::with_capacity(graph.nodes.len());
+    for node in &graph.nodes {
+        let role = role_of(node.id, graph.subject, &shareholders, &investments);
         nodes.push(NodeContent {
             role,
-            lines: inbox_lines(node, role),
+            lines: inbox_lines_rec(node, role),
         });
     }
-    NodeDisplays { nodes, index_of }
+    NodeDisplays { nodes }
 }
 
 fn role_of(
-    index: usize,
-    subject: usize,
-    shareholders: &HashSet<usize>,
-    investments: &HashSet<usize>,
+    id: NodeId,
+    subject: NodeId,
+    shareholders: &HashSet<NodeId>,
+    investments: &HashSet<NodeId>,
 ) -> DisplayRole {
-    if index == subject {
+    if id == subject {
         DisplayRole::Subject
-    } else if investments.contains(&index) {
+    } else if investments.contains(&id) {
         DisplayRole::Investment
-    } else if shareholders.contains(&index) {
+    } else if shareholders.contains(&id) {
         DisplayRole::Shareholder
     } else {
         // `validate` already rejects a node outside both cones.
@@ -184,16 +155,34 @@ fn role_of(
     }
 }
 
-/// Lines for one node. Ratio text is not included.
-#[must_use]
-pub fn inbox_lines(node: &Node, role: DisplayRole) -> Vec<LogicalLine> {
+fn inbox_lines_rec(node: &NodeRec, role: DisplayRole) -> Vec<LogicalLine> {
+    inbox_fields(
+        &node.name,
+        node.legal_person.as_deref(),
+        node.paid_in_amount.as_deref(),
+        node.currency.as_deref(),
+        node.location.as_deref(),
+        node.approval_date.as_deref(),
+        role,
+    )
+}
+
+fn inbox_fields(
+    name: &str,
+    legal_person: Option<&str>,
+    paid_in_amount: Option<&str>,
+    currency: Option<&str>,
+    location: Option<&str>,
+    approval_date: Option<&str>,
+    role: DisplayRole,
+) -> Vec<LogicalLine> {
     let mut lines = vec![LogicalLine {
         kind: LineKind::Name,
-        text: node.name.clone(),
+        text: name.to_owned(),
     }];
     match role {
         DisplayRole::Subject | DisplayRole::Shareholder => {
-            if let Some(text) = shown(node.legal_person.as_deref()) {
+            if let Some(text) = shown(legal_person) {
                 lines.push(LogicalLine {
                     kind: LineKind::LegalPerson,
                     text,
@@ -201,19 +190,19 @@ pub fn inbox_lines(node: &Node, role: DisplayRole) -> Vec<LogicalLine> {
             }
         }
         DisplayRole::Investment => {
-            if let Some(text) = paid_in_text(node) {
+            if let Some(text) = paid_in_text(paid_in_amount, currency) {
                 lines.push(LogicalLine {
                     kind: LineKind::Detail,
                     text,
                 });
             }
-            if let Some(text) = shown(node.location.as_deref()) {
+            if let Some(text) = shown(location) {
                 lines.push(LogicalLine {
                     kind: LineKind::Detail,
                     text,
                 });
             }
-            if let Some(text) = shown(node.approval_date.as_deref()) {
+            if let Some(text) = shown(approval_date) {
                 lines.push(LogicalLine {
                     kind: LineKind::Detail,
                     text,
@@ -227,18 +216,28 @@ pub fn inbox_lines(node: &Node, role: DisplayRole) -> Vec<LogicalLine> {
 /// Gray fill when the node is a company, or when type is unset and a legal person is present.
 ///
 /// [`NodeType::Person`] is always white, even when `legal_person` is set.
+#[cfg(test)]
 #[must_use]
 pub fn company_fill(node: &Node) -> bool {
-    match node.node_type {
+    company_fill_fields(node.node_type, node.legal_person.as_deref())
+}
+
+/// Gray fill for an arena node. Same rules as [`company_fill`].
+pub(crate) fn company_fill_rec(node: &NodeRec) -> bool {
+    company_fill_fields(node.node_type, node.legal_person.as_deref())
+}
+
+fn company_fill_fields(node_type: Option<NodeType>, legal_person: Option<&str>) -> bool {
+    match node_type {
         Some(NodeType::Company) => true,
         Some(NodeType::Person) => false,
-        None => shown(node.legal_person.as_deref()).is_some(),
+        None => shown(legal_person).is_some(),
     }
 }
 
-fn paid_in_text(node: &Node) -> Option<String> {
-    let amount = shown(node.paid_in_amount.as_deref())?;
-    let text = match shown(node.currency.as_deref()) {
+fn paid_in_text(paid_in_amount: Option<&str>, currency: Option<&str>) -> Option<String> {
+    let amount = shown(paid_in_amount)?;
+    let text = match shown(currency) {
         Some(currency) => format!("实缴 {amount} {currency}"),
         None => format!("实缴 {amount}"),
     };
@@ -265,33 +264,44 @@ pub fn format_display_ratio(ratio: f64) -> String {
 /// # Errors
 ///
 /// Returns [`Error`] when `request` fails validation, or when a parent edge is ambiguous.
+#[cfg(test)]
 pub fn ratio_facts(request: &ChartRequest) -> Result<Vec<RatioFact>, Error> {
-    let graph = graph::validate(request)?;
-    facts_of(&graph)
+    let mut graph = graph::validate(request)?;
+    facts_of(&mut graph)
 }
 
-pub(crate) fn facts_of(graph: &ValidatedGraph<'_>) -> Result<Vec<RatioFact>, Error> {
+pub(crate) fn facts_of(graph: &mut Graph) -> Result<Vec<RatioFact>, Error> {
     let shareholders = graph::shareholder_ids(graph);
     let investments = graph::investment_ids(graph);
-    let mut cache = HashMap::new();
     let mut facts = Vec::new();
-    for index in 0..graph.request.nodes.len() {
-        let role = role_of(index, graph.subject, &shareholders, &investments);
+    let count = graph.nodes.len();
+    for index in 0..count {
+        let id = NodeId::from_index(index);
+        let role = role_of(id, graph.subject, &shareholders, &investments);
         if role == DisplayRole::Subject {
             continue;
         }
-        let Some(source) = ratio_source(graph, index, &mut cache)? else {
+        let Some(source) = ratio_source(graph, id)? else {
             continue;
         };
+        let preferred_parent = match source.parent {
+            Some(edge) => {
+                let from = graph.edge_from(edge);
+                let to = graph.edge_to(edge);
+                Some(ParentEdge {
+                    from_id: graph.protocol_id(from).to_owned(),
+                    to_id: graph.protocol_id(to).to_owned(),
+                })
+            }
+            None => None,
+        };
         facts.push(RatioFact {
-            node_id: graph.node_id(index).to_owned(),
+            node_id: id,
+            protocol_id: graph.protocol_id(id).to_owned(),
             ratio: source.value,
             text: format_display_ratio(source.value),
             hug: hug_for(role)?,
-            preferred_parent: source.parent.map(|edge| ParentEdge {
-                from_id: graph.request.edges[edge].from_id.clone(),
-                to_id: graph.request.edges[edge].to_id.clone(),
-            }),
+            preferred_parent,
         });
     }
     Ok(facts)
@@ -319,6 +329,11 @@ mod tests {
             ratio: Some(ratio),
             ..Edge::new(from, to)
         }
+    }
+
+    fn id_of(request: &ChartRequest, protocol: &str) -> crate::ids::NodeId {
+        let graph = crate::graph::validate(request).expect("valid");
+        graph.id_of(protocol).expect(protocol)
     }
 
     #[test]
@@ -356,10 +371,11 @@ mod tests {
             vec![edge("s", "root", 40.0), edge("root", "c", 51.2)],
         );
         let display = build_display(&request).expect("display");
-        let pairs = |id: &str| {
+        let pairs = |protocol: &str| {
+            let id = id_of(&request, protocol);
             display
                 .get(id)
-                .expect(id)
+                .expect(protocol)
                 .lines
                 .iter()
                 .map(|line| (line.kind, line.text.as_str()))
@@ -388,31 +404,39 @@ mod tests {
                 assert!(!line.text.contains('%'));
             }
         }
+        let s = id_of(&request, "s");
         assert!(display
-            .get("s")
+            .get(s)
             .expect("s")
             .lines
             .iter()
             .all(|line| !line.text.contains("实缴")));
+        let c = id_of(&request, "c");
         assert!(display
-            .get("c")
+            .get(c)
             .expect("c")
             .lines
             .iter()
             .all(|line| !line.text.contains("赵六")));
         let facts = ratio_facts(&request).expect("facts");
-        let holder = facts.iter().find(|fact| fact.node_id == "s").expect("s");
+        let holder = facts
+            .iter()
+            .find(|fact| fact.protocol_id == "s")
+            .expect("s");
         assert_eq!(holder.text, "40.00%");
         assert_eq!(holder.ratio, 40.0);
         assert_eq!(holder.hug, LabelHug::Bottom);
         assert!(holder.preferred_parent.is_none());
-        let child = facts.iter().find(|fact| fact.node_id == "c").expect("c");
+        let child = facts
+            .iter()
+            .find(|fact| fact.protocol_id == "c")
+            .expect("c");
         assert_eq!(child.text, "51.20%");
         assert_eq!(child.hug, LabelHug::Top);
         let parent = child.preferred_parent.as_ref().expect("edge");
         assert_eq!(parent.from_id, "root");
         assert_eq!(parent.to_id, "c");
-        assert!(facts.iter().all(|fact| fact.node_id != "root"));
+        assert!(facts.iter().all(|fact| fact.protocol_id != "root"));
     }
 
     #[test]
@@ -435,9 +459,10 @@ mod tests {
             vec![edge("root", "c1", 10.0), edge("root", "c2", 0.0)],
         );
         let display = build_display(&request).expect("display");
+        let c1 = id_of(&request, "c1");
         assert_eq!(
             display
-                .get("c1")
+                .get(c1)
                 .expect("c1")
                 .lines
                 .iter()
@@ -445,9 +470,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["只有币种"]
         );
+        let c2 = id_of(&request, "c2");
         assert_eq!(
             display
-                .get("c2")
+                .get(c2)
                 .expect("c2")
                 .lines
                 .iter()
@@ -459,12 +485,12 @@ mod tests {
         assert_eq!(
             facts
                 .iter()
-                .find(|fact| fact.node_id == "c2")
+                .find(|fact| fact.protocol_id == "c2")
                 .expect("c2")
                 .text,
             "0.00%"
         );
-        assert!(facts.iter().all(|fact| fact.node_id != "root"));
+        assert!(facts.iter().all(|fact| fact.protocol_id != "root"));
     }
 
     #[test]
@@ -488,3 +514,7 @@ mod tests {
         }));
     }
 }
+
+#[cfg(test)]
+#[path = "display_tests.rs"]
+mod display_tests;

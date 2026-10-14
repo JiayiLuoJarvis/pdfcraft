@@ -7,27 +7,21 @@
 
 #![forbid(unsafe_code)]
 
-#[doc(hidden)]
-pub mod captions;
+mod captions;
 mod cues;
-#[doc(hidden)]
-pub mod display;
+mod display;
 mod error;
 mod family;
 mod graph;
-#[doc(hidden)]
-pub mod layout;
-#[doc(hidden)]
-pub mod measure;
+mod ids;
+mod layout;
+mod measure;
 mod model;
-#[doc(hidden)]
-pub mod page;
-#[doc(hidden)]
-pub mod paging;
+mod page;
+mod paging;
 mod prepare;
 mod render;
-#[doc(hidden)]
-pub mod units;
+mod units;
 
 pub use error::{Error, ErrorCode};
 pub use model::{
@@ -78,41 +72,42 @@ pub fn generate_pdf(request: &ChartRequest, font: &FontBytes) -> Result<Vec<u8>,
     let prepared = prepare::prepare_request(request)?;
     let graph = graph::validate(&prepared)?;
     let shown = display::display_of(&graph);
-    let margin = prepared.options.margin_mm.unwrap_or(units::MARGIN_MM);
-    let node_width = prepared
-        .options
-        .node_width_mm
-        .unwrap_or(units::NODE_WIDTH_MM);
+    let margin = graph.options.margin_mm.unwrap_or(units::MARGIN_MM);
+    let node_width = graph.options.node_width_mm.unwrap_or(units::NODE_WIDTH_MM);
     let geometry = units::PageGeometry::portrait(margin);
-    let metrics = measure::FontMetrics::open(font)?;
-    let inboxes: Vec<measure::InboxNode<'_>> = prepared
-        .nodes
-        .iter()
-        .zip(shown.nodes())
-        .map(|(node, content)| measure::InboxNode {
-            id: &node.id,
-            lines: &content.lines,
-            node,
-        })
-        .collect();
-    let boxes = measure::build_node_boxes(
-        &inboxes,
-        &metrics,
-        node_width,
-        &prepared.subject_id,
-        geometry.printable_height_mm(),
-    )?;
-    let pages = paging::paginate(&prepared, &boxes, geometry)?;
+    let mut metrics = measure::FontMetrics::open(font)?;
+    let subject_protocol = graph.subject_protocol_id.clone();
+    let boxes = {
+        let inboxes: Vec<measure::InboxNode<'_>> = graph
+            .nodes
+            .iter()
+            .zip(shown.nodes())
+            .map(|(node, content)| measure::InboxNode {
+                id: node.id,
+                protocol_id: &node.protocol_id,
+                lines: &content.lines,
+                is_company: display::company_fill_rec(node),
+            })
+            .collect();
+        measure::build_node_boxes(
+            &inboxes,
+            &mut metrics,
+            node_width,
+            &subject_protocol,
+            geometry.printable_height_mm(),
+        )?
+    };
+    let pages = paging::paginate(graph, &boxes, geometry, &mut metrics)?;
     for page in &pages {
-        measure::Measurer::ensure_glyphs(&metrics, &page.main_title)?;
-        measure::Measurer::ensure_glyphs(&metrics, &page.sub_title)?;
+        measure::Measurer::ensure_glyphs(&mut metrics, &page.main_title)?;
+        measure::Measurer::ensure_glyphs(&mut metrics, &page.sub_title)?;
         for fact in &page.ratio_facts {
-            measure::Measurer::ensure_glyphs(&metrics, &fact.text)?;
+            measure::Measurer::ensure_glyphs(&mut metrics, &fact.text)?;
         }
     }
     let count = pages.len();
     for index in 1..=count {
-        measure::Measurer::ensure_glyphs(&metrics, &captions::footer(index, count))?;
+        measure::Measurer::ensure_glyphs(&mut metrics, &captions::footer(index, count))?;
     }
-    render::render(&pages, &metrics)
+    render::render(&pages, &mut metrics)
 }

@@ -1,9 +1,8 @@
 //! In-box lines and ratio facts. Width and paging stay in later tests.
 
-use quire_orgchart::display::{
-    build_display, company_fill, ratio_facts, DisplayRole, LabelHug, LineKind,
-};
-use quire_orgchart::{ChartRequest, Edge, Node, NodeType};
+use crate::display::{build_display, company_fill, ratio_facts, DisplayRole, LabelHug, LineKind};
+use crate::graph;
+use crate::{ChartRequest, Edge, Node, NodeType};
 
 fn cone() -> ChartRequest {
     let mut root = Node::new("root", "主体");
@@ -45,14 +44,20 @@ fn cone() -> ChartRequest {
     )
 }
 
+fn nid(request: &ChartRequest, protocol: &str) -> crate::ids::NodeId {
+    graph::validate(request)
+        .expect("valid")
+        .id_of(protocol)
+        .expect(protocol)
+}
+
 #[test]
 #[allow(clippy::float_cmp)]
 fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
     let request = cone();
     let display = build_display(&request).expect("display");
-    let root = display.get("root").expect("root");
+    let root = display.get(nid(&request, "root")).expect("root");
     assert_eq!(root.role, DisplayRole::Subject);
-    assert_eq!(root.role.as_str(), "SUBJECT");
     assert_eq!(
         root.lines
             .iter()
@@ -60,8 +65,8 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
             .collect::<Vec<_>>(),
         vec![(LineKind::Name, "主体"), (LineKind::LegalPerson, "李四"),]
     );
-    let holder = display.get("s").expect("holder");
-    assert_eq!(holder.role.as_str(), "SHAREHOLDER");
+    let holder = display.get(nid(&request, "s")).expect("holder");
+    assert_eq!(holder.role, DisplayRole::Shareholder);
     assert_eq!(
         holder
             .lines
@@ -70,8 +75,8 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
             .collect::<Vec<_>>(),
         vec![(LineKind::Name, "股东甲"), (LineKind::LegalPerson, "王五"),]
     );
-    let child = display.get("c").expect("child");
-    assert_eq!(child.role.as_str(), "INVESTMENT");
+    let child = display.get(nid(&request, "c")).expect("child");
+    assert_eq!(child.role, DisplayRole::Investment);
     assert_eq!(
         child
             .lines
@@ -97,7 +102,7 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
     let facts = ratio_facts(&request).expect("facts");
     let by_id: std::collections::HashMap<_, _> = facts
         .iter()
-        .map(|fact| (fact.node_id.as_str(), fact))
+        .map(|fact| (fact.protocol_id.as_str(), fact))
         .collect();
     assert_eq!(
         by_id
@@ -110,7 +115,6 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
     assert_eq!(holder_fact.text, "40.00%");
     assert_eq!(holder_fact.ratio, 40.0);
     assert_eq!(holder_fact.hug, LabelHug::Bottom);
-    assert_eq!(holder_fact.hug.as_str(), "BOTTOM");
     assert!(holder_fact.preferred_parent.is_none());
     let child_fact = by_id["c"];
     assert_eq!(child_fact.text, "51.20%");
@@ -143,10 +147,10 @@ fn currency_without_amount_and_blank_amount_add_no_detail_line() {
         ],
     );
     let display = build_display(&request).expect("display");
-    let texts = |id: &str| {
+    let texts = |protocol: &str| {
         display
-            .get(id)
-            .expect(id)
+            .get(nid(&request, protocol))
+            .expect(protocol)
             .lines
             .iter()
             .map(|line| line.text.as_str())
@@ -157,7 +161,7 @@ fn currency_without_amount_and_blank_amount_add_no_detail_line() {
     let facts = ratio_facts(&request).expect("facts");
     let by_id: std::collections::HashMap<_, _> = facts
         .iter()
-        .map(|fact| (fact.node_id.as_str(), fact.text.as_str()))
+        .map(|fact| (fact.protocol_id.as_str(), fact.text.as_str()))
         .collect();
     assert_eq!(by_id["c2"], "0.00%");
     assert!(!by_id.contains_key("root"));

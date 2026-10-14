@@ -15,6 +15,10 @@ while remaining `0.x`.
 
 - `quire-pdf` ships a self-contained crates.io-style README, `docs/guide.md` usage guide, crate/module rustdoc, dual license files in the package, and `package.metadata.docs.rs`. Caller docs do not require reading internal proposal notes.
 
+### Fixed
+
+- `quire-orgchart` `generate_pdf` measures overflow boxes, continuation cues, and promoted annex subjects with the same skrifa face that draws the page.
+
 ### Added
 
 - `quire-forms` `FillOptions` now covers production fill options. `h_align` / `v_align` and their overrides, `font_size_overrides`, `line_below`, and `absolute_lines` (`AbsoluteLine`, default red 0.8 pt). Unknown names in those maps follow `missing`. Vertical placement uses glyph ink. A last line of one glyph may drop the size by up to 2 pt. A TrueType collection is reduced to `FontBytes.index` before embed. CJK text fills when the caller supplies a `glyf` font. `QUIRE_FORMS_FONT` turns on the Chinese fixture test. Subsetting and OTF are still out.

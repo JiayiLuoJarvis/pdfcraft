@@ -5,6 +5,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use crate::error::{Error, ErrorCode};
 use crate::graph::overflow_node_id;
+use crate::ids::NodeId;
 use crate::units::{PageGeometry, FIT_EPSILON_MM};
 
 const MAX_SEARCH_EXPANSIONS: usize = 8192;
@@ -39,16 +40,16 @@ impl ChildKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct FamilyEdge {
     pub(crate) id: usize,
-    pub(crate) parent_id: String,
-    pub(crate) child_id: String,
+    pub(crate) parent_id: NodeId,
+    pub(crate) child_id: NodeId,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct FamilyGraph {
-    pub(crate) subject_id: String,
+    pub(crate) subject_id: NodeId,
     pub(crate) edges: Vec<FamilyEdge>,
-    pub(crate) node_order: Vec<String>,
-    pub(crate) person_ids: BTreeSet<String>,
+    pub(crate) node_order: Vec<NodeId>,
+    pub(crate) person_ids: BTreeSet<NodeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,21 +64,21 @@ pub(crate) struct LayoutEvaluation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AttachmentTask {
-    pub(crate) subject_id: String,
+    pub(crate) subject_id: NodeId,
     pub(crate) edge_ids: BTreeSet<usize>,
     pub(crate) kind: TaskKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct OverflowNode {
-    pub(crate) subject_id: String,
-    pub(crate) first_moved_id: String,
+    pub(crate) subject_id: NodeId,
+    pub(crate) first_moved_id: NodeId,
     pub(crate) moved_count: usize,
 }
 
 impl OverflowNode {
-    pub(crate) fn id(&self) -> String {
-        overflow_node_id(&self.subject_id, &self.first_moved_id)
+    pub(crate) fn protocol_id(&self, protocol: impl Fn(NodeId) -> String) -> String {
+        overflow_node_id(&protocol(self.subject_id), &protocol(self.first_moved_id))
     }
 }
 
@@ -89,9 +90,9 @@ pub(crate) struct OverflowCut {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PageDraft {
-    pub(crate) subject_id: String,
-    pub(crate) node_ids: BTreeSet<String>,
-    pub(crate) stub_ids: BTreeSet<String>,
+    pub(crate) subject_id: NodeId,
+    pub(crate) node_ids: BTreeSet<NodeId>,
+    pub(crate) stub_ids: BTreeSet<NodeId>,
     pub(crate) overflow: Option<OverflowNode>,
     pub(crate) kind: TaskKind,
 }
@@ -144,9 +145,6 @@ pub(crate) struct AttachmentCut {
 pub(crate) struct SearchPage {
     pub(crate) task: AttachmentTask,
     pub(crate) draft: PageDraft,
-    /// Edges this page claims. Follow-up tasks carry the rest.
-    #[allow(dead_code)]
-    pub(crate) edge_ids: BTreeSet<usize>,
     pub(crate) attachment_cuts: Vec<AttachmentCut>,
     pub(crate) overflow: Option<OverflowCut>,
     pub(crate) layout: LayoutEvaluation,
@@ -160,30 +158,24 @@ pub(crate) struct SearchPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct SearchResult {
     pub(crate) plan: SearchPlan,
-    #[allow(dead_code)]
-    pub(crate) expansions: usize,
-    #[allow(dead_code)]
-    pub(crate) budget_exhausted: bool,
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 enum PlacedChild {
-    Stub(String),
-    Leaf(String),
+    Stub(NodeId),
+    Leaf,
     Inlined {
-        child_id: String,
+        child_id: NodeId,
         edge_ids: BTreeSet<usize>,
-        node_ids: BTreeSet<String>,
+        node_ids: BTreeSet<NodeId>,
     },
 }
 
 #[derive(Clone)]
 struct HeadPlan {
-    base_node_ids: BTreeSet<String>,
-    base_edge_ids: BTreeSet<usize>,
+    base_node_ids: BTreeSet<NodeId>,
     placed: Vec<PlacedChild>,
-    units: Vec<(String, BTreeSet<usize>, BTreeSet<String>)>,
+    units: Vec<(NodeId, BTreeSet<usize>, BTreeSet<NodeId>)>,
     overflow: Option<OverflowCut>,
     direct_layout: Option<LayoutEvaluation>,
     direct_degraded: bool,
@@ -262,79 +254,71 @@ struct ChainPage {
     retained_count: usize,
     layout: LayoutEvaluation,
     degraded: bool,
-    node_ids: BTreeSet<String>,
+    node_ids: BTreeSet<NodeId>,
 }
 
 struct MeasuredCut {
-    retained: Vec<String>,
+    retained: Vec<NodeId>,
     overflow: Option<OverflowCut>,
     draft: PageDraft,
     fit: DirectFit,
 }
 
-struct Context<'a> {
+pub(crate) trait PageOracle {
+    fn evaluate(&mut self, draft: &PageDraft) -> Result<LayoutEvaluation, Error>;
+    fn evaluate_direct(&mut self, draft: &PageDraft) -> Result<DirectFit, Error>;
+}
+
+struct Context<'a, O: PageOracle> {
     graph: &'a FamilyGraph,
-    ordinary: &'a mut dyn FnMut(&PageDraft) -> Result<LayoutEvaluation, Error>,
-    direct: &'a mut dyn FnMut(&PageDraft) -> Result<DirectFit, Error>,
+    oracle: &'a mut O,
     max_expansions: usize,
     expansions: usize,
     budget_exhausted: bool,
     edge_by_id: HashMap<usize, FamilyEdge>,
-    outgoing: HashMap<String, Vec<usize>>,
-    order_index: HashMap<String, usize>,
+    outgoing: HashMap<NodeId, Vec<usize>>,
+    order_index: HashMap<NodeId, usize>,
     layout_cache: HashMap<PageDraft, LayoutEvaluation>,
     direct_cache: HashMap<PageDraft, DirectFit>,
-    memo: HashMap<(AttachmentTask, BTreeSet<String>), SearchPlan>,
+    /// Search plans live here. Memo maps store indices into this arena.
+    plans: Vec<SearchPlan>,
+    memo: HashMap<(AttachmentTask, BTreeSet<NodeId>), usize>,
     head_memo: HashMap<AttachmentTask, HeadPlan>,
-    greedy_memo: HashMap<AttachmentTask, SearchPlan>,
+    greedy_memo: HashMap<AttachmentTask, usize>,
     run_memo: HashMap<AttachmentTask, Vec<ChainPage>>,
 }
 
 pub(crate) fn search_family_pages(
     graph: &FamilyGraph,
-    ordinary: &mut dyn FnMut(&PageDraft) -> Result<LayoutEvaluation, Error>,
-    direct: &mut dyn FnMut(&PageDraft) -> Result<DirectFit, Error>,
+    oracle: &mut impl PageOracle,
 ) -> Result<SearchResult, Error> {
-    let mut context = Context::new(graph, ordinary, direct, MAX_SEARCH_EXPANSIONS);
+    let mut context = Context::new(graph, oracle, MAX_SEARCH_EXPANSIONS);
     let root = AttachmentTask {
-        subject_id: graph.subject_id.clone(),
+        subject_id: graph.subject_id,
         edge_ids: graph.edges.iter().map(|edge| edge.id).collect(),
         kind: TaskKind::Primary,
     };
     let plan = context.solve_task(&root, &BTreeSet::new())?;
-    Ok(SearchResult {
-        plan,
-        expansions: context.expansions,
-        budget_exhausted: context.budget_exhausted,
-    })
+    Ok(SearchResult { plan })
 }
 
-impl<'a> Context<'a> {
-    fn new(
-        graph: &'a FamilyGraph,
-        ordinary: &'a mut dyn FnMut(&PageDraft) -> Result<LayoutEvaluation, Error>,
-        direct: &'a mut dyn FnMut(&PageDraft) -> Result<DirectFit, Error>,
-        max_expansions: usize,
-    ) -> Self {
-        let mut outgoing: HashMap<String, Vec<usize>> = HashMap::new();
+impl<'a, O: PageOracle> Context<'a, O> {
+    fn new(graph: &'a FamilyGraph, oracle: &'a mut O, max_expansions: usize) -> Self {
+        let mut outgoing: HashMap<NodeId, Vec<usize>> = HashMap::new();
         let mut edge_by_id = HashMap::new();
         for edge in &graph.edges {
-            outgoing
-                .entry(edge.parent_id.clone())
-                .or_default()
-                .push(edge.id);
+            outgoing.entry(edge.parent_id).or_default().push(edge.id);
             edge_by_id.insert(edge.id, edge.clone());
         }
         let order_index = graph
             .node_order
             .iter()
             .enumerate()
-            .map(|(index, id)| (id.clone(), index))
+            .map(|(index, id)| (*id, index))
             .collect();
         Self {
             graph,
-            ordinary,
-            direct,
+            oracle,
             max_expansions: max_expansions.max(1),
             expansions: 0,
             budget_exhausted: false,
@@ -343,6 +327,7 @@ impl<'a> Context<'a> {
             order_index,
             layout_cache: HashMap::new(),
             direct_cache: HashMap::new(),
+            plans: Vec::new(),
             memo: HashMap::new(),
             head_memo: HashMap::new(),
             greedy_memo: HashMap::new(),
@@ -350,11 +335,21 @@ impl<'a> Context<'a> {
         }
     }
 
+    fn store_plan(&mut self, plan: SearchPlan) -> usize {
+        let index = self.plans.len();
+        self.plans.push(plan);
+        index
+    }
+
+    fn plan_at(&self, index: usize) -> SearchPlan {
+        self.plans[index].clone()
+    }
+
     fn evaluate(&mut self, draft: &PageDraft) -> Result<LayoutEvaluation, Error> {
         if let Some(cached) = self.layout_cache.get(draft) {
             return Ok(cached.clone());
         }
-        let evaluated = (self.ordinary)(draft)?;
+        let evaluated = self.oracle.evaluate(draft)?;
         self.layout_cache.insert(draft.clone(), evaluated.clone());
         Ok(evaluated)
     }
@@ -363,7 +358,7 @@ impl<'a> Context<'a> {
         if let Some(cached) = self.direct_cache.get(draft) {
             return Ok(cached.clone());
         }
-        let evaluated = (self.direct)(draft)?;
+        let evaluated = self.oracle.evaluate_direct(draft)?;
         self.direct_cache.insert(draft.clone(), evaluated.clone());
         Ok(evaluated)
     }
@@ -377,37 +372,44 @@ impl<'a> Context<'a> {
         true
     }
 
-    fn rank(&self, node_id: &str) -> usize {
+    fn rank(&self, node_id: NodeId) -> usize {
         self.order_index
-            .get(node_id)
+            .get(&node_id)
             .copied()
             .unwrap_or(self.order_index.len())
     }
 
-    fn sorted_nodes(&self, node_ids: &BTreeSet<String>) -> Vec<String> {
-        let mut ids: Vec<String> = node_ids.iter().cloned().collect();
-        ids.sort_by(|left, right| self.rank(left).cmp(&self.rank(right)).then(left.cmp(right)));
+    fn sorted_nodes(&self, node_ids: &BTreeSet<NodeId>) -> Vec<NodeId> {
+        let mut ids: Vec<NodeId> = node_ids.iter().copied().collect();
+        ids.sort_by(|left, right| {
+            self.rank(*left)
+                .cmp(&self.rank(*right))
+                .then(left.cmp(right))
+        });
         ids
     }
 
-    fn direct_children(&self, parent_id: &str, allowed: &BTreeSet<usize>) -> Vec<String> {
+    fn direct_children(&self, parent_id: NodeId, allowed: &BTreeSet<usize>) -> Vec<NodeId> {
         let mut children = Vec::new();
-        if let Some(edges) = self.outgoing.get(parent_id) {
+        if let Some(edges) = self.outgoing.get(&parent_id) {
             for edge_id in edges {
                 if allowed.contains(edge_id) {
-                    children.push(self.edge_by_id[edge_id].child_id.clone());
+                    children.push(self.edge_by_id[edge_id].child_id);
                 }
             }
         }
-        children
-            .sort_by(|left, right| self.rank(left).cmp(&self.rank(right)).then(left.cmp(right)));
+        children.sort_by(|left, right| {
+            self.rank(*left)
+                .cmp(&self.rank(*right))
+                .then(left.cmp(right))
+        });
         children.dedup();
         children
     }
 
-    fn direct_edges(&self, parent_id: &str, allowed: &BTreeSet<usize>) -> BTreeSet<usize> {
+    fn direct_edges(&self, parent_id: NodeId, allowed: &BTreeSet<usize>) -> BTreeSet<usize> {
         self.outgoing
-            .get(parent_id)
+            .get(&parent_id)
             .into_iter()
             .flatten()
             .copied()
@@ -415,12 +417,12 @@ impl<'a> Context<'a> {
             .collect()
     }
 
-    fn reachable_edges(&self, subject_id: &str, allowed: &BTreeSet<usize>) -> BTreeSet<usize> {
+    fn reachable_edges(&self, subject_id: NodeId, allowed: &BTreeSet<usize>) -> BTreeSet<usize> {
         let mut found = BTreeSet::new();
-        let mut stack = vec![subject_id.to_owned()];
+        let mut stack = vec![subject_id];
         let mut seen = BTreeSet::new();
         while let Some(parent_id) = stack.pop() {
-            if !seen.insert(parent_id.clone()) {
+            if !seen.insert(parent_id) {
                 continue;
             }
             if let Some(edges) = self.outgoing.get(&parent_id) {
@@ -429,34 +431,35 @@ impl<'a> Context<'a> {
                         continue;
                     }
                     found.insert(*edge_id);
-                    stack.push(self.edge_by_id[edge_id].child_id.clone());
+                    stack.push(self.edge_by_id[edge_id].child_id);
                 }
             }
         }
         found
     }
 
-    fn nodes_below(&self, edge_ids: &BTreeSet<usize>) -> BTreeSet<String> {
+    fn nodes_below(&self, edge_ids: &BTreeSet<usize>) -> BTreeSet<NodeId> {
         edge_ids
             .iter()
-            .map(|edge_id| self.edge_by_id[edge_id].child_id.clone())
+            .map(|edge_id| self.edge_by_id[edge_id].child_id)
             .collect()
     }
 
     fn solve_task(
         &mut self,
         task: &AttachmentTask,
-        seen_nodes: &BTreeSet<String>,
+        seen_nodes: &BTreeSet<NodeId>,
     ) -> Result<SearchPlan, Error> {
         let key = (task.clone(), seen_nodes.clone());
-        if let Some(cached) = self.memo.get(&key) {
-            return Ok(cached.clone());
+        if let Some(&index) = self.memo.get(&key) {
+            return Ok(self.plan_at(index));
         }
         let greedy = self.greedy_plan(task)?;
         if let Some(chain) = self.chain_path(task) {
             let best = self.solve_chain(task, &chain, seen_nodes, greedy)?;
-            self.memo.insert(key, best.clone());
-            return Ok(best);
+            let index = self.store_plan(best);
+            self.memo.insert(key, index);
+            return Ok(self.plan_at(index));
         }
         let head = self.plan_head(task)?;
         let mut best = greedy;
@@ -477,18 +480,19 @@ impl<'a> Context<'a> {
                 best_score = candidate_score;
             }
         }
-        self.memo.insert(key, best.clone());
-        Ok(best)
+        let index = self.store_plan(best);
+        self.memo.insert(key, index);
+        Ok(self.plan_at(index))
     }
 
     fn expand_page(
         &mut self,
         page: &SearchPage,
-        seen_nodes: &BTreeSet<String>,
+        seen_nodes: &BTreeSet<NodeId>,
     ) -> Result<SearchPlan, Error> {
         let mut pages = vec![page.clone()];
         let mut branch_seen = seen_nodes.clone();
-        branch_seen.extend(page.draft.node_ids.iter().cloned());
+        branch_seen.extend(page.draft.node_ids.iter().copied());
         let mut follow_ups: Vec<AttachmentTask> = page
             .attachment_cuts
             .iter()
@@ -500,7 +504,7 @@ impl<'a> Context<'a> {
         for follow_up in follow_ups {
             let subplan = self.solve_task(&follow_up, &branch_seen)?;
             for item in &subplan.pages {
-                branch_seen.extend(item.draft.node_ids.iter().cloned());
+                branch_seen.extend(item.draft.node_ids.iter().copied());
             }
             pages.extend(subplan.pages);
         }
@@ -508,14 +512,14 @@ impl<'a> Context<'a> {
     }
 
     fn greedy_plan(&mut self, task: &AttachmentTask) -> Result<SearchPlan, Error> {
-        if let Some(cached) = self.greedy_memo.get(task) {
-            return Ok(cached.clone());
+        if let Some(&index) = self.greedy_memo.get(task) {
+            return Ok(self.plan_at(index));
         }
         let head = self.plan_head(task)?;
         let mut inlined = BTreeSet::new();
         for (child_id, _, _) in &head.units {
             let mut candidate = inlined.clone();
-            candidate.insert(child_id.clone());
+            candidate.insert(*child_id);
             let layout = self.page_for(task, &head, &candidate)?.layout;
             if layout.fits && !over_elastic(&layout) {
                 inlined = candidate;
@@ -534,9 +538,9 @@ impl<'a> Context<'a> {
         for follow_up in follow_ups {
             pages.extend(self.greedy_plan(&follow_up)?.pages);
         }
-        let plan = SearchPlan { pages };
-        self.greedy_memo.insert(task.clone(), plan.clone());
-        Ok(plan)
+        let index = self.store_plan(SearchPlan { pages });
+        self.greedy_memo.insert(task.clone(), index);
+        Ok(self.plan_at(index))
     }
 
     fn plan_head(&mut self, task: &AttachmentTask) -> Result<HeadPlan, Error> {
@@ -549,9 +553,9 @@ impl<'a> Context<'a> {
     }
 
     fn compute_head(&mut self, task: &AttachmentTask) -> Result<HeadPlan, Error> {
-        let children = self.direct_children(&task.subject_id, &task.edge_ids);
+        let children = self.direct_children(task.subject_id, &task.edge_ids);
         if children.is_empty() {
-            let draft = make_draft(task, BTreeSet::from([task.subject_id.clone()]), &[], None)?;
+            let draft = make_draft(task, BTreeSet::from([task.subject_id]), &[], None)?;
             if !self.evaluate(&draft)?.fits {
                 return Err(Error::new(
                     ErrorCode::LayoutFailed,
@@ -560,7 +564,6 @@ impl<'a> Context<'a> {
             }
             return Ok(HeadPlan {
                 base_node_ids: draft.node_ids.clone(),
-                base_edge_ids: BTreeSet::new(),
                 placed: Vec::new(),
                 units: Vec::new(),
                 overflow: None,
@@ -571,7 +574,7 @@ impl<'a> Context<'a> {
         }
         let mut kinds = HashMap::new();
         for child_id in &children {
-            kinds.insert(child_id.clone(), self.classify(task, child_id)?);
+            kinds.insert(*child_id, self.classify(task, *child_id)?);
         }
         let measured = self.measure_direct_cuts(task, &children, &kinds)?;
         let legal = legal_direct_cuts(&measured);
@@ -608,20 +611,20 @@ impl<'a> Context<'a> {
     fn measure_direct_cuts(
         &mut self,
         task: &AttachmentTask,
-        children: &[String],
-        kinds: &HashMap<String, ChildKind>,
+        children: &[NodeId],
+        kinds: &HashMap<NodeId, ChildKind>,
     ) -> Result<Vec<MeasuredCut>, Error> {
         let mut eviction = children.to_vec();
         eviction.sort_by(|left, right| {
             kinds[left]
                 .eviction_rank()
                 .cmp(&kinds[right].eviction_rank())
-                .then(self.rank(right).cmp(&self.rank(left)))
+                .then(self.rank(*right).cmp(&self.rank(*left)))
                 .then(left.cmp(right))
         });
-        let mut kept: BTreeSet<String> = children.iter().cloned().collect();
+        let mut kept: BTreeSet<NodeId> = children.iter().copied().collect();
         let mut measured = Vec::new();
-        let mut victims: VecDeque<Option<String>> = VecDeque::new();
+        let mut victims: VecDeque<Option<NodeId>> = VecDeque::new();
         victims.push_back(None);
         victims.extend(eviction.into_iter().map(Some));
         for victim in victims {
@@ -631,16 +634,16 @@ impl<'a> Context<'a> {
                 }
                 kept.remove(&victim);
             }
-            let moved: Vec<String> = children
+            let moved: Vec<NodeId> = children
                 .iter()
                 .filter(|id| !kept.contains(*id))
-                .cloned()
+                .copied()
                 .collect();
             let overflow = self.overflow_cut(task, &moved);
-            let retained: Vec<String> = children
+            let retained: Vec<NodeId> = children
                 .iter()
                 .filter(|id| kept.contains(*id))
-                .cloned()
+                .copied()
                 .collect();
             let draft = head_draft(self, task, &retained, overflow.as_ref())?;
             let fit = self.evaluate_direct(&draft)?;
@@ -654,29 +657,29 @@ impl<'a> Context<'a> {
         Ok(measured)
     }
 
-    fn overflow_cut(&self, task: &AttachmentTask, moved: &[String]) -> Option<OverflowCut> {
+    fn overflow_cut(&self, task: &AttachmentTask, moved: &[NodeId]) -> Option<OverflowCut> {
         if moved.is_empty() {
             return None;
         }
         let mut edge_ids = BTreeSet::new();
         for child_id in moved {
-            edge_ids.extend(self.reachable_edges(child_id, &task.edge_ids));
+            edge_ids.extend(self.reachable_edges(*child_id, &task.edge_ids));
         }
-        let moved_set: BTreeSet<&str> = moved.iter().map(String::as_str).collect();
-        for edge_id in self.direct_edges(&task.subject_id, &task.edge_ids) {
-            if moved_set.contains(self.edge_by_id[&edge_id].child_id.as_str()) {
+        let moved_set: BTreeSet<NodeId> = moved.iter().copied().collect();
+        for edge_id in self.direct_edges(task.subject_id, &task.edge_ids) {
+            if moved_set.contains(&self.edge_by_id[&edge_id].child_id) {
                 edge_ids.insert(edge_id);
             }
         }
         let node = OverflowNode {
-            subject_id: task.subject_id.clone(),
-            first_moved_id: moved[0].clone(),
+            subject_id: task.subject_id,
+            first_moved_id: moved[0],
             moved_count: moved.len(),
         };
         Some(OverflowCut {
             node,
             task: AttachmentTask {
-                subject_id: task.subject_id.clone(),
+                subject_id: task.subject_id,
                 edge_ids,
                 kind: TaskKind::Continuation,
             },
@@ -762,7 +765,7 @@ impl<'a> Context<'a> {
         let mut input_order = Vec::new();
         for page in run {
             for node_id in self.sorted_nodes(&page.node_ids) {
-                input_order.push(self.rank(&node_id));
+                input_order.push(self.rank(node_id));
             }
         }
         OverflowScore {
@@ -782,8 +785,8 @@ impl<'a> Context<'a> {
     fn build_head(
         &self,
         task: &AttachmentTask,
-        retained: &[String],
-        kinds: &HashMap<String, ChildKind>,
+        retained: &[NodeId],
+        kinds: &HashMap<NodeId, ChildKind>,
         overflow: Option<OverflowCut>,
         direct_layout: LayoutEvaluation,
         direct_degraded: bool,
@@ -791,25 +794,19 @@ impl<'a> Context<'a> {
     ) -> HeadPlan {
         let mut placed = Vec::new();
         for child_id in retained {
-            let cone = self.reachable_edges(child_id, &task.edge_ids);
+            let cone = self.reachable_edges(*child_id, &task.edge_ids);
             if cone.is_empty() {
-                placed.push(PlacedChild::Leaf(child_id.clone()));
+                placed.push(PlacedChild::Leaf);
             } else if kinds[child_id] == ChildKind::LargeFamily {
-                placed.push(PlacedChild::Stub(child_id.clone()));
+                placed.push(PlacedChild::Stub(*child_id));
             } else {
                 placed.push(PlacedChild::Inlined {
-                    child_id: child_id.clone(),
+                    child_id: *child_id,
                     edge_ids: cone.clone(),
                     node_ids: self.nodes_below(&cone),
                 });
             }
         }
-        let retained_set: BTreeSet<&str> = retained.iter().map(String::as_str).collect();
-        let base_edge_ids = self
-            .direct_edges(&task.subject_id, &task.edge_ids)
-            .into_iter()
-            .filter(|edge_id| retained_set.contains(self.edge_by_id[edge_id].child_id.as_str()))
-            .collect();
         let mut units = Vec::new();
         for child in &placed {
             if let PlacedChild::Inlined {
@@ -818,20 +815,19 @@ impl<'a> Context<'a> {
                 node_ids,
             } = child
             {
-                units.push((child_id.clone(), edge_ids.clone(), node_ids.clone()));
+                units.push((*child_id, edge_ids.clone(), node_ids.clone()));
             }
         }
         units.sort_by(|left, right| {
             left.1
                 .len()
                 .cmp(&right.1.len())
-                .then(self.rank(&left.0).cmp(&self.rank(&right.0)))
+                .then(self.rank(left.0).cmp(&self.rank(right.0)))
         });
-        let mut base_node_ids = BTreeSet::from([task.subject_id.clone()]);
-        base_node_ids.extend(retained.iter().cloned());
+        let mut base_node_ids = BTreeSet::from([task.subject_id]);
+        base_node_ids.extend(retained.iter().copied());
         HeadPlan {
             base_node_ids,
-            base_edge_ids,
             placed,
             units,
             overflow,
@@ -841,18 +837,18 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn classify(&mut self, task: &AttachmentTask, child_id: &str) -> Result<ChildKind, Error> {
+    fn classify(&mut self, task: &AttachmentTask, child_id: NodeId) -> Result<ChildKind, Error> {
         let cone = self.reachable_edges(child_id, &task.edge_ids);
         if cone.is_empty() {
-            if self.graph.person_ids.contains(child_id) {
+            if self.graph.person_ids.contains(&child_id) {
                 return Ok(ChildKind::Person);
             }
             return Ok(ChildKind::LeafCompany);
         }
-        let mut node_ids = BTreeSet::from([task.subject_id.clone(), child_id.to_owned()]);
+        let mut node_ids = BTreeSet::from([task.subject_id, child_id]);
         node_ids.extend(self.nodes_below(&cone));
         let draft = PageDraft {
-            subject_id: task.subject_id.clone(),
+            subject_id: task.subject_id,
             node_ids,
             stub_ids: BTreeSet::new(),
             overflow: None,
@@ -871,24 +867,22 @@ impl<'a> Context<'a> {
         &mut self,
         task: &AttachmentTask,
         head: &HeadPlan,
-        inlined: &BTreeSet<String>,
+        inlined: &BTreeSet<NodeId>,
     ) -> Result<SearchPage, Error> {
         let mut node_ids = head.base_node_ids.clone();
-        let mut edge_ids = head.base_edge_ids.clone();
         let mut cut_ids = Vec::new();
         for child in &head.placed {
             match child {
-                PlacedChild::Leaf(_) => {}
+                PlacedChild::Leaf => {}
                 PlacedChild::Inlined {
                     child_id,
-                    edge_ids: cone,
                     node_ids: below,
+                    ..
                 } if inlined.contains(child_id) => {
-                    node_ids.extend(below.iter().cloned());
-                    edge_ids.extend(cone.iter().copied());
+                    node_ids.extend(below.iter().copied());
                 }
                 PlacedChild::Inlined { child_id, .. } | PlacedChild::Stub(child_id) => {
-                    cut_ids.push(child_id.clone());
+                    cut_ids.push(*child_id);
                 }
             }
         }
@@ -896,8 +890,8 @@ impl<'a> Context<'a> {
             .iter()
             .map(|child_id| AttachmentCut {
                 task: AttachmentTask {
-                    subject_id: child_id.clone(),
-                    edge_ids: self.reachable_edges(child_id, &task.edge_ids),
+                    subject_id: *child_id,
+                    edge_ids: self.reachable_edges(*child_id, &task.edge_ids),
                     kind: TaskKind::Primary,
                 },
             })
@@ -917,7 +911,6 @@ impl<'a> Context<'a> {
         Ok(SearchPage {
             task: task.clone(),
             draft,
-            edge_ids,
             attachment_cuts: cuts,
             overflow: head.overflow.clone(),
             layout,
@@ -946,7 +939,7 @@ impl<'a> Context<'a> {
                     continue;
                 }
                 let mut expanded = state.clone();
-                expanded.insert(child_id.clone());
+                expanded.insert(*child_id);
                 if visited.contains(&expanded) {
                     continue;
                 }
@@ -961,11 +954,11 @@ impl<'a> Context<'a> {
         Ok(pages)
     }
 
-    fn chain_path(&self, task: &AttachmentTask) -> Option<(Vec<String>, Vec<usize>)> {
-        let mut node_ids = vec![task.subject_id.clone()];
+    fn chain_path(&self, task: &AttachmentTask) -> Option<(Vec<NodeId>, Vec<usize>)> {
+        let mut node_ids = vec![task.subject_id];
         let mut edge_ids = Vec::new();
         let mut remaining = task.edge_ids.clone();
-        let mut current = task.subject_id.clone();
+        let mut current = task.subject_id;
         while !remaining.is_empty() {
             let outgoing: Vec<usize> = self
                 .outgoing
@@ -981,7 +974,7 @@ impl<'a> Context<'a> {
             let edge_id = outgoing[0];
             let edge = &self.edge_by_id[&edge_id];
             edge_ids.push(edge_id);
-            node_ids.push(edge.child_id.clone());
+            node_ids.push(edge.child_id);
             remaining.remove(&edge_id);
             current.clone_from(&edge.child_id);
         }
@@ -991,8 +984,8 @@ impl<'a> Context<'a> {
     fn solve_chain(
         &mut self,
         task: &AttachmentTask,
-        chain: &(Vec<String>, Vec<usize>),
-        seen_nodes: &BTreeSet<String>,
+        chain: &(Vec<NodeId>, Vec<usize>),
+        seen_nodes: &BTreeSet<NodeId>,
         baseline: SearchPlan,
     ) -> Result<SearchPlan, Error> {
         let (node_ids, edge_ids) = chain;
@@ -1002,14 +995,13 @@ impl<'a> Context<'a> {
             if !self.consume_expansion() {
                 break;
             }
-            let page_nodes: BTreeSet<String> = node_ids[..=end_index].iter().cloned().collect();
-            let included_edges: BTreeSet<usize> = edge_ids[..end_index].iter().copied().collect();
+            let page_nodes: BTreeSet<NodeId> = node_ids[..=end_index].iter().copied().collect();
             let cuts = if end_index == node_ids.len() - 1 {
                 Vec::new()
             } else {
                 vec![AttachmentCut {
                     task: AttachmentTask {
-                        subject_id: node_ids[end_index].clone(),
+                        subject_id: node_ids[end_index],
                         edge_ids: edge_ids[end_index..].iter().copied().collect(),
                         kind: TaskKind::Primary,
                     },
@@ -1023,7 +1015,6 @@ impl<'a> Context<'a> {
             let page = SearchPage {
                 task: task.clone(),
                 draft,
-                edge_ids: included_edges,
                 attachment_cuts: cuts.clone(),
                 overflow: None,
                 layout,
@@ -1055,7 +1046,7 @@ impl<'a> Context<'a> {
             input_order.push(
                 self.sorted_nodes(&page.draft.node_ids)
                     .into_iter()
-                    .map(|id| self.rank(&id))
+                    .map(|id| self.rank(id))
                     .collect(),
             );
         }
@@ -1091,12 +1082,12 @@ impl<'a> Context<'a> {
                     continue;
                 };
                 let mut node_ids = source.draft.node_ids.clone();
-                node_ids.extend(attachment.draft.node_ids.iter().cloned());
+                node_ids.extend(attachment.draft.node_ids.iter().copied());
                 let mut stub_ids = source.draft.stub_ids.clone();
                 stub_ids.remove(&cut.task.subject_id);
-                stub_ids.extend(attachment.draft.stub_ids.iter().cloned());
+                stub_ids.extend(attachment.draft.stub_ids.iter().copied());
                 let merged = self.evaluate(&PageDraft {
-                    subject_id: source.draft.subject_id.clone(),
+                    subject_id: source.draft.subject_id,
                     node_ids,
                     stub_ids,
                     overflow: source.draft.overflow.clone(),
@@ -1145,22 +1136,22 @@ fn accepted_layout(fit: &DirectFit) -> Result<(LayoutEvaluation, bool), Error> {
     }
 }
 
-fn head_draft(
-    context: &Context<'_>,
+fn head_draft<O: PageOracle>(
+    context: &Context<'_, O>,
     task: &AttachmentTask,
-    retained: &[String],
+    retained: &[NodeId],
     overflow: Option<&OverflowCut>,
 ) -> Result<PageDraft, Error> {
     let cuts: Vec<AttachmentCut> = retained
         .iter()
         .filter_map(|child_id| {
-            let cone = context.reachable_edges(child_id, &task.edge_ids);
+            let cone = context.reachable_edges(*child_id, &task.edge_ids);
             if cone.is_empty() {
                 None
             } else {
                 Some(AttachmentCut {
                     task: AttachmentTask {
-                        subject_id: child_id.clone(),
+                        subject_id: *child_id,
                         edge_ids: cone,
                         kind: TaskKind::Primary,
                     },
@@ -1168,21 +1159,21 @@ fn head_draft(
             }
         })
         .collect();
-    let mut node_ids = BTreeSet::from([task.subject_id.clone()]);
-    node_ids.extend(retained.iter().cloned());
+    let mut node_ids = BTreeSet::from([task.subject_id]);
+    node_ids.extend(retained.iter().copied());
     make_draft(task, node_ids, &cuts, overflow.map(|cut| cut.node.clone()))
 }
 
 fn make_draft(
     task: &AttachmentTask,
-    node_ids: BTreeSet<String>,
+    node_ids: BTreeSet<NodeId>,
     cuts: &[AttachmentCut],
     overflow: Option<OverflowNode>,
 ) -> Result<PageDraft, Error> {
     let draft = PageDraft {
-        subject_id: task.subject_id.clone(),
+        subject_id: task.subject_id,
         node_ids,
-        stub_ids: cuts.iter().map(|cut| cut.task.subject_id.clone()).collect(),
+        stub_ids: cuts.iter().map(|cut| cut.task.subject_id).collect(),
         overflow,
         kind: task.kind,
     };
@@ -1228,7 +1219,7 @@ fn repeated_context(plan: &SearchPlan) -> usize {
             .count();
         let necessary = usize::from(seen.contains(&page.draft.subject_id));
         extra += repeats.saturating_sub(necessary);
-        seen.extend(page.draft.node_ids.iter().cloned());
+        seen.extend(page.draft.node_ids.iter().copied());
     }
     extra
 }

@@ -3,12 +3,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{Error, ErrorCode};
-use crate::graph::{resolve_display_ratio, shareholder_ids, validate, ValidatedGraph};
+use crate::graph::{resolve_display_ratio, shareholder_ids, validate, Graph};
+use crate::ids::{EdgeId, NodeId};
 use crate::model::{ChartRequest, Edge, Node, NodeType, RATIO_MAX, RATIO_MIN};
 
 struct Fold {
-    parent: usize,
-    dropped: Vec<usize>,
+    parent: NodeId,
+    dropped: Vec<EdgeId>,
     total: f64,
 }
 
@@ -19,61 +20,59 @@ struct Fold {
 /// while a dropped holder stays reachable, and that can pass this step and
 /// fail a later node-cap check.
 pub(crate) fn prepare_request(request: &ChartRequest) -> Result<ChartRequest, Error> {
-    let graph = validate(request)?;
+    let mut graph = validate(request)?;
     let Some(top_n) = request.options.top_n.filter(|top_n| *top_n > 0) else {
         return Ok(request.clone());
     };
-    fold_shareholders(&graph, top_n)
+    fold_shareholders(&mut graph, top_n)
 }
 
-fn fold_shareholders(graph: &ValidatedGraph<'_>, top_n: usize) -> Result<ChartRequest, Error> {
+fn fold_shareholders(graph: &mut Graph, top_n: usize) -> Result<ChartRequest, Error> {
     let holders = shareholder_ids(graph);
     let mut parents = vec![graph.subject];
-    for index in 0..graph.request.nodes.len() {
-        if holders.contains(&index) {
-            parents.push(index);
+    for node in &graph.nodes {
+        if holders.contains(&node.id) {
+            parents.push(node.id);
         }
     }
-    let mut cache = HashMap::new();
     let mut folds = Vec::new();
     for parent in parents {
-        if let Some(fold) = fold_parent(graph, parent, top_n, &holders, &mut cache)? {
+        if let Some(fold) = fold_parent(graph, parent, top_n, &holders)? {
             folds.push(fold);
         }
     }
     if folds.is_empty() {
-        return Ok(graph.request.clone());
+        return Ok(graph.to_request());
     }
     Ok(rebuild(graph, &holders, &folds))
 }
 
 fn fold_parent(
-    graph: &ValidatedGraph<'_>,
-    parent: usize,
+    graph: &mut Graph,
+    parent: NodeId,
     top_n: usize,
-    holders: &HashSet<usize>,
-    cache: &mut HashMap<(usize, usize), bool>,
+    holders: &HashSet<NodeId>,
 ) -> Result<Option<Fold>, Error> {
-    let parent_id = graph.node_id(parent);
-    let synthetic = synthetic_id(parent_id);
-    let children: Vec<usize> = graph
+    let parent_protocol = graph.protocol_id(parent).to_owned();
+    let synthetic = synthetic_id(&parent_protocol);
+    let children: Vec<EdgeId> = graph
         .incoming_edges(parent)
         .iter()
         .copied()
         .filter(|&edge| {
             let from = graph.edge_from(edge);
-            holders.contains(&from) && graph.node_id(from) != synthetic
+            holders.contains(&from) && graph.protocol_id(from) != synthetic
         })
         .collect();
     let mut ratios = HashMap::with_capacity(children.len());
     for &edge in &children {
         let from = graph.edge_from(edge);
-        let ratio = resolve_display_ratio(graph, from, cache)?.ok_or_else(|| {
+        let ratio = resolve_display_ratio(graph, from)?.ok_or_else(|| {
             Error::new(
                 ErrorCode::InvalidProtocol,
                 format!(
-                    "top_n requires a display ratio for {} under {parent_id}",
-                    graph.node_id(from)
+                    "top_n requires a display ratio for {} under {parent_protocol}",
+                    graph.protocol_id(from)
                 ),
             )
         })?;
@@ -99,14 +98,14 @@ fn fold_parent(
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
             format!(
-                "folded ratio sum={total:?} under {parent_id} must be in {RATIO_MIN}..{RATIO_MAX}"
+                "folded ratio sum={total:?} under {parent_protocol} must be in {RATIO_MIN}..{RATIO_MAX}"
             ),
         ));
     }
-    if graph.contains_id(&synthetic) {
+    if graph.contains_protocol(&synthetic) {
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
-            format!("node id {synthetic} is reserved for the folded holders of {parent_id}"),
+            format!("node id {synthetic} is reserved for the folded holders of {parent_protocol}"),
         ));
     }
     Ok(Some(Fold {
@@ -116,9 +115,8 @@ fn fold_parent(
     }))
 }
 
-fn rebuild(graph: &ValidatedGraph<'_>, holders: &HashSet<usize>, folds: &[Fold]) -> ChartRequest {
-    let request = graph.request;
-    let folded_edges: HashSet<usize> = folds
+fn rebuild(graph: &Graph, holders: &HashSet<NodeId>, folds: &[Fold]) -> ChartRequest {
+    let folded_edges: HashSet<EdgeId> = folds
         .iter()
         .flat_map(|fold| fold.dropped.iter().copied())
         .collect();
@@ -132,22 +130,31 @@ fn rebuild(graph: &ValidatedGraph<'_>, holders: &HashSet<usize>, folds: &[Fold])
             }
         }
     }
-    let removed: HashSet<usize> = holders.difference(&alive).copied().collect();
+    let removed: HashSet<NodeId> = holders.difference(&alive).copied().collect();
     let kept: Vec<&Fold> = folds
         .iter()
         .filter(|fold| !removed.contains(&fold.parent))
         .collect();
 
-    let mut nodes: Vec<Node> = request
+    let mut nodes: Vec<Node> = graph
         .nodes
         .iter()
-        .enumerate()
-        .filter(|(index, _)| !removed.contains(index))
-        .map(|(_, node)| node.clone())
+        .filter(|node| !removed.contains(&node.id))
+        .map(|node| Node {
+            id: node.protocol_id.clone(),
+            name: node.name.clone(),
+            legal_person: node.legal_person.clone(),
+            ratio: node.ratio,
+            node_type: node.node_type,
+            paid_in_amount: node.paid_in_amount.clone(),
+            currency: node.currency.clone(),
+            location: node.location.clone(),
+            approval_date: node.approval_date.clone(),
+        })
         .collect();
     for fold in &kept {
         nodes.push(Node {
-            id: synthetic_id(graph.node_id(fold.parent)),
+            id: synthetic_id(graph.protocol_id(fold.parent)),
             name: other_shareholders_name(fold.dropped.len()),
             legal_person: None,
             ratio: Some(fold.total),
@@ -159,30 +166,33 @@ fn rebuild(graph: &ValidatedGraph<'_>, holders: &HashSet<usize>, folds: &[Fold])
         });
     }
 
-    let mut edges: Vec<Edge> = request
+    let mut edges: Vec<Edge> = graph
         .edges
         .iter()
-        .enumerate()
-        .filter(|(edge, _)| {
-            let from = graph.edge_from(*edge);
-            let to = graph.edge_to(*edge);
-            !removed.contains(&from) && !removed.contains(&to) && !folded_edges.contains(edge)
+        .filter(|edge| {
+            !removed.contains(&edge.from)
+                && !removed.contains(&edge.to)
+                && !folded_edges.contains(&edge.id)
         })
-        .map(|(_, edge)| edge.clone())
+        .map(|edge| Edge {
+            from_id: graph.protocol_id(edge.from).to_owned(),
+            to_id: graph.protocol_id(edge.to).to_owned(),
+            ratio: edge.ratio,
+        })
         .collect();
     for fold in &kept {
         edges.push(Edge {
-            from_id: synthetic_id(graph.node_id(fold.parent)),
-            to_id: graph.node_id(fold.parent).to_owned(),
+            from_id: synthetic_id(graph.protocol_id(fold.parent)),
+            to_id: graph.protocol_id(fold.parent).to_owned(),
             ratio: Some(fold.total),
         });
     }
 
     ChartRequest {
-        subject_id: request.subject_id.clone(),
+        subject_id: graph.subject_protocol_id.clone(),
         nodes,
         edges,
-        options: request.options.clone(),
+        options: graph.options.clone(),
     }
 }
 

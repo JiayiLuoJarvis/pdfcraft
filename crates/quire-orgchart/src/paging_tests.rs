@@ -2,28 +2,34 @@
 
 use std::collections::BTreeSet;
 
-use quire_orgchart::captions::CueSide;
-use quire_orgchart::display::{build_display, ratio_facts, LineKind};
-use quire_orgchart::layout::{FamilyRowMetrics, LayoutEngine};
-use quire_orgchart::measure::{build_node_boxes, InboxNode, Measurer, NodeBox, WrappedLine};
-use quire_orgchart::page::{ContCue, LayoutResult, NodePageLink, PageSpec, PlacedNode};
-use quire_orgchart::paging::{paginate, paginate_with, FallbackMeasurer};
-use quire_orgchart::units::PageGeometry;
-use quire_orgchart::{document_title, ChartRequest, Edge, Error, ErrorCode, Node};
+use crate::captions::CueSide;
+use crate::display::{build_display, ratio_facts, LineKind};
+use crate::ids::NodeId;
+use crate::layout::{FamilyRowMetrics, LayoutEngine};
+use crate::measure::{
+    build_node_boxes, promote_to_page_subject, FontMetrics, InboxNode, Measurer, NodeBox,
+    WrappedLine,
+};
+use crate::page::{ContCue, LayoutResult, NodePageLink, PageSpec, PlacedNode};
+use crate::paging::{
+    paginate_request as paginate, paginate_request_with as paginate_with, FallbackMeasurer,
+};
+use crate::units::PageGeometry;
+use crate::{document_title, ChartRequest, Edge, Error, ErrorCode, FontBytes, Node};
 
 struct FakeMeasurer;
 
 impl Measurer for FakeMeasurer {
-    fn string_width_mm(&self, text: &str, _size_pt: f64) -> Result<f64, Error> {
+    fn string_width_mm(&mut self, text: &str, _size_pt: f64) -> Result<f64, Error> {
         let count = u32::try_from(text.chars().count()).unwrap_or(u32::MAX);
         Ok(f64::from(count) * 2.0)
     }
 
-    fn line_height_mm(&self, _size_pt: f64) -> f64 {
+    fn line_height_mm(&mut self, _size_pt: f64) -> f64 {
         5.0
     }
 
-    fn ensure_glyphs(&self, _text: &str) -> Result<(), Error> {
+    fn ensure_glyphs(&mut self, _text: &str) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -52,22 +58,29 @@ fn chart(holders: usize, investments: usize) -> ChartRequest {
     ChartRequest::new("root", nodes, edges)
 }
 
-fn pages_of(request: &ChartRequest) -> Vec<quire_orgchart::page::PageSpec> {
+fn pages_of(request: &ChartRequest) -> Vec<crate::page::PageSpec> {
+    let graph = crate::graph::validate(request).expect("graph");
     let display = build_display(request).expect("display");
     let facts = ratio_facts(request).expect("facts");
     let inbox: Vec<InboxNode<'_>> = request
         .nodes
         .iter()
-        .map(|node| InboxNode {
-            id: node.id.as_str(),
-            lines: &display.get(&node.id).expect("lines").lines,
-            node,
+        .enumerate()
+        .map(|(index, node)| {
+            let id = crate::ids::NodeId::from_index(index);
+            InboxNode {
+                id,
+                protocol_id: node.id.as_str(),
+                lines: &display.get(id).expect("lines").lines,
+                is_company: crate::display::company_fill(node),
+            }
         })
         .collect();
+    let mut measurer = FakeMeasurer;
     let boxes =
-        build_node_boxes(&inbox, &FakeMeasurer, 38.0, &request.subject_id, 257.0).expect("boxes");
-    let _ = facts;
-    paginate(request, &boxes, PageGeometry::default()).expect("pages")
+        build_node_boxes(&inbox, &mut measurer, 38.0, &request.subject_id, 257.0).expect("boxes");
+    let _ = (facts, graph);
+    paginate(request, &boxes, PageGeometry::default(), &mut measurer).expect("pages")
 }
 
 #[test]
@@ -134,8 +147,8 @@ impl LayoutEngine for FakeEngine {
     fn layout(
         &self,
         boxes: &[NodeBox],
-        _edges: &[quire_orgchart::page::EdgeRef],
-        _node_order: &[String],
+        _edges: &[crate::page::EdgeRef],
+        _node_order: &[NodeId],
         _cols: usize,
         _node_width_mm: f64,
         _row_gap_mm: f64,
@@ -147,7 +160,8 @@ impl LayoutEngine for FakeEngine {
             for box_ in boxes {
                 let height = box_.height_mm.max(1.0);
                 nodes.push(PlacedNode {
-                    id: box_.id.clone(),
+                    id: box_.id,
+                    protocol_id: box_.protocol_id.clone(),
                     x,
                     y: 0.0,
                     width: box_.width_mm,
@@ -171,8 +185,8 @@ impl LayoutEngine for FakeEngine {
     fn family_row_metrics(
         &self,
         boxes: &[NodeBox],
-        _edges: &[quire_orgchart::page::EdgeRef],
-        _node_order: &[String],
+        _edges: &[crate::page::EdgeRef],
+        _node_order: &[NodeId],
         _cols: usize,
         _node_width_mm: f64,
         _printable_width_mm: f64,
@@ -200,9 +214,11 @@ impl LayoutEngine for FakeEngine {
     }
 }
 
-fn plain_box(id: &str, name: &str, subject: bool) -> NodeBox {
+fn plain_box(index: usize, id: &str, name: &str, subject: bool) -> NodeBox {
     NodeBox {
-        id: id.to_owned(),
+        id: NodeId::from_index(index),
+        protocol_id: id.to_owned(),
+        is_overflow: false,
         width_mm: 38.0,
         height_mm: 12.0,
         lines: vec![WrappedLine {
@@ -219,14 +235,15 @@ fn fake_pages(request: &ChartRequest, limit: i32) -> Result<Vec<PageSpec>, Error
     let boxes: Vec<NodeBox> = request
         .nodes
         .iter()
-        .map(|node| plain_box(&node.id, &node.name, node.id == request.subject_id))
+        .enumerate()
+        .map(|(index, node)| plain_box(index, &node.id, &node.name, node.id == request.subject_id))
         .collect();
     paginate_with(
         request,
         &boxes,
         PageGeometry::default(),
         &FakeEngine { limit },
-        &FallbackMeasurer,
+        &mut FallbackMeasurer,
     )
 }
 
@@ -253,7 +270,12 @@ fn chain(ids: &[&str], investment: bool) -> ChartRequest {
 fn id_sets(pages: &[PageSpec]) -> Vec<BTreeSet<String>> {
     pages
         .iter()
-        .map(|page| page.boxes.iter().map(|box_| box_.id.clone()).collect())
+        .map(|page| {
+            page.boxes
+                .iter()
+                .map(|box_| box_.protocol_id.clone())
+                .collect()
+        })
         .collect()
 }
 
@@ -281,6 +303,63 @@ fn chain_split_keeps_cut_overlap() {
     }
     assert_eq!(union, set_of(&["root", "a1", "a2"]));
     assert!(pages.iter().all(|page| page.layout.fits(page.geometry)));
+}
+
+#[test]
+fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
+    let mut request = chain(&["a1", "a2"], false);
+    for node in &mut request.nodes {
+        if node.id != "root" {
+            node.name = "甲".repeat(25);
+        }
+    }
+    let boxes: Vec<NodeBox> = request
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| plain_box(index, &node.id, &node.name, node.id == request.subject_id))
+        .collect();
+    let mut font = FontMetrics::open(&hc_font()).expect("font");
+    let pages = paginate_with(
+        &request,
+        &boxes,
+        PageGeometry::default(),
+        &FakeEngine { limit: 2 },
+        &mut font,
+    )
+    .expect("pages");
+    let promoted = pages
+        .iter()
+        .flat_map(|page| page.boxes.iter())
+        .find(|box_| box_.is_subject && box_.protocol_id != "root")
+        .expect("annex subject");
+    let source_name = request
+        .nodes
+        .iter()
+        .find(|node| node.id == promoted.protocol_id)
+        .expect("source")
+        .name
+        .clone();
+    let source = plain_box(
+        promoted.id.index(),
+        &promoted.protocol_id,
+        &source_name,
+        false,
+    );
+    let mut again = FontMetrics::open(&hc_font()).expect("font");
+    let expected = promote_to_page_subject(&source, 38.0, &mut again).expect("promote");
+    assert_eq!(promoted.lines, expected.lines);
+    let mut fake = FallbackMeasurer;
+    let fallback = promote_to_page_subject(&source, 38.0, &mut fake).expect("fallback");
+    assert_ne!(promoted.lines.len(), fallback.lines.len());
+}
+
+fn hc_font() -> FontBytes {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/fonts/SourceHanSerifHC-ExtraLight.ttf");
+    FontBytes::new(
+        std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display())),
+    )
 }
 
 #[test]
@@ -468,7 +547,7 @@ fn shareholder_pages_cue_the_next_direct_page_not_investments() {
     let overflow_text = |page: &PageSpec, id: &str| {
         page.boxes
             .iter()
-            .find(|box_| box_.id == id)
+            .find(|box_| box_.protocol_id == id)
             .and_then(|box_| box_.lines.last())
             .map(|line| line.text.clone())
             .unwrap_or_default()

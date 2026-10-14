@@ -1,6 +1,6 @@
 //! Page chrome strings. They do not open a font.
 
-use quire_orgchart::captions::{
+use crate::captions::{
     cont_cue_lines, continuation_title, equity_chart_title, footer, holds_relation,
     investment_chart_title, investment_overview, investment_page_titles, invests_relation,
     other_investments_name, other_shareholders_name, overflow_detail_line, penetration_title,

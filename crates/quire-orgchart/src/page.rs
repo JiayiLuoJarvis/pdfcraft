@@ -4,6 +4,7 @@ use crate::captions::CueSide;
 use crate::display::RatioFact;
 use crate::error::{Error, ErrorCode};
 use crate::graph::OVERFLOW_ID_PREFIX;
+use crate::ids::NodeId;
 use crate::measure::NodeBox;
 use crate::units::{within, PageGeometry};
 
@@ -11,18 +12,15 @@ use crate::units::{within, PageGeometry};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EdgeRef {
     /// Holder.
-    pub from_id: String,
+    pub from_id: NodeId,
     /// Held company.
-    pub to_id: String,
+    pub to_id: NodeId,
 }
 
 impl EdgeRef {
     #[must_use]
-    pub fn new(from_id: impl Into<String>, to_id: impl Into<String>) -> Self {
-        Self {
-            from_id: from_id.into(),
-            to_id: to_id.into(),
-        }
+    pub fn new(from_id: NodeId, to_id: NodeId) -> Self {
+        Self { from_id, to_id }
     }
 }
 
@@ -35,26 +33,13 @@ pub struct PointMm {
     pub y: f64,
 }
 
-/// A node after packing.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LaidOutNode {
-    /// Node id.
-    pub id: &'static str,
-    /// Left edge, mm.
-    pub x: f64,
-    /// Top edge, mm.
-    pub y: f64,
-    /// Width, mm.
-    pub width: f64,
-    /// Height, mm.
-    pub height: f64,
-}
-
-/// Owned placed node. Layout stores ids that outlive the function, so the id is owned.
+/// Owned placed node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedNode {
-    /// Node id.
-    pub id: String,
+    /// Layout identity.
+    pub id: NodeId,
+    /// Caller id or synthetic overflow id.
+    pub protocol_id: String,
     /// Left edge, mm.
     pub x: f64,
     /// Top edge, mm.
@@ -69,9 +54,9 @@ pub struct PlacedNode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaidOutEdge {
     /// Holder.
-    pub from_id: String,
+    pub from_id: NodeId,
     /// Held company.
-    pub to_id: String,
+    pub to_id: NodeId,
     /// Polyline in layout space.
     pub points: Vec<PointMm>,
     /// Draw an arrow on the last segment.
@@ -245,8 +230,8 @@ impl PageSpec {
         let overflow_ids: Vec<&str> = self
             .boxes
             .iter()
-            .filter(|box_| box_.id.starts_with(OVERFLOW_ID_PREFIX))
-            .map(|box_| box_.id.as_str())
+            .filter(|box_| box_.is_overflow)
+            .map(|box_| box_.protocol_id.as_str())
             .collect();
         let link_ids: Vec<&str> = self
             .node_page_links

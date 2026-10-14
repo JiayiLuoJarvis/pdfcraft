@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::error::{Error, ErrorCode};
+use crate::ids::{EdgeId, EdgeRec, NodeId, NodeOrigin, NodeRec};
 use crate::model::{
     ChartOptions, ChartRequest, MAX_MARGIN_MM, MAX_NODES, MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,
     RATIO_MAX, RATIO_MIN,
@@ -27,92 +28,165 @@ enum Visit {
     Visited,
 }
 
-struct Endpoint {
-    from: usize,
-    to: usize,
-}
-
-/// A request that passed [`validate`].
+/// A request that passed [`validate`], owned as an arena.
 ///
-/// Nodes and edges are addressed by index into `request`. `outgoing` and
-/// `incoming` list edge indexes. `out_nodes` lists the head of each outgoing edge.
-pub(crate) struct ValidatedGraph<'a> {
-    pub(crate) request: &'a ChartRequest,
-    index_of: HashMap<&'a str, usize>,
-    ends: Vec<Endpoint>,
-    outgoing: Vec<Vec<usize>>,
-    incoming: Vec<Vec<usize>>,
-    out_nodes: Vec<Vec<usize>>,
-    pub(crate) subject: usize,
+/// Nodes and edges are addressed by [`NodeId`] / [`EdgeId`]. `outgoing` and
+/// `incoming` are indexed by [`NodeId::index`].
+#[derive(Debug, Clone)]
+pub(crate) struct Graph {
+    pub(crate) nodes: Vec<NodeRec>,
+    pub(crate) edges: Vec<EdgeRec>,
+    by_protocol_id: HashMap<String, NodeId>,
+    outgoing: Vec<Vec<EdgeId>>,
+    incoming: Vec<Vec<EdgeId>>,
+    out_nodes: Vec<Vec<NodeId>>,
+    pub(crate) subject: NodeId,
+    pub(crate) subject_protocol_id: String,
+    pub(crate) options: ChartOptions,
+    /// Reachability answers for layout-parent selection. Same lifetime as the graph.
+    reach_cache: HashMap<(NodeId, NodeId), bool>,
+    /// Overflow boxes already appended for `(subject, first_moved)`.
+    overflow_ids: HashMap<(NodeId, NodeId), NodeId>,
 }
 
-impl<'a> ValidatedGraph<'a> {
-    pub(crate) fn node_id(&self, index: usize) -> &'a str {
-        &self.request.nodes[index].id
+impl Graph {
+    pub(crate) fn protocol_id(&self, id: NodeId) -> &str {
+        &self.nodes[id.index()].protocol_id
     }
 
-    pub(crate) fn contains_id(&self, id: &str) -> bool {
-        self.index_of.contains_key(id)
+    pub(crate) fn node_name(&self, id: NodeId) -> &str {
+        &self.nodes[id.index()].name
     }
 
-    pub(crate) fn incoming_edges(&self, node: usize) -> &[usize] {
-        &self.incoming[node]
+    pub(crate) fn contains_protocol(&self, protocol: &str) -> bool {
+        self.by_protocol_id.contains_key(protocol)
     }
 
-    pub(crate) fn edge_from(&self, edge: usize) -> usize {
-        self.ends[edge].from
+    #[cfg(test)]
+    pub(crate) fn id_of(&self, protocol: &str) -> Option<NodeId> {
+        self.by_protocol_id.get(protocol).copied()
     }
 
-    pub(crate) fn edge_to(&self, edge: usize) -> usize {
-        self.ends[edge].to
+    pub(crate) fn incoming_edges(&self, node: NodeId) -> &[EdgeId] {
+        &self.incoming[node.index()]
     }
 
-    pub(crate) fn index(&self, id: &str) -> Option<usize> {
-        self.index_of.get(id).copied()
+    pub(crate) fn edge_from(&self, edge: EdgeId) -> NodeId {
+        self.edges[edge.index()].from
+    }
+
+    pub(crate) fn edge_to(&self, edge: EdgeId) -> NodeId {
+        self.edges[edge.index()].to
     }
 
     /// Holders of `id` (`from` on an incoming edge), in edge order.
-    pub(crate) fn incoming_sources(&self, id: &str) -> Vec<&str> {
-        let Some(node) = self.index(id) else {
-            return Vec::new();
-        };
-        self.incoming[node]
+    pub(crate) fn incoming_sources(&self, id: NodeId) -> Vec<NodeId> {
+        self.incoming[id.index()]
             .iter()
-            .map(|&edge| self.node_id(self.ends[edge].from))
+            .map(|&edge| self.edge_from(edge))
             .collect()
     }
 
     /// Nodes `id` holds (`to` on an outgoing edge), in edge order.
-    pub(crate) fn outgoing_targets(&self, id: &str) -> Vec<&str> {
-        let Some(node) = self.index(id) else {
-            return Vec::new();
-        };
-        self.outgoing[node]
+    pub(crate) fn outgoing_targets(&self, id: NodeId) -> Vec<NodeId> {
+        self.outgoing[id.index()]
             .iter()
-            .map(|&edge| self.node_id(self.ends[edge].to))
+            .map(|&edge| self.edge_to(edge))
             .collect()
     }
 
     /// Endpoints of the unique layout-parent edge, or `None` when there is no parent.
     ///
     /// An ambiguous parent is [`ErrorCode::InvalidProtocol`].
-    pub(crate) fn layout_parent_ends(&self, id: &str) -> Result<Option<(&str, &str)>, Error> {
-        let Some(node) = self.index(id) else {
+    pub(crate) fn layout_parent_ends(
+        &mut self,
+        id: NodeId,
+    ) -> Result<Option<(NodeId, NodeId)>, Error> {
+        let Some(edge) = unique_layout_parent_edge(self, id)? else {
             return Ok(None);
         };
-        let mut cache = HashMap::new();
-        let Some(edge) = unique_layout_parent_edge(self, node, &mut cache)? else {
-            return Ok(None);
-        };
-        Ok(Some((
-            self.node_id(self.ends[edge].from),
-            self.node_id(self.ends[edge].to),
-        )))
+        Ok(Some((self.edge_from(edge), self.edge_to(edge))))
+    }
+
+    /// Unique layout parent when one exists. No parent or an ambiguous parent is `None`.
+    pub(crate) fn layout_parent_optional(&mut self, id: NodeId) -> Option<(NodeId, NodeId)> {
+        self.layout_parent_ends(id).unwrap_or_default()
+    }
+
+    /// Append an overflow node, or reuse the id for the same subject and first moved child.
+    pub(crate) fn ensure_overflow(
+        &mut self,
+        subject: NodeId,
+        first_moved: NodeId,
+        moved_count: usize,
+        name: String,
+    ) -> NodeId {
+        if let Some(id) = self.overflow_ids.get(&(subject, first_moved)) {
+            return *id;
+        }
+        let protocol = overflow_node_id(self.protocol_id(subject), self.protocol_id(first_moved));
+        let id = NodeId::from_index(self.nodes.len());
+        self.nodes.push(NodeRec {
+            id,
+            origin: NodeOrigin::Overflow {
+                subject,
+                first_moved,
+                moved_count,
+            },
+            protocol_id: protocol.clone(),
+            name,
+            legal_person: None,
+            ratio: None,
+            node_type: None,
+            paid_in_amount: None,
+            currency: None,
+            location: None,
+            approval_date: None,
+        });
+        self.by_protocol_id.insert(protocol, id);
+        self.outgoing.push(Vec::new());
+        self.incoming.push(Vec::new());
+        self.out_nodes.push(Vec::new());
+        self.overflow_ids.insert((subject, first_moved), id);
+        id
+    }
+
+    /// Rebuild a [`ChartRequest`] for the prepare boundary (fold output).
+    pub(crate) fn to_request(&self) -> ChartRequest {
+        ChartRequest {
+            subject_id: self.subject_protocol_id.clone(),
+            nodes: self
+                .nodes
+                .iter()
+                .filter(|node| !matches!(node.origin, NodeOrigin::Overflow { .. }))
+                .map(|node| crate::model::Node {
+                    id: node.protocol_id.clone(),
+                    name: node.name.clone(),
+                    legal_person: node.legal_person.clone(),
+                    ratio: node.ratio,
+                    node_type: node.node_type,
+                    paid_in_amount: node.paid_in_amount.clone(),
+                    currency: node.currency.clone(),
+                    location: node.location.clone(),
+                    approval_date: node.approval_date.clone(),
+                })
+                .collect(),
+            edges: self
+                .edges
+                .iter()
+                .map(|edge| crate::model::Edge {
+                    from_id: self.protocol_id(edge.from).to_owned(),
+                    to_id: self.protocol_id(edge.to).to_owned(),
+                    ratio: edge.ratio,
+                })
+                .collect(),
+            options: self.options.clone(),
+        }
     }
 }
 
-/// Check `request` and index it. Folding is a separate step.
-pub(crate) fn validate(request: &ChartRequest) -> Result<ValidatedGraph<'_>, Error> {
+/// Check `request` and copy it into an arena. Folding is a separate step.
+pub(crate) fn validate(request: &ChartRequest) -> Result<Graph, Error> {
     if request.subject_id.trim().is_empty() {
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
@@ -129,35 +203,39 @@ pub(crate) fn validate(request: &ChartRequest) -> Result<ValidatedGraph<'_>, Err
             ),
         ));
     }
-    let index_of = index_nodes(request)?;
-    let Some(&subject) = index_of.get(request.subject_id.as_str()) else {
+    let (nodes, by_protocol_id) = index_nodes(request)?;
+    let Some(&subject) = by_protocol_id.get(request.subject_id.as_str()) else {
         return Err(Error::new(
             ErrorCode::SubjectNotFound,
             format!("subject_id={} not in nodes", request.subject_id),
         ));
     };
-    let ends = check_edges(request, &index_of)?;
-    let node_count = request.nodes.len();
+    let edges = check_edges(request, &by_protocol_id)?;
+    let node_count = nodes.len();
     let mut outgoing = vec![Vec::new(); node_count];
     let mut incoming = vec![Vec::new(); node_count];
     let mut out_nodes = vec![Vec::new(); node_count];
-    for (edge_index, end) in ends.iter().enumerate() {
-        outgoing[end.from].push(edge_index);
-        incoming[end.to].push(edge_index);
-        out_nodes[end.from].push(end.to);
+    for edge in &edges {
+        outgoing[edge.from.index()].push(edge.id);
+        incoming[edge.to.index()].push(edge.id);
+        out_nodes[edge.from.index()].push(edge.to);
     }
-    detect_cycle(&out_nodes, request)?;
-    let graph = ValidatedGraph {
-        request,
-        index_of,
-        ends,
+    detect_cycle(&out_nodes, &nodes)?;
+    let mut graph = Graph {
+        nodes,
+        edges,
+        by_protocol_id,
         outgoing,
         incoming,
         out_nodes,
         subject,
+        subject_protocol_id: request.subject_id.clone(),
+        options: request.options.clone(),
+        reach_cache: HashMap::new(),
+        overflow_ids: HashMap::new(),
     };
     require_dual_cone(&graph)?;
-    reject_ambiguous_ratios(&graph)?;
+    reject_ambiguous_ratios(&mut graph)?;
     Ok(graph)
 }
 
@@ -202,13 +280,14 @@ fn option_bounds(options: &ChartOptions) -> Result<usize, Error> {
     Ok(max_nodes)
 }
 
-fn index_nodes(request: &ChartRequest) -> Result<HashMap<&str, usize>, Error> {
-    let mut index_of = HashMap::with_capacity(request.nodes.len());
+fn index_nodes(request: &ChartRequest) -> Result<(Vec<NodeRec>, HashMap<String, NodeId>), Error> {
+    let mut by_protocol_id = HashMap::with_capacity(request.nodes.len());
+    let mut nodes = Vec::with_capacity(request.nodes.len());
     for (index, node) in request.nodes.iter().enumerate() {
         if node.id.trim().is_empty() || node.name.trim().is_empty() {
             return Err(Error::new(ErrorCode::InvalidProtocol, "node id/name blank"));
         }
-        if index_of.contains_key(node.id.as_str()) {
+        if by_protocol_id.contains_key(node.id.as_str()) {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
                 format!("duplicate node id={}", node.id),
@@ -223,21 +302,48 @@ fn index_nodes(request: &ChartRequest) -> Result<HashMap<&str, usize>, Error> {
                 ),
             ));
         }
-        index_of.insert(node.id.as_str(), index);
+        let id = NodeId::from_index(index);
+        let origin = folded_origin(&node.id, &by_protocol_id).unwrap_or(NodeOrigin::Input);
+        by_protocol_id.insert(node.id.clone(), id);
+        nodes.push(NodeRec {
+            id,
+            origin,
+            protocol_id: node.id.clone(),
+            name: node.name.clone(),
+            legal_person: node.legal_person.clone(),
+            ratio: node.ratio,
+            node_type: node.node_type,
+            paid_in_amount: node.paid_in_amount.clone(),
+            currency: node.currency.clone(),
+            location: node.location.clone(),
+            approval_date: node.approval_date.clone(),
+        });
     }
-    Ok(index_of)
+    Ok((nodes, by_protocol_id))
+}
+
+/// When a later node is `__other__:{parent}` and that parent is already indexed,
+/// treat it as a fold stand-in. Caller-written `__other__:` ids whose parent is
+/// missing stay [`NodeOrigin::Input`].
+fn folded_origin(
+    protocol_id: &str,
+    by_protocol_id: &HashMap<String, NodeId>,
+) -> Option<NodeOrigin> {
+    let parent_protocol = protocol_id.strip_prefix("__other__:")?;
+    let parent = *by_protocol_id.get(parent_protocol)?;
+    Some(NodeOrigin::FoldedHolders { parent })
 }
 
 fn check_edges(
     request: &ChartRequest,
-    index_of: &HashMap<&str, usize>,
-) -> Result<Vec<Endpoint>, Error> {
+    by_protocol_id: &HashMap<String, NodeId>,
+) -> Result<Vec<EdgeRec>, Error> {
     let mut seen = HashSet::with_capacity(request.edges.len());
-    let mut ends = Vec::with_capacity(request.edges.len());
-    for edge in &request.edges {
+    let mut edges = Vec::with_capacity(request.edges.len());
+    for (index, edge) in request.edges.iter().enumerate() {
         let (Some(&from), Some(&to)) = (
-            index_of.get(edge.from_id.as_str()),
-            index_of.get(edge.to_id.as_str()),
+            by_protocol_id.get(edge.from_id.as_str()),
+            by_protocol_id.get(edge.to_id.as_str()),
         ) else {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
@@ -260,12 +366,17 @@ fn check_edges(
             edge.ratio,
             &format!("edge {}->{}", edge.from_id, edge.to_id),
         )?;
-        ends.push(Endpoint { from, to });
+        edges.push(EdgeRec {
+            id: EdgeId::from_index(index),
+            from,
+            to,
+            ratio: edge.ratio,
+        });
     }
     for node in &request.nodes {
         require_ratio(node.ratio, &format!("node {}", node.id))?;
     }
-    Ok(ends)
+    Ok(edges)
 }
 
 fn require_ratio(value: Option<f64>, label: &str) -> Result<(), Error> {
@@ -281,7 +392,7 @@ fn require_ratio(value: Option<f64>, label: &str) -> Result<(), Error> {
     ))
 }
 
-fn detect_cycle(out_nodes: &[Vec<usize>], request: &ChartRequest) -> Result<(), Error> {
+fn detect_cycle(out_nodes: &[Vec<NodeId>], nodes: &[NodeRec]) -> Result<(), Error> {
     let mut state = vec![Visit::Unvisited; out_nodes.len()];
     for start in 0..out_nodes.len() {
         if state[start] != Visit::Unvisited {
@@ -291,7 +402,7 @@ fn detect_cycle(out_nodes: &[Vec<usize>], request: &ChartRequest) -> Result<(), 
         state[start] = Visit::Visiting;
         while let Some(&(node, mut child_index)) = stack.last() {
             if child_index < out_nodes[node].len() {
-                let target = out_nodes[node][child_index];
+                let target = out_nodes[node][child_index].index();
                 child_index += 1;
                 if let Some(top) = stack.last_mut() {
                     top.1 = child_index;
@@ -302,7 +413,7 @@ fn detect_cycle(out_nodes: &[Vec<usize>], request: &ChartRequest) -> Result<(), 
                             ErrorCode::CycleDetected,
                             format!(
                                 "cycle at {}->{}",
-                                request.nodes[node].id, request.nodes[target].id
+                                nodes[node].protocol_id, nodes[target].protocol_id
                             ),
                         ));
                     }
@@ -322,12 +433,12 @@ fn detect_cycle(out_nodes: &[Vec<usize>], request: &ChartRequest) -> Result<(), 
 }
 
 /// Shareholder cone, excluding the subject.
-pub(crate) fn shareholder_ids(graph: &ValidatedGraph<'_>) -> HashSet<usize> {
+pub(crate) fn shareholder_ids(graph: &Graph) -> HashSet<NodeId> {
     walk_cone(graph, Cone::Shareholder)
 }
 
 /// Investment cone, excluding the subject.
-pub(crate) fn investment_ids(graph: &ValidatedGraph<'_>) -> HashSet<usize> {
+pub(crate) fn investment_ids(graph: &Graph) -> HashSet<NodeId> {
     walk_cone(graph, Cone::Investment)
 }
 
@@ -337,17 +448,14 @@ enum Cone {
     Investment,
 }
 
-fn walk_cone(graph: &ValidatedGraph<'_>, cone: Cone) -> HashSet<usize> {
+fn walk_cone(graph: &Graph, cone: Cone) -> HashSet<NodeId> {
     let mut into = HashSet::new();
     let mut stack = vec![graph.subject];
     let mut visited = HashSet::from([graph.subject]);
     while let Some(current) = stack.pop() {
-        let nexts: Vec<usize> = match cone {
-            Cone::Shareholder => graph.incoming[current]
-                .iter()
-                .map(|&edge| graph.ends[edge].from)
-                .collect(),
-            Cone::Investment => graph.out_nodes[current].clone(),
+        let nexts: Vec<NodeId> = match cone {
+            Cone::Shareholder => graph.incoming_sources(current),
+            Cone::Investment => graph.out_nodes[current.index()].clone(),
         };
         for next in nexts {
             if visited.insert(next) {
@@ -359,14 +467,16 @@ fn walk_cone(graph: &ValidatedGraph<'_>, cone: Cone) -> HashSet<usize> {
     into
 }
 
-fn require_dual_cone(graph: &ValidatedGraph<'_>) -> Result<(), Error> {
+fn require_dual_cone(graph: &Graph) -> Result<(), Error> {
     let shareholders = shareholder_ids(graph);
     let investments = investment_ids(graph);
     let mut orphans = Vec::new();
-    for index in 0..graph.request.nodes.len() {
-        if index != graph.subject && !shareholders.contains(&index) && !investments.contains(&index)
+    for node in &graph.nodes {
+        if node.id != graph.subject
+            && !shareholders.contains(&node.id)
+            && !investments.contains(&node.id)
         {
-            orphans.push(graph.node_id(index));
+            orphans.push(node.protocol_id.as_str());
         }
     }
     if !orphans.is_empty() {
@@ -375,14 +485,14 @@ fn require_dual_cone(graph: &ValidatedGraph<'_>) -> Result<(), Error> {
             ErrorCode::InvalidProtocol,
             format!(
                 "nodes not connected to subject={}: {}",
-                graph.request.subject_id,
+                graph.subject_protocol_id,
                 orphans.join(",")
             ),
         ));
     }
-    for (edge_index, edge) in graph.request.edges.iter().enumerate() {
-        let from = graph.ends[edge_index].from;
-        let to = graph.ends[edge_index].to;
+    for edge in &graph.edges {
+        let from = edge.from;
+        let to = edge.to;
         let up =
             shareholders.contains(&from) && (shareholders.contains(&to) || to == graph.subject);
         let down =
@@ -394,7 +504,8 @@ fn require_dual_cone(graph: &ValidatedGraph<'_>) -> Result<(), Error> {
                 ErrorCode::InvalidProtocol,
                 format!(
                     "edge crosses shareholder/investment cones: {}->{}",
-                    edge.from_id, edge.to_id
+                    graph.protocol_id(from),
+                    graph.protocol_id(to)
                 ),
             ));
         }
@@ -402,64 +513,66 @@ fn require_dual_cone(graph: &ValidatedGraph<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-fn reject_ambiguous_ratios(graph: &ValidatedGraph<'_>) -> Result<(), Error> {
-    let mut cache = HashMap::new();
-    for (index, node) in graph.request.nodes.iter().enumerate() {
-        if node.ratio.is_some() || index == graph.subject {
+fn reject_ambiguous_ratios(graph: &mut Graph) -> Result<(), Error> {
+    for index in 0..graph.nodes.len() {
+        let id = NodeId::from_index(index);
+        if graph.nodes[index].ratio.is_some() || id == graph.subject {
             continue;
         }
-        unique_layout_parent_edge(graph, index, &mut cache)?;
+        unique_layout_parent_edge(graph, id)?;
     }
     Ok(())
 }
 
 pub(crate) fn unique_layout_parent_edge(
-    graph: &ValidatedGraph<'_>,
-    node: usize,
-    cache: &mut HashMap<(usize, usize), bool>,
-) -> Result<Option<usize>, Error> {
+    graph: &mut Graph,
+    node: NodeId,
+) -> Result<Option<EdgeId>, Error> {
     if node == graph.subject {
         return Ok(None);
     }
-    let to_subject: Vec<usize> = graph.outgoing[node]
+    let to_subject: Vec<EdgeId> = graph.outgoing[node.index()]
         .iter()
         .copied()
-        .filter(|&edge| graph.ends[edge].to == graph.subject)
+        .filter(|&edge| graph.edge_to(edge) == graph.subject)
         .collect();
     if !to_subject.is_empty() {
         return single_edge(graph, &to_subject, node).map(Some);
     }
-    let from_subject: Vec<usize> = graph.incoming[node]
+    let from_subject: Vec<EdgeId> = graph.incoming[node.index()]
         .iter()
         .copied()
-        .filter(|&edge| graph.ends[edge].from == graph.subject)
+        .filter(|&edge| graph.edge_from(edge) == graph.subject)
         .collect();
     if !from_subject.is_empty() {
         return single_edge(graph, &from_subject, node).map(Some);
     }
-    let down: Vec<usize> = graph.outgoing[node]
-        .iter()
-        .copied()
-        .filter(|&edge| reaches(graph, graph.ends[edge].to, graph.subject, cache))
-        .collect();
+    let outgoing = graph.outgoing[node.index()].clone();
+    let mut down = Vec::new();
+    for edge in outgoing {
+        let to = graph.edge_to(edge);
+        if reaches(graph, to, graph.subject) {
+            down.push(edge);
+        }
+    }
     if !down.is_empty() {
         return single_edge(graph, &down, node).map(Some);
     }
-    let up: Vec<usize> = graph.incoming[node]
-        .iter()
-        .copied()
-        .filter(|&edge| {
-            let from = graph.ends[edge].from;
-            from == graph.subject || reaches(graph, graph.subject, from, cache)
-        })
-        .collect();
+    let incoming = graph.incoming[node.index()].clone();
+    let mut up = Vec::new();
+    for edge in incoming {
+        let from = graph.edge_from(edge);
+        if from == graph.subject || reaches(graph, graph.subject, from) {
+            up.push(edge);
+        }
+    }
     if !up.is_empty() {
         return single_edge(graph, &up, node).map(Some);
     }
     Ok(None)
 }
 
-fn single_edge(graph: &ValidatedGraph<'_>, edges: &[usize], node: usize) -> Result<usize, Error> {
+fn single_edge(graph: &Graph, edges: &[EdgeId], node: NodeId) -> Result<EdgeId, Error> {
     if let [only] = edges {
         Ok(*only)
     } else {
@@ -467,32 +580,27 @@ fn single_edge(graph: &ValidatedGraph<'_>, edges: &[usize], node: usize) -> Resu
     }
 }
 
-fn ambiguous(graph: &ValidatedGraph<'_>, edges: &[usize], node: usize) -> Error {
+fn ambiguous(graph: &Graph, edges: &[EdgeId], node: NodeId) -> Error {
     let ratios: Vec<Option<f64>> = edges
         .iter()
-        .map(|&edge| graph.request.edges[edge].ratio)
+        .map(|&edge| graph.edges[edge.index()].ratio)
         .collect();
     Error::new(
         ErrorCode::InvalidProtocol,
         format!(
             "ambiguous parent edges for {} count={} ratios={ratios:?}",
-            graph.node_id(node),
+            graph.protocol_id(node),
             edges.len()
         ),
     )
 }
 
-fn reaches(
-    graph: &ValidatedGraph<'_>,
-    from: usize,
-    target: usize,
-    cache: &mut HashMap<(usize, usize), bool>,
-) -> bool {
-    if let Some(found) = cache.get(&(from, target)) {
+fn reaches(graph: &mut Graph, from: NodeId, target: NodeId) -> bool {
+    if let Some(found) = graph.reach_cache.get(&(from, target)) {
         return *found;
     }
     if from == target {
-        cache.insert((from, target), true);
+        graph.reach_cache.insert((from, target), true);
         return true;
     }
     let mut seen = HashSet::new();
@@ -502,7 +610,7 @@ fn reaches(
         if !seen.insert(current) {
             continue;
         }
-        for &next in &graph.out_nodes[current] {
+        for &next in &graph.out_nodes[current.index()] {
             if next == target {
                 found = true;
                 break;
@@ -513,14 +621,14 @@ fn reaches(
             break;
         }
     }
-    cache.insert((from, target), found);
+    graph.reach_cache.insert((from, target), found);
     found
 }
 
 /// Where a display percent came from. `parent` is set only when the value is an edge ratio.
 pub(crate) struct RatioSource {
     pub(crate) value: f64,
-    pub(crate) parent: Option<usize>,
+    pub(crate) parent: Option<EdgeId>,
 }
 
 /// Display percent for `node`, plus the parent edge when the percent came from that edge.
@@ -528,12 +636,8 @@ pub(crate) struct RatioSource {
 /// A ratio stored on the node wins, and a diamond then does not need one parent.
 /// The subject has no display ratio. Otherwise the unique layout parent edge
 /// supplies the percent, or `None` when that edge has no ratio.
-pub(crate) fn ratio_source(
-    graph: &ValidatedGraph<'_>,
-    node: usize,
-    cache: &mut HashMap<(usize, usize), bool>,
-) -> Result<Option<RatioSource>, Error> {
-    if let Some(ratio) = graph.request.nodes[node].ratio {
+pub(crate) fn ratio_source(graph: &mut Graph, node: NodeId) -> Result<Option<RatioSource>, Error> {
+    if let Some(ratio) = graph.nodes[node.index()].ratio {
         return Ok(Some(RatioSource {
             value: ratio,
             parent: None,
@@ -542,10 +646,10 @@ pub(crate) fn ratio_source(
     if node == graph.subject {
         return Ok(None);
     }
-    let Some(parent) = unique_layout_parent_edge(graph, node, cache)? else {
+    let Some(parent) = unique_layout_parent_edge(graph, node)? else {
         return Ok(None);
     };
-    let Some(value) = graph.request.edges[parent].ratio else {
+    let Some(value) = graph.edges[parent.index()].ratio else {
         return Ok(None);
     };
     Ok(Some(RatioSource {
@@ -555,33 +659,25 @@ pub(crate) fn ratio_source(
 }
 
 /// Display percent for `node`. See [`ratio_source`].
-pub(crate) fn resolve_display_ratio(
-    graph: &ValidatedGraph<'_>,
-    node: usize,
-    cache: &mut HashMap<(usize, usize), bool>,
-) -> Result<Option<f64>, Error> {
-    Ok(ratio_source(graph, node, cache)?.map(|source| source.value))
+pub(crate) fn resolve_display_ratio(graph: &mut Graph, node: NodeId) -> Result<Option<f64>, Error> {
+    Ok(ratio_source(graph, node)?.map(|source| source.value))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::BTreeSet;
 
     use super::{investment_ids, resolve_display_ratio, shareholder_ids, validate};
     use crate::model::{ChartRequest, Edge, Node};
 
-    fn index_of(request: &ChartRequest, id: &str) -> usize {
-        request
-            .nodes
-            .iter()
-            .position(|node| node.id == id)
-            .expect("node id")
+    fn id_of(graph: &super::Graph, protocol: &str) -> crate::ids::NodeId {
+        graph.id_of(protocol).expect("node id")
     }
 
-    fn ratio_of(request: &ChartRequest, id: &str) -> Option<f64> {
-        let graph = validate(request).expect("valid graph");
-        let mut cache = HashMap::new();
-        resolve_display_ratio(&graph, index_of(request, id), &mut cache).expect("ratio")
+    fn ratio_of(request: &ChartRequest, protocol: &str) -> Option<f64> {
+        let mut graph = validate(request).expect("valid graph");
+        let id = id_of(&graph, protocol);
+        resolve_display_ratio(&mut graph, id).expect("ratio")
     }
 
     #[test]
@@ -686,11 +782,11 @@ mod tests {
         let graph = validate(&request).expect("valid graph");
         let holders: BTreeSet<_> = shareholder_ids(&graph)
             .into_iter()
-            .map(|index| request.nodes[index].id.as_str())
+            .map(|id| graph.protocol_id(id))
             .collect();
         let investments: BTreeSet<_> = investment_ids(&graph)
             .into_iter()
-            .map(|index| request.nodes[index].id.as_str())
+            .map(|id| graph.protocol_id(id))
             .collect();
         assert_eq!(holders, BTreeSet::from(["a", "b"]));
         assert_eq!(investments, BTreeSet::from(["x", "y"]));
