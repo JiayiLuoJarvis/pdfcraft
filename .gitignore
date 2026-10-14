@@ -11,5 +11,6 @@
 *.pdf
 !tests/fixtures/**/*.pdf
 !crates/**/tests/fixtures/**/*.pdf
+*.deb
 .fonts/
 /out/
