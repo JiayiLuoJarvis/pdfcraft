@@ -4,6 +4,7 @@ members = [
     "crates/pdfcraft-pdf",
     "crates/pdfcraft-forms",
     "crates/pdfcraft-orgchart",
+    "crates/pdfcraft-post",
 ]
 
 [workspace.package]
@@ -14,6 +15,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 krilla = { version = "=0.8.2", default-features = false }
 lopdf = { version = "=0.45.0", default-features = false }
+getrandom = { version = "=0.4.3" }
 png = { version = "=0.18.1" }
 read-fonts = { version = "=0.45.0", default-features = false }
 skrifa = { version = "=0.48.0", default-features = false }
