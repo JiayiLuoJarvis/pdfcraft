@@ -12,12 +12,16 @@ categories = ["graphics"]
 include = [
     "src/**/*",
     "examples/**/*",
+    "docs/**/*",
     "tests/fixtures/README.md",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE",
     "Cargo.toml",
 ]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 lopdf = { workspace = true }

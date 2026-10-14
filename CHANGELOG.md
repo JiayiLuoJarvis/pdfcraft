@@ -8,6 +8,10 @@ while remaining `0.x`.
 
 ## [Unreleased]
 
+### Documentation
+
+- Each of `pdfcraft-pdf`, `pdfcraft-forms`, and `pdfcraft-orgchart` ships a Diátaxis set: crates.io README (install / quick start), package `docs/guide.md` (how-to), and crate-root rustdoc (overview + example). `pdfcraft-forms` and `pdfcraft-orgchart` guides cover mental model, options, fonts, errors, and testing. Published packages include `docs/**/*`. The workspace root README indexes Guide / API for every crate.
+
 ### Changed
 
 - **Breaking.** `pdfcraft-pdf` selects faces with a caller-defined key. `FontFace`, `FontFamily`, and `FontRegistry<K>` replace `Resources::body_font` and `Resources::bold_font`. Build resources with `Resources::with_fonts`. `DocumentSpec`, sections, blocks, paragraphs, inline runs, table cells, bands, and layer text carry `K` (`Copy + Eq + Hash + Debug`). `InlineRun::Text` and `InlineRun::Bold` are `{ text, font }`. `Block::paragraph(font, text)` and `ParagraphSpec::text(font, text)` take that key. `FontRegistry::single` registers one family under `()`. A key that was not registered fails with `ErrorKind::UnregisteredFont`. A bold run whose family has no bold face fails with `ErrorKind::BoldFaceRequired`. `pdfcraft-forms` and `pdfcraft-orgchart` still take one font byte buffer.

@@ -1,9 +1,71 @@
 //! Equity and outbound-investment charts.
 //!
-//! [`validate_request`] checks a [`ChartRequest`], including a shareholder fold
-//! when `top_n` is set. [`document_title`] builds the string a caller can store
-//! as PDF document info. [`generate_pdf`] draws the chart with krilla.
+//! Build a [`ChartRequest`] (subject, nodes, holding edges, options). Call
+//! [`validate_request`] to check the protocol, [`document_title`] for a string
+//! you can store as PDF document info, and [`generate_pdf`] to draw the chart.
+//! Shareholders sit above the subject. Outbound investments sit below.
+//!
 //! This crate does not depend on `pdfcraft-pdf` or `pdfcraft-forms`.
+//!
+//! # Pipeline
+//!
+//! ```text
+//! ChartRequest + FontBytes → validate_request (optional)
+//!                         → generate_pdf → PDF bytes
+//! ChartRequest → document_title → String (caller stores PDF info)
+//! ```
+//!
+//! [`generate_pdf`] folds (`top_n`), validates again, measures with skrifa,
+//! paginates, and draws with krilla. It does **not** write a document info
+//! dictionary. Use [`document_title`] yourself if you need `/Title`.
+//!
+//! # Fonts
+//!
+//! Pass owned face bytes as [`FontBytes`]. Paths are not accepted. A font
+//! collection is rejected. Measurement and drawing use the same face.
+//!
+//! # Modules
+//!
+//! Public items are re-exported at the crate root. Layout and paging stay
+//! private.
+//!
+//! | Item | Role |
+//! | --- | --- |
+//! | [`ChartRequest`] / [`ChartOptions`] | Chart values and caps |
+//! | [`Node`] / [`Edge`] / [`NodeType`] | Parties and holding edges |
+//! | [`FontBytes`] | Owned TrueType / OpenType face bytes |
+//! | [`validate_request`] | Protocol check (no font open) |
+//! | [`document_title`] | Title string for caller-owned PDF info |
+//! | [`generate_pdf`] | Draw chart → PDF bytes |
+//! | [`Error`] / [`ErrorCode`] | Stable failure codes |
+//!
+//! # Example
+//!
+//! ```no_run
+//! use pdfcraft_orgchart::{
+//!     document_title, generate_pdf, validate_request, ChartRequest, Edge, FontBytes, Node,
+//! };
+//!
+//! # fn main() -> Result<(), pdfcraft_orgchart::Error> {
+//! let font = FontBytes::new(std::fs::read("face.ttf").expect("font"));
+//! let request = ChartRequest::new(
+//!     "root",
+//!     vec![
+//!         Node::new("holder", "甲股东"),
+//!         Node::new("root", "主体公司"),
+//!         Node::new("invest", "乙投资"),
+//!     ],
+//!     vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
+//! );
+//! validate_request(&request)?;
+//! let _title = document_title(&request)?;
+//! let pdf = generate_pdf(&request, &font)?;
+//! assert!(pdf.starts_with(b"%PDF"));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! A longer walkthrough ships in `docs/guide.md` next to this crate’s README.
 
 #![forbid(unsafe_code)]
 

@@ -12,6 +12,7 @@ categories = ["graphics"]
 include = [
     "src/**/*",
     "examples/**/*",
+    "docs/**/*",
     "tests/fixtures/fonts/OFL.txt",
     "tests/fixtures/fonts/PROVENANCE.txt",
     "README.md",
@@ -19,6 +20,9 @@ include = [
     "LICENSE-APACHE",
     "Cargo.toml",
 ]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 read-fonts = { workspace = true, features = ["std"] }

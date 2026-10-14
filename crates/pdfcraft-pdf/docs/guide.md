@@ -1,9 +1,18 @@
 # pdfcraft-pdf guide
 
 How to build documents with `pdfcraft-pdf`: concepts, value types, layout rules,
-errors, limits, and testing. For a one-page overview see the
-[crate README](../README.md). For every public item signature see
-[rustdoc](https://docs.rs/pdfcraft-pdf) (`cargo doc -p pdfcraft-pdf --open` locally).
+errors, limits, and testing.
+
+| Doc | Role |
+| --- | --- |
+| [crate README](../README.md) | Install and quick start |
+| This guide | How-to for real documents |
+| [rustdoc](https://docs.rs/pdfcraft-pdf) | Every public signature (`cargo doc -p pdfcraft-pdf --open`) |
+
+Related crates (separate packages, separate docs):
+
+- [`pdfcraft-forms`](https://docs.rs/pdfcraft-forms) fills existing AcroForm PDFs.
+- [`pdfcraft-orgchart`](https://docs.rs/pdfcraft-orgchart) draws equity charts.
 
 ---
 

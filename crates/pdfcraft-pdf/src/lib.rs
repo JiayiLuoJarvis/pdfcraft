@@ -79,7 +79,10 @@
 //! # }
 //! ```
 //!
-//! A longer walkthrough ships in `docs/guide.md` next to this crate’s README.
+//! # Further reading
+//!
+//! The full how-to (blocks, tables, bands, limits, errors, testing) ships in
+//! `docs/guide.md` next to this crate’s README.
 
 #![forbid(unsafe_code)]
 

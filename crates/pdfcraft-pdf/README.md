@@ -17,6 +17,10 @@ part of the public API.
 | License | MIT OR Apache-2.0 |
 | Status | `0.1.0`. The API can break before `1.0` |
 
+Filling existing AcroForms is [`pdfcraft-forms`](https://docs.rs/pdfcraft-forms).
+Equity charts are [`pdfcraft-orgchart`](https://docs.rs/pdfcraft-orgchart). Both
+are separate crates with their own guides.
+
 ---
 
 ## Install
