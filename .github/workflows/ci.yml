@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: module dag
-        run: python3 scripts/check_quire_pdf_modules.py
+        run: python3 scripts/check_pdfcraft_pdf_modules.py
 
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
@@ -96,31 +96,31 @@ jobs:
           command -v pdfinfo
 
       - name: clippy forms and orgchart
-        run: cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
+        run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings
 
-      - name: test quire-forms
-        run: cargo test -p quire-forms
+      - name: test pdfcraft-forms
+        run: cargo test -p pdfcraft-forms
 
-      - name: clippy quire-pdf (no default features)
-        run: cargo clippy -p quire-pdf --all-targets --no-default-features --features test-utils -- -D warnings
+      - name: clippy pdfcraft-pdf (no default features)
+        run: cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings
 
-      - name: clippy quire-pdf (backend-krilla)
-        run: cargo clippy -p quire-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
+      - name: clippy pdfcraft-pdf (backend-krilla)
+        run: cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
 
-      - name: test quire-orgchart
-        run: cargo test -p quire-orgchart
+      - name: test pdfcraft-orgchart
+        run: cargo test -p pdfcraft-orgchart
 
-      - name: test quire-pdf (no default features)
-        run: cargo test -p quire-pdf --no-default-features --features test-utils
+      - name: test pdfcraft-pdf (no default features)
+        run: cargo test -p pdfcraft-pdf --no-default-features --features test-utils
 
-      - name: test quire-pdf (backend-krilla)
-        run: cargo test -p quire-pdf --features backend-krilla,test-utils
+      - name: test pdfcraft-pdf (backend-krilla)
+        run: cargo test -p pdfcraft-pdf --features backend-krilla,test-utils
 
-      - name: doc quire-pdf (no default features)
-        run: cargo doc -p quire-pdf --no-deps --no-default-features
+      - name: doc pdfcraft-pdf (no default features)
+        run: cargo doc -p pdfcraft-pdf --no-deps --no-default-features
 
-      - name: doc quire-pdf (backend-krilla)
-        run: cargo doc -p quire-pdf --no-deps --features backend-krilla
+      - name: doc pdfcraft-pdf (backend-krilla)
+        run: cargo doc -p pdfcraft-pdf --no-deps --features backend-krilla
 
       - name: doc shells
-        run: cargo doc -p quire-forms -p quire-orgchart --no-deps
+        run: cargo doc -p pdfcraft-forms -p pdfcraft-orgchart --no-deps

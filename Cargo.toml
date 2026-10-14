@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/quire-pdf",
-    "crates/quire-forms",
-    "crates/quire-orgchart",
+    "crates/pdfcraft-pdf",
+    "crates/pdfcraft-forms",
+    "crates/pdfcraft-orgchart",
 ]
 
 [workspace.package]

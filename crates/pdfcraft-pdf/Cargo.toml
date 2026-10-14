@@ -1,0 +1,58 @@
+[package]
+name = "pdfcraft-pdf"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Lay out DocumentSpec values (flow, bands, layers) and emit vector PDF via a sealed krilla backend"
+license.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/pdfcraft-pdf"
+keywords = ["pdf", "layout", "typography", "document"]
+categories = ["graphics", "text-processing"]
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "docs/**/*",
+    "tests/fixtures/**/*",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "Cargo.toml",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["backend-krilla"]
+backend-krilla = ["dep:krilla", "dep:png"]
+# Floating-point helpers for integration tests (`pt_near`, `PT_ABS_TOLERANCE`).
+test-utils = []
+
+[dependencies]
+krilla = { workspace = true, optional = true, features = ["raster-images"] }
+png = { workspace = true, optional = true }
+skrifa = { workspace = true, features = ["std", "autohint_shaping"] }
+unicode-segmentation = { workspace = true }
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+
+[[example]]
+name = "hello"
+required-features = ["backend-krilla"]
+
+[[example]]
+name = "bill"
+required-features = ["backend-krilla"]

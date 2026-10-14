@@ -188,7 +188,7 @@ doc.ol(Numbering::Decimal, |l| {
 
 **改谁。** `src/lib.rs` 的 `layout` / `text` 改为 `pub(crate) mod`。各已完成模块去掉 `#![allow(dead_code)]`。删或 `pub(crate)` 空的 `layout/dump.rs`。
 
-**验收。** `cargo clippy --all-targets -- -D warnings` 与 `cargo test` 全绿。对外 rustdoc 不再出现 `quire_pdf::layout`。无公共签名变化。
+**验收。** `cargo clippy --all-targets -- -D warnings` 与 `cargo test` 全绿。对外 rustdoc 不再出现 `pdfcraft_pdf::layout`。无公共签名变化。
 
 本工作项可与产品工作项并行，但不要和 R1–R6 挤在同一 diff。
 

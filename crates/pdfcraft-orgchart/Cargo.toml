@@ -1,0 +1,37 @@
+[package]
+name = "pdfcraft-orgchart"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Equity and outbound-investment charts. Callers pass FontBytes. Measurement uses skrifa; drawing uses krilla."
+license.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/pdfcraft-orgchart"
+keywords = ["pdf", "org-chart", "ownership"]
+categories = ["graphics"]
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "tests/fixtures/fonts/OFL.txt",
+    "tests/fixtures/fonts/PROVENANCE.txt",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "Cargo.toml",
+]
+
+[dependencies]
+read-fonts = { workspace = true, features = ["std"] }
+skrifa = { workspace = true, default-features = false, features = ["std"] }
+krilla = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

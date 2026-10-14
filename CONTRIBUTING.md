@@ -5,10 +5,10 @@ Thank you for considering a contribution.
 ## Before you code
 
 1. For **product scope**, read [`docs/提案书.md`](docs/提案书.md). Confirmed
-   bullets there override [`docs/quire-design.md`](docs/quire-design.md).
+   bullets there override [`docs/pdfcraft-design.md`](docs/pdfcraft-design.md).
    Callers should never need those files — their docs are
-   [`crates/quire-pdf/README.md`](crates/quire-pdf/README.md) and
-   [`crates/quire-pdf/docs/guide.md`](crates/quire-pdf/docs/guide.md).
+   [`crates/pdfcraft-pdf/README.md`](crates/pdfcraft-pdf/README.md) and
+   [`crates/pdfcraft-pdf/docs/guide.md`](crates/pdfcraft-pdf/docs/guide.md).
 2. Follow [`AGENTS.md`](AGENTS.md) for modules, layering, coding standards, and
    what not to touch.
 
@@ -26,17 +26,17 @@ Thank you for considering a contribution.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
-cargo test -p quire-pdf --features test-utils
-RUSTDOCFLAGS='-D warnings' cargo doc -p quire-pdf --no-deps
-cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
+cargo clippy -p pdfcraft-pdf --all-targets --features test-utils -- -D warnings
+cargo test -p pdfcraft-pdf --features test-utils
+RUSTDOCFLAGS='-D warnings' cargo doc -p pdfcraft-pdf --no-deps
+cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings
 ```
 
 MSRV is **1.92** (driven by krilla 0.8.2). CI uses the same toolchain and
 treats Rust/rustdoc warnings as errors. Package layout:
 [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md).
 
-Integration tests compare coordinates with `quire_pdf::canvas::pt_near`.
+Integration tests compare coordinates with `pdfcraft_pdf::canvas::pt_near`.
 That function is always public. Feature `test-utils` only re-exports it
 at the crate root.
 

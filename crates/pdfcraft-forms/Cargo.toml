@@ -1,0 +1,37 @@
+[package]
+name = "pdfcraft-forms"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Fill AcroForm fields in an existing PDF and flatten the result"
+license.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/pdfcraft-forms"
+keywords = ["pdf", "acroform", "forms"]
+categories = ["graphics"]
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "tests/fixtures/README.md",
+    "tests/fixtures/DejaVuSans.ttf",
+    "tests/fixtures/DejaVuSans.LICENSE",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "Cargo.toml",
+]
+
+[dependencies]
+lopdf = { workspace = true }
+skrifa = { workspace = true, features = ["std", "autohint_shaping"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

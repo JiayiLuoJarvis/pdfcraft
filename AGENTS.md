@@ -5,13 +5,13 @@
 ## 文档优先级
 
 1. [`docs/提案书.md`](docs/提案书.md) — **已确认条目的唯一权威**。
-2. [`docs/quire-design.md`](docs/quire-design.md) — 设计草稿。其中**未经提案书确认**的决定先不算数（提案书抬头写明）。
+2. [`docs/pdfcraft-design.md`](docs/pdfcraft-design.md) — 设计草稿。其中**未经提案书确认**的决定先不算数（提案书抬头写明）。
 3. [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md) — 仓库 workspace / 多 crate 边界。
 4. 本文件 — 工程约定与禁止项。
 
 冲突时：提案书 > workspace 规格（包边界）> 本文件 > 设计稿未确认部分。
 
-提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/quire-forms`，含对齐、按字段字号、`line_below`、`absolute_lines` 与 TTC 拆面。OTF 与字体子集仍未做。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/pdfcraft-forms`，含对齐、按字段字号、`line_below`、`absolute_lines` 与 TTC 拆面。OTF 与字体子集仍未做。不要把填表写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
 仍须遵守：未确认功能不「顺便」做。三包版本是 `0.1.0`，可以发布。
 
@@ -25,12 +25,12 @@
 
 ## 这是什么库
 
-`quire` 的调用方用 `DocumentSpec` 描述文档。库做测量、断行、分页、表格、页眉页脚，经自有 `Canvas` 画出矢量 PDF。唯一后端是私有 **krilla** 适配器（相当于 pdfmake 下面的 pdfkit）。
+`pdfcraft` 的调用方用 `DocumentSpec` 描述文档。库做测量、断行、分页、表格、页眉页脚，经自有 `Canvas` 画出矢量 PDF。唯一后端是私有 **krilla** 适配器（相当于 pdfmake 下面的 pdfkit）。
 
 已钉死（见提案书「你已经定过的」）：
 
 - 不做 FOP / XSL-FO；股权架构图不做。
-- 底座 krilla。`quire-pdf` 不改用 pdf-writer、lopdf、printpdf。`quire-forms` 用自有的 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）与 `skrifa =0.48.0`，见提案书 §10。`quire-forms` 不依赖 `quire-pdf`。
+- 底座 krilla。`pdfcraft-pdf` 不改用 pdf-writer、lopdf、printpdf。`pdfcraft-forms` 用自有的 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）与 `skrifa =0.48.0`，见提案书 §10。`pdfcraft-forms` 不依赖 `pdfcraft-pdf`。
 - 行宽用 **skrifa** 量，不靠 krilla 文字绘制反推。
 - 直依 `skrifa =0.48.0` 与 `krilla =0.8.2` 传递的 `skrifa ^0.42.0` 是两份库。2026-10-14 的解析结果是 `0.42.1`。当天 crates.io 上 krilla 最新仍是 0.8.2，升 krilla 消不掉这两份。上游 `main` 钉 `skrifa 0.44.0`，尚未发布，也不是 0.48.0。不要 fork krilla，不要改成 git 依赖。`emit` 的 `check_upem` 拒绝 units per em 不一致，夹具字形的 `TJ` 调整量锁住两边的 hmtx。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
@@ -58,14 +58,14 @@
 单仓库 Cargo workspace。包边界见 [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
 
 ```text
-quire/
+pdfcraft/                 # git 仓库 / workspace 根（无业务 package）
   AGENTS.md CONTRIBUTING.md README.md CHANGELOG.md
-  Cargo.toml              workspace 根（无业务 package）
+  Cargo.toml
   rustfmt.toml clippy.toml
   LICENSE-MIT LICENSE-APACHE
   docs/                   提案与设计；含 workspace-crates-spec
   crates/
-    quire-pdf/            主线排版库
+    pdfcraft-pdf/            主线排版库
       Cargo.toml
       src/
         lib.rs            只挂模块；公共重导出随实现 PR 增加
@@ -78,8 +78,8 @@ quire/
         backend/          仅 feature backend-krilla；唯一可 use krilla 处
       tests/              集成测试；fixtures/ 放字体与样张
       examples/           可运行示例
-    quire-forms/          读已有 AcroForm 并 flatten（§10 已确认；基础填写已实现；禁止依赖 quire-pdf；不用 krilla）
-    quire-orgchart/       股权架构图。不依赖 quire-pdf。FontBytes；skrifa 0.48.0 测量；krilla 0.8.2 绘制
+    pdfcraft-forms/          读已有 AcroForm 并 flatten（§10 已确认；基础填写已实现；禁止依赖 pdfcraft-pdf；不用 krilla）
+    pdfcraft-orgchart/       股权与对外投资图。不依赖 pdfcraft-pdf。FontBytes；skrifa 0.48.0 测量；krilla 0.8.2 绘制
   .github/workflows/      CI
 ```
 
@@ -110,7 +110,7 @@ lib         → spec, backend, canvas, fonts, error, geom, limits
 | `lib.rs` 重导出 | 公共 `spec`、geom、error、Canvas | 任何 krilla 类型 |
 | 测试 | 排版用 `RecordingCanvas` 断言坐标 | 用测试依赖反转生产 DAG；把 krilla 压缩字节当排版断言 |
 
-上表是 `quire-pdf` 内部模块。`quire-orgchart` 在自己的 crate 里使用 krilla `0.8.2` 与 skrifa `0.48.0`，不引用 `quire-pdf`。
+上表是 `pdfcraft-pdf` 内部模块。`pdfcraft-orgchart` 在自己的 crate 里使用 krilla `0.8.2` 与 skrifa `0.48.0`，不引用 `pdfcraft-pdf`。
 
 ## 代码与贡献规范
 
@@ -126,31 +126,31 @@ lib         → spec, backend, canvas, fonts, error, geom, limits
 ### 门禁（每个可合并改动）
 
 ```bash
-python3 scripts/check_quire_pdf_modules.py
+python3 scripts/check_pdfcraft_pdf_modules.py
 cargo fmt --all -- --check
-cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
-cargo test -p quire-pdf --features test-utils
-cargo doc -p quire-pdf --no-deps
-cargo clippy -p quire-forms -p quire-orgchart --all-targets -- -D warnings
-cargo test -p quire-forms
-cargo doc -p quire-forms --no-deps
-cargo test -p quire-orgchart
-cargo doc -p quire-orgchart --no-deps
+cargo clippy -p pdfcraft-pdf --all-targets --features test-utils -- -D warnings
+cargo test -p pdfcraft-pdf --features test-utils
+cargo doc -p pdfcraft-pdf --no-deps
+cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings
+cargo test -p pdfcraft-forms
+cargo doc -p pdfcraft-forms --no-deps
+cargo test -p pdfcraft-orgchart
+cargo doc -p pdfcraft-orgchart --no-deps
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
-# 集成测试用 `quire_pdf::canvas::pt_near`，不依赖 `test-utils`。
+# 集成测试用 `pdfcraft_pdf::canvas::pt_near`，不依赖 `test-utils`。
 # 该 feature 只把同一函数再导出到 crate 根。
 #
 # feature 组合变多后再强制：
-#   cargo hack check -p quire-pdf --each-feature
+#   cargo hack check -p pdfcraft-pdf --each-feature
 ```
 
-`quire-forms` 的填写测试会调用 `pdftotext`。
+`pdfcraft-forms` 的填写测试会调用 `pdftotext`。
 
 ### 语言与依赖
 
 - **Edition** `2021`，**MSRV** `1.92`（跟 krilla 0.8.2）；CI 用同一 toolchain。
 - **禁止** `unsafe`（`Cargo.toml` / `#![forbid(unsafe_code)]`）。
-- 依赖**按需引入、精确钉版本**（`=x.y.z`），写在根 `Cargo.toml` 的 `[workspace.dependencies]`。成员 crate 用 `workspace = true`，各自的 feature 留在使用处。当前直依是 `krilla =0.8.2`（`default-features = false`，`quire-pdf` 再开 `raster-images`）、`skrifa =0.48.0`（workspace 关闭 default。`quire-pdf` 与 `quire-forms` 打开 `std` 和 `autohint_shaping`。`quire-orgchart` 只打开 `std`）、`unicode-segmentation =1.13.3`、`png =0.18.1`、`read-fonts =0.45.0`（`default-features = false`，`quire-orgchart` 再开 `std`）、`lopdf =0.45.0`（`default-features = false`）。未用到的依赖不要写进清单。
+- 依赖**按需引入、精确钉版本**（`=x.y.z`），写在根 `Cargo.toml` 的 `[workspace.dependencies]`。成员 crate 用 `workspace = true`，各自的 feature 留在使用处。当前直依是 `krilla =0.8.2`（`default-features = false`，`pdfcraft-pdf` 再开 `raster-images`）、`skrifa =0.48.0`（workspace 关闭 default。`pdfcraft-pdf` 与 `pdfcraft-forms` 打开 `std` 和 `autohint_shaping`。`pdfcraft-orgchart` 只打开 `std`）、`unicode-segmentation =1.13.3`、`png =0.18.1`、`read-fonts =0.45.0`（`default-features = false`，`pdfcraft-orgchart` 再开 `std`）、`lopdf =0.45.0`（`default-features = false`）。未用到的依赖不要写进清单。
 - 不启用 krilla 的 `simple-text` / `rayon`；禁止 `Surface::draw_text`。
 - 测量与绘制同一条字形管线：charmap → advance → 断行 → 同一批 glyph id 再画。
 - 缺字策略以提案书 §4 为准（设计稿默认「缺字即错」；未确认前不要实现回退字体）。
@@ -162,9 +162,9 @@ cargo doc -p quire-orgchart --no-deps
 - `missing_docs`：当前 `warn`。公共 `spec` 与其余稳定对外 API 落地后升为 `deny`。
 - 公共项写 `///`（模块级说明 + 类型/方法）；`Errors` / `Panics` 按 API Guidelines。`pub(crate)` 与私有代码短注释即可。
 - 库代码返回本 crate 的 `Result`。三个 crate 不共用一个 error crate。
-- `quire-pdf` 的失败是 `Error` 或 `Errors`。位置放在可选的 `Location`。依赖失败通过 `source()` 取出。
-- `quire-forms` 的失败是单条 `Error`，没有字段级 `Location`。依赖失败通过 `source()` 取出。
-- `quire-orgchart` 的失败是 `ErrorCode` 加 `message`。调用方匹配 `ErrorCode::as_str`。`message` 只给日志。依赖失败映射到稳定码。`crates/quire-orgchart/src` 的生产路径不用 `expect` 或 `unwrap`。`#[cfg(test)]` 模块和 `tests/` 可以。
+- `pdfcraft-pdf` 的失败是 `Error` 或 `Errors`。位置放在可选的 `Location`。依赖失败通过 `source()` 取出。
+- `pdfcraft-forms` 的失败是单条 `Error`，没有字段级 `Location`。依赖失败通过 `source()` 取出。
+- `pdfcraft-orgchart` 的失败是 `ErrorCode` 加 `message`。调用方匹配 `ErrorCode::as_str`。`message` 只给日志。依赖失败映射到稳定码。`crates/pdfcraft-orgchart/src` 的生产路径不用 `expect` 或 `unwrap`。`#[cfg(test)]` 模块和 `tests/` 可以。
 
 ### PR 纪律
 
@@ -183,11 +183,11 @@ cargo doc -p quire-orgchart --no-deps
 
 ## 明确不要做
 
-- **`quire-pdf`** 第二 PDF 后端；该 crate 生产代码依赖 pdf-writer / lopdf / printpdf。读第三方 PDF 填表只在 `quire-forms`，见 [`workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
+- **`pdfcraft-pdf`** 第二 PDF 后端；该 crate 生产代码依赖 pdf-writer / lopdf / printpdf。读第三方 PDF 填表只在 `pdfcraft-forms`，见 [`workspace-crates-spec.md`](docs/workspace-crates-spec.md)。
 - 完整 UAX #14、bidi、阿文/印度系 shaping、竖排、kerning、连字。
 - 向调用方暴露 `Flowable` trait。
-- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。股权架构图在 `quire-orgchart`，行为以 `docs/quire-orgchart-spec.md` 为准，不进 `quire-pdf`。
+- 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。股权架构图在 `pdfcraft-orgchart`，行为以 `docs/pdfcraft-orgchart-spec.md` 为准，不进 `pdfcraft-pdf`。
 - 用 JSON/serde 当主接口（设计稿旧表述已作废；serde 若将来做，也只是可选，不是主路径）。
 - 并行开页或并行画页。
 - 为「像大厂」堆流程：不建 viewer 视觉回归农场；不放宽成 `^` 依赖。
-- 把 forms / orgchart 做成 `quire-pdf` 的 feature，或让 `quire-forms` ↔ `quire-pdf` 互相依赖。
+- 把 forms / orgchart 做成 `pdfcraft-pdf` 的 feature，或让 `pdfcraft-forms` ↔ `pdfcraft-pdf` 互相依赖。

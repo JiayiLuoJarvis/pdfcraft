@@ -17,7 +17,7 @@
 ### 目标
 
 1. 对外文档与附属包 OSS 面达到可评审状态。
-2. `quire-pdf` 模块 DAG 按硬规则无环，并由 CI 守住。
+2. `pdfcraft-pdf` 模块 DAG 按硬规则无环，并由 CI 守住。
 3. 公共 API 不再暗示可插拔后端；`DocumentSpec` 能设置文档元数据。
 4. 三包错误约定对齐（不抽共享 error crate）；清 orgchart 生产路径 `expect`。
 5. 工艺尾巴收干净：`dead_code`、公共 `# Errors`、排版内核品牌长度。
@@ -25,9 +25,9 @@
 
 ### 非目标（本规格明确不做）
 
-- **整文档流式写出 / 按页释放 `RecordingCanvas`。** 现状是分页片段 → 全量 `RecordingCanvas` → krilla marks → PDF 字节。批跑靠 [`Limits`](../crates/quire-pdf/src/limits.rs)。若内存日后成实测瓶颈，另开性能规格。这与提案书「正文流式布局」不是同一件事。
+- **整文档流式写出 / 按页释放 `RecordingCanvas`。** 现状是分页片段 → 全量 `RecordingCanvas` → krilla marks → PDF 字节。批跑靠 [`Limits`](../crates/pdfcraft-pdf/src/limits.rs)。若内存日后成实测瓶颈，另开性能规格。这与提案书「正文流式布局」不是同一件事。
 - 不抽 `quire-error` / `quire-geom` 共享 crate。
-- 不为消环把 `quire-pdf` 拆成多 crate；不为消环把 `FlowNode` 改成 trait 对象热路径。
+- 不为消环把 `pdfcraft-pdf` 拆成多 crate；不为消环把 `FlowNode` 改成 trait 对象热路径。
 - 不做 fuzz、完整威胁模型长文、viewer 视觉回归农场。
 - 不并行开页或并行画页（AGENTS）。
 - 不在本规格里改加密、标签 PDF、OTF、字体子集、完整 i18n shaping 等提案书范围外能力。
@@ -87,7 +87,7 @@ D 对外文档对齐
 
 | | |
 | --- | --- |
-| 现象 | 根 README / `workspace-crates-spec` 仍写 forms 若干能力未做；`code-quality-assessment` 仍提 builder / `FlowWriter`；`quire-forms-spec` 抬头与提案书 §10 打架。 |
+| 现象 | 根 README / `workspace-crates-spec` 仍写 forms 若干能力未做；`code-quality-assessment` 仍提 builder / `FlowWriter`；`pdfcraft-forms-spec` 抬头与提案书 §10 打架。 |
 | 已确认 | **做。** 修准 README 与 workspace 规格；评估稿标过时或改错句；forms 规格抬头/清单对齐 §10。不做全库 docs 考古。 |
 | 验收 | 新人只读 README + workspace 规格 + 提案书总表，不会得到「forms 对齐线未做」的假结论。 |
 
@@ -97,7 +97,7 @@ D 对外文档对齐
 | --- | --- |
 | 现象 | forms / orgchart 无包内许可证与 crate README；orgchart 字体仅有 PROVENANCE、无 OFL 正文；forms 夹具 PDF 再分发边界不清。 |
 | 已确认 | **做。** 双许可证副本、短 README、`Cargo.toml` 的 `readme` / `include`；字体旁附 OFL 1.1；夹具写清边界（能附则附，否则排除出 crate `include`）。 |
-| 验收 | 两包元数据与 `quire-pdf` 同级可评审；字体/夹具许可证可跟。 |
+| 验收 | 两包元数据与 `pdfcraft-pdf` 同级可评审；字体/夹具许可证可跟。 |
 
 ### 5.5–5.6 生产环与 DAG 文档（条 5–6）→ 工作项 G
 
@@ -153,7 +153,7 @@ D 对外文档对齐
 | | |
 | --- | --- |
 | 现象 | `DocumentInfo` 在 canvas；`DocumentSpec` 无 `info`；规格到 PDF 几乎设不了标题/作者。 |
-| 已确认 | **做。** `DocumentSpec` 增加 `info`；`layout_spec` / `to_pdf` 接通到 emit；提案书补确认小项。不扩 Creator/Producer 定制（保持现有 `"quire"` creator 即可）。 |
+| 已确认 | **做。** `DocumentSpec` 增加 `info`；`layout_spec` / `to_pdf` 接通到 emit；提案书补确认小项。不扩 Creator/Producer 定制（保持现有 `"pdfcraft"` creator 即可）。 |
 | 验收 | 设置 title/author 后，产出 PDF 元数据可读到对应值（测试方式在实现 PR 钉）；提案书有对应确认表述。 |
 
 ### 5.10 非流式写出（条 10）→ 记录 N
@@ -197,13 +197,13 @@ D 对外文档对齐
 
 | 工作项 | 状态 | 日期 | 说明 |
 | --- | --- | --- | --- |
-| D 对外文档 | 完成 | 2026-10-14 | 根 `README.md`、`workspace-crates-spec`、`quire-forms-spec` 抬头与提案书 §10 对齐（对齐 / `line_below` / `absolute_lines` / TTC 已实现；OTF 与子集未做）。`code-quality-assessment` 标为历史快照并划掉过时的 builder / `FlowWriter` 开项表述。验收：新人只读 README + workspace 规格 + 提案书总表，不会得到「forms 对齐线未做」的假结论。 |
-| O 附属包 OSS | 完成 | 2026-10-14 | `quire-forms` / `quire-orgchart` 各有 `LICENSE-MIT`、`LICENSE-APACHE`、短 `README.md`，`Cargo.toml` 含 `readme` / `include`。orgchart 字体旁附 `OFL.txt`（SIL OFL 1.1），`PROVENANCE.txt` 指向它。forms 夹具：DejaVu 可附并进 `include`；PDF 无再分发许可说明，留在 git、排除出 crate `include`。 |
+| D 对外文档 | 完成 | 2026-10-14 | 根 `README.md`、`workspace-crates-spec`、`pdfcraft-forms-spec` 抬头与提案书 §10 对齐（对齐 / `line_below` / `absolute_lines` / TTC 已实现；OTF 与子集未做）。`code-quality-assessment` 标为历史快照并划掉过时的 builder / `FlowWriter` 开项表述。验收：新人只读 README + workspace 规格 + 提案书总表，不会得到「forms 对齐线未做」的假结论。 |
+| O 附属包 OSS | 完成 | 2026-10-14 | `pdfcraft-forms` / `pdfcraft-orgchart` 各有 `LICENSE-MIT`、`LICENSE-APACHE`、短 `README.md`，`Cargo.toml` 含 `readme` / `include`。orgchart 字体旁附 `OFL.txt`（SIL OFL 1.1），`PROVENANCE.txt` 指向它。forms 夹具：DejaVu 可附并进 `include`；PDF 无再分发许可说明，留在 git、排除出 crate `include`。 |
 | E 错误约定 | 完成 | 2026-10-14 | orgchart 生产 4 处 `expect` 改为 `ErrorCode::LayoutFailed` + 含协议 id 的 message（`render.rs` / `paging.rs`）。`AGENTS.md` 写明三包错误纪律。`rg` 生产路径无 expect/unwrap；残留仅在 `#[cfg(test)]`。orgchart 门禁绿。 |
-| G 模块 DAG | 完成 | 2026-10-14 | `LimitKind` 迁入 `error`；`limits → error` 单向。`decorate_tests` 旁路；`column_width` / `line_run` 中立共享。`python3 scripts/check_quire_pdf_modules.py` + 边文件入 CI；自检可红。`module-dependency.md` / AGENTS 图已对齐。quire-pdf 门禁绿。 |
+| G 模块 DAG | 完成 | 2026-10-14 | `LimitKind` 迁入 `error`；`limits → error` 单向。`decorate_tests` 旁路；`column_width` / `line_run` 中立共享。`python3 scripts/check_pdfcraft_pdf_modules.py` + 边文件入 CI；自检可红。`module-dependency.md` / AGENTS 图已对齐。pdfcraft-pdf 门禁绿。 |
 | P 公共面 | 完成 | 2026-10-14 | `Canvas` 与 `FontId`/`ImageId::from_raw` 为 `pub(crate)`。命令类型仍公开并 rustdoc 标明非扩展点。compile_fail doctest 钉住。 |
 | I DocumentInfo | 完成 | 2026-10-14 | `DocumentSpec.info`；经 `Rendered` → `to_pdf` → `set_document_info`。提案书已确认。`tests/document_info.rs` 用 `pdfinfo` 验收 Title/Author。 |
-| C 工艺尾巴 | 完成 | 2026-10-14 | 清 quire-pdf 文件级 blanket `dead_code`；`missing_errors_doc`/`missing_panics_doc` 升为 warn（门禁 -D）；公共构造路径补 `# Errors`；品牌 `Length<C>` 推进 frame/flow/paginate/paragraph/columns/table/list 等热路径。环检查 114 边无环。 |
+| C 工艺尾巴 | 完成 | 2026-10-14 | 清 pdfcraft-pdf 文件级 blanket `dead_code`；`missing_errors_doc`/`missing_panics_doc` 升为 warn（门禁 -D）；公共构造路径补 `# Errors`；品牌 `Length<C>` 推进 frame/flow/paginate/paragraph/columns/table/list 等热路径。环检查 114 边无环。 |
 | S 供应链 | 完成 | 2026-10-14 | `Cargo.lock` 入库（不再 ignore）；`deny.toml` + CI `cargo deny check advisories licenses`；根 `SECURITY.md`；toolchain 钉 commit；Dependabot；CI 矩阵 ubuntu+macos。 |
 | L 依赖升级 | 完成 | 2026-10-14 | `[workspace.dependencies]`；`lopdf =0.45.0`；skrifa/krilla 已最新。双栈书面已知缝 + `emit` upem/`TJ` 测试锁。父会话重生 `Cargo.lock`；`cargo deny check advisories licenses` 绿。 |
 | R 发布 | 完成 | 2026-10-14 | 删 workspace `publish = false` 与三包 `publish.workspace`；版本 `0.1.0`；CHANGELOG / AGENTS / 提案书门槛已更新。orgchart 测试字体排除出 `include`（crates.io 10MiB）。三包 `cargo publish --dry-run --allow-dirty` 退出 0。父会话终检：环检查、deny、AGENTS 门禁全绿。 |
