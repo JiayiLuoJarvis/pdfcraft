@@ -15,18 +15,15 @@ part of the public API.
 | API | [docs.rs/quire-pdf](https://docs.rs/quire-pdf) |
 | MSRV | 1.92 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.x`, API may break; package `publish = false` until the first release |
+| Status | `0.1.0`. The API can break before `1.0` |
 
 ---
 
 ## Install
 
-Until the first crates.io release, depend on the workspace path (or your git
-remote):
-
 ```toml
 [dependencies]
-quire-pdf = { path = "crates/quire-pdf" }
+quire-pdf = "0.1.0"
 ```
 
 Default features enable the krilla backend (`to_pdf`).
@@ -34,7 +31,7 @@ Default features enable the krilla backend (`to_pdf`).
 ```toml
 # Optional. Re-exports `pt_near` and `PT_ABS_TOLERANCE` at the crate root.
 # `canvas::pt_near` is available without this feature.
-quire-pdf = { path = "crates/quire-pdf", features = ["test-utils"] }
+quire-pdf = { version = "0.1.0", features = ["test-utils"] }
 ```
 
 ---
@@ -43,7 +40,7 @@ quire-pdf = { path = "crates/quire-pdf", features = ["test-utils"] }
 
 ```rust
 use quire_pdf::spec::{
-    BandInset, BandSlot, BandSpec, Block, Resources, SectionSpec, TextRun,
+    BandInset, BandSlot, BandSpec, Block, DocumentInfo, Resources, SectionSpec, TextRun,
 };
 use quire_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize, Result};
 
@@ -55,6 +52,7 @@ fn main() -> Result<()> {
         page_size: PageSize::A4,
         resources,
         limits: Limits::default(),
+        info: DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_uniform(48.0)?,
             header: Some(BandSpec {
@@ -131,6 +129,7 @@ errors, testing).
 | Item | Role |
 | --- | --- |
 | `DocumentSpec` / `SectionSpec` | Document and section values |
+| `DocumentSpec.info` | PDF title and author (`DocumentInfo`). Creator stays `quire` |
 | `Resources` | Font bytes + `add_image` → `ImageRef` |
 | `Block` and friends | Flow content |
 | `BandSpec` / `TextRun` | Header/footer; page numbers at paint time |

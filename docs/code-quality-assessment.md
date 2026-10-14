@@ -3,12 +3,12 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-10 |
-| 状态 | 探讨稿。只记录判断，不改代码。逐条讨论后再定要不要动 |
+| 状态 | **历史探讨稿，已过时。** 下文是 2026-10-10 的判断，不代表当前代码。现行工作见 [`enterprise-readiness-spec.md`](enterprise-readiness-spec.md) 与 [`AGENTS.md`](../AGENTS.md) |
 | 范围 | `src/`，明确排除 `src/backend/` |
-| 性质 | explanation。尚未写入提案书 |
+| 性质 | explanation。历史快照，不是现行规格 |
 
 本文汇总一次只读评估里「已经够好 / 开源或上生产前宜处理 / 0.x 可暂留」的分项。  
-`Deref` 到 `Flow`：已迁到 `FlowWriter`（见 [`deref-flow-api.md`](deref-flow-api.md)、[`flow-writer-spec.md`](flow-writer-spec.md)）。
+builder 的三种返回值描述的是已删除的 builder DSL。`FlowWriter` 也不是当前开项。调用入口是 `DocumentSpec`，见 [`remove-builder-dsl.md`](remove-builder-dsl.md)。
 
 讨论与落地时遵守 [`AGENTS.md`](../AGENTS.md)「现阶段姿态」：**无生产包袱、主题内不将就**；不为「改动小」留下已知歪的错误面或 API。
 
@@ -73,19 +73,20 @@
 这些可以记着，不阻塞当前里程碑。
 
 - 大量 `#![cfg_attr(not(test), allow(dead_code))]`（接线期常见）。`hline` / `image` 与多数 layout 文件不统一，是小问题。
-- builder 返回值三种并存（`()`、`&mut Self` 链、消费 `Self`）。`must_use` / `Debug` / `#[non_exhaustive]` 半覆盖。体验问题，不是正确性问题。
+- ~~builder 返回值三种并存（`()`、`&mut Self` 链、消费 `Self`）。~~ 该描述针对已删除的 builder DSL，不是当前 API。见 [`remove-builder-dsl.md`](remove-builder-dsl.md)。
+- `must_use` / `Debug` / `#[non_exhaustive]` 半覆盖。这是 2026-10-10 的体验记录，不是正确性结论。
 - 测试浮点断言三套（`to_bits`、`pt_near`、裸 `assert_eq`）。只影响维护。
 - 公开与内部同名类型（如 `Border`）。内部为 `pub(crate)`，外部看不到。
-- ~~`Deref` / `DerefMut` 到 `Flow`~~。**已迁移**为 `FlowWriter` + 公开 `add` + 糖，见 [`deref-flow-api.md`](deref-flow-api.md)。
+- ~~`Deref` / `DerefMut` 到 `Flow`~~。这不是开项。后来的 `FlowWriter` 路径也已删掉。现行入口是 `DocumentSpec`，见 [`remove-builder-dsl.md`](remove-builder-dsl.md)。
 
 ## 分项 verdict
 
 | 维度 | 判断 |
 | --- | --- |
 | 模块组织 | 目标 DAG 已落地（[`module-dependency.md`](module-dependency.md)）：生产代码无环，document 不再依赖 backend |
-| 风格 | 机械层统一。API 三种形态 0.x 可接受，1.0 前宜收敛 |
+| 风格 | 机械层统一。~~API 三种形态 0.x 可接受，1.0 前宜收敛~~ 这句指已删除的 builder 返回形态 |
 | 报错 / 批跑 | 工作项 1–4 已落地（定位 + `source()` + `Errors` 多错收集） |
-| 对照官方 Rust | `Error` 已是 kind+location+source。正文入流为 `FlowWriter` |
+| 对照官方 Rust | `Error` 已是 kind+location+source。~~正文入流为 `FlowWriter`~~ 现行入口是 `DocumentSpec` |
 
 ## 两类读者分别要知道的
 
@@ -98,7 +99,7 @@
 **维护者。**
 
 - 依赖只许沿 [`module-dependency.md`](module-dependency.md) 的 DAG 向下；禁止环。
-- DSL→节点转换在 `document/*`；`layout/nesting`（原 lower）只做嵌套内容规则。
+- ~~DSL→节点转换在 `document/*`~~。`src/document` 已删除，见 [`remove-builder-dsl.md`](remove-builder-dsl.md)。`layout/nesting`（原 lower）只做嵌套内容规则。
 - 补错误上下文：组装与 layout 的 `Location` 钩子；动 `decorate` 时注意它会改写下层错误语义。
 
 ## 讨论顺序建议
@@ -106,4 +107,4 @@
 1. 报错可诊断性——**工作项 1–4 已落地**。
 2. 公开面清理——**已落地**。
 3. 组织与依赖——**已落地**，见 [`module-dependency.md`](module-dependency.md)「落地记录」。
-4. `Deref` 到 `Flow`——**已落地**。
+4. `Deref` 到 `Flow` 已落地，不是开项。后续删掉的 builder 与 `FlowWriter` 见 [`remove-builder-dsl.md`](remove-builder-dsl.md)。

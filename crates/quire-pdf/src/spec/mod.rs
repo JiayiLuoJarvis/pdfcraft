@@ -4,7 +4,7 @@
 //!
 //! | Type | Role |
 //! | --- | --- |
-//! | [`DocumentSpec`] | Page default, [`Resources`], [`crate::Limits`], sections |
+//! | [`DocumentSpec`] | Page default, [`Resources`], [`crate::Limits`], [`DocumentInfo`], sections |
 //! | [`SectionSpec`] | Margins, bands, layers, flow [`Block`] list |
 //! | [`Resources`] | Body/bold font bytes; [`Resources::add_image`] → [`ImageRef`] |
 //! | [`Block`] | Paragraphs, tables, columns, lists, images, rules, … |
@@ -24,6 +24,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use crate::canvas::DocumentInfo;
 pub use lower::layout_spec;
 pub use types::{Numbering, Ratio, Rendered, Track};
 
@@ -45,6 +46,11 @@ pub struct DocumentSpec {
     pub resources: Resources,
     /// Resource and document-size caps.
     pub limits: Limits,
+    /// PDF document information.
+    ///
+    /// Non-empty `title` and `author` become the PDF title and author. Empty
+    /// strings are omitted. The creator is `quire`. Producer is not set.
+    pub info: DocumentInfo,
     /// Sections in document order. An empty list produces one empty default section.
     pub sections: Vec<SectionSpec>,
 }
@@ -56,6 +62,7 @@ impl DocumentSpec {
             page_size,
             resources,
             limits: Limits::default(),
+            info: DocumentInfo::default(),
             sections: vec![SectionSpec::default()],
         }
     }

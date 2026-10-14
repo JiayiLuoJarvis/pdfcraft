@@ -2,7 +2,8 @@ use crate::canvas::CanvasCommand;
 use crate::error::{Error, ErrorKind};
 use crate::fonts::FontStore;
 use crate::geom::{Color, NonNegative, Positive};
-use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
+use crate::layout::column_width::{ColumnWidth, Ratio};
+use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::Decorations;
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{FragmentCommand, Frame, Split};
@@ -12,9 +13,9 @@ use crate::layout::test_util::{page, render, strokes};
 
 fn frame(width: f32, height: f32, full: f32) -> Frame {
     Frame {
-        width,
-        height,
-        full_height: full,
+        width: Positive::pt(width).unwrap(),
+        height: NonNegative::pt(height).unwrap(),
+        full_height: Positive::pt(full).unwrap(),
     }
 }
 
@@ -43,8 +44,8 @@ fn default_spans_frame_on_centre_line() {
     else {
         panic!("expected fit");
     };
-    assert_eq!(height.to_bits(), 10.0f32.to_bits());
-    assert_eq!(fragment.spacing_after.to_bits(), 0.0f32.to_bits());
+    assert_eq!(height.as_pt().to_bits(), 10.0f32.to_bits());
+    assert_eq!(fragment.spacing_after.as_pt().to_bits(), 0.0f32.to_bits());
     let FragmentCommand::Stroke {
         path,
         paint,
@@ -142,7 +143,7 @@ fn overflowing_spaces_are_taller_than_frame() {
 #[test]
 fn column_offsets_the_line() {
     let line = node(None, TextAlign::Start, 1.0, 0.0, 0.0);
-    let even = ColumnWidth::Ratio(Ratio::ONE);
+    let even = ColumnWidth::Ratio(Ratio::new(1.0).unwrap());
     let cols = ColumnsNode::new(
         NonNegative::ZERO,
         vec![

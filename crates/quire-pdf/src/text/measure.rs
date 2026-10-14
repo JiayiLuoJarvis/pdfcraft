@@ -2,8 +2,6 @@
 //!
 //! Missing cmap entries become errors; v1 does not draw `.notdef` or fall back.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::ops::Range;
 
 use skrifa::instance::{LocationRef, Size};
@@ -11,7 +9,7 @@ use skrifa::MetadataProvider;
 
 use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
 use crate::fonts::{parse_face, FaceMetrics, FontId, FontStore};
-use crate::geom::{Length, Positive};
+use crate::geom::{Finite, Length, Positive};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MeasuredGlyph {
@@ -33,11 +31,11 @@ pub(crate) struct MeasuredText {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LineMetrics {
-    pub(crate) ascent: f32,
-    pub(crate) descent: f32,
-    pub(crate) leading: f32,
-    pub(crate) line_height: f32,
-    pub(crate) baseline: f32,
+    pub(crate) ascent: Length<Finite>,
+    pub(crate) descent: Length<Finite>,
+    pub(crate) leading: Length<Finite>,
+    pub(crate) line_height: Length<Positive>,
+    pub(crate) baseline: Length<Finite>,
 }
 
 pub(crate) fn measure_text(
@@ -148,12 +146,13 @@ pub(crate) fn line_metrics(
     let descent = face.descent * scale;
     let leading = face.leading * scale;
     let natural = ascent - descent + leading;
+    let line_height = natural.max(size * factor);
     Ok(LineMetrics {
-        ascent,
-        descent,
-        leading,
-        line_height: natural.max(size * factor),
-        baseline: ascent,
+        ascent: Length::from_trusted_pt(ascent),
+        descent: Length::from_trusted_pt(descent),
+        leading: Length::from_trusted_pt(leading),
+        line_height: Length::from_trusted_pt(line_height),
+        baseline: Length::from_trusted_pt(ascent),
     })
 }
 
@@ -226,9 +225,12 @@ mod tests {
         let face = fonts.metrics(id).unwrap();
         assert!(face.descent < 0.0);
         let line = line_metrics(face, Positive::pt(12.0).unwrap(), 1.2).unwrap();
-        assert!(line.descent < 0.0);
-        assert!(line.line_height > 0.0);
-        assert_eq!(line.baseline.to_bits(), line.ascent.to_bits());
+        assert!(line.descent.as_pt() < 0.0);
+        assert!(line.line_height.as_pt() > 0.0);
+        assert_eq!(
+            line.baseline.as_pt().to_bits(),
+            line.ascent.as_pt().to_bits()
+        );
     }
 
     #[test]

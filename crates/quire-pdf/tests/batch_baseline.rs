@@ -109,6 +109,7 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
         page_size: PageSize::A4,
         resources,
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0)?),
             footer: Some(BandSpec {
@@ -148,6 +149,7 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
         page_size: PageSize::A4,
         resources: Resources::new(MEASURE_FONT.to_vec()),
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0)?),
             body: vec![Block::Table(TableSpec {
@@ -173,6 +175,7 @@ fn paragraphs_doc(count: usize) -> Result<Rendered> {
         page_size: PageSize::A4,
         resources: Resources::new(MEASURE_FONT.to_vec()),
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0)?),
             body,

@@ -1,6 +1,6 @@
 [package]
 name = "quire-pdf"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Lay out DocumentSpec values (flow, bands, layers) and emit vector PDF via a sealed krilla backend"
@@ -9,7 +9,6 @@ readme = "README.md"
 documentation = "https://docs.rs/quire-pdf"
 keywords = ["pdf", "layout", "typography", "document"]
 categories = ["graphics", "text-processing"]
-publish.workspace = true
 include = [
     "src/**/*",
     "examples/**/*",
@@ -32,10 +31,10 @@ backend-krilla = ["dep:krilla", "dep:png"]
 test-utils = []
 
 [dependencies]
-krilla = { version = "=0.8.2", optional = true, default-features = false, features = ["raster-images"] }
-png = { version = "=0.18.1", optional = true }
-skrifa = { version = "=0.48.0" }
-unicode-segmentation = { version = "=1.13.3" }
+krilla = { workspace = true, optional = true, features = ["raster-images"] }
+png = { workspace = true, optional = true }
+skrifa = { workspace = true, features = ["std", "autohint_shaping"] }
+unicode-segmentation = { workspace = true }
 
 [dev-dependencies]
 
@@ -47,8 +46,8 @@ missing_docs = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
 
 [[example]]
 name = "hello"

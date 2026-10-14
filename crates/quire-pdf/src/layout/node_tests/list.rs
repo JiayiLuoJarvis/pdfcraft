@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use crate::error::{Error, ErrorKind, GeometryKind};
 use crate::geom::{Color, NonNegative, Positive};
-use crate::layout::columns::ColumnWidth;
+use crate::layout::column_width::ColumnWidth;
 use crate::layout::decorate::Decorations;
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{Fragment, FragmentCommand};
@@ -48,7 +48,7 @@ fn hanging_indent_and_marker_on_first_fragment_only() {
         vec![item("A\nB\nC", &style), item("D", &style)],
     ))
     .unwrap();
-    let config = page(200.0, m.line_height * 2.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 2.0 + 1.0);
     let (result, rec) = render(
         FlowNode::List(list),
         &mut fonts,
@@ -58,8 +58,8 @@ fn hanging_indent_and_marker_on_first_fragment_only() {
     result.unwrap();
     let pages = rec.pages();
     assert_eq!(pages.len(), 2);
-    let first_line = m.baseline.to_bits();
-    let second_line = (m.line_height + m.baseline).to_bits();
+    let first_line = m.baseline.as_pt().to_bits();
+    let second_line = (m.line_height.as_pt() + m.baseline.as_pt()).to_bits();
     assert_eq!(
         runs(&pages[0]).iter().map(bits).collect::<Vec<_>>(),
         [
@@ -285,8 +285,8 @@ fn empty_custom_marker_is_rejected() {
 #[test]
 fn image_command_has_no_baseline() {
     let fragment = Fragment {
-        height: 10.0,
-        spacing_after: 0.0,
+        height: NonNegative::pt(10.0).unwrap(),
+        spacing_after: NonNegative::ZERO,
         commands: vec![FragmentCommand::Image {
             image: crate::canvas::DecodedImage {
                 id: crate::canvas::ImageId::from_raw(3),

@@ -1,15 +1,13 @@
 //! Bulleted and numbered lists with a hanging marker column.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
 use crate::error::{Fallible as Result, GeometryKind};
-use crate::geom::{Length, Point, Positive};
+use crate::geom::{Length, NonNegative, Point, Positive};
 use crate::layout::frame::{Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
+use crate::layout::line_run::single_line_run;
 use crate::layout::nesting::ItemBody;
-use crate::layout::paragraph::single_line_run;
 use crate::layout::style::Style;
 
 /// Ordered marker numbering. Each label gets a trailing `.`.
@@ -134,20 +132,20 @@ struct PendingItem<N> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListNode<N> {
-    marker_width: f32,
-    indent: f32,
+    marker_width: Length<Positive>,
+    indent: Length<Positive>,
     marker_style: Style,
     items: VecDeque<PendingItem<N>>,
 }
 
 impl<N: Flowable> ListNode<N> {
     pub(crate) fn new(spec: ListSpec<N>) -> Result<Self> {
-        let marker_width = spec.marker_width.as_pt();
-        let indent = spec.nest_indent.map_or(marker_width, Length::as_pt);
-        if indent < marker_width {
+        let marker_width = spec.marker_width;
+        let indent = spec.nest_indent.unwrap_or(marker_width);
+        if indent.as_pt() < marker_width.as_pt() {
             return Err(GeometryKind::ListIndent {
-                indent,
-                marker_width,
+                indent: indent.as_pt(),
+                marker_width: marker_width.as_pt(),
             }
             .into());
         }
@@ -190,17 +188,18 @@ impl<N: Flowable> ListNode<N> {
         ctx: &mut LayoutCtx<'_>,
         mut avail: Frame,
     ) -> Result<Split<Self>> {
-        let body_w = avail.width - self.indent;
-        if body_w <= 0.0 || self.marker_width >= avail.width {
+        let body = (avail.width - Length::<NonNegative>::from(self.indent)).as_pt();
+        if body <= 0.0 || self.marker_width.as_pt() >= avail.width.as_pt() {
             return Err(GeometryKind::ListIndentWiderThanFrame {
-                indent: self.indent,
-                avail: avail.width,
+                indent: self.indent.as_pt(),
+                avail: avail.width.as_pt(),
             }
             .into());
         }
+        let body_w = Length::<Positive>::from_trusted_pt(body);
         let mut commands = Vec::new();
-        let mut y = 0.0f32;
-        let mut trailing_spacing = 0.0f32;
+        let mut y = NonNegative::ZERO;
+        let mut trailing_spacing = NonNegative::ZERO;
         let mut placed_any = false;
 
         while let Some(item) = self.items.pop_front() {
@@ -215,7 +214,7 @@ impl<N: Flowable> ListNode<N> {
                     head_height,
                     head,
                     tail,
-                } if head_height > 0.0 => (head_height, head, Some(tail)),
+                } if head_height > NonNegative::ZERO => (head_height, head, Some(tail)),
                 Split::Partial { tail: node, .. } | Split::MoveToNextPage(node) => {
                     self.items.push_front(PendingItem {
                         pending_marker: item.pending_marker,
@@ -224,20 +223,21 @@ impl<N: Flowable> ListNode<N> {
                     if !placed_any {
                         return Ok(Split::MoveToNextPage(self));
                     }
-                    return Ok(partial(commands, y, 0.0, self));
+                    return Ok(partial(commands, y, NonNegative::ZERO, self));
                 }
             };
 
             if let Some(label) = &item.pending_marker {
-                let mut run = single_line_run(ctx, label, &self.marker_style, self.marker_width)?;
+                let mut run =
+                    single_line_run(ctx, label, &self.marker_style, Some(self.marker_width))?;
                 let baseline = first_baseline(&fragment).unwrap_or(run.origin.y().as_pt());
-                run.origin = Point::try_pt(0.0, y + baseline)?;
+                run.origin = Point::try_pt(0.0, y.as_pt() + baseline)?;
                 commands.push(FragmentCommand::Glyphs(run));
             }
             let spacing = fragment.spacing_after;
-            commands.extend(fragment.with_offset(self.indent, y)?.commands);
+            commands.extend(fragment.with_offset(self.indent.into(), y.into())?.commands);
             y += height;
-            avail.height = (avail.height - height).max(0.0);
+            avail.height = avail.height.saturating_sub(height);
             placed_any = true;
 
             if let Some(node) = tail {
@@ -249,13 +249,13 @@ impl<N: Flowable> ListNode<N> {
             }
             if self.items.is_empty() {
                 trailing_spacing = spacing;
-            } else if spacing > 0.0 && avail.height >= spacing {
+            } else if spacing > NonNegative::ZERO && avail.height >= spacing {
                 y += spacing;
-                avail.height -= spacing;
-            } else if spacing > 0.0 && ctx.natural {
+                avail.height = avail.height.sub_exact(spacing);
+            } else if spacing > NonNegative::ZERO && ctx.natural {
                 // Measurement must count gaps that will not fit a fresh frame.
                 y += spacing;
-                avail.height = 0.0;
+                avail.height = NonNegative::ZERO;
             }
         }
 
@@ -272,8 +272,8 @@ impl<N: Flowable> ListNode<N> {
 
 fn partial<N>(
     commands: Vec<FragmentCommand>,
-    y: f32,
-    spacing_after: f32,
+    y: Length<NonNegative>,
+    spacing_after: Length<NonNegative>,
     rest: ListNode<N>,
 ) -> Split<ListNode<N>> {
     Split::Partial {

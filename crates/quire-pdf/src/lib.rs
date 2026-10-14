@@ -1,7 +1,7 @@
 //! Lay out documents and emit vector PDF.
 //!
 //! Build a [`DocumentSpec`] from ordinary Rust values, call [`layout_spec`] to
-//! measure, break, and paginate, then [`to_pdf`] to serialize. Fonts and images
+//! measure, break, and paginate, then `to_pdf` to serialize. Fonts and images
 //! live on [`spec::Resources`]. Batch caps live on [`DocumentSpec::limits`].
 //!
 //! # Pipeline
@@ -36,18 +36,19 @@
 //! | --- | --- |
 //! | [`spec`] | Document values and [`layout_spec`] |
 //! | [`geom`] | Lengths, pages, paint, paths |
-//! | [`error`] | [`Error`], [`Errors`], [`ErrorKind`] |
-//! | [`limits`] | [`Limits`] caps |
-//! | [`canvas`] | Drawing surface and recording log |
+//! | [`error`] | [`Error`], [`Errors`], [`ErrorKind`], [`LimitKind`] |
+//! | [`limits`] | [`Limits`] caps. [`LimitKind`] is defined in [`error`] and re-exported here |
+//! | [`canvas`] | Recorded drawing commands |
 //! | [`fonts`] | [`FontId`] |
 //!
 //! Layout and text engines are crate-private. The PDF backend is private and
-//! compiled behind feature `backend-krilla` (default).
+//! compiled behind feature `backend-krilla` (default). The drawing surface is
+//! crate-private too. Tests observe [`CanvasCommand`] on [`RecordingCanvas`].
 //!
 //! # Example
 //!
 //! ```
-//! use quire_pdf::spec::{Block, Resources, SectionSpec};
+//! use quire_pdf::spec::{Block, DocumentInfo, Resources, SectionSpec};
 //! use quire_pdf::{layout_spec, to_pdf, DocumentSpec, Margins, PageSize, Result};
 //!
 //! # fn main() -> Result<()> {
@@ -56,6 +57,7 @@
 //!     page_size: PageSize::A4,
 //!     resources: Resources::new(font),
 //!     limits: quire_pdf::Limits::default(),
+//!     info: DocumentInfo::default(),
 //!     sections: vec![SectionSpec {
 //!         margins: Margins::try_uniform(48.0)?,
 //!         body: vec![Block::paragraph("Hello from quire-pdf.")],
@@ -96,8 +98,8 @@ pub use spec::{layout_spec, DocumentSpec, Numbering, Ratio, Rendered, Track};
 #[cfg(feature = "test-utils")]
 pub use canvas::{pt_near, PT_ABS_TOLERANCE};
 pub use canvas::{
-    Canvas, CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId,
-    LinkTarget, RecordedPage, RecordingCanvas,
+    CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId, LinkTarget,
+    RecordedPage, RecordingCanvas,
 };
 pub use fonts::FontId;
 
@@ -121,6 +123,10 @@ pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
 
 /// Writes the pages of `rendered` as PDF bytes.
 ///
+/// [`DocumentSpec::info`](crate::spec::DocumentSpec::info) is included. Non-empty
+/// title and author become the PDF title and author. Empty strings are omitted.
+/// The creator is `quire`. Producer is not set.
+///
 /// JPEG, GIF, and WebP pixel data that passed header checks while the document
 /// was laid out can still fail here. That [`ErrorKind::Backend`] value has no
 /// page. PNG pixel data fails during [`layout_spec`] instead.
@@ -130,5 +136,11 @@ pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
 /// Returns backend serialization failures as [`Errors`].
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
-    backend::write_pdf(&rendered.recording, rendered.fonts, rendered.images).map_err(Errors::from)
+    backend::write_pdf(
+        &rendered.recording,
+        rendered.fonts,
+        rendered.images,
+        &rendered.info,
+    )
+    .map_err(Errors::from)
 }

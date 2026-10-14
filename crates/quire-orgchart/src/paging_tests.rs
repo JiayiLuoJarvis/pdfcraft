@@ -290,6 +290,28 @@ fn never_fits_chain_is_layout_failed() {
 }
 
 #[test]
+fn a_page_draft_without_a_measured_box_is_layout_failed() {
+    let request = chain(&["a1", "a2"], false);
+    let boxes: Vec<NodeBox> = request
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| node.id != "a2")
+        .map(|(index, node)| plain_box(index, &node.id, &node.name, node.id == request.subject_id))
+        .collect();
+    let error = paginate_with(
+        &request,
+        &boxes,
+        PageGeometry::default(),
+        &FakeEngine { limit: -1 },
+        &mut FallbackMeasurer,
+    )
+    .expect_err("missing box");
+    assert_eq!(error.code, ErrorCode::LayoutFailed);
+    assert_eq!(error.message, "page draft node a2 has no measured box");
+}
+
+#[test]
 fn chain_split_keeps_cut_overlap() {
     let pages = fake_pages(&chain(&["a1", "a2"], false), 2).expect("pages");
     assert!(pages.len() >= 2);

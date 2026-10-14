@@ -75,6 +75,7 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         page_size: PageSize::A4,
         resources: Resources::new(FONT.to_vec()),
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![section],
     };
     let rendered = layout_spec(spec).unwrap();
@@ -123,6 +124,7 @@ fn foreign_cell_image_ref_is_unknown() {
         page_size: PageSize::A4,
         resources: dest,
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![cell_image_section(foreign)],
     })
     .err()
@@ -145,6 +147,7 @@ fn local_cell_image_ref_draws() {
         page_size: PageSize::A4,
         resources: dest,
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![cell_image_section(owned)],
     })
     .unwrap();

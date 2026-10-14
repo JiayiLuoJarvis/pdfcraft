@@ -33,6 +33,7 @@ use crate::units::{
 /// # Errors
 ///
 /// Returns [`ErrorCode::FontError`] when krilla rejects the face, and glyph errors.
+/// A placed node or ratio label with no measured box is [`ErrorCode::LayoutFailed`].
 pub(crate) fn render(pages: &[PageSpec], font: &mut FontMetrics) -> Result<Vec<u8>, Error> {
     let mut document = Document::new_with(SerializeSettings {
         enable_tagging: false,
@@ -79,9 +80,12 @@ fn draw_page(
         let box_by_id: HashMap<NodeId, &NodeBox> =
             page.boxes.iter().map(|box_| (box_.id, box_)).collect();
         for node in &page.layout.nodes {
-            let box_ = box_by_id
-                .get(&node.id)
-                .expect("placed node has a measured box");
+            let box_ = box_by_id.get(&node.id).copied().ok_or_else(|| {
+                Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!("placed node {} has no measured box", node.protocol_id),
+                )
+            })?;
             draw_node(&mut surface, node, box_, origin_x, origin_y, font, face)?;
         }
         draw_ratios(
@@ -378,9 +382,12 @@ fn draw_ratios(
         .map(|node| (node.id, node))
         .collect();
     for fact in &page.ratio_facts {
-        let node = node_by_id
-            .get(&fact.node_id)
-            .expect("ratio fact node is placed on the page");
+        let node = node_by_id.get(&fact.node_id).copied().ok_or_else(|| {
+            Error::new(
+                ErrorCode::LayoutFailed,
+                format!("ratio label {} is not placed on the page", fact.protocol_id),
+            )
+        })?;
         if box_by_id.get(&node.id).is_some_and(|box_| box_.is_subject) {
             continue;
         }

@@ -92,7 +92,7 @@ impl WidgetSnap {
         let is_widget = dict.get(b"Subtype").is_ok_and(|subtype| {
             matches!(
                 doc.lookup(subtype.clone()),
-                Lookup::Found(found) if found.as_name_str().ok() == Some("Widget")
+                Lookup::Found(found) if name_str(&found) == Some("Widget")
             )
         });
         if !is_widget {
@@ -106,7 +106,7 @@ impl WidgetSnap {
             .and_then(|obj| PdfRect::parse(&obj))?;
         let ft = doc
             .inherited(&dict, b"FT")
-            .and_then(|obj| obj.as_name_str().ok().map(str::to_string));
+            .and_then(|obj| name_str(&obj).map(str::to_owned));
         let flags = doc.inherited(&dict, b"Ff").map_or(0, |obj| flags_of(&obj));
         let field_type = field_type_of(ft.as_deref(), flags);
         let options = doc
@@ -373,6 +373,9 @@ impl PdfDoc {
     }
 
     /// Roots are `Root` and `Info`. `save_to` writes the rest of the trailer as-is, apart from `Size`.
+    ///
+    /// lopdf 0.45 already drops `/Prev` while reading. This still removes `/Prev`
+    /// and `/XRefStm` so a trailer that kept them is not written back.
     pub(crate) fn prune(&mut self) -> Result<()> {
         let reachable = self.reachable()?;
         let keys: Vec<Vec<u8>> = self.0.trailer.iter().map(|(key, _)| key.clone()).collect();
@@ -457,7 +460,7 @@ impl PdfDoc {
         let Lookup::Found(Object::Dictionary(dict)) = self.lookup(annot.clone()) else {
             return true;
         };
-        dict.get(b"Subtype").and_then(Object::as_name_str).ok() != Some("Widget")
+        dict.get(b"Subtype").ok().and_then(name_str) != Some("Widget")
     }
 
     fn read_options(&self, obj: &Object) -> Vec<String> {
@@ -522,6 +525,11 @@ fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
         reason: FlattenReason::FontNameTaken,
     }
     .into())
+}
+
+// lopdf 0.45 returns name bytes. `/FT` and `/Subtype` in this crate are ASCII.
+fn name_str(obj: &Object) -> Option<&str> {
+    std::str::from_utf8(obj.as_name().ok()?).ok()
 }
 
 fn flags_of(obj: &Object) -> i64 {

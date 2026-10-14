@@ -2,7 +2,8 @@ use crate::canvas::{CanvasCommand, DecodedImage, ImageId};
 use crate::error::{Error, ErrorKind};
 use crate::fonts::FontStore;
 use crate::geom::{NonNegative, Positive, Rect};
-use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio};
+use crate::layout::column_width::{ColumnWidth, Ratio};
+use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::Decorations;
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{FragmentCommand, Frame, Split};
@@ -20,9 +21,9 @@ fn pixels(width: u32, height: u32) -> DecodedImage {
 
 fn frame(width: f32, height: f32, full: f32) -> Frame {
     Frame {
-        width,
-        height,
-        full_height: full,
+        width: Positive::pt(width).unwrap(),
+        height: NonNegative::pt(height).unwrap(),
+        full_height: Positive::pt(full).unwrap(),
     }
 }
 
@@ -64,7 +65,7 @@ fn size_rules_and_end_placement() {
     let Split::Fit { fragment, .. } = node.split(frame(300.0, 400.0, 400.0)).unwrap() else {
         panic!("expected fit");
     };
-    assert_eq!(fragment.spacing_after.to_bits(), 0.0f32.to_bits());
+    assert_eq!(fragment.spacing_after.as_pt().to_bits(), 0.0f32.to_bits());
     let FragmentCommand::Image { rect, .. } = &fragment.commands[0] else {
         panic!("expected image");
     };
@@ -156,7 +157,7 @@ fn column_offsets_the_image() {
         TextAlign::Start,
     )
     .unwrap();
-    let even = ColumnWidth::Ratio(Ratio::ONE);
+    let even = ColumnWidth::Ratio(Ratio::new(1.0).unwrap());
     let cols = ColumnsNode::new(
         NonNegative::ZERO,
         vec![

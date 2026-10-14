@@ -1,18 +1,29 @@
 [package]
 name = "quire-orgchart"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Equity ownership charts. Callers pass FontBytes. Measurement uses skrifa; drawing uses krilla."
 license.workspace = true
-publish.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/quire-orgchart"
 keywords = ["pdf", "org-chart", "ownership"]
 categories = ["graphics"]
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "tests/fixtures/fonts/OFL.txt",
+    "tests/fixtures/fonts/PROVENANCE.txt",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "Cargo.toml",
+]
 
 [dependencies]
-read-fonts = { version = "=0.45.0", default-features = false, features = ["std"] }
-skrifa = { version = "=0.48.0", default-features = false, features = ["std"] }
-krilla = { version = "=0.8.2", default-features = false }
+read-fonts = { workspace = true, features = ["std"] }
+skrifa = { workspace = true, default-features = false, features = ["std"] }
+krilla = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"

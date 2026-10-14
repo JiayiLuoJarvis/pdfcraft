@@ -25,7 +25,9 @@ Two moments matter:
    library substitutes page numbers and last-page visibility then.
 
 ```rust
-use quire_pdf::spec::{Block, CellBlock, CellSpec, Resources, SectionSpec, TableSpec};
+use quire_pdf::spec::{
+    Block, CellBlock, CellSpec, DocumentInfo, Resources, SectionSpec, TableSpec,
+};
 use quire_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, PageSize, Result};
 
 enum Kind { A, B }
@@ -79,6 +81,7 @@ fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
         page_size: PageSize::A4,
         resources: Resources::new(font),
         limits: Limits::default(),
+        info: DocumentInfo::default(),
         sections: vec![SectionSpec {
             body,
             ..SectionSpec::default()
@@ -143,9 +146,14 @@ DocumentSpec {
     page_size: PageSize::A4,      // default paper for sections that omit override
     resources,
     limits: Limits::default(),
+    info: DocumentInfo::default(),
     sections: vec![SectionSpec { /* … */ }],
 }
 ```
+
+`info` is `DocumentInfo`. `to_pdf` writes a non-empty `title` and `author` into the PDF information dictionary. Empty strings are omitted. The creator is `quire`. The library does not set a producer, and it does not take a custom creator.
+
+`pdfinfo` prints those strings on the `Title` and `Author` lines.
 
 | `SectionSpec` field | Meaning |
 | --- | --- |
@@ -458,6 +466,7 @@ See [examples/README.md](../examples/README.md).
 - A second PDF backend
 - Filling existing AcroForm PDFs (see workspace crate `quire-forms`)
 - Exposing an implementable `Flowable` trait to callers
+- An implementable drawing surface. `layout_spec` and `to_pdf` do not take one
 
 ---
 
@@ -469,7 +478,7 @@ See [examples/README.md](../examples/README.md).
 | `geom` | Lengths, pages, colors, paths, margins |
 | `error` | `Error`, `ErrorKind`, `Errors`, `Location` |
 | `limits` | Batch caps |
-| `canvas` | `Canvas`, `RecordingCanvas`, image formats (also re-exported) |
+| `canvas` | Recorded `CanvasCommand` and `RecordingCanvas`, image formats (also re-exported). Not a backend you implement |
 | `fonts` | `FontId` (measurement store is internal) |
 | crate root | `to_pdf`, common re-exports |
 

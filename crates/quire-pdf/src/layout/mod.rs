@@ -1,11 +1,15 @@
 //! Layout engine: split/draw flowables, check nested content, paginate, decorate.
 
+pub mod column_width;
 pub mod columns;
 pub mod decorate;
+#[cfg(test)]
+mod decorate_tests;
 pub mod flow;
 pub mod frame;
 pub mod hline;
 pub mod image;
+pub mod line_run;
 pub mod list;
 pub mod nesting;
 #[cfg(test)]

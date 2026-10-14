@@ -2,7 +2,7 @@
 
 use crate::canvas::DecodedImage;
 use crate::error::{Error, ErrorKind, Fallible as Result};
-use crate::geom::{Length, Positive, Rect, Size};
+use crate::geom::{Length, NonNegative, Positive, Rect, Size};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
 
@@ -27,38 +27,38 @@ impl ImageNode {
     }
 
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
-        let width = self.size.width().as_pt();
-        let height = self.size.height().as_pt();
-        if width > avail.width {
+        let width = self.size.width();
+        let height = self.size.height();
+        if width.as_pt() > avail.width.as_pt() {
             return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 text: None,
-                width,
-                avail: avail.width,
+                width: width.as_pt(),
+                avail: avail.width.as_pt(),
             }));
         }
-        if height > avail.full_height {
+        if height.as_pt() > avail.full_height.as_pt() {
             return Err(ErrorKind::UnsplittableTallerThanFrame {
-                height,
-                avail: avail.full_height,
+                height: height.as_pt(),
+                avail: avail.full_height.as_pt(),
             }
             .into());
         }
-        if height > avail.height {
+        if height.as_pt() > avail.height.as_pt() {
             return Ok(Split::MoveToNextPage(self));
         }
         let x = match self.align {
             TextAlign::Start => 0.0,
-            TextAlign::Center => (avail.width - width) / 2.0,
-            TextAlign::End => avail.width - width,
+            TextAlign::Center => (avail.width - width).as_pt() / 2.0,
+            TextAlign::End => (avail.width - width).as_pt(),
         };
         Ok(Split::Fit {
-            height,
+            height: height.into(),
             fragment: Fragment {
-                height,
-                spacing_after: 0.0,
+                height: height.into(),
+                spacing_after: NonNegative::ZERO,
                 commands: vec![FragmentCommand::Image {
                     image: self.image,
-                    rect: Rect::try_pt(x, 0.0, width, height)?,
+                    rect: Rect::try_pt(x, 0.0, width.as_pt(), height.as_pt())?,
                 }],
             },
         })

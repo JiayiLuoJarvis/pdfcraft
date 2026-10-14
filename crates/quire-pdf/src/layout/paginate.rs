@@ -1,17 +1,17 @@
 //! Page breaking and page assembly over the flow.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
 use crate::canvas::Canvas;
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind, Location, Region};
-use crate::geom::{Margins, Point, Size};
+use crate::geom::{Length, Margins, NonNegative, Point, Positive, Size};
 use crate::layout::decorate::{measure_bands, Decorations, PageBands, SectionSpan};
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{draw_fragment, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
-use crate::limits::{LimitKind, Limits};
+use crate::limits::LimitKind;
+#[cfg(test)]
+use crate::limits::Limits;
 
 /// Page geometry for pagination. Header and footer bands sit inside the margins.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,12 +21,20 @@ pub(crate) struct PaginateConfig {
 }
 
 impl PaginateConfig {
-    pub(crate) fn body_width(self) -> f32 {
-        self.page_size.width().as_pt() - self.margins.left().as_pt() - self.margins.right().as_pt()
+    pub(crate) fn body_width(self) -> Length<crate::geom::Finite> {
+        Length::from_trusted_pt(
+            self.page_size.width().as_pt()
+                - self.margins.left().as_pt()
+                - self.margins.right().as_pt(),
+        )
     }
 
-    pub(crate) fn body_height(self) -> f32 {
-        self.page_size.height().as_pt() - self.margins.top().as_pt() - self.margins.bottom().as_pt()
+    pub(crate) fn body_height(self) -> Length<crate::geom::Finite> {
+        Length::from_trusted_pt(
+            self.page_size.height().as_pt()
+                - self.margins.top().as_pt()
+                - self.margins.bottom().as_pt(),
+        )
     }
 
     pub(crate) fn body_origin(self) -> Result<Point> {
@@ -34,8 +42,8 @@ impl PaginateConfig {
     }
 
     fn validate(self) -> Result<()> {
-        let w = self.body_width();
-        let h = self.body_height();
+        let w = self.body_width().as_pt();
+        let h = self.body_height().as_pt();
         if !w.is_finite() || w <= 0.0 || !h.is_finite() || h <= 0.0 {
             return Err(GeometryKind::BodyFrame {
                 width: w,
@@ -70,6 +78,7 @@ pub(crate) struct SectionJob<'a> {
 /// Paginate one section and paint onto `canvas`.
 ///
 /// Bands are measured after the body plan, so decorations can never move body content.
+#[cfg(test)]
 pub(crate) fn paginate_root(
     root: FlowNode,
     ctx: &mut LayoutCtx<'_>,
@@ -127,6 +136,7 @@ pub(crate) fn layout_pages(
 }
 
 /// Plan every section, then measure and paint the flat page list.
+#[cfg(test)]
 pub(crate) fn paginate_sections(
     jobs: Vec<SectionJob<'_>>,
     ctx: &mut LayoutCtx<'_>,
@@ -165,14 +175,14 @@ fn plan_pages(
         other => VecDeque::from([other]),
     };
 
-    let body_w = config.body_width();
-    let body_h = config.body_height();
+    let body_w = Length::<Positive>::from_trusted_pt(config.body_width().as_pt());
+    let body_h = Length::<Positive>::from_trusted_pt(config.body_height().as_pt());
     let body_origin = config.body_origin()?;
 
     let mut cursor = PageCursor::Fresh;
     let mut pages: Vec<PagePlan> = Vec::new();
     let mut current: Option<PagePlan> = None;
-    let mut y = 0.0f32;
+    let mut y = NonNegative::ZERO;
 
     while let Some(node) = nodes.pop_front() {
         match node {
@@ -185,13 +195,13 @@ fn plan_pages(
                     first_page,
                     max_pages,
                 )?;
-                y = 0.0;
+                y = NonNegative::ZERO;
             }
             node => {
                 ensure_content_page(&mut current, config);
                 let avail = Frame {
                     width: body_w,
-                    height: (body_h - y).max(0.0),
+                    height: (body_h - y).clamp_non_negative(),
                     full_height: body_h,
                 };
                 let split = ctx.located(
@@ -201,13 +211,15 @@ fn plan_pages(
                 match split {
                     Split::Fit { height, fragment } => {
                         let page = current.as_mut().expect("content page open");
-                        let origin =
-                            Point::try_pt(body_origin.x().as_pt(), body_origin.y().as_pt() + y)?;
+                        let origin = Point::try_pt(
+                            body_origin.x().as_pt(),
+                            body_origin.y().as_pt() + y.as_pt(),
+                        )?;
                         let spacing = fragment.spacing_after;
                         page.placed.push(PlacedFragment { origin, fragment });
                         y += height;
-                        if spacing > 0.0 {
-                            let remain = (body_h - y).max(0.0);
+                        if spacing > NonNegative::ZERO {
+                            let remain = (body_h - y).clamp_non_negative();
                             if remain >= spacing {
                                 y += spacing;
                             }
@@ -220,28 +232,30 @@ fn plan_pages(
                         tail,
                     } => {
                         let page = current.as_mut().expect("content page open");
-                        let origin =
-                            Point::try_pt(body_origin.x().as_pt(), body_origin.y().as_pt() + y)?;
+                        let origin = Point::try_pt(
+                            body_origin.x().as_pt(),
+                            body_origin.y().as_pt() + y.as_pt(),
+                        )?;
                         page.placed.push(PlacedFragment {
                             origin,
                             fragment: head,
                         });
                         commit_page(&mut pages, &mut current, first_page, max_pages)?;
                         nodes.push_front(tail);
-                        y = 0.0;
+                        y = NonNegative::ZERO;
                         cursor = PageCursor::Fresh;
                     }
                     Split::MoveToNextPage(tail) => {
-                        if y == 0.0 {
+                        if y == NonNegative::ZERO {
                             return Err(Error::from(GeometryKind::StalledOnFreshPage {
-                                height: body_h,
+                                height: body_h.as_pt(),
                             })
                             .in_region(Region::Body)
                             .on_page_index(first_page + pages.len()));
                         }
                         commit_page(&mut pages, &mut current, first_page, max_pages)?;
                         nodes.push_front(tail);
-                        y = 0.0;
+                        y = NonNegative::ZERO;
                         cursor = PageCursor::Fresh;
                     }
                 }
@@ -481,7 +495,7 @@ mod tests {
                 TextAlign::Center => indent + (body_w - indent - line_width) / 2.0,
                 TextAlign::End => body_w - line_width,
             };
-            let expected_y = metrics.baseline;
+            let expected_y = metrics.baseline.as_pt();
 
             let mut errors = crate::error::ErrorBag::default();
             let mut ctx = LayoutCtx {
@@ -693,7 +707,10 @@ mod tests {
         let runs = page_runs(&pages[1]);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, "A");
-        assert_eq!(runs[0].1.to_bits(), (30.0 + metrics.baseline).to_bits());
+        assert_eq!(
+            runs[0].1.to_bits(),
+            (30.0 + metrics.baseline.as_pt()).to_bits()
+        );
     }
 
     #[test]
@@ -701,7 +718,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
-        let line_h = metrics.line_height;
+        let line_h = metrics.line_height.as_pt();
         let page = Size::try_pt(200.0, line_h * 2.0).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A\nB\nC", &style, 200.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
@@ -727,11 +744,14 @@ mod tests {
             first.iter().map(|run| run.0.as_str()).collect::<Vec<_>>(),
             vec!["A", "B"]
         );
-        assert_eq!(first[0].1.to_bits(), metrics.baseline.to_bits());
-        assert_eq!(first[1].1.to_bits(), (line_h + metrics.baseline).to_bits());
+        assert_eq!(first[0].1.to_bits(), metrics.baseline.as_pt().to_bits());
+        assert_eq!(
+            first[1].1.to_bits(),
+            (line_h + metrics.baseline.as_pt()).to_bits()
+        );
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].0, "C");
-        assert_eq!(second[0].1.to_bits(), metrics.baseline.to_bits());
+        assert_eq!(second[0].1.to_bits(), metrics.baseline.as_pt().to_bits());
     }
 
     #[test]
@@ -739,7 +759,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 20.0);
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
-        let line_h = metrics.line_height;
+        let line_h = metrics.line_height.as_pt();
         // Body fits exactly one line; spacing_after 20 cannot fit.
         let page = Size::try_pt(200.0, line_h).unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
@@ -766,7 +786,7 @@ mod tests {
         let origins = glyph_origins(&rec);
         assert_eq!(origins.len(), 2);
         // Second page first glyph at body top baseline, not pushed by leftover spacing.
-        assert_eq!(origins[1].1.to_bits(), metrics.baseline.to_bits());
+        assert_eq!(origins[1].1.to_bits(), metrics.baseline.as_pt().to_bits());
     }
 
     #[test]
@@ -774,7 +794,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
-        let line_h = metrics.line_height;
+        let line_h = metrics.line_height.as_pt();
         // Two lines fit in the full frame. One leading line leaves only one line of room.
         let page = Size::try_pt(200.0, line_h * 2.0 + 10.0).unwrap();
         let filler = ParagraphNode::layout(&mut fonts, "X", &style, 200.0).unwrap();
@@ -807,8 +827,11 @@ mod tests {
         let group = page_runs(&pages[1]);
         assert_eq!(group[0].0, "A");
         assert_eq!(group[1].0, "B");
-        assert_eq!(group[0].1.to_bits(), metrics.baseline.to_bits());
-        assert_eq!(group[1].1.to_bits(), (line_h + metrics.baseline).to_bits());
+        assert_eq!(group[0].1.to_bits(), metrics.baseline.as_pt().to_bits());
+        assert_eq!(
+            group[1].1.to_bits(),
+            (line_h + metrics.baseline.as_pt()).to_bits()
+        );
     }
 
     #[test]
@@ -816,7 +839,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
-        let line_h = metrics.line_height;
+        let line_h = metrics.line_height.as_pt();
         let page = Size::try_pt(200.0, line_h + 1.0).unwrap();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
@@ -856,7 +879,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
-        let line_h = metrics.line_height;
+        let line_h = metrics.line_height.as_pt();
         let spacing = line_h + 1.0;
         let mut spaced = style;
         spaced.paragraph_spacing = NonNegative::pt(spacing).unwrap();
@@ -899,7 +922,7 @@ mod tests {
         let (mut fonts, style) = fonts_and_style(TextAlign::Start, 8.0);
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
-        let line_h = metrics.line_height;
+        let line_h = metrics.line_height.as_pt();
         let page = Size::try_pt(200.0, line_h * 2.0 + 8.0).unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let second = ParagraphNode::layout(&mut fonts, "B", &style, 200.0).unwrap();
@@ -926,7 +949,7 @@ mod tests {
         assert_eq!(runs[1].0, "B");
         assert_eq!(
             runs[1].1.to_bits(),
-            (line_h + 8.0 + metrics.baseline).to_bits()
+            (line_h + 8.0 + metrics.baseline.as_pt()).to_bits()
         );
     }
 
@@ -961,7 +984,10 @@ mod tests {
         .unwrap();
         let origins = glyph_origins(&rec);
         assert_eq!(origins[0].0.to_bits(), 10.0f32.to_bits());
-        assert_eq!(origins[0].1.to_bits(), (15.0 + metrics.baseline).to_bits());
+        assert_eq!(
+            origins[0].1.to_bits(),
+            (15.0 + metrics.baseline.as_pt()).to_bits()
+        );
     }
 
     #[test]
@@ -1023,8 +1049,11 @@ mod tests {
         let (first_x, first_y) = origin(&pages[0]).unwrap();
         let (second_x, second_y) = origin(&pages[1]).unwrap();
         assert_eq!(first_x.to_bits(), 0.0f32.to_bits());
-        assert_eq!(first_y.to_bits(), metrics.baseline.to_bits());
+        assert_eq!(first_y.to_bits(), metrics.baseline.as_pt().to_bits());
         assert_eq!(second_x.to_bits(), 30.0f32.to_bits());
-        assert_eq!(second_y.to_bits(), (12.0 + metrics.baseline).to_bits());
+        assert_eq!(
+            second_y.to_bits(),
+            (12.0 + metrics.baseline.as_pt()).to_bits()
+        );
     }
 }

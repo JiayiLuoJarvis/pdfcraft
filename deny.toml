@@ -1,0 +1,18 @@
+# cargo-deny 0.20.2. CI runs `cargo deny check advisories licenses`.
+
+[advisories]
+# The tool default is warn. A yanked crate fails this job.
+yanked = "deny"
+
+[licenses]
+confidence-threshold = 0.8
+# BSD-2-Clause is arrayref.
+# BSD-3-Clause is tiny-skia-path and brotli-decompressor.
+# Unicode-3.0 is yoke, zerofrom, and unicode-ident.
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT",
+    "Unicode-3.0",
+]

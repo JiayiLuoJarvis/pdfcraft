@@ -56,9 +56,9 @@ impl<C> PartialOrd for Length<C> {
 impl<C> Length<C> {
     /// Builds a length from a point value that already satisfies `C`.
     ///
-    /// Only for compile-time constants such as [`A4`]. Runtime values must
-    /// go through a brand factory.
-    const fn from_trusted_pt(pt: f32) -> Self {
+    /// Constants such as [`A4`] use this. Layout also uses it after arithmetic
+    /// that preserves the brand, such as a sum of non-negative lengths.
+    pub(crate) const fn from_trusted_pt(pt: f32) -> Self {
         Self {
             pt,
             brand: PhantomData,
@@ -70,11 +70,29 @@ impl<C> Length<C> {
     pub const fn as_pt(self) -> f32 {
         self.pt
     }
+
+    pub(crate) fn min(self, other: Self) -> Self {
+        match self.partial_cmp(&other) {
+            Some(std::cmp::Ordering::Greater) => other,
+            _ => self,
+        }
+    }
+
+    pub(crate) fn max(self, other: Self) -> Self {
+        match self.partial_cmp(&other) {
+            Some(std::cmp::Ordering::Less) => other,
+            _ => self,
+        }
+    }
 }
 
 /// Brand for any finite point value, including negatives and zero.
 #[derive(Debug, Clone, Copy)]
 pub enum Finite {}
+
+impl Finite {
+    pub(crate) const ZERO: Length<Self> = Length::from_trusted_pt(0.0);
+}
 
 /// Brand for a finite length greater than or equal to zero.
 #[derive(Debug, Clone, Copy)]
@@ -99,11 +117,19 @@ fn pt_from_mm(mm: f32) -> std::result::Result<f32, Error> {
 
 impl Finite {
     /// Accepts a finite point value.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `value` is NaN or infinite.
     pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
         Ok(Length::from_trusted_pt(finite_pt(value)?))
     }
 
     /// Accepts a finite millimeter value and stores the point equivalent.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `value` or its point equivalent is NaN or infinite.
     pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
         Ok(Length::from_trusted_pt(pt_from_mm(value)?))
     }
@@ -114,6 +140,11 @@ impl NonNegative {
     pub const ZERO: Length<Self> = Length::from_trusted_pt(0.0);
 
     /// Accepts a finite point value greater than or equal to zero.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `value` is NaN or infinite.
+    /// [`ErrorKind::NegativeLength`] when `value` is negative.
     pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
         let value = finite_pt(value)?;
         if value < 0.0 {
@@ -123,6 +154,11 @@ impl NonNegative {
     }
 
     /// Accepts a finite millimeter value greater than or equal to zero.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `value` or its point equivalent is NaN or infinite.
+    /// [`ErrorKind::NegativeLength`] when `value` or its point equivalent is negative.
     pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
         let mm = finite_pt(value)?;
         if mm < 0.0 {
@@ -138,6 +174,11 @@ impl NonNegative {
 
 impl Positive {
     /// Accepts a finite point value strictly greater than zero.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `value` is NaN or infinite.
+    /// [`ErrorKind::NonPositiveLength`] when `value` is zero or negative.
     pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
         let value = finite_pt(value)?;
         if value <= 0.0 {
@@ -147,6 +188,11 @@ impl Positive {
     }
 
     /// Accepts a finite millimeter value strictly greater than zero.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `value` or its point equivalent is NaN or infinite.
+    /// [`ErrorKind::NonPositiveLength`] when `value` or its point equivalent is zero or negative.
     pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
         let mm = finite_pt(value)?;
         if mm <= 0.0 {
@@ -178,9 +224,114 @@ impl From<Length<NonNegative>> for Length<Finite> {
     }
 }
 
+impl Length<Finite> {
+    pub(crate) fn clamp_non_negative(self) -> Length<NonNegative> {
+        Length::from_trusted_pt(self.pt.max(0.0))
+    }
+
+    pub(crate) fn try_positive(self) -> Option<Length<Positive>> {
+        if self.pt.is_finite() && self.pt > 0.0 {
+            Some(Length::from_trusted_pt(self.pt))
+        } else {
+            None
+        }
+    }
+}
+
+impl Length<NonNegative> {
+    /// `self - rhs`, then `max(0)`. Matches the frame's remaining-space update.
+    pub(crate) fn saturating_sub(self, rhs: Self) -> Self {
+        Self::from_trusted_pt((self.pt - rhs.pt).max(0.0))
+    }
+
+    /// `self - rhs` when the caller already knows `self >= rhs`.
+    pub(crate) fn sub_exact(self, rhs: Self) -> Self {
+        Self::from_trusted_pt(self.pt - rhs.pt)
+    }
+}
+
+impl std::ops::Add for Length<NonNegative> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self::from_trusted_pt(self.pt + rhs.pt)
+    }
+}
+
+impl std::ops::Add<Length<Positive>> for Length<NonNegative> {
+    type Output = Self;
+
+    fn add(self, rhs: Length<Positive>) -> Self {
+        Self::from_trusted_pt(self.pt + rhs.as_pt())
+    }
+}
+
+impl std::ops::Add<Length<NonNegative>> for Length<Positive> {
+    type Output = Length<NonNegative>;
+
+    fn add(self, rhs: Length<NonNegative>) -> Length<NonNegative> {
+        Length::from_trusted_pt(self.as_pt() + rhs.as_pt())
+    }
+}
+
+impl std::ops::AddAssign for Length<NonNegative> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::AddAssign<Length<Positive>> for Length<NonNegative> {
+    fn add_assign(&mut self, rhs: Length<Positive>) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub for Length<NonNegative> {
+    type Output = Length<Finite>;
+
+    fn sub(self, rhs: Self) -> Length<Finite> {
+        Length::from_trusted_pt(self.pt - rhs.pt)
+    }
+}
+
+impl std::ops::Sub<Length<Positive>> for Length<Positive> {
+    type Output = Length<Finite>;
+
+    fn sub(self, rhs: Self) -> Length<Finite> {
+        Length::from_trusted_pt(self.as_pt() - rhs.as_pt())
+    }
+}
+
+impl std::ops::Sub<Length<NonNegative>> for Length<Positive> {
+    type Output = Length<Finite>;
+
+    fn sub(self, rhs: Length<NonNegative>) -> Length<Finite> {
+        Length::from_trusted_pt(self.as_pt() - rhs.as_pt())
+    }
+}
+
+impl std::ops::Sub<Length<Positive>> for Length<NonNegative> {
+    type Output = Length<Finite>;
+
+    fn sub(self, rhs: Length<Positive>) -> Length<Finite> {
+        Length::from_trusted_pt(self.pt - rhs.as_pt())
+    }
+}
+
+impl std::iter::Sum for Length<NonNegative> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(NonNegative::ZERO, std::ops::Add::add)
+    }
+}
+
 /// Converts a value into a non-negative length at a DSL or geometry boundary.
 pub trait IntoNonNegative {
     /// Rejects non-finite or negative inputs.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NegativeLength`] for a raw `f32`.
+    /// A length that is already [`NonNegative`] or [`Positive`] is returned as-is.
     fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error>;
 }
 
@@ -205,6 +356,11 @@ impl IntoNonNegative for f32 {
 /// Converts a value into a strictly positive length at a DSL or geometry boundary.
 pub trait IntoPositive {
     /// Rejects non-finite or non-positive inputs.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NonPositiveLength`] for a raw `f32`.
+    /// A length that is already [`Positive`] is returned as-is.
     fn into_positive(self) -> std::result::Result<Length<Positive>, Error>;
 }
 
@@ -223,6 +379,11 @@ impl IntoPositive for f32 {
 /// Converts a value into a finite length at a DSL or geometry boundary.
 pub trait IntoFinite {
     /// Rejects non-finite inputs.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] for a raw `f32`.
+    /// A length that is already finite, non-negative, or positive is returned as-is.
     fn into_finite(self) -> std::result::Result<Length<Finite>, Error>;
 }
 
@@ -253,6 +414,11 @@ impl IntoFinite for f32 {
 /// Converts a value into a [`Point`] at a DSL or geometry boundary.
 pub trait IntoPoint {
     /// Rejects non-finite coordinates.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when either coordinate is NaN or infinite.
+    /// An existing [`Point`] is returned as-is.
     fn into_point(self) -> std::result::Result<Point, Error>;
 }
 
@@ -271,6 +437,11 @@ impl IntoPoint for (f32, f32) {
 /// Converts a value into a [`Rect`] at a DSL or geometry boundary.
 pub trait IntoRect {
     /// Rejects non-finite origins or non-positive size.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NonPositiveLength`] when a raw tuple
+    /// cannot form a [`Rect`]. An existing [`Rect`] is returned as-is.
     fn into_rect(self) -> std::result::Result<Rect, Error>;
 }
 
@@ -304,11 +475,19 @@ impl Point {
     }
 
     /// Builds a point from finite point values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `x` or `y` is NaN or infinite.
     pub fn try_pt(x: f32, y: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Finite::pt(x)?, Finite::pt(y)?))
     }
 
     /// Builds a point from finite millimeter values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `x`, `y`, or either point equivalent is NaN or infinite.
     pub fn try_mm(x: f32, y: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Finite::mm(x)?, Finite::mm(y)?))
     }
@@ -346,11 +525,21 @@ impl Size {
     }
 
     /// Builds a size from positive point values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `width` or `height` is NaN or infinite.
+    /// [`ErrorKind::NonPositiveLength`] when either value is zero or negative.
     pub fn try_pt(width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Positive::pt(width)?, Positive::pt(height)?))
     }
 
     /// Builds a size from positive millimeter values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when a side or its point equivalent is NaN or infinite.
+    /// [`ErrorKind::NonPositiveLength`] when a side or its point equivalent is zero or negative.
     pub fn try_mm(width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(Positive::mm(width)?, Positive::mm(height)?))
     }
@@ -495,6 +684,11 @@ impl Rect {
     }
 
     /// Builds a rectangle from point values. Width and height must be positive.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when any argument is NaN or infinite.
+    /// [`ErrorKind::NonPositiveLength`] when `width` or `height` is zero or negative.
     pub fn try_pt(x: f32, y: f32, width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(
             Point::try_pt(x, y)?,
@@ -503,6 +697,11 @@ impl Rect {
     }
 
     /// Builds a rectangle from millimeter values. Width and height must be positive.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when any argument or its point equivalent is NaN or infinite.
+    /// [`ErrorKind::NonPositiveLength`] when `width` or `height`, or its point equivalent, is zero or negative.
     pub fn try_mm(x: f32, y: f32, width: f32, height: f32) -> std::result::Result<Self, Error> {
         Ok(Self::new(
             Point::try_mm(x, y)?,
@@ -562,11 +761,21 @@ impl Margins {
     }
 
     /// The same length on every side, from a length or pt value.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NegativeLength`] when `value` is a raw `f32`
+    /// that is not finite and at least zero. An existing non-negative length is accepted.
     pub fn try_uniform(value: impl IntoNonNegative) -> std::result::Result<Self, Error> {
         Ok(Self::uniform(value.into_non_negative()?))
     }
 
     /// Four sides from lengths or pt values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NegativeLength`] when a side is a raw `f32`
+    /// that is not finite and at least zero. An existing non-negative length is accepted.
     pub fn try_new(
         top: impl IntoNonNegative,
         right: impl IntoNonNegative,
@@ -718,6 +927,11 @@ pub struct Pen {
 
 impl Pen {
     /// Stroke of `color` and `width` (a positive length or pt value).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NonPositiveLength`] when `width` is a raw `f32`
+    /// that is not finite and strictly greater than zero. An existing positive length is accepted.
     pub fn new(color: Color, width: impl IntoPositive) -> std::result::Result<Self, Error> {
         Ok(Self {
             color,

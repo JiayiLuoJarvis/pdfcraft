@@ -1,6 +1,6 @@
 use crate::canvas::{pt_near, CanvasCommand, LinkTarget, RecordingCanvas};
 use crate::fonts::{fixture_bytes, FontSource, FontStore};
-use crate::geom::{NonNegative, Point};
+use crate::geom::{Finite, NonNegative, Point, Positive};
 use crate::layout::frame::{draw_fragment, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun};
 use crate::layout::style::{Style, TextAlign};
@@ -33,9 +33,9 @@ fn fit(
         .split(
             &mut ctx,
             Frame {
-                width,
-                height,
-                full_height: height,
+                width: Positive::pt(width).unwrap(),
+                height: NonNegative::pt(height).unwrap(),
+                full_height: Positive::pt(height).unwrap(),
             },
         )
         .unwrap()
@@ -93,6 +93,7 @@ fn body_line(fonts: &FontStore, style: &Style) -> f32 {
     line_metrics(face, style.font_size, style.line_height_factor)
         .unwrap()
         .line_height
+        .as_pt()
 }
 
 #[test]
@@ -116,9 +117,9 @@ fn centered_fill_blank_starts_at_the_frame_x() {
         .split(
             &mut ctx,
             Frame {
-                width: 120.0,
-                height: 400.0,
-                full_height: 400.0,
+                width: Positive::pt(120.0).unwrap(),
+                height: NonNegative::pt(400.0).unwrap(),
+                full_height: Positive::pt(400.0).unwrap(),
             },
         )
         .unwrap()
@@ -370,7 +371,10 @@ fn offset_and_paint_move_the_link_rect() {
         40.0,
     );
     let local = &hits(&fragment)[0];
-    let shifted = fragment.clone().with_offset(10.0, 20.0).unwrap();
+    let shifted = fragment
+        .clone()
+        .with_offset(Finite::pt(10.0).unwrap(), Finite::pt(20.0).unwrap())
+        .unwrap();
     let moved = &hits(&shifted)[0];
     assert!(pt_near(moved.x, local.x + 10.0));
     assert!(pt_near(moved.y, local.y + 20.0));

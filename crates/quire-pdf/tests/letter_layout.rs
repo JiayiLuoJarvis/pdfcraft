@@ -41,6 +41,7 @@ fn letter() -> Result<quire_pdf::Rendered> {
         page_size: PageSize::A4,
         resources,
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::uniform(margin),
             footer: Some(BandSpec {

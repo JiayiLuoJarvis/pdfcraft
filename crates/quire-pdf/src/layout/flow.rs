@@ -2,12 +2,10 @@
 //!
 //! Not part of the public API. Callers never implement this protocol.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::VecDeque;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
-use crate::geom::{Length, NonNegative};
+use crate::geom::{Finite, Length, NonNegative};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::frame::{natural_height, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split};
 use crate::layout::hline::HLineNode;
@@ -24,8 +22,8 @@ pub(crate) struct SpacerNode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PreparedGroup {
-    pub(crate) height: f32,
-    pub(crate) spacing_after: f32,
+    pub(crate) height: Length<NonNegative>,
+    pub(crate) spacing_after: Length<NonNegative>,
     pub(crate) fragment: Fragment,
 }
 
@@ -52,7 +50,6 @@ pub(crate) enum FlowNode {
 
 impl Flowable for FlowNode {
     fn split(self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split<Self>> {
-        avail.validate()?;
         Ok(match self {
             FlowNode::PageBreak => return Err(GeometryKind::NestedPageBreak.into()),
             FlowNode::Paragraph(node) => node.split(avail)?.map(FlowNode::Paragraph),
@@ -98,18 +95,18 @@ impl Flowable for FlowNode {
 
 impl SpacerNode {
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
-        let h = self.height.as_pt();
-        if h == 0.0 {
+        let h = self.height;
+        if h == NonNegative::ZERO {
             return Ok(Split::Fit {
-                height: 0.0,
+                height: NonNegative::ZERO,
                 fragment: Fragment::empty(),
             });
         }
         let take = h.min(avail.height);
-        let rest = h - take;
+        let rest = (h - take).as_pt();
         let head = Fragment {
             height: take,
-            spacing_after: 0.0,
+            spacing_after: NonNegative::ZERO,
             commands: Vec::new(),
         };
         if rest <= 0.0 {
@@ -139,12 +136,12 @@ fn split_keep_together(
         KeepTogetherNode::Open(kids) => {
             let full = Frame {
                 width: avail.width,
-                height: avail.full_height,
+                height: avail.full_height.into(),
                 full_height: avail.full_height,
             };
             let (height, mut fragment) = natural_height(FlowNode::Stack(kids), ctx, full)?;
             let spacing_after = fragment.spacing_after;
-            fragment.spacing_after = 0.0;
+            fragment.spacing_after = NonNegative::ZERO;
             PreparedGroup {
                 height,
                 spacing_after,
@@ -153,21 +150,21 @@ fn split_keep_together(
         }
     };
 
-    if prepared.height <= avail.height {
+    if prepared.height.as_pt() <= avail.height.as_pt() {
         let mut fragment = prepared.fragment;
         fragment.spacing_after = prepared.spacing_after;
         Ok(Split::Fit {
             height: prepared.height,
             fragment,
         })
-    } else if prepared.height <= avail.full_height {
+    } else if prepared.height.as_pt() <= avail.full_height.as_pt() {
         Ok(Split::MoveToNextPage(FlowNode::KeepTogether(
             KeepTogetherNode::Prepared(prepared),
         )))
     } else {
         Err(ErrorKind::UnsplittableTallerThanFrame {
-            height: prepared.height,
-            avail: avail.full_height,
+            height: prepared.height.as_pt(),
+            avail: avail.full_height.as_pt(),
         }
         .into())
     }
@@ -180,15 +177,15 @@ fn split_stack(
 ) -> Result<Split<FlowNode>> {
     if kids.is_empty() {
         return Ok(Split::Fit {
-            height: 0.0,
+            height: NonNegative::ZERO,
             fragment: Fragment::empty(),
         });
     }
 
     let mut kids: VecDeque<FlowNode> = kids.into();
     let mut commands = Vec::new();
-    let mut y = 0.0f32;
-    let mut trailing_spacing = 0.0f32;
+    let mut y = NonNegative::ZERO;
+    let mut trailing_spacing = NonNegative::ZERO;
     let mut placed_any = false;
 
     while let Some(child) = kids.pop_front() {
@@ -198,20 +195,20 @@ fn split_stack(
                 fragment: child_frag,
             } => {
                 let spacing = child_frag.spacing_after;
-                let offset = child_frag.with_offset(0.0, y)?;
+                let offset = child_frag.with_offset(Finite::ZERO, y.into())?;
                 commands.extend(offset.commands);
                 y += height;
-                avail.height = (avail.height - height).max(0.0);
+                avail.height = avail.height.saturating_sub(height);
                 placed_any = true;
 
                 if kids.is_empty() {
                     trailing_spacing = spacing;
-                } else if spacing > 0.0 && avail.height >= spacing {
+                } else if spacing > NonNegative::ZERO && avail.height >= spacing {
                     y += spacing;
-                    avail.height -= spacing;
-                } else if spacing > 0.0 && ctx.natural {
+                    avail.height = avail.height.sub_exact(spacing);
+                } else if spacing > NonNegative::ZERO && ctx.natural {
                     y += spacing;
-                    avail.height = 0.0;
+                    avail.height = NonNegative::ZERO;
                 }
             }
             Split::Partial {
@@ -219,7 +216,7 @@ fn split_stack(
                 head,
                 tail,
             } => {
-                let offset = head.with_offset(0.0, y)?;
+                let offset = head.with_offset(Finite::ZERO, y.into())?;
                 commands.extend(offset.commands);
                 y += head_height;
                 let mut rest = Vec::with_capacity(kids.len() + 1);
@@ -233,7 +230,7 @@ fn split_stack(
                         spacing_after: if ctx.natural {
                             offset.spacing_after
                         } else {
-                            0.0
+                            NonNegative::ZERO
                         },
                         commands,
                     },
@@ -251,7 +248,7 @@ fn split_stack(
                     head_height: y,
                     head: Fragment {
                         height: y,
-                        spacing_after: 0.0,
+                        spacing_after: NonNegative::ZERO,
                         commands,
                     },
                     tail: FlowNode::Stack(rest),

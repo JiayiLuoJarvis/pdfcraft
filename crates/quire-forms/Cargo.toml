@@ -1,17 +1,29 @@
 [package]
 name = "quire-forms"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Fill AcroForm fields in an existing PDF and flatten the result"
 license.workspace = true
-publish.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/quire-forms"
 keywords = ["pdf", "acroform", "forms"]
 categories = ["graphics"]
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "tests/fixtures/README.md",
+    "tests/fixtures/DejaVuSans.ttf",
+    "tests/fixtures/DejaVuSans.LICENSE",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "Cargo.toml",
+]
 
 [dependencies]
-lopdf = { version = "=0.34.0", default-features = false, features = ["nom_parser"] }
-skrifa = { version = "=0.48.0" }
+lopdf = { workspace = true }
+skrifa = { workspace = true, features = ["std", "autohint_shaping"] }
 
 [lints.rust]
 unsafe_code = "forbid"

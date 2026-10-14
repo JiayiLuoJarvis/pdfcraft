@@ -8,7 +8,8 @@ use crate::error::{
 };
 use crate::fonts::{FontSource, FontStore};
 use crate::geom::{Ink, Length, Margins, NonNegative, PageSize, Path, Point, Positive};
-use crate::layout::columns::{ColumnWidth, ColumnsNode, Ratio as LayoutRatio};
+use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
+use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::{Decorations, LayerContent, LayerItem, LayerText, PageInfo};
 use crate::layout::flow::{check_limits, FlowNode, KeepTogetherNode, SpacerNode};
 use crate::layout::frame::LayoutCtx;
@@ -44,6 +45,7 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
         page_size,
         resources,
         limits,
+        info,
         mut sections,
     } = spec;
     if sections.is_empty() {
@@ -102,6 +104,7 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
         recording,
         fonts,
         images,
+        info,
     })
 }
 

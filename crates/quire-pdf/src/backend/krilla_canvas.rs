@@ -122,6 +122,7 @@ impl KrillaCanvas {
     }
 
     /// Production serialize settings (compressed, not pretty).
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::with_resources(
             Arc::new(FontStore::new()),
@@ -130,6 +131,7 @@ impl KrillaCanvas {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_fonts(fonts: Arc<FontStore>) -> Self {
         Self::new_with_resources(fonts, ImageTable::default())
     }

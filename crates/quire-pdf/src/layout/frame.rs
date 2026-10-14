@@ -4,11 +4,9 @@
 //! so no node module names the concrete `FlowNode` enum.
 
 use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
-use crate::error::{
-    Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind, Location,
-};
+use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, Location};
 use crate::fonts::FontStore;
-use crate::geom::{Paint, Path, Point, Rect, Stroke};
+use crate::geom::{Finite, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
 
 /// Fonts and the document error bag available while splitting.
 pub(crate) struct LayoutCtx<'a> {
@@ -44,49 +42,31 @@ impl LayoutCtx<'_> {
 /// Remaining layout region. `height` may be zero; `width` and `full_height` stay positive.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Frame {
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) full_height: f32,
-}
-
-impl Frame {
-    pub(crate) fn validate(&self) -> Result<()> {
-        let positive = |value: f32| value.is_finite() && value > 0.0;
-        if positive(self.width)
-            && self.height.is_finite()
-            && self.height >= 0.0
-            && positive(self.full_height)
-        {
-            Ok(())
-        } else {
-            Err(GeometryKind::LayoutFrame {
-                width: self.width,
-                height: self.height,
-                full_height: self.full_height,
-            }
-            .into())
-        }
-    }
+    pub(crate) width: Length<Positive>,
+    pub(crate) height: Length<NonNegative>,
+    pub(crate) full_height: Length<Positive>,
 }
 
 /// One placed piece of content. Coordinates are relative to the fragment origin.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Fragment {
-    pub(crate) height: f32,
-    pub(crate) spacing_after: f32,
+    pub(crate) height: Length<NonNegative>,
+    pub(crate) spacing_after: Length<NonNegative>,
     pub(crate) commands: Vec<FragmentCommand>,
 }
 
 impl Fragment {
     pub(crate) fn empty() -> Self {
         Self {
-            height: 0.0,
-            spacing_after: 0.0,
+            height: NonNegative::ZERO,
+            spacing_after: NonNegative::ZERO,
             commands: Vec::new(),
         }
     }
 
-    pub(crate) fn with_offset(mut self, dx: f32, dy: f32) -> Result<Self> {
+    pub(crate) fn with_offset(mut self, dx: Length<Finite>, dy: Length<Finite>) -> Result<Self> {
+        let dx = dx.as_pt();
+        let dy = dy.as_pt();
         for command in &mut self.commands {
             match command {
                 FragmentCommand::Glyphs(run) => {
@@ -138,12 +118,12 @@ pub(crate) struct PlacedFragment {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Split<T> {
     Fit {
-        height: f32,
+        height: Length<NonNegative>,
         fragment: Fragment,
     },
     /// Head fits this frame; only `tail` continues on later frames.
     Partial {
-        head_height: f32,
+        head_height: Length<NonNegative>,
         head: Fragment,
         tail: T,
     },
@@ -204,15 +184,17 @@ pub(crate) fn natural_height<N: Flowable>(
     node: N,
     ctx: &mut LayoutCtx<'_>,
     full: Frame,
-) -> Result<(f32, Fragment)> {
+) -> Result<(Length<NonNegative>, Fragment)> {
     let saved = ctx.natural;
     ctx.natural = true;
     let split = node.split(ctx, full);
     let result = match split {
-        Ok(Split::Fit { height, fragment }) if height <= full.full_height => Ok((height, fragment)),
-        Ok(Split::Fit { height, .. }) => Err(too_tall(height, full.full_height)),
+        Ok(Split::Fit { height, fragment }) if height.as_pt() <= full.full_height.as_pt() => {
+            Ok((height, fragment))
+        }
+        Ok(Split::Fit { height, .. }) => Err(too_tall(height.as_pt(), full.full_height.as_pt())),
         Ok(split) => match stacked_height(split, ctx, full) {
-            Ok(height) => Err(too_tall(height, full.full_height)),
+            Ok(height) => Err(too_tall(height.as_pt(), full.full_height.as_pt())),
             Err(error) => Err(error),
         },
         Err(error) => Err(error),
@@ -233,12 +215,12 @@ pub(crate) fn stacked_height<N: Flowable>(
     mut split: Split<N>,
     ctx: &mut LayoutCtx<'_>,
     full: Frame,
-) -> Result<f32> {
+) -> Result<Length<NonNegative>> {
     let fresh = Frame {
-        height: full.full_height,
+        height: full.full_height.into(),
         ..full
     };
-    let mut total = 0.0f32;
+    let mut total = NonNegative::ZERO;
     loop {
         match split {
             Split::Fit { height, .. } => return Ok(total + height),
@@ -246,7 +228,7 @@ pub(crate) fn stacked_height<N: Flowable>(
                 head_height,
                 head,
                 tail,
-            } if head_height > 0.0 => {
+            } if head_height > NonNegative::ZERO => {
                 total += head_height + head.spacing_after;
                 split = tail.split(ctx, fresh)?;
             }

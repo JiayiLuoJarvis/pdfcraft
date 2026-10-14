@@ -1,7 +1,5 @@
 //! Break-class table for CJK-aware line breaking (not full UAX #14).
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 /// Cluster-head class. `Hard` is BK and never enters the pair matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BreakClass {

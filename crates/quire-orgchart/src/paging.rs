@@ -578,17 +578,16 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
         geometry: PageGeometry,
     ) -> Result<PackedLayout, Error> {
         let content = self.materialize(key)?;
-        let boxes: Vec<NodeBox> = content
-            .order
-            .iter()
-            .map(|id| {
-                content
-                    .boxes
-                    .get(id)
-                    .cloned()
-                    .expect("page order id has a materialised box")
-            })
-            .collect();
+        let mut boxes = Vec::with_capacity(content.order.len());
+        for id in &content.order {
+            let Some(box_) = content.boxes.get(id) else {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!("page order id {} has no measured box", self.protocol(*id)),
+                ));
+            };
+            boxes.push(box_.clone());
+        }
         let cols = geometry.max_cols(self.node_width);
         let printable = geometry.printable_width_mm();
         let anchors = sized_cue_anchors(
@@ -691,10 +690,12 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
     ) -> Result<HashMap<NodeId, NodeBox>, Error> {
         let mut page_boxes = HashMap::new();
         for &id in ids {
-            let box_ = self
-                .boxes
-                .get(&id)
-                .expect("page draft node has a measured box");
+            let Some(box_) = self.boxes.get(&id) else {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!("page draft node {} has no measured box", self.protocol(id)),
+                ));
+            };
             let stored = match layout_root_id {
                 Some(root) if id == root => {
                     if id == self.subject_node && box_.is_subject {

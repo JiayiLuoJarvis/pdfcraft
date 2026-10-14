@@ -3,11 +3,11 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-12 |
-| 状态 | **待确认草案**。未写入 [`提案书.md`](提案书.md) 确认总表前，不在 `crates/quire-forms` 实现公共 API |
-| 相关 | [`workspace-crates-spec.md`](workspace-crates-spec.md)；[`提案书.md`](提案书.md) §9；移植计划（agent store）`quire-forms-port.md` |
+| 状态 | **已与提案书 §10 对齐，2026-10-12 确认。** 公共 API 已在 `crates/quire-forms`。OTF 与字体子集仍未做 |
+| 相关 | [`workspace-crates-spec.md`](workspace-crates-spec.md)；[`提案书.md`](提案书.md) §10 |
 | 意图来源 | pdfcraft-forms 的行为合同（bytes → flatten）。API 按本仓库重做，不逐文件翻译 |
 
-本文是 **reference**。只描述将要确认的产品面。实现细节（PR 切片、模块文件名）不在此钉死。
+本文是 **reference**。产品面以提案书 §10 为准。实现细节不在这里钉死。
 
 ## 1. 产品一句话
 
@@ -47,9 +47,9 @@
 
 `quire-pdf` 正文里的填空下划线（如 `BlankWidth`）不是 AcroForm，与本 crate 无关。
 
-## 3. 公共 API（拟定）
+## 3. 公共 API
 
-命名以 Rust 习惯为准。下列签名为规格形状；确认后实现时允许在不改变语义的前提下微调可见性与模块路径。
+命名以 Rust 习惯为准。下列签名是提案书 §10 确认过的形状。不改变语义时，实现可以调整可见性与模块路径。
 
 ### 3.1 入口
 
@@ -91,7 +91,7 @@ FieldValue =
 
 - 不提供松散的 `str | bool | int | float` 联合，避免把 `false` 画成文本 `"False"`。
 - ListBox/ComboBox 使用 `FieldValue::Text`；值必须落在展平后的 `/Opt` 中（export 与 display 皆合法）。画出的是调用方字符串，不改写成 display。
-- 将 Signature / RadioButton / PushButton 放入 `fields` → `ErrorKind::WidgetUnsupported`（或等价命名）。未放入 `fields` 的上述控件在 flatten 时与其它未填控件一并剥离。
+- 把 Signature 放进 `fields` 会得到 `SignatureNotWritable`。把 RadioButton 或 PushButton 放进 `fields` 会得到 `WidgetUnsupported`。没有放进 `fields` 的这些控件，flatten 时和其它未填控件一起剥掉。
 
 ### 3.4 `FillOptions`
 
@@ -106,11 +106,7 @@ FieldValue =
 | `line_below` | 空 | 字段名 → 框底下方 pt 偏移，画与框同宽黑线（线宽 1 pt）。不需要字体 |
 | `absolute_lines` | 空 | 页面绝对坐标线段（PDF 用户空间）。与字段名无关 |
 
-v1 分期（实现顺序，不改变本节语义）：
-
-1. `list_fields` + 错误域  
-2. `fill_and_flatten` 的 text / checkbox / choice（对齐与线条可先不暴露或固定默认）  
-3. 对齐覆盖、`line_below`、`absolute_lines`
+上表里的默认对齐、按字段覆盖、`font_size_overrides`、`line_below` 和 `absolute_lines` 都已实现。语义以本表和提案书 §10 为准。
 
 ### 3.5 缩字与折行常量（v1 默认）
 
@@ -192,7 +188,7 @@ v1 分期（实现顺序，不改变本节语义）：
 - 字段相关错误携带 `field_name`（在 kind 内或并列字段）。
 - 不提供面向 HTTP 的 `to_dict`；应用层自行映射。
 
-拟定 `ErrorKind`（名称可在实现时微调，语义固定）：
+确认的 `ErrorKind` 名称与提案书 §10 相同。
 
 | Kind | 何时 |
 | --- | --- |
@@ -207,23 +203,23 @@ v1 分期（实现顺序，不改变本节语义）：
 | `BoxOverflow` | 最小字号仍超框 |
 | `FontNotConfigured { reason }` | 需字体而未提供，或字体不可用。原因是 `FontReason` |
 | `SignatureNotWritable` | 试图填写 Signature |
-| `WidgetUnsupported` | Radio / Push 等 |
+| `WidgetUnsupported` | 试图填写 RadioButton 或 PushButton |
 | `FlattenFailed` | overlay 合并或写出失败 |
 
 ## 6. 依赖（crate 内）
 
 目标尽量少。
 
-| 角色 | 拟定 | 备注 |
+| 角色 | 版本 | 备注 |
 | --- | --- | --- |
-| 读结构 / merge / 剥表 | `lopdf = "=0.34.0"` | 已用夹具验证可列字段 |
+| 读结构 / merge / 剥表 | `lopdf = "=0.45.0"`，`default-features = false` | 已用夹具验证可列字段 |
 | 量宽 / glyphs | `skrifa = "=0.48.0"` | 与 `quire-pdf` 同钉，不依赖该 package |
 | overlay 绘制 | `lopdf` 拼内容流 | **不**默认引入 `pdf-writer` / `printpdf` |
-| 字体子集 | 可后置 | 先允许嵌整份 TTF 跑通 CJK；体积问题再单开 PR 钉 subsetter |
+| 字体子集 | 未做 | 成功路径嵌入整份 TrueType 面。缺字仍然失败 |
 
 禁止：`krilla`、`quire-pdf`、运行时 PyMuPDF。
 
-`publish = false` 直至本规格确认且约定门槛（测试夹具 + 门禁）通过。
+版本是 `0.1.0`，可以发布。产品范围已由提案书 §10 确认。OTF 仍未做。
 
 ## 7. 测试合同
 
@@ -232,16 +228,16 @@ v1 分期（实现顺序，不改变本节语义）：
 - 不移植 pdfcraft 的生产模板测例（NAR1、租约等）与 HTTP 映射测例。
 - CI：在现有 forms clippy / rustdoc 之外增加 `cargo test -p quire-forms`。
 
-## 8. 确认清单（供写入提案书）
+## 8. 确认清单
 
-确认本规格后，提案书应增加独立条目（建议 §10 或 §9 附条），并从表「清单外 / 不做」中把 **`quire-forms` crate** 划出。下列句子保持「加密 / 书签 / `quire-pdf` 内交互表单」仍为不做。
+提案书 §10 已确认下列范围。文末总表仍把加密、书签，以及在 `quire-pdf` 里生成或填写交互表单，列为不做。填写已有 AcroForm 的产品是 `quire-forms`。OTF 与字体子集仍未做。
 
-- [ ] 采纳 §1–§2 范围与边界  
-- [ ] 采纳 §3 公共 API 形状（含字体字节、无全局默认字体）  
-- [ ] 采纳 §4 行为合同（overlay+strip、空 map flatten、同名规则）  
-- [ ] 采纳 §5 错误模型  
-- [ ] 采纳 §6 依赖方针（`lopdf` + `skrifa`，子集可后置）  
-- [ ] 更新 [`workspace-crates-spec.md`](workspace-crates-spec.md) 产品 API 状态  
+- [x] §1 与 §2 的范围和边界
+- [x] §3 的公共 API，含字体字节，不含全局默认字体
+- [x] §4 的行为合同，含绘制后剥离、空字段表也 flatten、同名规则
+- [x] §5 的错误模型
+- [x] §6 的依赖。`lopdf` 与 `skrifa` 已钉版本。字体子集仍未做
+- [x] [`workspace-crates-spec.md`](workspace-crates-spec.md) 里的产品状态与 §10 一致
 
 ## 9. 附录：相对 pdfcraft-forms 的有意差异
 

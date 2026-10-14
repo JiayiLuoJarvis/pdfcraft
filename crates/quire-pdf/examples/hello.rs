@@ -41,6 +41,7 @@ fn main() -> Result<()> {
         page_size: PageSize::A4,
         resources,
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_uniform(48.0)?,
             header: Some(BandSpec {

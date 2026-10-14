@@ -564,8 +564,13 @@ fn fills_chinese_text() {
 #[test]
 fn drops_prev_xrefstm_and_trailer_keys_that_point_at_orphans() {
     let (input, orphan) = trailer_orphan_pdf();
+    let input_text = String::from_utf8_lossy(&input);
+    assert!(input_text.contains("/Prev "), "{input_text}");
+    assert!(input_text.contains("/XRefStm "), "{input_text}");
     let before = lopdf::Document::load_mem(&input).unwrap();
-    assert!(before.trailer.get(b"Prev").is_ok());
+    // lopdf 0.45 deletes `/Prev` while resolving the xref chain, including a
+    // non-integer value. `/XRefStm` stays when that loop does not run.
+    assert!(before.trailer.get(b"Prev").is_err());
     assert!(before.trailer.get(b"XRefStm").is_ok());
     assert!(before.get_object(orphan).is_ok());
     let pdf = fill_and_flatten(&input, &HashMap::new(), &FillOptions::default()).unwrap();
@@ -687,7 +692,8 @@ fn trailer_orphan_pdf() -> (Vec<u8>, lopdf::ObjectId) {
         .position(|window| window == b"<<")
         .unwrap();
     let at = start + dict + 2;
-    // A literal `Prev` is not an offset, so lopdf keeps `XRefStm` while loading.
+    // A string `/Prev` is not an xref offset. lopdf 0.45 still deletes that key
+    // on load and leaves `/XRefStm`. `prune` has to drop `XRefStm`.
     let extra = format!("/Prev (0) /XRefStm {start}");
     let mut with_offsets = Vec::with_capacity(bytes.len() + extra.len());
     with_offsets.extend_from_slice(&bytes[..at]);
@@ -750,6 +756,6 @@ fn page_stream(pdf: &[u8]) -> String {
 
 fn page_text(doc: &lopdf::Document) -> String {
     let page_id = doc.page_iter().next().unwrap();
-    let bytes = doc.get_page_content(page_id).unwrap();
+    let bytes = doc.get_page_content(page_id);
     String::from_utf8_lossy(&bytes).into_owned()
 }

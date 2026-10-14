@@ -1,7 +1,28 @@
-//! Drawing surface and the ordered command log.
+//! Recorded drawing commands.
 //!
-//! Layout draws through [`Canvas`]. Tests read [`RecordingCanvas::commands`].
-//! Coordinates match [`crate::geom`]: top-left origin, y downward, PDF points.
+//! [`layout_spec`](crate::layout_spec) paints through a crate-private surface and
+//! stores each call on [`RecordingCanvas`]. Tests read [`RecordingCanvas::commands`]
+//! and [`crate::Rendered::pages`]. With feature `backend-krilla`, `to_pdf` replays
+//! that log.
+//! [`CanvasCommand`], [`GlyphRun`], and [`RecordingCanvas`] are a read-only
+//! observation of the log. They are not an extension point and not a pluggable
+//! backend. An outside crate cannot name the drawing surface, so it cannot
+//! implement one that those functions would draw on.
+//!
+//! ```compile_fail
+//! fn _hidden<T: quire_pdf::Canvas>() {}
+//! ```
+//!
+//! ```compile_fail
+//! fn _hidden<T: quire_pdf::canvas::Canvas>() {}
+//! ```
+//!
+//! ```compile_fail
+//! let _id = quire_pdf::ImageId::from_raw(0);
+//! ```
+//!
+//! Coordinates match [`crate::geom`]. The origin is the top left, y increases
+//! downward, and lengths are PDF points.
 
 use std::any::Any;
 use std::ops::Range;
@@ -11,7 +32,7 @@ use crate::fonts::FontId;
 use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 use crate::limits::Limits;
 
-/// Document metadata recorded by [`Canvas::set_document_info`].
+/// Document metadata copied into a [`CanvasCommand::SetDocumentInfo`] record.
 ///
 /// Defined in this module so `canvas` does not depend on `spec`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -37,7 +58,11 @@ pub struct LinkTarget(String);
 impl LinkTarget {
     /// Builds a URI target.
     ///
-    /// An empty string is [`ErrorKind::EmptyLink`]. Spaces are kept.
+    /// Spaces are kept.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::EmptyLink`] when `uri` is empty.
     pub fn uri(uri: &str) -> std::result::Result<Self, Error> {
         if uri.is_empty() {
             return Err(Error::from(ErrorKind::EmptyLink));
@@ -69,13 +94,16 @@ pub enum ImageFormat {
 }
 
 /// Opaque image identifier.
+///
+/// The library assigns this id when it registers image bytes. Read it with
+/// [`Self::as_u32`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct ImageId(pub(crate) u32);
 
 impl ImageId {
     /// Wraps a raw identifier allocated for an image.
-    pub const fn from_raw(raw: u32) -> Self {
+    pub(crate) const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
@@ -86,7 +114,7 @@ impl ImageId {
     }
 }
 
-/// Identifier and pixel size of an image the caller already decoded.
+/// Recorded image identity and pixel size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct DecodedImage {
@@ -114,7 +142,13 @@ pub(crate) trait ImageRegistry: Any + Send + Sync {
 }
 
 /// Registry for builds without a decoder. Every image fails.
-#[cfg_attr(feature = "backend-krilla", allow(dead_code))]
+#[cfg_attr(
+    feature = "backend-krilla",
+    allow(
+        dead_code,
+        reason = "only constructed when feature backend-krilla is off"
+    )
+)]
 pub(crate) struct RejectingImageRegistry;
 
 impl ImageRegistry for RejectingImageRegistry {
@@ -131,7 +165,7 @@ impl ImageRegistry for RejectingImageRegistry {
     }
 }
 
-/// One glyph in a [`GlyphRun`].
+/// One glyph in a recorded [`GlyphRun`].
 #[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct GlyphPlacement {
@@ -146,9 +180,11 @@ pub struct GlyphPlacement {
     pub byte_range: Range<usize>,
 }
 
-/// One horizontal glyph run.
+/// One recorded horizontal glyph run.
 ///
-/// `origin` is the baseline of the first glyph. y increases downward.
+/// `origin` is the baseline of the first glyph. y increases downward. Tests
+/// read this value from [`CanvasCommand::DrawGlyphRun`]. It is not an extension
+/// point and not a pluggable backend.
 #[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct GlyphRun {
@@ -166,25 +202,29 @@ pub struct GlyphRun {
     pub text: String,
 }
 
-/// One recorded [`Canvas`] call, in the order the caller made it.
+/// One recorded drawing call, in call order.
+///
+/// Read these values from [`RecordingCanvas`] or [`RecordedPage`] after layout.
+/// This enum is a read-only observation. It is not an extension point and not
+/// a pluggable backend.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 #[must_use]
 pub enum CanvasCommand {
-    /// [`Canvas::set_document_info`].
+    /// Document metadata copied into the log.
     SetDocumentInfo(DocumentInfo),
-    /// [`Canvas::start_page`].
+    /// A page opened at this size.
     StartPage(Size),
-    /// [`Canvas::finish_page`].
+    /// The open page closed.
     FinishPage,
-    /// [`Canvas::fill_path`].
+    /// A filled path.
     FillPath {
         /// Filled path.
         path: Path,
         /// Fill paint.
         paint: Paint,
     },
-    /// [`Canvas::stroke_path`].
+    /// A stroked path.
     StrokePath {
         /// Stroked path.
         path: Path,
@@ -193,19 +233,19 @@ pub enum CanvasCommand {
         /// Stroke width.
         stroke: Stroke,
     },
-    /// [`Canvas::draw_image`].
+    /// An image drawn into a rectangle.
     DrawImage {
         /// Image identity and pixel size.
         image: DecodedImage,
         /// Destination rectangle.
         rect: Rect,
     },
-    /// [`Canvas::draw_glyph_run`].
+    /// A positioned glyph run.
     DrawGlyphRun {
         /// Glyph run.
         run: GlyphRun,
     },
-    /// [`Canvas::annotate_link`].
+    /// A hyperlink annotation.
     AnnotateLink {
         /// Annotation rectangle.
         rect: Rect,
@@ -215,7 +255,10 @@ pub enum CanvasCommand {
 }
 
 /// Draws output that layout has already positioned.
-pub trait Canvas {
+///
+/// Crate-private. [`RecordingCanvas`] and the PDF backend implement this.
+/// Outside crates cannot name it.
+pub(crate) trait Canvas {
     /// Stores document metadata.
     fn set_document_info(&mut self, info: &DocumentInfo) -> std::result::Result<(), Error>;
 
@@ -226,9 +269,13 @@ pub trait Canvas {
     fn finish_page(&mut self) -> std::result::Result<(), Error>;
 
     /// Fills `path` with `paint`.
+    // `Path` is borrowed. `Paint` stays a reference beside it.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     fn fill_path(&mut self, path: &Path, paint: &Paint) -> std::result::Result<(), Error>;
 
     /// Strokes `path` with `paint` and `stroke`.
+    // `Path` is borrowed. `Paint` and `Stroke` stay references beside it.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     fn stroke_path(
         &mut self,
         path: &Path,
@@ -251,6 +298,9 @@ pub trait Canvas {
 }
 
 /// One page copied out of a [`RecordingCanvas`] log.
+///
+/// [`Self::ops`] is the read-only observation of that page. It is not an
+/// extension point and not a pluggable backend.
 #[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct RecordedPage {
@@ -272,7 +322,10 @@ impl RecordedPage {
 
 /// Append-only log of [`CanvasCommand`].
 ///
-/// The log is the only stored record. [`Self::pages`] scans it.
+/// The log is the only stored record. [`Self::pages`] scans it. Tests read the
+/// log after layout. With feature `backend-krilla`, `to_pdf` replays it. This
+/// type is not a drawing surface you implement, and
+/// [`layout_spec`](crate::layout_spec) does not accept one.
 #[derive(Debug)]
 #[must_use]
 pub struct RecordingCanvas {
@@ -402,7 +455,10 @@ impl Canvas for RecordingCanvas {
     }
 }
 
-#[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
+#[cfg_attr(
+    not(feature = "backend-krilla"),
+    allow(dead_code, reason = "only the krilla backend replays a recording")
+)]
 pub(crate) fn replay(
     recording: &RecordingCanvas,
     canvas: &mut dyn Canvas,

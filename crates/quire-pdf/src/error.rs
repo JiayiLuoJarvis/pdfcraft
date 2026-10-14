@@ -12,12 +12,11 @@
 //!
 //! Match on [`ErrorKind`] for recovery or tests; use [`Location`] / [`Region`] /
 //! [`CellIndex`] when the failure is tied to a section, page, band, or cell.
+//! [`LimitKind`] names the cap in [`ErrorKind::LimitExceeded`].
 
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
-
-use crate::limits::LimitKind;
 
 /// A construction, layout, or drawing failure.
 ///
@@ -129,6 +128,43 @@ impl StdError for Error {
     }
 }
 
+/// Which [`crate::Limits`] cap failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LimitKind {
+    /// Encoded font file bytes.
+    FontBytes,
+    /// Encoded image file bytes.
+    ImageBytes,
+    /// Decoded image pixels, `width * height`.
+    ImagePixels,
+    /// Decoded image width or height, whichever is larger.
+    ImageEdge,
+    /// Body-flow blocks, not counting stack containers.
+    Blocks,
+    /// Table cells in the body flow.
+    TableCells,
+    /// UTF-8 bytes of paragraph text in the body flow.
+    ParagraphBytes,
+    /// Pages committed during pagination.
+    Pages,
+}
+
+impl fmt::Display for LimitKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::FontBytes => "font bytes",
+            Self::ImageBytes => "image bytes",
+            Self::ImagePixels => "image pixels",
+            Self::ImageEdge => "image edge",
+            Self::Blocks => "blocks",
+            Self::TableCells => "table cells",
+            Self::ParagraphBytes => "paragraph bytes",
+            Self::Pages => "pages",
+        })
+    }
+}
+
 /// What went wrong.
 ///
 /// Length variants carry `value`, the argument of `pt` or `mm`, in the unit
@@ -155,7 +191,7 @@ pub enum ErrorKind {
     },
     /// A link URI was empty.
     EmptyLink,
-    /// A `Canvas` call used an illegal page lifecycle state.
+    /// A drawing call used an illegal page lifecycle state.
     InvalidCanvasState {
         /// The method that failed.
         operation: &'static str,
@@ -703,6 +739,10 @@ impl PartialEq for Errors {
 
 impl Errors {
     /// The first failure found.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` has no items. Construction keeps at least one failure.
     #[must_use]
     pub fn first(&self) -> &Error {
         self.items.first().expect("Errors keeps at least one item")

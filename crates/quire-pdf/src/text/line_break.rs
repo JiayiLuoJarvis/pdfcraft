@@ -1,16 +1,16 @@
 //! Pure line-breaking over clustered text.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
+#[cfg(test)]
 use std::ops::Range;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
+use crate::geom::{Length, NonNegative, Positive};
 use crate::text::break_class::{allows, BreakClass, PairClass};
 use crate::text::cluster::{Cluster, ClusterCursor, ClusteredText};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Advance {
-    Fixed(f32),
+    Fixed(Length<NonNegative>),
     Fill,
 }
 
@@ -28,7 +28,7 @@ pub(crate) enum Seg<T> {
         end: ClusterCursor,
     },
     Blank {
-        width: f32,
+        width: Length<NonNegative>,
         payload: T,
     },
 }
@@ -41,32 +41,35 @@ enum Atom<T> {
     },
     Ink {
         pair: PairClass,
-        width: f32,
+        width: Length<NonNegative>,
         group: usize,
         cluster: usize,
     },
     Blank {
         advance: Advance,
-        width: f32,
+        width: Length<NonNegative>,
         payload: T,
     },
 }
 
 /// Lines produced by [`break_lines`].
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BrokenLines<'text> {
     text: &'text ClusteredText,
     records: Box<[LineRecord]>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 struct LineRecord {
     start: ClusterCursor,
     end: ClusterCursor,
-    width: f32,
+    width: Length<NonNegative>,
 }
 
 /// One broken line over `glyph_text` coordinates.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BrokenLine<'a> {
     text: &'a ClusteredText,
@@ -81,50 +84,41 @@ pub(crate) struct BrokenSpans<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpanLine<T> {
     segs: Vec<Seg<T>>,
-    width: f32,
+    width: Length<NonNegative>,
     empty_at: Option<(usize, ClusterCursor)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LineBudget {
-    pub(crate) first: f32,
-    pub(crate) rest: f32,
+    pub(crate) first: Length<Positive>,
+    pub(crate) rest: Length<Positive>,
 }
 
 impl LineBudget {
-    pub(crate) const fn uniform(width: f32) -> Self {
+    #[cfg(test)]
+    pub(crate) const fn uniform(width: Length<Positive>) -> Self {
         Self {
             first: width,
             rest: width,
         }
     }
 
-    fn for_line(self, index: usize) -> f32 {
+    fn for_line(self, index: usize) -> Length<Positive> {
         if index == 0 {
             self.first
         } else {
             self.rest
         }
     }
-
-    fn validate(self) -> Result<()> {
-        for width in [self.first, self.rest] {
-            if !width.is_finite() || width <= 0.0 {
-                return Err(GeometryKind::LineWidth { width }.into());
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Break `text` to fit `budget` using `width_of` for each non-BK cluster.
+#[cfg(test)]
 pub(crate) fn break_lines(
     text: &ClusteredText,
     budget: LineBudget,
-    mut width_of: impl FnMut(Cluster<'_>) -> f32,
+    mut width_of: impl FnMut(Cluster<'_>) -> Length<NonNegative>,
 ) -> Result<BrokenLines<'_>> {
-    budget.validate()?;
-
     if text.is_empty() {
         let origin = ClusterCursor {
             cluster: 0,
@@ -136,7 +130,7 @@ pub(crate) fn break_lines(
             records: Box::new([LineRecord {
                 start: origin,
                 end: origin,
-                width: 0.0,
+                width: NonNegative::ZERO,
             }]),
         });
     }
@@ -158,9 +152,8 @@ pub(crate) fn break_spans<T: Copy>(
     groups: &[&ClusteredText],
     spans: &[Span<T>],
     budget: LineBudget,
-    mut width_of: impl FnMut(usize, Cluster<'_>) -> f32,
+    mut width_of: impl FnMut(usize, Cluster<'_>) -> Length<NonNegative>,
 ) -> Result<BrokenSpans<T>> {
-    budget.validate()?;
     if let Some(pos) = spans.iter().position(|span| {
         matches!(
             span,
@@ -185,7 +178,7 @@ pub(crate) fn break_spans<T: Copy>(
 fn project_atoms<T: Copy>(
     groups: &[&ClusteredText],
     spans: &[Span<T>],
-    width_of: &mut impl FnMut(usize, Cluster<'_>) -> f32,
+    width_of: &mut impl FnMut(usize, Cluster<'_>) -> Length<NonNegative>,
 ) -> Result<Vec<Atom<T>>> {
     let mut atoms = Vec::new();
     for span in spans {
@@ -201,8 +194,11 @@ fn project_atoms<T: Copy>(
                         }),
                         BreakClass::Pair(pair) => {
                             let width = width_of(group, cluster);
-                            if !width.is_finite() || width < 0.0 {
-                                return Err(GeometryKind::AdvanceWidth { width }.into());
+                            if !width.as_pt().is_finite() || width.as_pt() < 0.0 {
+                                return Err(GeometryKind::AdvanceWidth {
+                                    width: width.as_pt(),
+                                }
+                                .into());
                             }
                             atoms.push(Atom::Ink {
                                 pair,
@@ -217,12 +213,15 @@ fn project_atoms<T: Copy>(
             Span::Blank { advance, payload } => {
                 let width = match advance {
                     Advance::Fixed(width) => {
-                        if !width.is_finite() || width < 0.0 {
-                            return Err(GeometryKind::AdvanceWidth { width }.into());
+                        if !width.as_pt().is_finite() || width.as_pt() < 0.0 {
+                            return Err(GeometryKind::AdvanceWidth {
+                                width: width.as_pt(),
+                            }
+                            .into());
                         }
                         width
                     }
-                    Advance::Fill => 0.0,
+                    Advance::Fill => NonNegative::ZERO,
                 };
                 atoms.push(Atom::Blank {
                     advance,
@@ -243,7 +242,7 @@ fn pack_lines<T: Copy>(
     let mut records = Vec::new();
     let mut line_start = 0usize;
     let mut i = 0usize;
-    let mut line_width = 0.0f32;
+    let mut line_width = NonNegative::ZERO;
 
     while i < atoms.len() {
         let avail = budget.for_line(records.len());
@@ -264,46 +263,46 @@ fn pack_lines<T: Copy>(
                 records.push(emit_line(groups, &atoms, line_start, i, line_width));
                 i += 1;
                 line_start = i;
-                line_width = 0.0;
+                line_width = NonNegative::ZERO;
             }
             Atom::Blank {
                 advance: Advance::Fill,
                 ..
             } => {
-                debug_assert!(line_width <= avail);
-                let remain = avail - line_width;
+                debug_assert!(line_width.as_pt() <= avail.as_pt());
+                let remain = (avail - line_width).as_pt();
                 let width = if remain.is_finite() && remain > 0.0 {
-                    remain
+                    Length::from_trusted_pt(remain)
                 } else {
-                    0.0
+                    NonNegative::ZERO
                 };
                 if let Atom::Blank { width: slot, .. } = &mut atoms[i] {
                     *slot = width;
                 }
-                line_width = avail;
+                line_width = avail.into();
                 i += 1;
             }
             Atom::Ink { width, .. } | Atom::Blank { width, .. } => {
-                if line_width + width <= avail {
+                if (line_width + width).as_pt() <= avail.as_pt() {
                     line_width += width;
                     i += 1;
                     continue;
                 }
                 match nearest_break(&atoms, line_start, i) {
                     Some(split) => {
-                        let committed: f32 = (line_start..split)
+                        let committed: Length<NonNegative> = (line_start..split)
                             .filter_map(|idx| atom_width(&atoms[idx]))
                             .sum();
                         records.push(emit_line(groups, &atoms, line_start, split, committed));
                         line_start = split;
                         i = split;
-                        line_width = 0.0;
+                        line_width = NonNegative::ZERO;
                     }
                     None => {
                         return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                             text: overflow_text(groups, &atoms, line_start, i),
-                            width: line_width + width,
-                            avail,
+                            width: (line_width + width).as_pt(),
+                            avail: avail.as_pt(),
                         }));
                     }
                 }
@@ -320,7 +319,13 @@ fn pack_lines<T: Copy>(
             line_width,
         ));
     } else {
-        records.push(emit_line(groups, &atoms, line_start, line_start, 0.0));
+        records.push(emit_line(
+            groups,
+            &atoms,
+            line_start,
+            line_start,
+            NonNegative::ZERO,
+        ));
     }
     Ok(records)
 }
@@ -401,7 +406,7 @@ fn ink_pair<T>(atom: &Atom<T>) -> Option<PairClass> {
     }
 }
 
-fn atom_width<T>(atom: &Atom<T>) -> Option<f32> {
+fn atom_width<T>(atom: &Atom<T>) -> Option<Length<NonNegative>> {
     match *atom {
         Atom::Ink { width, .. } | Atom::Blank { width, .. } => Some(width),
         Atom::Hard { .. } => None,
@@ -413,12 +418,12 @@ fn emit_line<T: Copy>(
     atoms: &[Atom<T>],
     start: usize,
     end: usize,
-    width: f32,
+    width: Length<NonNegative>,
 ) -> SpanLine<T> {
     if start >= end {
         return SpanLine {
             segs: Vec::new(),
-            width: 0.0,
+            width: NonNegative::ZERO,
             empty_at: Some(eof_cursor(groups, atoms, start)),
         };
     }
@@ -490,6 +495,7 @@ fn eof_cursor<T>(
     (0, origin)
 }
 
+#[cfg(test)]
 fn facade_record(line: &SpanLine<()>) -> LineRecord {
     let mut glyphs = line.segs.iter().filter_map(|seg| match *seg {
         Seg::Glyphs { start, end, .. } => Some((start, end)),
@@ -514,7 +520,7 @@ fn facade_record(line: &SpanLine<()>) -> LineRecord {
     LineRecord {
         start: cursor,
         end: cursor,
-        width: 0.0,
+        width: NonNegative::ZERO,
     }
 }
 
@@ -523,6 +529,7 @@ impl<T> BrokenSpans<T> {
         self.lines.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn get(&self, index: usize) -> &SpanLine<T> {
         &self.lines[index]
     }
@@ -537,15 +544,17 @@ impl<T> SpanLine<T> {
         &self.segs
     }
 
-    pub(crate) fn width(&self) -> f32 {
+    pub(crate) fn width(&self) -> Length<NonNegative> {
         self.width
     }
 
+    #[cfg(test)]
     pub(crate) fn empty_at(&self) -> Option<(usize, ClusterCursor)> {
         self.empty_at
     }
 }
 
+#[cfg(test)]
 impl BrokenLines<'_> {
     pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = BrokenLine<'_>> + '_ {
         self.records.iter().map(|record| BrokenLine {
@@ -555,6 +564,7 @@ impl BrokenLines<'_> {
     }
 }
 
+#[cfg(test)]
 impl BrokenLine<'_> {
     pub(crate) fn text(&self) -> &str {
         let start = self.record.start.glyph_byte;
@@ -566,23 +576,42 @@ impl BrokenLine<'_> {
         self.record.start.glyph..self.record.end.glyph
     }
 
-    pub(crate) fn width(&self) -> f32 {
+    pub(crate) fn width(&self) -> Length<NonNegative> {
         self.record.width
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use super::*;
+
+    fn pos(value: f32) -> Length<Positive> {
+        Positive::pt(value).unwrap()
+    }
+
+    fn nn(value: f32) -> Length<NonNegative> {
+        NonNegative::pt(value).unwrap()
+    }
 
     fn break_owned(source: &str, avail: f32) -> Result<Vec<(String, f32, Range<usize>)>> {
         let text = ClusteredText::new(source);
-        let broken = break_lines(&text, LineBudget::uniform(avail), |cluster| {
-            f32::from(u16::try_from(cluster.scalar_count()).expect("stub cluster scalar count"))
+        let broken = break_lines(&text, LineBudget::uniform(pos(avail)), |cluster| {
+            let count = f32::from(
+                u16::try_from(cluster.scalar_count()).expect("stub cluster scalar count"),
+            );
+            Length::from_trusted_pt(count)
         })?;
         Ok(broken
             .iter()
-            .map(|line| (line.text().to_owned(), line.width(), line.glyph_range()))
+            .map(|line| {
+                (
+                    line.text().to_owned(),
+                    line.width().as_pt(),
+                    line.glyph_range(),
+                )
+            })
             .collect())
     }
 
@@ -725,27 +754,15 @@ mod tests {
     }
 
     #[test]
-    fn invalid_avail() {
-        assert_eq!(
-            break_owned("A", 0.0).unwrap_err(),
-            GeometryKind::LineWidth { width: 0.0 }.into()
-        );
-        assert!(matches!(
-            break_owned("A", f32::NAN).unwrap_err().kind,
-            ErrorKind::InvalidGeometry(GeometryKind::LineWidth { width }) if width.is_nan()
-        ));
-    }
-
-    #[test]
     fn first_and_rest_budgets_follow_visual_lines() {
         let text = ClusteredText::new("你你好");
         let broken = break_lines(
             &text,
             LineBudget {
-                first: 1.0,
-                rest: 2.0,
+                first: pos(1.0),
+                rest: pos(2.0),
             },
-            |_| 1.0,
+            |_| nn(1.0),
         )
         .unwrap();
         assert_eq!(
@@ -760,10 +777,10 @@ mod tests {
         let broken = break_lines(
             &hard,
             LineBudget {
-                first: 1.0,
-                rest: 1.0,
+                first: pos(1.0),
+                rest: pos(1.0),
             },
-            |_| 1.0,
+            |_| nn(1.0),
         )
         .unwrap();
         assert_eq!(
@@ -781,10 +798,10 @@ mod tests {
         let error = break_lines(
             &text,
             LineBudget {
-                first: 0.5,
-                rest: 10.0,
+                first: pos(0.5),
+                rest: pos(10.0),
             },
-            |_| 1.0,
+            |_| nn(1.0),
         )
         .unwrap_err();
         assert_eq!(
@@ -820,7 +837,10 @@ mod tests {
     ) -> Result<BrokenSpans<()>> {
         let refs: Vec<&ClusteredText> = groups.iter().collect();
         break_spans(&refs, spans, budget, |_, cluster| {
-            f32::from(u16::try_from(cluster.scalar_count()).expect("stub cluster scalar count"))
+            let count = f32::from(
+                u16::try_from(cluster.scalar_count()).expect("stub cluster scalar count"),
+            );
+            Length::from_trusted_pt(count)
         })
     }
 
@@ -839,18 +859,18 @@ mod tests {
         let spans = [
             Span::Group(0),
             Span::Blank {
-                advance: Advance::Fixed(3.0),
+                advance: Advance::Fixed(nn(3.0)),
                 payload: (),
             },
             Span::Group(1),
         ];
-        let broken = break_groups(&groups, &spans, LineBudget::uniform(10.0)).unwrap();
+        let broken = break_groups(&groups, &spans, LineBudget::uniform(pos(10.0))).unwrap();
         assert_eq!(broken.len(), 1);
-        assert_width(broken.get(0).width(), 6.0);
+        assert_width(broken.get(0).width().as_pt(), 6.0);
         let segs = broken.get(0).segs();
         assert!(matches!(
             segs[1],
-            Seg::Blank { width, .. } if width.to_bits() == 3.0f32.to_bits()
+            Seg::Blank { width, .. } if width.as_pt().to_bits() == 3.0f32.to_bits()
         ));
         assert_eq!(glyph_text(&groups, &segs[0]), "AB");
         assert_eq!(glyph_text(&groups, &segs[2]), "C");
@@ -863,7 +883,7 @@ mod tests {
         let spans = [
             Span::Group(0),
             Span::Blank {
-                advance: Advance::Fixed(4.0),
+                advance: Advance::Fixed(nn(4.0)),
                 payload: (),
             },
         ];
@@ -871,8 +891,8 @@ mod tests {
             &groups,
             &spans,
             LineBudget {
-                first: 2.0,
-                rest: 5.0,
+                first: pos(2.0),
+                rest: pos(5.0),
             },
         )
         .unwrap();
@@ -880,7 +900,7 @@ mod tests {
         assert!(matches!(broken.get(0).segs(), [Seg::Glyphs { .. }]));
         assert!(matches!(
             broken.get(1).segs(),
-            [Seg::Blank { width, .. }] if width.to_bits() == 4.0f32.to_bits()
+            [Seg::Blank { width, .. }] if width.as_pt().to_bits() == 4.0f32.to_bits()
         ));
     }
 
@@ -888,15 +908,15 @@ mod tests {
     fn fixed_blank_wider_than_first_budget_uses_that_budget() {
         let groups = [ClusteredText::new("")];
         let spans = [Span::Blank {
-            advance: Advance::Fixed(4.0),
+            advance: Advance::Fixed(nn(4.0)),
             payload: (),
         }];
         let error = break_groups(
             &groups,
             &spans,
             LineBudget {
-                first: 2.0,
-                rest: 5.0,
+                first: pos(2.0),
+                rest: pos(5.0),
             },
         )
         .unwrap_err();
@@ -916,7 +936,7 @@ mod tests {
         let spans = [
             Span::Group(0),
             Span::Blank {
-                advance: Advance::Fixed(5.0),
+                advance: Advance::Fixed(nn(5.0)),
                 payload: (),
             },
         ];
@@ -924,8 +944,8 @@ mod tests {
             &groups,
             &spans,
             LineBudget {
-                first: 2.0,
-                rest: 10.0,
+                first: pos(2.0),
+                rest: pos(10.0),
             },
         )
         .unwrap();
@@ -943,12 +963,12 @@ mod tests {
                 payload: (),
             },
         ];
-        let broken = break_groups(&groups, &spans, LineBudget::uniform(10.0)).unwrap();
+        let broken = break_groups(&groups, &spans, LineBudget::uniform(pos(10.0))).unwrap();
         assert_eq!(broken.len(), 1);
-        assert_width(broken.get(0).width(), 10.0);
+        assert_width(broken.get(0).width().as_pt(), 10.0);
         assert!(matches!(
             broken.get(0).segs()[1],
-            Seg::Blank { width, .. } if width.to_bits() == 7.0f32.to_bits()
+            Seg::Blank { width, .. } if width.as_pt().to_bits() == 7.0f32.to_bits()
         ));
     }
 
@@ -962,12 +982,12 @@ mod tests {
                 payload: (),
             },
         ];
-        let broken = break_groups(&groups, &spans, LineBudget::uniform(5.0)).unwrap();
+        let broken = break_groups(&groups, &spans, LineBudget::uniform(pos(5.0))).unwrap();
         assert_eq!(broken.len(), 1);
-        assert_width(broken.get(0).width(), 5.0);
+        assert_width(broken.get(0).width().as_pt(), 5.0);
         assert!(matches!(
             broken.get(0).segs()[1],
-            Seg::Blank { width, .. } if width.to_bits() == 0.0f32.to_bits()
+            Seg::Blank { width, .. } if width.as_pt().to_bits() == 0.0f32.to_bits()
         ));
     }
 
@@ -985,17 +1005,17 @@ mod tests {
             &groups,
             &spans,
             LineBudget {
-                first: 4.0,
-                rest: 9.0,
+                first: pos(4.0),
+                rest: pos(9.0),
             },
         )
         .unwrap();
         assert_eq!(broken.len(), 2);
-        assert_width(broken.get(0).width(), 1.0);
-        assert_width(broken.get(1).width(), 9.0);
+        assert_width(broken.get(0).width().as_pt(), 1.0);
+        assert_width(broken.get(1).width().as_pt(), 9.0);
         assert!(matches!(
             broken.get(1).segs(),
-            [Seg::Blank { width, .. }] if width.to_bits() == 9.0f32.to_bits()
+            [Seg::Blank { width, .. }] if width.as_pt().to_bits() == 9.0f32.to_bits()
         ));
     }
 
@@ -1005,12 +1025,12 @@ mod tests {
         let spans = [
             Span::Group(0),
             Span::Blank {
-                advance: Advance::Fixed(1.0),
+                advance: Advance::Fixed(nn(1.0)),
                 payload: (),
             },
             Span::Group(1),
         ];
-        let broken = break_groups(&groups, &spans, LineBudget::uniform(10.0)).unwrap();
+        let broken = break_groups(&groups, &spans, LineBudget::uniform(pos(10.0))).unwrap();
         assert_eq!(broken.len(), 2);
         let hard_end = groups[1].cluster(1).end_cursor();
         assert_eq!(broken.get(1).empty_at(), Some((1, hard_end)));
@@ -1023,12 +1043,12 @@ mod tests {
         let spans = [
             Span::Group(0),
             Span::Blank {
-                advance: Advance::Fixed(1.0),
+                advance: Advance::Fixed(nn(1.0)),
                 payload: (),
             },
             Span::Group(1),
         ];
-        let broken = break_groups(&groups, &spans, LineBudget::uniform(2.0)).unwrap();
+        let broken = break_groups(&groups, &spans, LineBudget::uniform(pos(2.0))).unwrap();
         assert_eq!(broken.len(), 2);
         assert_eq!(glyph_text(&groups, &broken.get(0).segs()[0]), "：");
         assert!(matches!(broken.get(1).segs()[0], Seg::Blank { .. }));

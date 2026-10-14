@@ -1,6 +1,11 @@
 //! Font identifiers and a crate-internal store for skrifa measurement.
-
-#![allow(dead_code)]
+//!
+//! A [`FontId`] on a recorded [`crate::canvas::GlyphRun`] is read-only. The
+//! library assigns ids. Callers do not build an id from a raw integer.
+//!
+//! ```compile_fail
+//! let _id = quire_pdf::FontId::from_raw(0);
+//! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,14 +18,15 @@ use crate::limits::{LimitKind, Limits};
 
 /// Opaque font identifier stored on a [`crate::canvas::GlyphRun`].
 ///
-/// A store numbers faces from 0 in registration order. The first face is 0.
+/// The library assigns ids in registration order. The first face is 0. Read an
+/// id with [`Self::as_u32`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct FontId(pub(crate) u32);
 
 impl FontId {
     /// Wraps a raw identifier allocated for a font.
-    pub const fn from_raw(raw: u32) -> Self {
+    pub(crate) const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 

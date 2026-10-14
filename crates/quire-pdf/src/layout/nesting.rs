@@ -2,8 +2,6 @@
 //!
 //! Holds the one content rule matrix, plus the checked bodies of table cells and list items.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::layout::frame::{Flowable, NodeKind};
 

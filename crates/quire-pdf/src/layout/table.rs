@@ -1,7 +1,5 @@
 //! Table column sizing, row placement, optional repeating headers.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::VecDeque;
 use std::num::NonZeroU16;
 use std::ops::Range;
@@ -9,8 +7,8 @@ use std::ops::Range;
 use crate::error::{
     CellSpanReason, ColumnWidthsReason, Error, ErrorKind, Fallible as Result, GeometryKind,
 };
-use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
-use crate::layout::columns::{resolve_column_widths, ColumnWidth};
+use crate::geom::{Color, Finite, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
+use crate::layout::column_width::{resolve_column_widths, ColumnWidth};
 use crate::layout::frame::{
     natural_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split,
 };
@@ -92,7 +90,7 @@ enum TableState<N> {
 #[derive(Debug, Clone, PartialEq)]
 struct GridTable<N> {
     widths: Vec<ColumnWidth>,
-    padding: f32,
+    padding: Length<NonNegative>,
     border: Border,
     header_rows: usize,
     rows: usize,
@@ -117,14 +115,14 @@ struct PlacedCell<N> {
 
 struct LaidCell {
     span: Span,
-    height: f32,
+    height: Length<NonNegative>,
     content: Fragment,
     fill: Option<Color>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct MeasuredTable {
-    width: f32,
+    width: Length<Positive>,
     header: Option<Fragment>,
     body: VecDeque<Fragment>,
     repeat_header: bool,
@@ -194,7 +192,7 @@ impl<N: Flowable> TableNode<N> {
         }
         Ok(Self(TableState::Open(GridTable {
             widths: spec.widths,
-            padding: spec.padding.as_pt(),
+            padding: spec.padding,
             border: spec.border,
             header_rows,
             rows,
@@ -227,40 +225,46 @@ impl<N: Flowable> TableNode<N> {
     }
 }
 
+fn column_edges(widths: &[Length<Positive>]) -> Vec<Length<NonNegative>> {
+    let mut xs = Vec::with_capacity(widths.len() + 1);
+    let mut x = NonNegative::ZERO;
+    for width in widths {
+        xs.push(x);
+        x += *width;
+    }
+    xs.push(x);
+    xs
+}
+
 fn measure<N: Flowable>(
     grid: GridTable<N>,
     ctx: &mut LayoutCtx<'_>,
     avail: Frame,
 ) -> Result<MeasuredTable> {
     let widths = resolve_column_widths(&grid.widths, avail.width)?;
-    let mut xs = Vec::with_capacity(widths.len() + 1);
-    let mut x = 0.0f32;
-    for w in &widths {
-        xs.push(x);
-        x += w;
-    }
-    xs.push(x);
+    let xs = column_edges(&widths);
 
     let border = grid.border.width.as_pt();
-    let inset = border / 2.0 + grid.padding;
-    let inner_full = avail.full_height - 2.0 * inset;
-    if inner_full <= 0.0 {
+    let inset = border / 2.0 + grid.padding.as_pt();
+    let inner_full_pt = avail.full_height.as_pt() - 2.0 * inset;
+    if inner_full_pt <= 0.0 {
         return Err(ErrorKind::UnsplittableTallerThanFrame {
             height: 2.0 * inset,
-            avail: avail.full_height,
+            avail: avail.full_height.as_pt(),
         }
         .into());
     }
+    let inner_full = Length::<Positive>::from_trusted_pt(inner_full_pt);
 
     let mut laid = Vec::with_capacity(grid.cells.len());
-    let mut row_h = vec![0.0f32; grid.rows];
+    let mut row_h = vec![NonNegative::ZERO; grid.rows];
     for PlacedCell {
         span: cell,
         body,
         fill,
     } in grid.cells
     {
-        let inner_w = xs[cell.col + cell.cols] - xs[cell.col] - 2.0 * inset;
+        let inner_w = xs[cell.col + cell.cols].as_pt() - xs[cell.col].as_pt() - 2.0 * inset;
         if inner_w <= 0.0 {
             return Err(Error::from(ErrorKind::ColumnWidths {
                 reason: ColumnWidthsReason::ContentWidth,
@@ -268,15 +272,15 @@ fn measure<N: Flowable>(
             .in_cell(cell.row, cell.col));
         }
         let frame = Frame {
-            width: inner_w,
-            height: inner_full,
+            width: Length::from_trusted_pt(inner_w),
+            height: inner_full.into(),
             full_height: inner_full,
         };
         let (h, content) = ctx.located(
             &crate::error::Location::at_cell(cell.row, cell.col),
             |ctx| natural_height(body.into_node(), ctx, frame),
         )?;
-        let cell_h = h + 2.0 * inset;
+        let cell_h = Length::<NonNegative>::from_trusted_pt(h.as_pt() + 2.0 * inset);
         if cell.rows == 1 {
             row_h[cell.row] = row_h[cell.row].max(cell_h);
         }
@@ -287,10 +291,11 @@ fn measure<N: Flowable>(
             fill,
         });
     }
+    let col_x: Vec<f32> = xs.iter().map(|value| value.as_pt()).collect();
     let row_y = row_offsets(row_h, &laid);
     let groups = row_groups(&laid, grid.header_rows, grid.rows);
     let fragments = GridPaint {
-        col_x: &xs,
+        col_x: &col_x,
         row_y: &row_y,
         groups: &groups,
         content_inset: inset,
@@ -306,22 +311,29 @@ fn measure<N: Flowable>(
     } else {
         None
     };
-    let header_h = header.as_ref().map_or(0.0, |h| h.height);
+    let header_h = header
+        .as_ref()
+        .map_or(NonNegative::ZERO, |header| header.height);
     for (index, block) in fragments.iter().enumerate() {
         let with_header = index == 0 || grid.repeat_header;
-        let need = block.height + if with_header { header_h } else { 0.0 };
-        if need > avail.full_height {
+        let need = block.height
+            + if with_header {
+                header_h
+            } else {
+                NonNegative::ZERO
+            };
+        if need.as_pt() > avail.full_height.as_pt() {
             return Err(ErrorKind::UnsplittableTallerThanFrame {
-                height: need,
-                avail: avail.full_height,
+                height: need.as_pt(),
+                avail: avail.full_height.as_pt(),
             }
             .into());
         }
     }
-    if header_h > avail.full_height {
+    if header_h.as_pt() > avail.full_height.as_pt() {
         return Err(ErrorKind::UnsplittableTallerThanFrame {
-            height: header_h,
-            avail: avail.full_height,
+            height: header_h.as_pt(),
+            avail: avail.full_height.as_pt(),
         }
         .into());
     }
@@ -349,8 +361,8 @@ impl GridPaint<'_> {
             .groups
             .iter()
             .map(|rows| Fragment {
-                height: self.row_y[rows.end] - self.row_y[rows.start],
-                spacing_after: 0.0,
+                height: Length::from_trusted_pt(self.row_y[rows.end] - self.row_y[rows.start]),
+                spacing_after: NonNegative::ZERO,
                 commands: Vec::new(),
             })
             .collect();
@@ -379,7 +391,10 @@ impl GridPaint<'_> {
             }
             commands.extend(
                 content
-                    .with_offset(x + self.content_inset, y + self.content_inset)?
+                    .with_offset(
+                        Length::from_trusted_pt(x + self.content_inset),
+                        Length::from_trusted_pt(y + self.content_inset),
+                    )?
                     .commands,
             );
             if let Some((stroke, paint)) = self.border {
@@ -394,21 +409,25 @@ impl GridPaint<'_> {
     }
 }
 
-fn row_offsets(mut row_h: Vec<f32>, laid: &[LaidCell]) -> Vec<f32> {
+fn row_offsets(mut row_h: Vec<Length<NonNegative>>, laid: &[LaidCell]) -> Vec<f32> {
     let mut spanning: Vec<_> = laid.iter().filter(|cell| cell.span.rows > 1).collect();
     spanning.sort_by_key(|cell| cell.span.rows);
     for cell in spanning {
         let rows = cell.span.row..cell.span.row + cell.span.rows;
-        let have: f32 = row_h[rows.clone()].iter().sum();
-        if cell.height > have {
-            row_h[rows.end - 1] += cell.height - have;
+        let have: f32 = row_h[rows.clone()]
+            .iter()
+            .map(|height| height.as_pt())
+            .sum();
+        if cell.height.as_pt() > have {
+            let grown = row_h[rows.end - 1].as_pt() + cell.height.as_pt() - have;
+            row_h[rows.end - 1] = Length::from_trusted_pt(grown);
         }
     }
     let mut row_y = Vec::with_capacity(row_h.len() + 1);
     let mut y = 0.0f32;
     for h in &row_h {
         row_y.push(y);
-        y += h;
+        y += h.as_pt();
     }
     row_y.push(y);
     row_y
@@ -438,19 +457,22 @@ fn row_groups(laid: &[LaidCell], header_rows: usize, rows: usize) -> Vec<Range<u
 }
 
 fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<TableNode<N>>> {
-    if table.width > avail.width {
+    if table.width.as_pt() > avail.width.as_pt() {
         return Err(GeometryKind::LaidOutWiderThanFrame {
-            width: table.width,
-            avail: avail.width,
+            width: table.width.as_pt(),
+            avail: avail.width.as_pt(),
         }
         .into());
     }
-    let mut y = 0.0f32;
+    let mut y = NonNegative::ZERO;
     let mut commands = Vec::new();
     if table.draw_header_next {
         if let Some(header) = &table.header {
-            let first = table.body.front().map_or(0.0, |b| b.height);
-            if header.height + first > avail.height {
+            let first = table
+                .body
+                .front()
+                .map_or(NonNegative::ZERO, |block| block.height);
+            if (header.height + first).as_pt() > avail.height.as_pt() {
                 return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
                     table,
                 ))));
@@ -461,18 +483,18 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
     }
     let mut placed = 0usize;
     while let Some(block) = table.body.front() {
-        if y + block.height > avail.height {
+        if (y + block.height).as_pt() > avail.height.as_pt() {
             break;
         }
         let block = table.body.pop_front().expect("front exists");
         let h = block.height;
-        commands.extend(block.with_offset(0.0, y)?.commands);
+        commands.extend(block.with_offset(Finite::ZERO, y.into())?.commands);
         y += h;
         placed += 1;
     }
     let head = Fragment {
         height: y,
-        spacing_after: 0.0,
+        spacing_after: NonNegative::ZERO,
         commands,
     };
     if table.body.is_empty() {

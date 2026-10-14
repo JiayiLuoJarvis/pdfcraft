@@ -4,11 +4,12 @@
 //! Defaults (32 MiB fonts/images, 40M pixels, 8192 edge, 10 000 pages, 100 000
 //! blocks, 50 000 table cells, 1 000 000 paragraph bytes) suit batch generation.
 //! Setters reject `0` and any value above four times that default. Overflow is
-//! [`ErrorKind::LimitExceeded`] with a [`LimitKind`].
-
-use std::fmt;
+//! [`ErrorKind::LimitExceeded`] with a [`LimitKind`]. [`LimitKind`] is defined
+//! in [`crate::error`] and re-exported here.
 
 use crate::error::{Error, ErrorKind};
+
+pub use crate::error::LimitKind;
 
 const DEFAULT_FONT_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_IMAGE_BYTES: usize = 32 * 1024 * 1024;
@@ -18,43 +19,6 @@ const DEFAULT_PAGES: u32 = 10_000;
 const DEFAULT_BLOCKS: u32 = 100_000;
 const DEFAULT_TABLE_CELLS: u32 = 50_000;
 const DEFAULT_PARAGRAPH_BYTES: usize = 1_000_000;
-
-/// Which [`Limits`] cap failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum LimitKind {
-    /// Encoded font file bytes.
-    FontBytes,
-    /// Encoded image file bytes.
-    ImageBytes,
-    /// Decoded image pixels, `width * height`.
-    ImagePixels,
-    /// Decoded image width or height, whichever is larger.
-    ImageEdge,
-    /// Body-flow blocks, not counting stack containers.
-    Blocks,
-    /// Table cells in the body flow.
-    TableCells,
-    /// UTF-8 bytes of paragraph text in the body flow.
-    ParagraphBytes,
-    /// Pages committed during pagination.
-    Pages,
-}
-
-impl fmt::Display for LimitKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::FontBytes => "font bytes",
-            Self::ImageBytes => "image bytes",
-            Self::ImagePixels => "image pixels",
-            Self::ImageEdge => "image edge",
-            Self::Blocks => "blocks",
-            Self::TableCells => "table cells",
-            Self::ParagraphBytes => "paragraph bytes",
-            Self::Pages => "pages",
-        })
-    }
-}
 
 /// Resource and document-size caps.
 ///

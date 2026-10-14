@@ -1,17 +1,19 @@
 //! Paragraph measurement, wrapping, and fragment drawing.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
-use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
-use crate::fonts::{FontId, FontStore};
-use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
+#[cfg(test)]
+use crate::error::ErrorBag;
+use crate::error::{ErrorKind, Fallible as Result, FontFault, GeometryKind};
+use crate::fonts::FontId;
+#[cfg(test)]
+use crate::fonts::FontStore;
+use crate::geom::{Color, Finite, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::style::{Style, TextAlign};
-use crate::text::break_class::BreakClass;
+use crate::layout::line_run::{align_x, line_metrics_or_soft};
+use crate::layout::style::Style;
 use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
 use crate::text::line_break::{break_spans, Advance, LineBudget, Seg, Span, SpanLine};
-use crate::text::measure::{line_metrics, measure_text, LineMetrics, MeasuredText};
+use crate::text::measure::measure_text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Face {
@@ -154,18 +156,20 @@ impl TextNode {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ParagraphNode {
     pub(crate) lines: Vec<LineBox>,
-    pub(crate) line_height: f32,
-    pub(crate) spacing_after: f32,
-    width: f32,
+    pub(crate) line_height: Length<Positive>,
+    pub(crate) spacing_after: Length<NonNegative>,
+    width: Length<Positive>,
 }
 
 impl ParagraphNode {
+    #[cfg(test)]
     pub(crate) fn layout(
         fonts: &mut FontStore,
         text: &str,
         style: &Style,
         width: f32,
     ) -> Result<Self> {
+        let width = Positive::pt(width)?;
         let items = if text.is_empty() {
             Vec::new()
         } else {
@@ -196,18 +200,16 @@ impl ParagraphNode {
         ctx: &mut LayoutCtx<'_>,
         items: &[InlineItem],
         style: &Style,
-        width: f32,
+        width: Length<Positive>,
     ) -> Result<Self> {
-        if !width.is_finite() || width <= 0.0 {
-            return Err(GeometryKind::LineWidth { width }.into());
-        }
-
-        let indent = style.first_line_indent.as_pt();
-        let first_width = width - indent;
-        if !first_width.is_finite() || first_width <= 0.0 {
-            return Err(GeometryKind::FirstLineIndent { indent, width }.into());
-        }
-        let font_size = style.font_size.as_pt();
+        let indent = style.first_line_indent;
+        let Some(first_width) = (width - indent).try_positive() else {
+            return Err(GeometryKind::FirstLineIndent {
+                indent: indent.as_pt(),
+                width: width.as_pt(),
+            }
+            .into());
+        };
         let prepared = prepare_inline(ctx, items, style)?;
         let group_refs: Vec<&ClusteredText> = prepared
             .groups
@@ -222,7 +224,11 @@ impl ParagraphNode {
                 rest: width,
             },
             |group, cluster| {
-                cluster_width_pt(&prepared.groups[group], cluster.glyph_range(), font_size)
+                cluster_width_pt(
+                    &prepared.groups[group],
+                    cluster.glyph_range(),
+                    style.font_size,
+                )
             },
         )?;
         let metrics = line_metrics_or_soft(ctx, style)?;
@@ -231,7 +237,11 @@ impl ParagraphNode {
         let mut lines = Vec::with_capacity(broken.len());
         for (index, line) in broken.iter().enumerate() {
             let frame_width = if index == 0 { first_width } else { width };
-            let frame_x = if index == 0 { indent } else { 0.0 };
+            let frame_x = if index == 0 {
+                indent
+            } else {
+                NonNegative::ZERO
+            };
             lines.push(place_line(
                 &prepared.groups,
                 line,
@@ -239,14 +249,14 @@ impl ParagraphNode {
                 frame_width,
                 frame_x,
                 metrics.baseline,
-                font_size,
+                style.font_size,
             )?);
         }
 
         Ok(Self {
             lines,
             line_height,
-            spacing_after: style.paragraph_spacing.as_pt(),
+            spacing_after: style.paragraph_spacing,
             width,
         })
     }
@@ -264,27 +274,27 @@ impl ParagraphNode {
 
     /// Lines were wrapped at `self.width`; a narrower frame would overflow silently.
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
-        if self.width > avail.width {
+        if self.width.as_pt() > avail.width.as_pt() {
             return Err(GeometryKind::LaidOutWiderThanFrame {
-                width: self.width,
-                avail: avail.width,
+                width: self.width.as_pt(),
+                avail: avail.width.as_pt(),
             }
             .into());
         }
         if self.lines.is_empty() {
             return Ok(Split::Fit {
-                height: 0.0,
+                height: NonNegative::ZERO,
                 fragment: Fragment::empty(),
             });
         }
-        if self.line_height > avail.full_height {
+        if self.line_height.as_pt() > avail.full_height.as_pt() {
             return Err(ErrorKind::UnsplittableTallerThanFrame {
-                height: self.line_height,
-                avail: avail.full_height,
+                height: self.line_height.as_pt(),
+                avail: avail.full_height.as_pt(),
             }
             .into());
         }
-        if avail.height < self.line_height {
+        if avail.height.as_pt() < self.line_height.as_pt() {
             return Ok(Split::MoveToNextPage(self));
         }
 
@@ -302,7 +312,7 @@ impl ParagraphNode {
         let mut lines = self.lines;
         let tail_lines = lines.split_off(max_lines);
         let height = lines_height(max_lines, self.line_height);
-        let head = fragment_from_lines(&lines, self.line_height, 0.0)?;
+        let head = fragment_from_lines(&lines, self.line_height, NonNegative::ZERO)?;
         let tail = ParagraphNode {
             lines: tail_lines,
             line_height: self.line_height,
@@ -317,43 +327,9 @@ impl ParagraphNode {
     }
 }
 
-/// One unwrapped run of `text` at origin `(0, baseline)`.
-pub(crate) fn single_line_run(
-    ctx: &mut LayoutCtx<'_>,
-    text: &str,
-    style: &Style,
-    max_width: f32,
-) -> Result<GlyphRun> {
-    let clustered = ClusteredText::new(text);
-    if (0..clustered.len()).any(|index| clustered.cluster(index).class() == BreakClass::Hard) {
-        return Err(Error::from(ErrorKind::UnexpectedLineBreakInSingleLine {
-            text: crate::error::text_snippet(clustered.normalized_text()),
-        }));
-    }
-    let measured = measure_text(ctx.fonts, ctx.errors, style.font, clustered.glyph_text())?;
-    let width = measured.advance_norm * style.font_size.as_pt();
-    if width > max_width {
-        return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
-            text: Some(crate::error::text_snippet(text)),
-            width,
-            avail: max_width,
-        }));
-    }
-    let metrics = line_metrics_or_soft(ctx, style)?;
-    let mut run = glyph_run_for_line(
-        &measured,
-        0..measured.glyphs.len(),
-        0..measured.text.len(),
-        style,
-        width,
-        max_width,
-        metrics.baseline,
-    )?;
-    run.origin = Point::try_pt(0.0, metrics.baseline)?;
-    Ok(run)
-}
-
-fn lines_fitting(avail_height: f32, line_height: f32) -> usize {
+fn lines_fitting(avail_height: Length<NonNegative>, line_height: Length<Positive>) -> usize {
+    let avail_height = avail_height.as_pt();
+    let line_height = line_height.as_pt();
     if !avail_height.is_finite()
         || !line_height.is_finite()
         || line_height <= 0.0
@@ -373,19 +349,19 @@ fn lines_fitting(avail_height: f32, line_height: f32) -> usize {
     usize::from(count)
 }
 
-fn lines_height(count: usize, line_height: f32) -> f32 {
+fn lines_height(count: usize, line_height: Length<Positive>) -> Length<NonNegative> {
     let count = u16::try_from(count).unwrap_or(u16::MAX);
-    f32::from(count) * line_height
+    Length::from_trusted_pt(f32::from(count) * line_height.as_pt())
 }
 
 fn fragment_from_lines(
     lines: &[LineBox],
-    line_height: f32,
-    spacing_after: f32,
+    line_height: Length<Positive>,
+    spacing_after: Length<NonNegative>,
 ) -> Result<Fragment> {
     let mut commands = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        let y0 = lines_height(index, line_height);
+        let y0 = lines_height(index, line_height).as_pt();
         for piece in &line.pieces {
             match piece {
                 LinePiece::Glyphs(run) => {
@@ -409,7 +385,7 @@ fn fragment_from_lines(
                     let width = x1 - x0;
                     if width > 0.0 {
                         commands.push(FragmentCommand::Link {
-                            rect: Rect::try_pt(*x0, y0, width, line_height)?,
+                            rect: Rect::try_pt(*x0, y0, width, line_height.as_pt())?,
                             target: target.clone(),
                         });
                     }
@@ -471,7 +447,7 @@ fn prepare_inline(
             InlineItem::Blank(blank) => {
                 flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
                 spans.push(Span::Blank {
-                    advance: blank_advance(blank.width, style.font_size.as_pt())?,
+                    advance: blank_advance(blank.width, style.font_size)?,
                     payload: BlankDraw {
                         thickness: blank.thickness,
                         color: blank.color,
@@ -502,15 +478,15 @@ fn flush_text(
     Ok(())
 }
 
-fn blank_advance(width: BlankWidth, font_size: f32) -> Result<Advance> {
+fn blank_advance(width: BlankWidth, font_size: Length<Positive>) -> Result<Advance> {
     match width {
-        BlankWidth::Fixed(length) => Ok(Advance::Fixed(length.as_pt())),
+        BlankWidth::Fixed(length) => Ok(Advance::Fixed(length)),
         BlankWidth::Em(ems) => {
-            let points = f32::from(ems) * font_size;
+            let points = f32::from(ems) * font_size.as_pt();
             if !points.is_finite() || points < 0.0 {
                 return Err(GeometryKind::AdvanceWidth { width: points }.into());
             }
-            Ok(Advance::Fixed(points))
+            Ok(Advance::Fixed(Length::from_trusted_pt(points)))
         }
         BlankWidth::ToEndOfLine => Ok(Advance::Fill),
     }
@@ -520,12 +496,13 @@ fn place_line(
     groups: &[MeasuredInline],
     line: &SpanLine<BlankDraw>,
     style: &Style,
-    frame_width: f32,
-    frame_x: f32,
-    baseline: f32,
-    font_size: f32,
+    frame_width: Length<Positive>,
+    frame_x: Length<NonNegative>,
+    baseline: Length<Finite>,
+    font_size: Length<Positive>,
 ) -> Result<LineBox> {
-    let line_x = frame_x + align_x(frame_width, line.width(), style.align);
+    let line_x = frame_x.as_pt() + align_x(frame_width, line.width(), style.align).as_pt();
+    let baseline = baseline.as_pt();
     let mut x = line_x;
     let mut pieces = Vec::new();
     let mut saw_glyphs = false;
@@ -536,7 +513,7 @@ fn place_line(
                 if range.is_empty() {
                     continue;
                 }
-                let advance = cluster_width_pt(&groups[group], range.clone(), font_size);
+                let advance = cluster_width_pt(&groups[group], range.clone(), font_size).as_pt();
                 let runs = glyph_runs_for_line(&groups[group], range, style, x, baseline)?;
                 pieces.extend(runs.into_iter().map(LinePiece::Glyphs));
                 if advance > 0.0 {
@@ -552,6 +529,7 @@ fn place_line(
                 saw_glyphs = true;
             }
             Seg::Blank { width, payload } => {
+                let width = width.as_pt();
                 if width > 0.0 {
                     pieces.push(LinePiece::Stroke(InlineStroke {
                         x0: x,
@@ -572,9 +550,9 @@ fn place_line(
         );
     }
     debug_assert!(
-        pt_near(x - line_x, line.width()),
+        pt_near(x - line_x, line.width().as_pt()),
         "placed {x} from {line_x}, line width {}",
-        line.width()
+        line.width().as_pt()
     );
     Ok(LineBox { pieces })
 }
@@ -655,39 +633,16 @@ fn measure_inline(
     Ok(MeasuredInline { text, glyphs, link })
 }
 
-fn line_metrics_or_soft(ctx: &mut LayoutCtx<'_>, style: &Style) -> Result<LineMetrics> {
-    match ctx.fonts.metrics(style.font) {
-        Ok(face) => line_metrics(face, style.font_size, style.line_height_factor),
-        Err(error) => {
-            if let ErrorKind::UnknownFont { id } = error.kind {
-                ctx.soft(FontFault::UnknownFont { id });
-                let size = style.font_size.as_pt();
-                let factor = style.line_height_factor;
-                if !factor.is_finite() || factor <= 0.0 {
-                    return Err(GeometryKind::LineHeightFactor { factor }.into());
-                }
-                return Ok(LineMetrics {
-                    ascent: size,
-                    descent: 0.0,
-                    leading: 0.0,
-                    line_height: size * factor,
-                    baseline: size,
-                });
-            }
-            Err(error)
-        }
-    }
-}
-
 fn cluster_width_pt(
     measured: &MeasuredInline,
     glyph_range: std::ops::Range<usize>,
-    font_size: f32,
-) -> f32 {
-    measured.glyphs[glyph_range]
+    font_size: Length<Positive>,
+) -> Length<NonNegative> {
+    let width = measured.glyphs[glyph_range]
         .iter()
-        .map(|glyph| glyph.advance_norm * font_size)
-        .sum()
+        .map(|glyph| glyph.advance_norm * font_size.as_pt())
+        .sum();
+    Length::from_trusted_pt(width)
 }
 
 fn glyph_runs_for_line(
@@ -749,46 +704,4 @@ fn glyph_runs_for_line(
         start = end;
     }
     Ok(runs)
-}
-
-fn glyph_run_for_line(
-    measured: &MeasuredText,
-    glyph_range: std::ops::Range<usize>,
-    byte_range: std::ops::Range<usize>,
-    style: &Style,
-    line_width: f32,
-    frame_width: f32,
-    baseline: f32,
-) -> Result<GlyphRun> {
-    let text = measured.text[byte_range.clone()].to_owned();
-    let byte_origin = byte_range.start;
-    let glyphs = measured.glyphs[glyph_range]
-        .iter()
-        .filter(|glyph| !glyph.omit)
-        .map(|glyph| GlyphPlacement {
-            glyph_id: glyph.glyph_id,
-            advance_norm: glyph.advance_norm,
-            byte_range: (glyph.byte_range.start - byte_origin)
-                ..(glyph.byte_range.end - byte_origin),
-        })
-        .collect();
-
-    let x = align_x(frame_width, line_width, style.align);
-    let y = baseline;
-    Ok(GlyphRun {
-        font: style.font,
-        font_size: style.font_size,
-        color: style.color,
-        origin: Point::try_pt(x, y)?,
-        glyphs,
-        text,
-    })
-}
-
-fn align_x(frame_width: f32, line_width: f32, align: TextAlign) -> f32 {
-    match align {
-        TextAlign::Start => 0.0,
-        TextAlign::Center => (frame_width - line_width) / 2.0,
-        TextAlign::End => frame_width - line_width,
-    }
 }

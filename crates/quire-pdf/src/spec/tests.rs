@@ -22,6 +22,7 @@ fn lay(page: PageSize, section: SectionSpec) -> crate::Result<crate::Rendered> {
         page_size: page,
         resources: resources(),
         limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
         sections: vec![section],
     })
 }
@@ -336,6 +337,7 @@ fn a_zero_length_layer_segment_fails_before_any_page() {
         page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
         resources: Resources::default(),
         limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             behind: vec![
                 LayerMark::Line {
@@ -371,6 +373,7 @@ fn a_non_finite_rotation_fails_before_any_page() {
         page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
         resources: Resources::default(),
         limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             behind: vec![LayerMark::Rotated {
                 when: PageWhen::All,

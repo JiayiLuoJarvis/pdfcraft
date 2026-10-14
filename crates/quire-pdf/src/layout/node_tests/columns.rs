@@ -1,8 +1,7 @@
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{NonNegative, Positive};
-use crate::layout::columns::{
-    default_column_gap, resolve_column_widths, ColumnWidth, ColumnsNode, Ratio,
-};
+use crate::layout::column_width::{resolve_column_widths, ColumnWidth, Ratio};
+use crate::layout::columns::{default_column_gap, ColumnsNode};
 use crate::layout::decorate::Decorations;
 use crate::layout::flow::{FlowNode, KeepTogetherNode};
 use crate::layout::paragraph::ParagraphNode;
@@ -14,6 +13,11 @@ fn fixed(w: f32) -> ColumnWidth {
 
 fn ratio(w: f32) -> ColumnWidth {
     ColumnWidth::Ratio(Ratio::new(w).unwrap())
+}
+
+fn resolved(specs: &[ColumnWidth], inner: f32) -> Result<Vec<f32>> {
+    let widths = resolve_column_widths(specs, Positive::pt(inner)?)?;
+    Ok(widths.into_iter().map(crate::geom::Length::as_pt).collect())
 }
 
 fn reason(result: Result<impl std::fmt::Debug>) -> ColumnWidthsReason {
@@ -28,13 +32,13 @@ fn reason(result: Result<impl std::fmt::Debug>) -> ColumnWidthsReason {
 
 #[test]
 fn auto_takes_what_fixed_leaves() {
-    let widths = resolve_column_widths(&[fixed(80.0), ColumnWidth::Auto], 188.0).unwrap();
+    let widths = resolved(&[fixed(80.0), ColumnWidth::Auto], 188.0).unwrap();
     assert_eq!(widths, [80.0, 108.0]);
 }
 
 #[test]
 fn ratios_split_the_rest_by_weight() {
-    let widths = resolve_column_widths(&[ratio(2.0), ratio(1.0)], 90.0).unwrap();
+    let widths = resolved(&[ratio(2.0), ratio(1.0)], 90.0).unwrap();
     assert_eq!(widths, [60.0, 30.0]);
 }
 
@@ -42,24 +46,21 @@ fn ratios_split_the_rest_by_weight() {
 fn auto_beside_ratio_is_rejected() {
     let specs = [fixed(10.0), ratio(1.0), ColumnWidth::Auto];
     assert_eq!(
-        reason(resolve_column_widths(&specs, 110.0)),
+        reason(resolved(&specs, 110.0)),
         ColumnWidthsReason::AutoWithRatio
     );
 }
 
 #[test]
 fn fixed_only_leaves_slack_on_the_right() {
-    assert_eq!(
-        resolve_column_widths(&[fixed(50.0)], 200.0).unwrap(),
-        [50.0]
-    );
+    assert_eq!(resolved(&[fixed(50.0)], 200.0).unwrap(), [50.0]);
 }
 
 #[test]
 fn column_widths_more_than_one_auto() {
     let specs = [ColumnWidth::Auto, ColumnWidth::Auto];
     assert_eq!(
-        reason(resolve_column_widths(&specs, 100.0)),
+        reason(resolved(&specs, 100.0)),
         ColumnWidthsReason::MoreThanOneAuto
     );
 }
@@ -68,7 +69,7 @@ fn column_widths_more_than_one_auto() {
 fn column_widths_fixed_sum_exceeds() {
     let specs = [fixed(150.0), fixed(60.0)];
     assert_eq!(
-        reason(resolve_column_widths(&specs, 200.0)),
+        reason(resolved(&specs, 200.0)),
         ColumnWidthsReason::FixedSumExceeds
     );
 }
@@ -77,7 +78,7 @@ fn column_widths_fixed_sum_exceeds() {
 fn column_widths_no_remaining_width() {
     let specs = [fixed(100.0), ColumnWidth::Auto];
     assert_eq!(
-        reason(resolve_column_widths(&specs, 100.0)),
+        reason(resolved(&specs, 100.0)),
         ColumnWidthsReason::NoRemainingWidth
     );
 }
@@ -128,7 +129,7 @@ fn column_widths_gap_eats_the_frame() {
 #[test]
 fn columns_place_each_column_at_its_x() {
     let (mut fonts, style) = fonts_and_style();
-    let b = metrics(&fonts, &style).baseline;
+    let b = metrics(&fonts, &style).baseline.as_pt();
     let cols = ColumnsNode::new(
         default_column_gap(),
         vec![
@@ -174,7 +175,7 @@ fn text_wraps_at_column_width_not_body_width() {
         .iter()
         .map(|r| r.2.to_bits())
         .collect();
-    let line = |n: f32| (m.line_height * n + m.baseline).to_bits();
+    let line = |n: f32| (m.line_height.as_pt() * n + m.baseline.as_pt()).to_bits();
     assert_eq!(ys, [line(0.0), line(1.0), line(2.0), line(3.0)]);
 }
 
@@ -190,7 +191,7 @@ fn columns_split_across_pages_per_column() {
         ],
     )
     .unwrap();
-    let config = page(200.0, m.line_height * 2.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 2.0 + 1.0);
     let (result, rec) = render(
         FlowNode::Columns(cols),
         &mut fonts,
@@ -203,7 +204,7 @@ fn columns_split_across_pages_per_column() {
     assert_eq!(texts(&pages[0]), ["A", "B", "X"]);
     assert_eq!(
         runs(&pages[1]).iter().map(bits).collect::<Vec<_>>(),
-        [("C", 0.0f32.to_bits(), m.baseline.to_bits())]
+        [("C", 0.0f32.to_bits(), m.baseline.as_pt().to_bits())]
     );
 }
 
@@ -227,7 +228,10 @@ fn columns_spacing_after_is_the_largest_column_spacing() {
     let (result, rec) = render(root, &mut fonts, page(200.0, 400.0), &Decorations::none());
     result.unwrap();
     let z = runs(&rec.pages()[0]).pop().unwrap();
-    assert_eq!(z.2.to_bits(), (m.line_height + 8.0 + m.baseline).to_bits());
+    assert_eq!(
+        z.2.to_bits(),
+        (m.line_height.as_pt() + 8.0 + m.baseline.as_pt()).to_bits()
+    );
 }
 
 #[test]
@@ -247,7 +251,7 @@ fn stuck_column_on_full_page_errors_with_no_output() {
         ],
     )
     .unwrap();
-    let config = page(200.0, m.line_height * 2.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 2.0 + 1.0);
     let (result, rec) = render(
         FlowNode::Columns(cols),
         &mut fonts,
@@ -257,7 +261,7 @@ fn stuck_column_on_full_page_errors_with_no_output() {
     assert!(matches!(
         result.unwrap_err().kind,
         ErrorKind::UnsplittableTallerThanFrame { height, avail }
-            if height > avail && avail.to_bits() == (m.line_height * 2.0 + 1.0).to_bits()
+            if height > avail && avail.to_bits() == (m.line_height.as_pt() * 2.0 + 1.0).to_bits()
     ));
     assert!(rec.commands().is_empty());
 }

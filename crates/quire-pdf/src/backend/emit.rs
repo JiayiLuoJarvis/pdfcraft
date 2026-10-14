@@ -7,6 +7,8 @@
 //! - `Page::surface()` a second time on the same page clears prior drawing.
 //! - `Surface::finish` is drop; unbalanced `push` / `pop` panics.
 //! - `SerializeSettings { ..Default::default() }` leaves `enable_tagging: true`.
+//! - krilla 0.8.2 parses fonts with skrifa 0.42. This crate measures with
+//!   skrifa 0.48. [`check_upem`] rejects a face when those reads disagree.
 
 use std::sync::Arc;
 
@@ -193,6 +195,8 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
 
 const UPEM_ABS_TOLERANCE: f32 = 0.01;
 
+// krilla 0.8.2 parses the face with skrifa 0.42. Measurement uses skrifa 0.48.
+// A units-per-em mismatch would scale the same advance against two em squares.
 fn check_upem(skrifa_upem: f32, krilla_upem: f32) -> Result<()> {
     if (skrifa_upem - krilla_upem).abs() >= UPEM_ABS_TOLERANCE {
         Err(Error::from(ErrorKind::FontMetricsMismatch {
@@ -483,6 +487,61 @@ mod tests {
             rest = &rest[at + 2..];
         }
         panic!("no TJ adjustment number in stream:\n{pdf}");
+    }
+
+    #[test]
+    fn fixture_upem_and_hmtx_match_across_skrifa_copies() {
+        // quire-measure.ttf, read from the file rather than from `measure_text`:
+        // head unitsPerEm is 1000, cmap format 4 maps U+0041 to glyph 34, and
+        // that glyph's hmtx advance is 707. krilla remaps the id to a CID, so
+        // the content stream does not contain 34. The TJ number is the hmtx
+        // comparison. A drawn advance of 0.707 + 0.25 is -250 in PDF's
+        // 1000-unit space only when krilla's advance for glyph 34 is also 707.
+        let bytes = fixture_bytes();
+        let font = Font::new(Data::from(Arc::clone(&bytes)), 0).unwrap();
+        assert_eq!(font.units_per_em().to_bits(), 1000.0f32.to_bits());
+
+        let mut store = FontStore::new();
+        let id = store
+            .register(FontSource {
+                bytes: Arc::clone(&bytes),
+                index: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            store.metrics(id).unwrap().units_per_em.to_bits(),
+            1000.0f32.to_bits()
+        );
+
+        let run = GlyphRun {
+            font: id,
+            font_size: Positive::pt(12.0).unwrap(),
+            color: Color::rgb(0, 0, 0),
+            origin: Point::try_pt(72.0, 100.0).unwrap(),
+            glyphs: vec![
+                GlyphPlacement {
+                    glyph_id: 34,
+                    advance_norm: 0.707 + 0.25,
+                    byte_range: 0..1,
+                },
+                GlyphPlacement {
+                    glyph_id: 34,
+                    advance_norm: 0.707,
+                    byte_range: 1..2,
+                },
+            ],
+            text: "AA".to_owned(),
+        };
+        let mut canvas = KrillaCanvas::new_observable_with_fonts(Arc::new(store));
+        canvas
+            .start_page(Size::try_pt(200.0, 200.0).unwrap())
+            .unwrap();
+        canvas.draw_glyph_run(&run).unwrap();
+        canvas.finish_page().unwrap();
+        let pdf = canvas.finish().unwrap();
+        let text = String::from_utf8_lossy(&pdf);
+        let adjustment = tj_adjustment(&text);
+        assert_eq!(adjustment.to_bits(), (-250.0f32).to_bits(), "{text}");
     }
 
     #[test]

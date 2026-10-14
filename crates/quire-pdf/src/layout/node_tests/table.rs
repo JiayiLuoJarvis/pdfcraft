@@ -2,7 +2,8 @@ use std::num::NonZeroU16;
 
 use crate::error::{CellSpanReason, Error, ErrorKind};
 use crate::geom::{Color, Margins, NonNegative, Positive, Size};
-use crate::layout::columns::{default_column_gap, ColumnWidth, ColumnsNode, Ratio};
+use crate::layout::column_width::{ColumnWidth, Ratio};
+use crate::layout::columns::{default_column_gap, ColumnsNode};
 use crate::layout::decorate::Decorations;
 use crate::layout::flow::{FlowNode, KeepTogetherNode, SpacerNode};
 use crate::layout::paginate::PaginateConfig;
@@ -29,8 +30,8 @@ fn span(cols: u16, rows: u16) -> (NonZeroU16, NonZeroU16) {
 
 fn halves() -> Vec<ColumnWidth> {
     vec![
-        ColumnWidth::Ratio(Ratio::ONE),
-        ColumnWidth::Ratio(Ratio::ONE),
+        ColumnWidth::Ratio(Ratio::new(1.0).unwrap()),
+        ColumnWidth::Ratio(Ratio::new(1.0).unwrap()),
     ]
 }
 
@@ -52,7 +53,7 @@ fn repeats_all_header_rows_on_continuation_page() {
     ];
     spec.body = numbered_rows(&style, 4);
     let table = TableNode::new(spec).unwrap();
-    let config = page(200.0, m.line_height * 4.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 4.0 + 1.0);
     let (result, rec) = render(
         FlowNode::Table(table),
         &mut fonts,
@@ -67,11 +68,11 @@ fn repeats_all_header_rows_on_continuation_page() {
     let second = runs(&pages[1]);
     assert_eq!(
         bits(&second[0]),
-        ("H1", 0.0f32.to_bits(), m.baseline.to_bits())
+        ("H1", 0.0f32.to_bits(), m.baseline.as_pt().to_bits())
     );
     assert_eq!(
         second[3].2.to_bits(),
-        (m.line_height * 2.0 + m.baseline).to_bits()
+        (m.line_height.as_pt() * 2.0 + m.baseline.as_pt()).to_bits()
     );
 }
 
@@ -84,7 +85,7 @@ fn repeat_header_off_continues_body_only() {
     spec.body = numbered_rows(&style, 3);
     spec.repeat_header = false;
     let table = TableNode::new(spec).unwrap();
-    let config = page(200.0, m.line_height * 2.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 2.0 + 1.0);
     let (result, rec) = render(
         FlowNode::Table(table),
         &mut fonts,
@@ -110,7 +111,7 @@ fn row_span_group_moves_to_next_page_whole() {
         vec![cell("d", &style)],
     ];
     let table = TableNode::new(spec).unwrap();
-    let config = page(200.0, m.line_height * 2.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 2.0 + 1.0);
     let (result, rec) = render(
         FlowNode::Table(table),
         &mut fonts,
@@ -124,12 +125,12 @@ fn row_span_group_moves_to_next_page_whole() {
     assert_eq!(
         runs(&pages[1]).iter().map(bits).collect::<Vec<_>>(),
         [
-            ("S", 0.0f32.to_bits(), m.baseline.to_bits()),
-            ("c", 100.0f32.to_bits(), m.baseline.to_bits()),
+            ("S", 0.0f32.to_bits(), m.baseline.as_pt().to_bits()),
+            ("c", 100.0f32.to_bits(), m.baseline.as_pt().to_bits()),
             (
                 "d",
                 100.0f32.to_bits(),
-                (m.line_height + m.baseline).to_bits()
+                (m.line_height.as_pt() + m.baseline.as_pt()).to_bits()
             ),
         ]
     );
@@ -143,7 +144,7 @@ fn header_plus_group_taller_than_page_errors_with_no_output() {
     spec.header = vec![vec![cell("h", &style), cell("k", &style)]];
     spec.body = vec![vec![cell("A\nB", &style), cell("1", &style)]];
     let table = TableNode::new(spec).unwrap();
-    let config = page(200.0, m.line_height * 2.0 + 1.0);
+    let config = page(200.0, m.line_height.as_pt() * 2.0 + 1.0);
     let (result, rec) = render(
         FlowNode::Table(table),
         &mut fonts,
@@ -153,8 +154,14 @@ fn header_plus_group_taller_than_page_errors_with_no_output() {
     let ErrorKind::UnsplittableTallerThanFrame { height, avail } = result.unwrap_err().kind else {
         panic!("expected UnsplittableTallerThanFrame");
     };
-    assert!((height - m.line_height * 3.0).abs() < 1e-3, "{height}");
-    assert_eq!(avail.to_bits(), (m.line_height * 2.0 + 1.0).to_bits());
+    assert!(
+        (height - m.line_height.as_pt() * 3.0).abs() < 1e-3,
+        "{height}"
+    );
+    assert_eq!(
+        avail.to_bits(),
+        (m.line_height.as_pt() * 2.0 + 1.0).to_bits()
+    );
     assert!(rec.commands().is_empty());
 }
 
@@ -185,7 +192,7 @@ fn borders_stroke_each_cell_centered_on_grid_lines() {
     );
     result.unwrap();
     let page = &rec.pages()[0];
-    let row = m.line_height + 10.0;
+    let row = m.line_height.as_pt() + 10.0;
     let rect = |x0: f32, x1: f32, y0: f32, y1: f32| {
         vec![
             Some((x0, y0)),
@@ -204,7 +211,7 @@ fn borders_stroke_each_cell_centered_on_grid_lines() {
             rect(60.0, 210.0, row + 15.0, row + row + 15.0),
         ]
     );
-    let baseline = (15.0 + 5.0 + m.baseline).to_bits();
+    let baseline = (15.0 + 5.0 + m.baseline.as_pt()).to_bits();
     assert_eq!(
         runs(page).iter().take(2).map(bits).collect::<Vec<_>>(),
         [
@@ -234,7 +241,7 @@ fn zero_border_draws_no_strokes() {
 #[test]
 fn cell_height_includes_spacing_between_paragraphs() {
     let (mut fonts, mut style) = fonts_and_style();
-    let line_h = metrics(&fonts, &style).line_height;
+    let line_h = metrics(&fonts, &style).line_height.as_pt();
     let spacing = line_h + 1.0;
     style.paragraph_spacing = NonNegative::pt(spacing).unwrap();
     let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(200.0).unwrap())]);

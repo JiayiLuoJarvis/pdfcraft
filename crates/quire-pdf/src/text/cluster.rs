@@ -1,7 +1,5 @@
 //! Extended grapheme clusters (UAX #29) as line-break atoms.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -106,6 +104,7 @@ impl ClusteredText {
         self.clusters.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.clusters.is_empty()
     }

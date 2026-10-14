@@ -13,7 +13,7 @@
 
 提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `quire-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/quire-forms`，含对齐、按字段字号、`line_below`、`absolute_lines` 与 TTC 拆面。OTF 与字体子集仍未做。不要把填表写进 `quire-pdf`。`quire-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。
 
-仍须遵守：未确认功能不「顺便」做；`publish = false` 直到限额与信件夹具通过。
+仍须遵守：未确认功能不「顺便」做。三包版本是 `0.1.0`，可以发布。
 
 ## 现阶段姿态（无生产包袱）
 
@@ -30,11 +30,12 @@
 已钉死（见提案书「你已经定过的」）：
 
 - 不做 FOP / XSL-FO；股权架构图不做。
-- 底座 krilla。`quire-pdf` 不改用 pdf-writer、lopdf、printpdf。`quire-forms` 用自有的 `lopdf =0.34.0` 与 `skrifa =0.48.0`，见提案书 §10。`quire-forms` 不依赖 `quire-pdf`。
+- 底座 krilla。`quire-pdf` 不改用 pdf-writer、lopdf、printpdf。`quire-forms` 用自有的 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）与 `skrifa =0.48.0`，见提案书 §10。`quire-forms` 不依赖 `quire-pdf`。
 - 行宽用 **skrifa** 量，不靠 krilla 文字绘制反推。
+- 直依 `skrifa =0.48.0` 与 `krilla =0.8.2` 传递的 `skrifa ^0.42.0` 是两份库。2026-10-14 的解析结果是 `0.42.1`。当天 crates.io 上 krilla 最新仍是 0.8.2，升 krilla 消不掉这两份。上游 `main` 钉 `skrifa 0.44.0`，尚未发布，也不是 0.48.0。不要 fork krilla，不要改成 git 依赖。`emit` 的 `check_upem` 拒绝 units per em 不一致，夹具字形的 `TJ` 调整量锁住两边的 hmtx。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
 - 排版坐标：**左上原点，y 向下**；与 krilla 0.8.2 Surface 一致，适配器里对几何做恒等映射，不预翻转。
-- 版本保持 `0.x`；`publish = false` 直到限额与信件夹具通过。
+- 版本保持 `0.x`。三包当前是 `0.1.0`，可以发布。
 
 调用方式（提案书 §1，已定）：`DocumentSpec` 值，经 `layout_spec` 排版。正文流式。页眉、页脚、`behind` / `front` 在每一页绘制时由库填页码。调用方不提供闭包。`Flowable` 只在库内部，不向调用方暴露。
 
@@ -73,7 +74,7 @@ quire/
         spec/             公共文档面。DocumentSpec、Resources、layout_spec
         fonts.rs
         text/             cluster / measure / break_class / line_break
-        layout/           frame flow nesting paragraph columns table list decorate paginate
+        layout/           frame flow nesting column_width line_run paragraph columns table list decorate paginate
         backend/          仅 feature backend-krilla；唯一可 use krilla 处
       tests/              集成测试；fixtures/ 放字体与样张
       examples/           可运行示例
@@ -84,17 +85,19 @@ quire/
 
 ### 依赖方向（禁止环）
 
-**不允许循环依赖**（含同 crate 模块之间）。边只许沿 DAG 向下；单 crate 能编译出环也不接受。目标图与拆环工作项顺序见 [`docs/module-dependency.md`](docs/module-dependency.md)。
+**不允许循环依赖**（含同 crate 模块之间）。边只许沿 DAG 向下；单 crate 能编译出环也不接受。目标图与检查命令见 [`docs/module-dependency.md`](docs/module-dependency.md)。
 
 ```text
-geom
-error       → geom；不依赖 fonts / layout / spec / backend
-fonts       → error, geom
-canvas      → error, geom
-text        → fonts, error, geom
-layout      → text, fonts, canvas, error, geom
-spec        → layout, canvas, fonts, error, geom    # 公共文档面；禁止 → backend
-backend     → canvas, fonts, error, geom, krilla    # 禁止 → layout / spec
+geom        → error
+error                          # LimitKind 定义在此。禁止 → geom、limits、fonts、layout、spec、backend
+limits      → error
+fonts       → error, limits
+canvas      → error, geom, fonts, limits
+text        → error, fonts, geom
+layout      → text, fonts, canvas, error, geom, limits
+spec        → layout, canvas, fonts, error, geom, limits    # 公共文档面；禁止 → backend
+backend     → canvas, fonts, error, geom, limits, krilla    # 禁止 → layout / spec
+lib         → spec, backend, canvas, fonts, error, geom, limits
 ```
 
 `layout_spec` 在 `spec` 里把 `DocumentSpec` 降成 layout 节点。打开 `backend-krilla` 时，`lib.rs` 的 `image_registry` 构造 `ImageTable`。`spec` 不引用 `backend`。
@@ -103,7 +106,7 @@ backend     → canvas, fonts, error, geom, krilla    # 禁止 → layout / spec
 | --- | --- | --- |
 | `layout/`、`text/`、`fonts/`、`spec/` | 自有几何、Canvas、skrifa（测量 PR 起） | `use krilla::…`；这些模块 → `backend` |
 | `backend/` | krilla、把 Canvas 指令译成 PDF | 被 `layout` 或 `spec` 反向依赖 |
-| `error` | 自有 kind / Display | 依赖 `fonts::FontId` 等上层类型 |
+| `error` | 自有 kind / Display，含 `LimitKind` | 依赖 `limits`、`fonts::FontId` 等上层类型 |
 | `lib.rs` 重导出 | 公共 `spec`、geom、error、Canvas | 任何 krilla 类型 |
 | 测试 | 排版用 `RecordingCanvas` 断言坐标 | 用测试依赖反转生产 DAG；把 krilla 压缩字节当排版断言 |
 
@@ -123,6 +126,7 @@ backend     → canvas, fonts, error, geom, krilla    # 禁止 → layout / spec
 ### 门禁（每个可合并改动）
 
 ```bash
+python3 scripts/check_quire_pdf_modules.py
 cargo fmt --all -- --check
 cargo clippy -p quire-pdf --all-targets --features test-utils -- -D warnings
 cargo test -p quire-pdf --features test-utils
@@ -146,7 +150,7 @@ cargo doc -p quire-orgchart --no-deps
 
 - **Edition** `2021`，**MSRV** `1.92`（跟 krilla 0.8.2）；CI 用同一 toolchain。
 - **禁止** `unsafe`（`Cargo.toml` / `#![forbid(unsafe_code)]`）。
-- 依赖**按需引入、精确钉版本**（`=x.y.z`）。计划中的钉：`krilla =0.8.2`（`default-features = false`，开 `raster-images`）、`skrifa =0.48.0`、`unicode-segmentation =1.13.3`。未用到的依赖不要写进清单。
+- 依赖**按需引入、精确钉版本**（`=x.y.z`），写在根 `Cargo.toml` 的 `[workspace.dependencies]`。成员 crate 用 `workspace = true`，各自的 feature 留在使用处。当前直依是 `krilla =0.8.2`（`default-features = false`，`quire-pdf` 再开 `raster-images`）、`skrifa =0.48.0`（workspace 关闭 default。`quire-pdf` 与 `quire-forms` 打开 `std` 和 `autohint_shaping`。`quire-orgchart` 只打开 `std`）、`unicode-segmentation =1.13.3`、`png =0.18.1`、`read-fonts =0.45.0`（`default-features = false`，`quire-orgchart` 再开 `std`）、`lopdf =0.45.0`（`default-features = false`）。未用到的依赖不要写进清单。
 - 不启用 krilla 的 `simple-text` / `rayon`；禁止 `Surface::draw_text`。
 - 测量与绘制同一条字形管线：charmap → advance → 断行 → 同一批 glyph id 再画。
 - 缺字策略以提案书 §4 为准（设计稿默认「缺字即错」；未确认前不要实现回退字体）。
@@ -157,12 +161,15 @@ cargo doc -p quire-orgchart --no-deps
 - rustfmt / clippy 即风格；禁止大段 `#[allow(...)]`，必要时单点 + 一行理由。
 - `missing_docs`：当前 `warn`。公共 `spec` 与其余稳定对外 API 落地后升为 `deny`。
 - 公共项写 `///`（模块级说明 + 类型/方法）；`Errors` / `Panics` 按 API Guidelines。`pub(crate)` 与私有代码短注释即可。
-- 库代码用 `Result` + 本库 `Error`；公共路径不 `unwrap` / `expect`（测试与已证明的私有不变量除外）。
+- 库代码返回本 crate 的 `Result`。三个 crate 不共用一个 error crate。
+- `quire-pdf` 的失败是 `Error` 或 `Errors`。位置放在可选的 `Location`。依赖失败通过 `source()` 取出。
+- `quire-forms` 的失败是单条 `Error`，没有字段级 `Location`。依赖失败通过 `source()` 取出。
+- `quire-orgchart` 的失败是 `ErrorCode` 加 `message`。调用方匹配 `ErrorCode::as_str`。`message` 只给日志。依赖失败映射到稳定码。`crates/quire-orgchart/src` 的生产路径不用 `expect` 或 `unwrap`。`#[cfg(test)]` 模块和 `tests/` 可以。
 
 ### PR 纪律
 
 - **一 PR 一件事**：不顺手重构无关模块；不把未确认功能「顺便」做进当前 PR。主题内为夯实基础的必要大改可以做（见「现阶段姿态」）。
-- 用户可见行为写入 `CHANGELOG.md`（有公共行为起记；`publish = false` 期间也记）。
+- 用户可见行为写入 `CHANGELOG.md`（有公共行为起记）。
 - 外部贡献说明见 `CONTRIBUTING.md`（英文短版，细节仍以本文件为准）。
 
 ## Agent 工作方式
@@ -182,6 +189,5 @@ cargo doc -p quire-orgchart --no-deps
 - 在提案书定为不做/延后的能力上抢跑：TOC / QR / SVG / 流内 canvas / 加密 / 标签 PDF 等；单元格合并等**已确认要做的**按对应层实现。股权架构图在 `quire-orgchart`，行为以 `docs/quire-orgchart-spec.md` 为准，不进 `quire-pdf`。
 - 用 JSON/serde 当主接口（设计稿旧表述已作废；serde 若将来做，也只是可选，不是主路径）。
 - 并行开页或并行画页。
-- 删除 `publish = false`，除非限额 PR 与信件夹具已通过。
 - 为「像大厂」堆流程：不建 viewer 视觉回归农场；不放宽成 `^` 依赖。
 - 把 forms / orgchart 做成 `quire-pdf` 的 feature，或让 `quire-forms` ↔ `quire-pdf` 互相依赖。

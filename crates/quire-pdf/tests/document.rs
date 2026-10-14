@@ -85,6 +85,7 @@ fn render(page: PageSize, resources: Resources, sections: Vec<SectionSpec>) -> R
         page_size: page,
         resources,
         limits: quire_pdf::Limits::default(),
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections,
     })
 }

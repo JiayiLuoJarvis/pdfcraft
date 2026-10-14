@@ -8,6 +8,13 @@ while remaining `0.x`.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-14
+
+### Changed
+
+- `quire-pdf`, `quire-forms`, and `quire-orgchart` are `0.1.0`. These crates can be published.
+- The published `quire-orgchart` package omits `SourceHanSerifHC-ExtraLight.ttf`. The git repository still has that face for tests. `gzip -c` of the face is 14798216 bytes, and crates.io rejects an upload larger than 10485760 bytes. `cargo publish --dry-run` does not report that limit.
+
 ### Documentation
 
 - Confirmed `quire-forms` in the proposal. The crate takes PDF bytes, fills existing AcroForm fields, and flattens on every successful call, including an empty field map. It does not depend on `quire-pdf`.
@@ -17,12 +24,13 @@ while remaining `0.x`.
 
 ### Fixed
 
+- `quire-orgchart` returns `ErrorCode::LayoutFailed` when a page draft, page order, placed node, or ratio label has no measured box. Those lookups used to panic.
 - `quire-orgchart` `generate_pdf` measures overflow boxes, continuation cues, and promoted annex subjects with the same skrifa face that draws the page.
 
 ### Added
 
 - `quire-forms` `FillOptions` now covers production fill options. `h_align` / `v_align` and their overrides, `font_size_overrides`, `line_below`, and `absolute_lines` (`AbsoluteLine`, default red 0.8 pt). Unknown names in those maps follow `missing`. Vertical placement uses glyph ink. A last line of one glyph may drop the size by up to 2 pt. A TrueType collection is reduced to `FontBytes.index` before embed. CJK text fills when the caller supplies a `glyf` font. `QUIRE_FORMS_FONT` turns on the Chinese fixture test. Subsetting and OTF are still out.
-- `quire-forms` lists AcroForm widgets with `list_fields` and fills ASCII text, checkboxes, and choices with `fill_and_flatten`. A successful call removes every widget annotation and the catalog `AcroForm` entry. An empty field map still removes the form. Font bytes are an argument on `FillOptions`. The crate pins `lopdf` 0.34.0. It does not depend on `quire-pdf`.
+- `quire-forms` lists AcroForm widgets with `list_fields` and fills ASCII text, checkboxes, and choices with `fill_and_flatten`. A successful call removes every widget annotation and the catalog `AcroForm` entry. An empty field map still removes the form. Font bytes are an argument on `FillOptions`. The crate pins `lopdf` 0.45.0 with default features off. It does not depend on `quire-pdf`.
 - `quire-orgchart` checks an equity chart with `validate_request` and builds a PDF info title with `document_title`. `top_n` of `None` or `Some(0)` leaves the request unchanged. A larger `top_n` folds extra shareholder children into one `其他股东(k家)` node. This step does not check the folded node count against `max_nodes`, and it does not draw a PDF.
 - `quire-orgchart` builds in-box lines and page-chrome strings. A ratio stays outside the box. Shareholder and subject lines are the name and the legal person. Investment lines are the name, paid-in amount, location, and approval date. Page titles use `股权架构图`, `对外投资`, `续页`, and `附件`. The footer keeps `頁`. This step does not measure text or draw a PDF.
 - `quire-orgchart` measures node boxes from `FontBytes` with skrifa `0.48.0`. A `ttcf` collection is `FONT_ERROR`. A missing glyph is `MISSING_GLYPH`. A box taller than the portrait limit is `NODE_TOO_TALL`. This step does not draw a PDF.
@@ -44,8 +52,13 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `Canvas` is crate-private. `layout_spec` and `to_pdf` do not take a caller canvas. `CanvasCommand`, `GlyphRun`, `GlyphPlacement`, `RecordingCanvas`, and `Rendered::pages` stay public so tests can read the recorded log. That log is not a pluggable backend.
+- **Breaking.** `FontId::from_raw` and `ImageId::from_raw` are crate-private. `FontId::as_u32` and `ImageId::as_u32` stay public. `FontId` stays in `fonts`.
+- **Breaking.** `DocumentSpec` has a public `info` field of type `DocumentInfo`. Struct literals must set it. `DocumentSpec::new` leaves it empty. `layout_spec` keeps the value, and `to_pdf` writes a non-empty title and author into the PDF information dictionary. Empty strings are omitted. Creator stays `quire`. Producer is not set. `pdfinfo` prints `Title` and `Author`. `DocumentInfo` is also available as `spec::DocumentInfo`.
+- `LimitKind` is defined in `error` next to `ErrorKind::LimitExceeded`. `limits` and the crate root still re-export it, so `quire_pdf::LimitKind` is unchanged.
 - Layout and backend policy thresholds (column counts, marker ranges, upem tolerance) and product defaults (column gap, blank stroke) are named constants next to the code that owns them. Behavior is unchanged.
-- Bump the workspace `skrifa` pin from `0.47.0` to `0.48.0` in `quire-pdf` and `quire-forms`. `krilla` still pulls its own `skrifa` 0.42.x copy.
+- Bump the workspace `skrifa` pin from `0.47.0` to `0.48.0` in `quire-pdf` and `quire-forms`. `krilla` 0.8.2 still requires `skrifa` ^0.42.0 (resolved to 0.42.1 on 2026-10-14). No newer krilla is on crates.io, so the two copies remain. `emit` rejects a units-per-em mismatch, and a test locks the fixture glyph's TJ adjustment at `-250`.
+- `quire-forms` pins `lopdf` 0.45.0 with default features off. Parsing no longer uses the removed `nom_parser` feature. `Document::get_page_content` returns the page bytes directly. Direct dependency versions live in `[workspace.dependencies]`.
 - **Breaking.** `quire-forms` `FillOptions` is no longer `Copy` (alignment override maps are borrowed). Struct-update sites that relied on `Copy` need `Clone` or a fresh `FillOptions`.
 - **Breaking.** `quire-forms` no longer exports `DEFAULT_FONT_SIZE`, `MIN_FONT_SIZE`, `FONT_SIZE_STEP`, `LINE_HEIGHT_FACTOR`, `PAD_X`, `PAD_BOTTOM`, or `PAD_TOP`. The values are unchanged.
 - **Breaking.** `quire-forms` `ErrorKind::InvalidArgument` carries `field_name` and `reason: ArgumentReason` instead of `message`. `ErrorKind::FlattenFailed` carries `reason: FlattenReason` instead of `message`. The variant names are unchanged. A non-finite content-stream number and an out-of-range font width fail instead of being written as 0.

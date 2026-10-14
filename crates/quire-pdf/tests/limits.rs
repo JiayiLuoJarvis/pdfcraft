@@ -22,6 +22,7 @@ fn lay(
         page_size: PageSize::A4,
         resources,
         limits,
+        info: quire_pdf::spec::DocumentInfo::default(),
         sections: vec![section],
     })
 }

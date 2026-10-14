@@ -10,4 +10,11 @@ members = [
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-publish = false
+
+[workspace.dependencies]
+krilla = { version = "=0.8.2", default-features = false }
+lopdf = { version = "=0.45.0", default-features = false }
+png = { version = "=0.18.1" }
+read-fonts = { version = "=0.45.0", default-features = false }
+skrifa = { version = "=0.48.0", default-features = false }
+unicode-segmentation = { version = "=1.13.3" }

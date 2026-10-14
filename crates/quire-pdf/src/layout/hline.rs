@@ -36,42 +36,42 @@ impl HLineNode {
         }
     }
 
-    fn height(&self) -> f32 {
-        self.space_before.as_pt() + self.thickness.as_pt() + self.space_after.as_pt()
+    fn height(&self) -> Length<NonNegative> {
+        self.space_before + Length::<NonNegative>::from(self.thickness) + self.space_after
     }
 
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
-        let width = self.width.map_or(avail.width, Length::as_pt);
+        let width = self.width.unwrap_or(avail.width);
         let height = self.height();
-        if width > avail.width {
+        if width.as_pt() > avail.width.as_pt() {
             return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                 text: None,
-                width,
-                avail: avail.width,
+                width: width.as_pt(),
+                avail: avail.width.as_pt(),
             }));
         }
-        if height > avail.full_height {
+        if height.as_pt() > avail.full_height.as_pt() {
             return Err(ErrorKind::UnsplittableTallerThanFrame {
-                height,
-                avail: avail.full_height,
+                height: height.as_pt(),
+                avail: avail.full_height.as_pt(),
             }
             .into());
         }
-        if height > avail.height {
+        if height.as_pt() > avail.height.as_pt() {
             return Ok(Split::MoveToNextPage(self));
         }
         let x = match self.align {
             TextAlign::Start => 0.0,
-            TextAlign::Center => (avail.width - width) / 2.0,
-            TextAlign::End => avail.width - width,
+            TextAlign::Center => (avail.width - width).as_pt() / 2.0,
+            TextAlign::End => (avail.width - width).as_pt(),
         };
         let y = self.space_before.as_pt() + self.thickness.as_pt() / 2.0;
-        let path = Path::line(Point::try_pt(x, y)?, Point::try_pt(x + width, y)?);
+        let path = Path::line(Point::try_pt(x, y)?, Point::try_pt(x + width.as_pt(), y)?);
         Ok(Split::Fit {
             height,
             fragment: Fragment {
                 height,
-                spacing_after: 0.0,
+                spacing_after: NonNegative::ZERO,
                 commands: vec![FragmentCommand::Stroke {
                     path,
                     paint: Paint::solid(self.color),

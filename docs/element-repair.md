@@ -42,7 +42,7 @@ pub enum Track {
 
 边框不导出 `Border`。调用方用 `Table::border(width, color)`。宽 0 不描边，默认黑。
 
-`Track` 只在 `Table::tracks` 与 `Columns` 的分栏方法之间用。lowering 时映到内部 `ColumnWidth`。`Ratio` 的权重语义与现在的 `layout::columns::Ratio` 相同。
+`Track` 只在 `Table::tracks` 与 `Columns` 的分栏方法之间用。lowering 时映到内部 `ColumnWidth`。`Ratio` 的权重语义与现在的 `layout::column_width::Ratio` 相同。
 
 `TextAlign` 继续 `pub(crate)`。段落、图、线、页眉槽继续用方法设对齐，不把该枚举交给调用方。
 

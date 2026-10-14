@@ -1,10 +1,10 @@
 //! Public value types used by [`super::DocumentSpec`].
 
-use crate::canvas::{ImageRegistry, RecordedPage, RecordingCanvas};
+use crate::canvas::{DocumentInfo, ImageRegistry, RecordedPage, RecordingCanvas};
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible};
 use crate::fonts::{FontId, FontStore};
 use crate::geom::{Length, Positive};
-use crate::layout::columns::{ColumnWidth, Ratio as LayoutRatio};
+use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
 use crate::layout::list::MarkerKind;
 use crate::layout::style::{Style, TextAlign};
 
@@ -103,10 +103,21 @@ pub(crate) fn default_style() -> Style {
 #[must_use]
 pub struct Rendered {
     pub(crate) recording: RecordingCanvas,
-    #[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
+    #[cfg_attr(
+        not(feature = "backend-krilla"),
+        allow(dead_code, reason = "only to_pdf reads fonts when the backend is on")
+    )]
     pub(crate) fonts: FontStore,
-    #[cfg_attr(not(feature = "backend-krilla"), allow(dead_code))]
+    #[cfg_attr(
+        not(feature = "backend-krilla"),
+        allow(dead_code, reason = "only to_pdf reads images when the backend is on")
+    )]
     pub(crate) images: Box<dyn ImageRegistry>,
+    #[cfg_attr(
+        not(feature = "backend-krilla"),
+        allow(dead_code, reason = "only to_pdf reads info when the backend is on")
+    )]
+    pub(crate) info: DocumentInfo,
 }
 
 impl Rendered {

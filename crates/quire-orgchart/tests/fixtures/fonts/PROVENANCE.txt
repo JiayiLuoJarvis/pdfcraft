@@ -6,4 +6,18 @@ on 2026-10-13. The Python package measures this file. The bytes are the original
 file, not a subset.
 
 Source Han Serif is published by Adobe under the SIL Open Font License 1.1.
-HC is the Hong Kong / Macau region build used by pdfcraft-equity.
+The font name table records the same terms. Name ID 0 is
+"© 2017-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+Name ID 7 is the Source trademark notice. Name ID 13 names SIL Open Font
+License, Version 1.1. Name ID 14 is http://scripts.sil.org/OFL.
+
+The full license text is OFL.txt in this directory. The license body matches
+the SIL plaintext at https://openfontlicense.org/documents/OFL.txt. The
+copyright lines at the top of OFL.txt are filled from name ID 0 and name ID 7.
+OFL 1.1 allows this unmodified font to be bundled with software when that
+notice and OFL.txt travel with the file. The git checkout keeps the font
+beside OFL.txt and this file. The published crate ships OFL.txt and this file,
+and leaves the font file out. `gzip -c` of the face is 14798216 bytes.
+crates.io rejects an upload larger than 10485760 bytes.
+
+HC is the Hong Kong and Macau region build used by pdfcraft-equity.
