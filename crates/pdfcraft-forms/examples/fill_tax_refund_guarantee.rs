@@ -13,8 +13,7 @@
 //! font to also fill `companyName`, `recipientName`, and `address`.
 //!
 //! Font resolution order:
-//! 1. `PDFCRAFT_FORMS_FONT` — path to a TrueType (`glyf`) `.ttf`
-//! 2. `tests/fixtures/DejaVuSans.ttf` — enough for the ASCII fields below
+//! 1. `PDFCRAFT_FORMS_FONT` — path to a TrueType (`glyf`) `.ttf` (required)
 //!
 //! ```text
 //! cargo run -p pdfcraft-forms --example fill_tax_refund_guarantee
@@ -38,10 +37,12 @@ fn main() {
             process::exit(1);
         });
 
-    let font_path = env::var_os("PDFCRAFT_FORMS_FONT")
-        .map_or_else(|| root.join("tests/fixtures/DejaVuSans.ttf"), PathBuf::from);
+    let font_path = env::var_os("PDFCRAFT_FORMS_FONT").unwrap_or_else(|| {
+        eprintln!("set PDFCRAFT_FORMS_FONT to a .ttf path");
+        process::exit(1);
+    });
     let font = fs::read(&font_path).unwrap_or_else(|err| {
-        eprintln!("read font {}: {err}", font_path.display());
+        eprintln!("read font {}: {err}", PathBuf::from(&font_path).display());
         process::exit(1);
     });
 

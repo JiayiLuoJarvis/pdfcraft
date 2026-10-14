@@ -40,13 +40,17 @@ pdfcraft-pdf = { version = "0.1.0", features = ["test-utils"] }
 
 ```rust
 use pdfcraft_pdf::spec::{
-    BandInset, BandSlot, BandSpec, Block, DocumentInfo, Resources, SectionSpec, TextRun,
+    BandInset, BandSlot, BandSpec, Block, DocumentInfo, FontFace, FontFamily, FontRegistry,
+    Resources, SectionSpec, TextRun,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize, Result};
 
 fn main() -> Result<()> {
-    let font = std::fs::read("tests/fixtures/quire-measure.ttf").expect("fixture font");
-    let resources = Resources::new(font);
+    let font = std::fs::read("path/to/face.ttf").expect("font");
+    let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace { bytes: font, index: 0 },
+        bold: None,
+    }));
 
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -57,17 +61,23 @@ fn main() -> Result<()> {
             margins: Margins::try_uniform(48.0)?,
             header: Some(BandSpec {
                 inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text(vec![TextRun::Literal("pdfcraft-pdf".into())])),
-                right: Some(BandSlot::Text(vec![
-                    TextRun::Literal("Page ".into()),
-                    TextRun::PageNumber,
-                    TextRun::Literal(" / ".into()),
-                    TextRun::PageCount,
-                ])),
+                left: Some(BandSlot::Text {
+                    runs: vec![TextRun::Literal("pdfcraft-pdf".into())],
+                    font: (),
+                }),
+                right: Some(BandSlot::Text {
+                    runs: vec![
+                        TextRun::Literal("Page ".into()),
+                        TextRun::PageNumber,
+                        TextRun::Literal(" / ".into()),
+                        TextRun::PageCount,
+                    ],
+                    font: (),
+                }),
             }),
             body: vec![
-                Block::paragraph("Hello from pdfcraft-pdf."),
-                Block::paragraph("Missing glyphs fail the whole document."),
+                Block::paragraph((), "Hello from pdfcraft-pdf."),
+                Block::paragraph((), "Missing glyphs fail the whole document."),
             ],
             ..SectionSpec::default()
         }],
@@ -106,7 +116,7 @@ cargo run -p pdfcraft-pdf --example bill   # needs a CJK face; see examples/READ
    paths).
 
 Coordinates: PDF points, **top-left origin, y downward**.  
-Fonts: you supply face bytes; a missing cmap entry fails the document.  
+Fonts: register face bytes under your own key type. A missing cmap entry fails the document.  
 Dynamic data: use Rust `if` / `for` when building values — there is no template
 DSL and no caller-provided layout closures.
 
@@ -130,7 +140,7 @@ errors, testing).
 | --- | --- |
 | `DocumentSpec` / `SectionSpec` | Document and section values |
 | `DocumentSpec.info` | PDF title and author (`DocumentInfo`). Creator stays `pdfcraft` |
-| `Resources` | Font bytes + `add_image` → `ImageRef` |
+| `FontRegistry` / `Resources::with_fonts` | Faces keyed by your type, plus `add_image` → `ImageRef` |
 | `Block` and friends | Flow content |
 | `BandSpec` / `TextRun` | Header/footer; page numbers at paint time |
 | `LayerMark` / `PageWhen` | Page-anchored marks |

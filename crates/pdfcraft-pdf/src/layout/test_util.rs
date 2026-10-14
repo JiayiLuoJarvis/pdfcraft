@@ -12,14 +12,10 @@ use crate::layout::paragraph::TextNode;
 use crate::layout::style::{Style, TextAlign};
 use crate::text::measure::{line_metrics, LineMetrics};
 
-pub(crate) fn fonts_and_style() -> (FontStore, Style) {
+pub(crate) fn fonts_and_style() -> Option<(FontStore, Style)> {
+    let bytes = fixture_bytes()?;
     let mut fonts = FontStore::new();
-    let font = fonts
-        .register(FontSource {
-            bytes: fixture_bytes(),
-            index: 0,
-        })
-        .unwrap();
+    let font = fonts.register(FontSource { bytes, index: 0 }).unwrap();
     let style = Style::new(
         font,
         Positive::pt(12.0).unwrap(),
@@ -29,7 +25,7 @@ pub(crate) fn fonts_and_style() -> (FontStore, Style) {
         TextAlign::Start,
     )
     .unwrap();
-    (fonts, style)
+    Some((fonts, style))
 }
 
 pub(crate) fn metrics(fonts: &FontStore, style: &Style) -> LineMetrics {

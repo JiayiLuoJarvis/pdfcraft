@@ -82,7 +82,7 @@ jobs:
           case "${RUNNER_OS}" in
             Linux)
               sudo apt-get update
-              sudo apt-get install -y poppler-utils
+              sudo apt-get install -y poppler-utils fonts-dejavu-core fonts-noto-cjk
               ;;
             macOS)
               HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install poppler
@@ -94,6 +94,36 @@ jobs:
           esac
           command -v pdftotext
           command -v pdfinfo
+
+      - name: Resolve test fonts
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-fonts
+          case "${RUNNER_OS}" in
+            Linux)
+              forms=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+              cjk="$(find /usr/share/fonts -type f \( -name 'NotoSansCJK*Regular*.ttc' -o -name 'NotoSansCJKsc-Regular.otf' \) | head -n1)"
+              ;;
+            macOS)
+              curl -fsSL -o .ci-fonts/DejaVuSans.ttf \
+                "https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans.ttf"
+              forms="$PWD/.ci-fonts/DejaVuSans.ttf"
+              cjk=""
+              ;;
+            *)
+              echo "No font setup for ${RUNNER_OS}." >&2
+              exit 1
+              ;;
+          esac
+          test -f "$forms"
+          {
+            echo "PDFCRAFT_FORMS_FONT=${forms}"
+            echo "PDFCRAFT_PDF_FONT=${forms}"
+            if [ -n "${cjk}" ] && [ -f "${cjk}" ]; then
+              echo "PDFCRAFT_CJK_FONT=${cjk}"
+              echo "PDFCRAFT_PDF_FONT=${cjk}"
+            fi
+          } >> "${GITHUB_ENV}"
 
       - name: clippy forms and orgchart
         run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings

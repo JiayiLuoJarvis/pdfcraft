@@ -13,8 +13,6 @@ include = [
     "src/**/*",
     "examples/**/*",
     "tests/fixtures/README.md",
-    "tests/fixtures/DejaVuSans.ttf",
-    "tests/fixtures/DejaVuSans.LICENSE",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE",

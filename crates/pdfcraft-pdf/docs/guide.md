@@ -26,7 +26,8 @@ Two moments matter:
 
 ```rust
 use pdfcraft_pdf::spec::{
-    Block, CellBlock, CellSpec, DocumentInfo, Resources, SectionSpec, TableSpec,
+    Block, CellBlock, CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources,
+    SectionSpec, TableSpec,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, PageSize, Result};
 
@@ -36,21 +37,31 @@ struct Item { name: String, amount: String }
 struct Contract { id: String, kind: Kind, items: Vec<Item> }
 
 fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
-    let mut body = vec![Block::paragraph(format!("Contract {}", contract.id))];
+    let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace { bytes: font, index: 0 },
+        bold: None,
+    }));
+    let mut body = vec![Block::paragraph((), format!("Contract {}", contract.id))];
     match contract.kind {
         Kind::A => {
-            body.push(Block::paragraph("Plan A."));
+            body.push(Block::paragraph((), "Plan A."));
             let rows = contract
                 .items
                 .iter()
                 .map(|item| {
                     vec![
                         CellSpec {
-                            content: vec![CellBlock::Text(item.name.clone())],
+                            content: vec![CellBlock::Text {
+                                text: item.name.clone(),
+                                font: (),
+                            }],
                             ..CellSpec::default()
                         },
                         CellSpec {
-                            content: vec![CellBlock::Text(item.amount.clone())],
+                            content: vec![CellBlock::Text {
+                                text: item.amount.clone(),
+                                font: (),
+                            }],
                             ..CellSpec::default()
                         },
                     ]
@@ -59,11 +70,17 @@ fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
             body.push(Block::Table(TableSpec {
                 header: vec![vec![
                     CellSpec {
-                        content: vec![CellBlock::Text("Item".into())],
+                        content: vec![CellBlock::Text {
+                            text: "Item".into(),
+                            font: (),
+                        }],
                         ..CellSpec::default()
                     },
                     CellSpec {
-                        content: vec![CellBlock::Text("Amount".into())],
+                        content: vec![CellBlock::Text {
+                            text: "Amount".into(),
+                            font: (),
+                        }],
                         ..CellSpec::default()
                     },
                 ]],
@@ -72,14 +89,14 @@ fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
             }));
         }
         Kind::B => {
-            body.push(Block::paragraph("Plan B."));
-            body.push(Block::paragraph("No detail table."));
+            body.push(Block::paragraph((), "Plan B."));
+            body.push(Block::paragraph((), "No detail table."));
         }
     }
 
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
-        resources: Resources::new(font),
+        resources,
         limits: Limits::default(),
         info: DocumentInfo::default(),
         sections: vec![SectionSpec {
@@ -115,23 +132,50 @@ the header/footer band height. Set margins yourself (or use `MarginPreset::Inch`
 ## Resources
 
 ```rust
-use pdfcraft_pdf::spec::Resources;
+use pdfcraft_pdf::spec::{FontFace, FontFamily, FontRegistry, Resources};
 use pdfcraft_pdf::ImageFormat;
 
-let mut resources = Resources::new(body_font_ttf_or_otf);
-resources.bold_font = Some(bold_face_bytes); // only if you use InlineRun::Bold
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum DocFont { Body, Cjk }
+
+let mut fonts = FontRegistry::new();
+fonts.register(DocFont::Body, FontFamily {
+    normal: FontFace { bytes: body_ttf, index: 0 },
+    bold: Some(FontFace { bytes: bold_ttf, index: 0 }),
+});
+fonts.register(DocFont::Cjk, FontFamily {
+    normal: FontFace { bytes: cjk_ttf, index: 0 },
+    bold: None,
+});
+let mut resources = Resources::with_fonts(fonts);
 let logo = resources.add_image(png_bytes, ImageFormat::Png);
+```
+
+A document that uses one family can skip the enum. `FontRegistry::single` registers that family under `()`.
+
+```rust
+let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
+    normal: FontFace { bytes: body_ttf, index: 0 },
+    bold: None,
+}));
 ```
 
 | Topic | Behavior |
 | --- | --- |
-| Body font | Required for any text |
-| Bold font | Required when the document contains `InlineRun::Bold` |
-| Missing glyph | Layout fails with `ErrorKind::MissingGlyph` — no fallback face, no `.notdef` box |
+| Font key | Your type `K` (`Copy + Eq + Hash + Debug`). Runs store `K`. |
+| Registry | `FontRegistry::register`. Registering the same key again replaces that family. |
+| One family | `FontRegistry::single` uses the key `()`. |
+| Collection index | `FontFace.index` selects a face inside a collection. `0` is the first face. |
+| Bold | `InlineRun::Bold` needs `FontFamily.bold`. Otherwise layout records `ErrorKind::BoldFaceRequired`. |
+| Unknown key | `ErrorKind::UnregisteredFont`. The document fails. |
+| Missing glyph | `ErrorKind::MissingGlyph`. There is no fallback face and no `.notdef` box. |
+| Empty registry | Valid when the document has no text. |
 | Images | Encoded bytes + `ImageFormat` only (no HTTP) |
 | Handle scope | An `ImageRef` is valid only for the `Resources` that created it |
 | PNG pixel errors | Fail in `layout_spec` (`ErrorKind::Image`) |
 | JPEG / GIF / WebP pixel errors | May fail in `to_pdf` (`ErrorKind::Backend`, no page attached) |
+
+Each run names its face. The library does not pick a face from the script of the text. List markers use the first face that registered successfully.
 
 Text shaping scope: horizontal Chinese and Latin. No bidi, vertical writing,
 kerning, ligatures, or justified lines in v1 (`Alignment` is Start / Center /
@@ -187,7 +231,7 @@ available.
 | `Image(ImageSpec)` | Raster block (atomic; not split mid-image) |
 | `HLine(HLineSpec)` | Horizontal rule |
 
-`Block::paragraph("…")` is shorthand for a single normal-face text run.
+`Block::paragraph(font, "…")` is shorthand for one `InlineRun::Text` on that font key. `ParagraphSpec::text` is the same run inside a paragraph value.
 
 ### Nesting rules (v1)
 
@@ -207,19 +251,22 @@ use pdfcraft_pdf::{Color, NonNegative, Positive};
 
 let paragraph = ParagraphSpec {
     runs: vec![
-        InlineRun::Text("Amount: ".into()),
+        InlineRun::Text { text: "Amount: ".into(), font: () },
         InlineRun::Blank(BlankSpec {
             width: BlankWidth::Em(8),
             thickness: Some(Positive::pt(0.75).unwrap()),
             color: Some(Color::rgb(0, 0, 0)),
             baseline_offset: Some(NonNegative::ZERO),
         }),
-        InlineRun::Text(". See ".into()),
+        InlineRun::Text { text: ". See ".into(), font: () },
         InlineRun::Link {
             uri: "https://example.test/pay".into(),
-            runs: vec![InlineRun::Text("payment terms".into())],
+            runs: vec![InlineRun::Text {
+                text: "payment terms".into(),
+                font: (),
+            }],
         },
-        InlineRun::Text(".".into()),
+        InlineRun::Text { text: ".".into(), font: () },
     ],
     first_line_indent: NonNegative::ZERO,
     align: Alignment::Start,
@@ -230,7 +277,7 @@ let paragraph = ParagraphSpec {
 
 | Topic | Rule |
 | --- | --- |
-| `InlineRun::Text` / `Bold` | Body / bold face |
+| `InlineRun::Text` / `Bold` | `{ text, font }`. `Bold` uses `FontFamily.bold` for that key. |
 | `InlineRun::Link` | Writes PDF link annotations over the glyph boxes; does not fetch the URI. Empty URI fails layout |
 | `BlankWidth::Fixed` / `Em` / `ToEndOfLine` | Underline-style blanks in forms |
 | Band / layer copy | Uses `TextRun` (resolved at paint time), not `InlineRun` |
@@ -276,11 +323,11 @@ use pdfcraft_pdf::{Color, NonNegative, Track};
 TableSpec {
     header: vec![vec![
         CellSpec {
-            content: vec![CellBlock::Text("Name".into())],
+            content: vec![CellBlock::Text { text: "Name".into(), font: () }],
             ..CellSpec::default()
         },
         CellSpec {
-            content: vec![CellBlock::Text("Qty".into())],
+            content: vec![CellBlock::Text { text: "Qty".into(), font: () }],
             col_span: NonZeroU16::new(2).unwrap(),
             ..CellSpec::default()
         },
@@ -315,19 +362,20 @@ ListSpec {
     items: vec![
         ListItemSpec {
             marker: None, // automatic label
-            blocks: vec![Block::paragraph("First")],
+            blocks: vec![Block::paragraph((), "First")],
         },
         ListItemSpec {
             marker: Some("*".into()), // custom; does not advance the counter
-            blocks: vec![Block::paragraph("Aside")],
+            blocks: vec![Block::paragraph((), "Aside")],
         },
     ],
 }
 ```
 
-Markers appear on the first fragment of an item; continuations keep the hanging
-indent without reprinting the marker. Automatic outline numbering (`1.1.1`) is
-not provided — nest lists instead.
+Markers appear on the first fragment of an item. Continuations keep the hanging
+indent and do not reprint the marker. Generated and custom markers use the first
+face that registered successfully. Automatic outline numbering (`1.1.1`) is
+not provided. Nest lists instead.
 
 ---
 
@@ -338,13 +386,19 @@ use pdfcraft_pdf::spec::{BandInset, BandSlot, BandSpec, TextRun};
 
 BandSpec {
     inset: BandInset::PageMargins, // or BandInset::Fixed { left, right }
-    left: Some(BandSlot::Text(vec![TextRun::Literal("Acme Co.".into())])),
-    right: Some(BandSlot::Text(vec![
-        TextRun::Literal("Page ".into()),
-        TextRun::PageNumber,
-        TextRun::Literal(" / ".into()),
-        TextRun::PageCount,
-    ])),
+    left: Some(BandSlot::Text {
+        runs: vec![TextRun::Literal("Acme Co.".into())],
+        font: (),
+    }),
+    right: Some(BandSlot::Text {
+        runs: vec![
+            TextRun::Literal("Page ".into()),
+            TextRun::PageNumber,
+            TextRun::Literal(" / ".into()),
+            TextRun::PageCount,
+        ],
+        font: (),
+    }),
 }
 ```
 
@@ -366,7 +420,7 @@ Use `LayerMark` for page-anchored content (seals, watermarks, paths):
 
 | Variant | Notes |
 | --- | --- |
-| `Text` | One unwrapped line; forced breaks error |
+| `Text` | One unwrapped line on a font key. Forced breaks error. |
 | `Image` | Stretched into a page `Rect` |
 | `Line` / `Rect` / `Ellipse` | Geometry + pen / ink |
 | `Rotated` | Group of `LayerShape` around a pivot |

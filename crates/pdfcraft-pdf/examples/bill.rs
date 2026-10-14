@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec, ColumnsSpec,
-    HLineSpec, ImageRef, ImageSpec, InlineRun, ParagraphSpec, Resources, SectionSpec, TableSpec,
-    TextRun, TextStyle,
+    FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, InlineRun, ParagraphSpec,
+    Resources, SectionSpec, TableSpec, TextRun, TextStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -40,20 +40,16 @@ fn main() -> Result<()> {
         fs::create_dir_all(parent).expect("create output dir");
     }
 
-    let mut resources = Resources::new(load_font(
-        "PDFCRAFT_CJK_FONT",
-        &[
-            ".fonts/body.ttf",
-            "/mnt/data/apps/hcsw-pdfcraft/backend/assets/fonts/SourceHanSerifHK/SourceHanSerifHK-Regular.ttf",
-        ],
-    )?);
-    resources.bold_font = Some(load_font(
-        "PDFCRAFT_CJK_BOLD_FONT",
-        &[
-            ".fonts/bold.ttf",
-            "/mnt/data/apps/hcsw-pdfcraft/backend/assets/fonts/SourceHanSerifHK/SourceHanSerifHK-Bold.ttf",
-        ],
-    )?);
+    let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: load_font("PDFCRAFT_CJK_FONT", &[".fonts/body.ttf"])?,
+            index: 0,
+        },
+        bold: Some(FontFace {
+            bytes: load_font("PDFCRAFT_CJK_BOLD_FONT", &[".fonts/bold.ttf"])?,
+            index: 0,
+        }),
+    }));
     let logo = resources.add_image(LOGO.to_vec(), ImageFormat::Png);
     let mark = resources.add_image(MARK.to_vec(), ImageFormat::Png);
     let diamond = resources.add_image(DIAMOND.to_vec(), ImageFormat::Png);
@@ -67,25 +63,31 @@ fn main() -> Result<()> {
             margins: Margins::try_new(28.0, 40.0, 28.0, 40.0)?,
             header: Some(BandSpec {
                 inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text(vec![TextRun::Literal(
-                    "恒誠商務有限公司".into(),
-                )])),
-                right: Some(BandSlot::Text(vec![
-                    TextRun::Literal("第 ".into()),
-                    TextRun::PageNumber,
-                    TextRun::Literal(" / ".into()),
-                    TextRun::PageCount,
-                    TextRun::Literal(" 頁".into()),
-                ])),
+                left: Some(BandSlot::Text {
+                    runs: vec![TextRun::Literal("恒誠商務有限公司".into())],
+                    font: (),
+                }),
+                right: Some(BandSlot::Text {
+                    runs: vec![
+                        TextRun::Literal("第 ".into()),
+                        TextRun::PageNumber,
+                        TextRun::Literal(" / ".into()),
+                        TextRun::PageCount,
+                        TextRun::Literal(" 頁".into()),
+                    ],
+                    font: (),
+                }),
             }),
             footer: Some(BandSpec {
                 inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text(vec![TextRun::Literal(
-                    "Tel.: 00852 - 2668 1868".into(),
-                )])),
-                right: Some(BandSlot::Text(vec![TextRun::Literal(
-                    "Web.: www.hc.biz".into(),
-                )])),
+                left: Some(BandSlot::Text {
+                    runs: vec![TextRun::Literal("Tel.: 00852 - 2668 1868".into())],
+                    font: (),
+                }),
+                right: Some(BandSlot::Text {
+                    runs: vec![TextRun::Literal("Web.: www.hc.biz".into())],
+                    font: (),
+                }),
             }),
             body: bill_body(logo, mark, diamond)?,
             ..SectionSpec::default()
@@ -105,19 +107,22 @@ fn nn(value: f32) -> Result<Length<NonNegative>> {
     NonNegative::pt(value).map_err(pdfcraft_pdf::Errors::from)
 }
 
-fn line(text: &str) -> Block {
-    Block::paragraph(text)
+fn line(text: &str) -> Block<()> {
+    Block::paragraph((), text)
 }
 
-fn aligned(text: &str, align: Alignment) -> Block {
+fn aligned(text: &str, align: Alignment) -> Block<()> {
     Block::Paragraph(ParagraphSpec {
-        runs: vec![InlineRun::Text(text.into())],
+        runs: vec![InlineRun::Text {
+            text: text.into(),
+            font: (),
+        }],
         align,
         ..ParagraphSpec::default()
     })
 }
 
-fn styled(size: f32, color: Color, children: Vec<Block>) -> Result<Block> {
+fn styled(size: f32, color: Color, children: Vec<Block<()>>) -> Result<Block<()>> {
     Ok(Block::Styled {
         style: TextStyle {
             font_size: Some(pos(size)?),
@@ -133,7 +138,7 @@ fn rule(
     thickness: f32,
     before: f32,
     after: f32,
-) -> Result<Block> {
+) -> Result<Block<()>> {
     Ok(Block::HLine(HLineSpec {
         width: width.map(pos).transpose()?,
         align,
@@ -144,14 +149,14 @@ fn rule(
     }))
 }
 
-fn ratio_col(weight: f32, blocks: Vec<Block>) -> ColumnSpec {
+fn ratio_col(weight: f32, blocks: Vec<Block<()>>) -> ColumnSpec<()> {
     ColumnSpec {
         width: Track::Ratio(Ratio::new(weight).expect("weight is positive")),
         blocks,
     }
 }
 
-fn filled(content: Vec<CellBlock>, fill: Color) -> CellSpec {
+fn filled(content: Vec<CellBlock<()>>, fill: Color) -> CellSpec<()> {
     CellSpec {
         content,
         fill: Some(fill),
@@ -159,10 +164,13 @@ fn filled(content: Vec<CellBlock>, fill: Color) -> CellSpec {
     }
 }
 
-fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec> {
+fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec<()>> {
     Ok(CellSpec {
         content: vec![CellBlock::Paragraph(ParagraphSpec {
-            runs: vec![InlineRun::Text(text.into())],
+            runs: vec![InlineRun::Text {
+                text: text.into(),
+                font: (),
+            }],
             color: Some(color),
             font_size: Some(pos(size)?),
             ..ParagraphSpec::default()
@@ -171,7 +179,7 @@ fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec> {
     })
 }
 
-fn bill_body(logo: ImageRef, mark: ImageRef, diamond: ImageRef) -> Result<Vec<Block>> {
+fn bill_body(logo: ImageRef, mark: ImageRef, diamond: ImageRef) -> Result<Vec<Block<()>>> {
     let mut body = letterhead(logo, mark)?;
     body.extend(bill_to()?);
     body.extend(service_table()?);
@@ -181,7 +189,7 @@ fn bill_body(logo: ImageRef, mark: ImageRef, diamond: ImageRef) -> Result<Vec<Bl
     Ok(body)
 }
 
-fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block>> {
+fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block<()>>> {
     Ok(vec![
         Block::Columns(ColumnsSpec {
             gap: nn(12.0)?,
@@ -215,7 +223,7 @@ fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block>> {
     ])
 }
 
-fn bill_to() -> Result<Vec<Block>> {
+fn bill_to() -> Result<Vec<Block<()>>> {
     Ok(vec![
         styled(16.0, NAVY, vec![line("Service Bill 服務賬單")])?,
         Block::Spacer(nn(18.0)?),
@@ -235,7 +243,7 @@ fn bill_to() -> Result<Vec<Block>> {
     ])
 }
 
-fn service_table() -> Result<Vec<Block>> {
+fn service_table() -> Result<Vec<Block<()>>> {
     let mut body = vec![vec![
         para_cell("綜合服務費用（含代支）", 11.0, BLACK)?,
         para_cell("505.00 HKD", 10.5, BLACK)?,
@@ -275,9 +283,10 @@ fn service_table() -> Result<Vec<Block>> {
             header: vec![vec![
                 filled(
                     vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![InlineRun::Text(
-                            "Key item (s) / outlay (s) 主要項目/代支".into(),
-                        )],
+                        runs: vec![InlineRun::Text {
+                            text: "Key item (s) / outlay (s) 主要項目/代支".into(),
+                            font: (),
+                        }],
                         color: Some(WHITE),
                         font_size: Some(pos(11.0)?),
                         ..ParagraphSpec::default()
@@ -286,7 +295,10 @@ fn service_table() -> Result<Vec<Block>> {
                 ),
                 filled(
                     vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![InlineRun::Text("Amt. 金額".into())],
+                        runs: vec![InlineRun::Text {
+                            text: "Amt. 金額".into(),
+                            font: (),
+                        }],
                         color: Some(WHITE),
                         font_size: Some(pos(10.5)?),
                         ..ParagraphSpec::default()
@@ -315,7 +327,7 @@ fn service_table() -> Result<Vec<Block>> {
     ])
 }
 
-fn payment(diamond: ImageRef) -> Result<Block> {
+fn payment(diamond: ImageRef) -> Result<Block<()>> {
     let rows = [
         (
             "Beneficiary Bank Name：Hang Seng Bank Ltd",
@@ -353,9 +365,10 @@ fn payment(diamond: ImageRef) -> Result<Block> {
             filled(vec![CellBlock::Spacer(nn(1.0)?)], NAVY),
             filled(
                 vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![InlineRun::Text(
-                        "Payment by bank transfer (T/T) and other info".into(),
-                    )],
+                    runs: vec![InlineRun::Text {
+                        text: "Payment by bank transfer (T/T) and other info".into(),
+                        font: (),
+                    }],
                     color: Some(WHITE),
                     font_size: Some(pos(8.0)?),
                     ..ParagraphSpec::default()
@@ -364,7 +377,10 @@ fn payment(diamond: ImageRef) -> Result<Block> {
             ),
             filled(
                 vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![InlineRun::Text("以電匯付款及其他注意事項".into())],
+                    runs: vec![InlineRun::Text {
+                        text: "以電匯付款及其他注意事項".into(),
+                        font: (),
+                    }],
                     color: Some(WHITE),
                     font_size: Some(pos(8.0)?),
                     ..ParagraphSpec::default()
@@ -385,7 +401,7 @@ fn payment(diamond: ImageRef) -> Result<Block> {
     }))
 }
 
-fn cheque_notes() -> Result<Vec<Block>> {
+fn cheque_notes() -> Result<Vec<Block<()>>> {
     Ok(vec![
         Block::Spacer(nn(12.0)?),
         styled(
@@ -414,7 +430,7 @@ fn cheque_notes() -> Result<Vec<Block>> {
     ])
 }
 
-fn company_block() -> Result<Vec<Block>> {
+fn company_block() -> Result<Vec<Block<()>>> {
     Ok(vec![
         Block::Spacer(nn(20.0)?),
         rule(None, Alignment::Center, 0.75, 0.0, 8.0)?,

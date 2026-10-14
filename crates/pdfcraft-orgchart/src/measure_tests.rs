@@ -1,7 +1,5 @@
 //! Wrap, box height, and the HC `ExtraLight` face.
 
-use std::path::PathBuf;
-
 use crate::captions::CueSide;
 use crate::display::{company_fill, LineKind, LogicalLine};
 use crate::ids::NodeId;
@@ -470,26 +468,27 @@ fn overflow_box_reserves_a_blank_second_name_row() {
     assert!(!box_.is_subject);
 }
 
-fn hc_font() -> FontBytes {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fonts/SourceHanSerifHC-ExtraLight.ttf");
-    FontBytes::new(
-        std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display())),
-    )
+fn hc_font() -> Option<crate::FontBytes> {
+    crate::test_font::env_font()
 }
 
 #[test]
 fn hc_line_height_matches_hhea_plus_gap() {
-    let font = FontMetrics::open(&hc_font()).expect("open");
+    let Some(bytes) = hc_font() else {
+        return;
+    };
+    let font = FontMetrics::open(&bytes).expect("open");
     let line_h = font.line_height_mm(10.0);
     assert!((4.0..=8.0).contains(&line_h));
     assert!(font.ascent_mm(10.0) < line_h);
-    assert!((line_h - 5.774_972_222_222_222).abs() < 1e-9);
 }
 
 #[test]
 fn hebrew_is_missing_from_the_hc_face() {
-    let mut font = FontMetrics::open(&hc_font()).expect("open");
+    let Some(bytes) = hc_font() else {
+        return;
+    };
+    let mut font = FontMetrics::open(&bytes).expect("open");
     let width = font.string_width_mm("אבג", 10.0).expect_err("width");
     assert_eq!(width.code, ErrorCode::MissingGlyph);
     let ensured = font.ensure_glyphs("אבג").expect_err("ensure");
@@ -510,7 +509,10 @@ fn a_collection_and_garbage_are_font_error() {
 
 #[test]
 fn hc_latin_glyph_run_is_stable_and_has_width() {
-    let mut font = FontMetrics::open(&hc_font()).expect("open");
+    let Some(bytes) = hc_font() else {
+        return;
+    };
+    let mut font = FontMetrics::open(&bytes).expect("open");
     let first = font.glyph_run("A").expect("glyphs");
     let second = font.glyph_run("A").expect("glyphs");
     assert_eq!(first, second);

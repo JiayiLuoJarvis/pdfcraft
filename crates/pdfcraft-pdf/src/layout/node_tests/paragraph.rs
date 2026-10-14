@@ -1,8 +1,8 @@
 use crate::canvas::{pt_near, CanvasCommand, LinkTarget, RecordingCanvas};
-use crate::fonts::{fixture_bytes, FontSource, FontStore};
+use crate::fonts::{fixture_bytes, FontId, FontSource, FontStore};
 use crate::geom::{Finite, NonNegative, Point, Positive};
 use crate::layout::frame::{draw_fragment, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::paragraph::{BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun};
+use crate::layout::paragraph::{BlankWidth, InlineBlank, InlineItem, TextNode, TextRun};
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::test_util::fonts_and_style;
 use crate::text::measure::line_metrics;
@@ -11,8 +11,8 @@ fn uri(text: &str) -> LinkTarget {
     LinkTarget::uri(text).unwrap()
 }
 
-fn text_item(text: &str, face: Face, link: Option<&str>) -> InlineItem {
-    InlineItem::Text(TextRun::new(text, face).with_link(link.map(uri)))
+fn text_item(text: &str, font: FontId, link: Option<&str>) -> InlineItem {
+    InlineItem::Text(TextRun::new(text, font).with_link(link.map(uri)))
 }
 
 fn fit(
@@ -98,11 +98,13 @@ fn body_line(fonts: &FontStore, style: &Style) -> f32 {
 
 #[test]
 fn centered_fill_blank_starts_at_the_frame_x() {
-    let (mut fonts, mut style) = fonts_and_style();
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
     style.align = TextAlign::Center;
     let node = TextNode::from_items(
         vec![
-            InlineItem::Text(TextRun::new("A", Face::Body)),
+            InlineItem::Text(TextRun::new("A", style.font)),
             InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
         ],
         style,
@@ -143,13 +145,15 @@ fn centered_fill_blank_starts_at_the_frame_x() {
 
 #[test]
 fn partial_link_rect_covers_only_the_linked_glyphs() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let line = body_line(&fonts, &style);
     let fragment = fit(
         vec![
-            text_item("A", Face::Body, None),
-            text_item("BC", Face::Body, Some("https://example.com/bc")),
-            text_item("D", Face::Body, None),
+            text_item("A", style.font, None),
+            text_item("BC", style.font, Some("https://example.com/bc")),
+            text_item("D", style.font, None),
         ],
         &style,
         &mut fonts,
@@ -176,12 +180,14 @@ fn partial_link_rect_covers_only_the_linked_glyphs() {
 
 #[test]
 fn wrapped_link_emits_one_rect_per_visual_line() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let line = body_line(&fonts, &style);
     let fragment = fit(
         vec![text_item(
             "第第",
-            Face::Body,
+            style.font,
             Some("https://example.com/wrap"),
         )],
         &style,
@@ -206,19 +212,23 @@ fn wrapped_link_emits_one_rect_per_visual_line() {
 
 #[test]
 fn same_link_keeps_body_and_bold_in_one_rect() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let Some(bold_bytes) = fixture_bytes() else {
+        return;
+    };
     let bold = fonts
         .register(FontSource {
-            bytes: fixture_bytes(),
+            bytes: bold_bytes,
             index: 0,
         })
         .unwrap();
-    fonts.set_bold(bold);
     let fragment = fit(
         vec![
-            text_item("A", Face::Body, Some("u")),
-            text_item("B", Face::Bold, Some("u")),
-            text_item("C", Face::Body, Some("u")),
+            text_item("A", style.font, Some("u")),
+            text_item("B", bold, Some("u")),
+            text_item("C", style.font, Some("u")),
         ],
         &style,
         &mut fonts,
@@ -239,13 +249,15 @@ fn same_link_keeps_body_and_bold_in_one_rect() {
 
 #[test]
 fn link_changes_flush_and_a_repeat_uri_stays_its_own_rect() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let fragment = fit(
         vec![
-            text_item("A", Face::Body, Some("a")),
-            text_item("B", Face::Body, Some("b")),
-            text_item("C", Face::Body, None),
-            text_item("D", Face::Body, Some("a")),
+            text_item("A", style.font, Some("a")),
+            text_item("B", style.font, Some("b")),
+            text_item("C", style.font, None),
+            text_item("D", style.font, Some("a")),
         ],
         &style,
         &mut fonts,
@@ -273,11 +285,13 @@ fn link_changes_flush_and_a_repeat_uri_stays_its_own_rect() {
 
 #[test]
 fn adjacent_runs_with_the_same_link_share_one_rect() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let fragment = fit(
         vec![
-            text_item("A", Face::Body, Some("u")),
-            text_item("B", Face::Body, Some("u")),
+            text_item("A", style.font, Some("u")),
+            text_item("B", style.font, Some("u")),
         ],
         &style,
         &mut fonts,
@@ -294,14 +308,16 @@ fn adjacent_runs_with_the_same_link_share_one_rect() {
 
 #[test]
 fn blank_splits_a_link_and_is_not_inside_either_rect() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let fragment = fit(
         vec![
-            text_item("A", Face::Body, Some("u")),
+            text_item("A", style.font, Some("u")),
             InlineItem::Blank(InlineBlank::new(BlankWidth::Fixed(
                 NonNegative::pt(30.0).unwrap(),
             ))),
-            text_item("B", Face::Body, Some("u")),
+            text_item("B", style.font, Some("u")),
         ],
         &style,
         &mut fonts,
@@ -319,10 +335,12 @@ fn blank_splits_a_link_and_is_not_inside_either_rect() {
 
 #[test]
 fn link_rect_follows_alignment_and_first_line_indent() {
-    let (mut fonts, mut style) = fonts_and_style();
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
     style.align = TextAlign::Center;
     let centered = fit(
-        vec![text_item("A", Face::Body, Some("u"))],
+        vec![text_item("A", style.font, Some("u"))],
         &style,
         &mut fonts,
         120.0,
@@ -335,7 +353,7 @@ fn link_rect_follows_alignment_and_first_line_indent() {
 
     style.align = TextAlign::End;
     let ended = fit(
-        vec![text_item("A", Face::Body, Some("u"))],
+        vec![text_item("A", style.font, Some("u"))],
         &style,
         &mut fonts,
         120.0,
@@ -349,7 +367,7 @@ fn link_rect_follows_alignment_and_first_line_indent() {
     style.align = TextAlign::Start;
     style.first_line_indent = NonNegative::pt(10.0).unwrap();
     let indented = fit(
-        vec![text_item("A", Face::Body, Some("u"))],
+        vec![text_item("A", style.font, Some("u"))],
         &style,
         &mut fonts,
         120.0,
@@ -362,9 +380,11 @@ fn link_rect_follows_alignment_and_first_line_indent() {
 
 #[test]
 fn offset_and_paint_move_the_link_rect() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let fragment = fit(
-        vec![text_item("A", Face::Body, Some("https://example.com/a"))],
+        vec![text_item("A", style.font, Some("https://example.com/a"))],
         &style,
         &mut fonts,
         80.0,
@@ -402,9 +422,11 @@ fn offset_and_paint_move_the_link_rect() {
 
 #[test]
 fn empty_linked_text_emits_no_rect() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let fragment = fit(
-        vec![text_item("", Face::Body, Some("u"))],
+        vec![text_item("", style.font, Some("u"))],
         &style,
         &mut fonts,
         80.0,

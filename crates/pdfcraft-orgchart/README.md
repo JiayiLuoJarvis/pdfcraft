@@ -24,4 +24,4 @@ Licensed under either of
 
 at your option.
 
-The test font `SourceHanSerifHC-ExtraLight.ttf` is Source Han Serif HC ExtraLight. The git repository stores that file. The published crate leaves it out so the `.crate` stays under the crates.io upload limit of 10485760 bytes. Its license is the SIL Open Font License 1.1 in [tests/fixtures/fonts/OFL.txt](tests/fixtures/fonts/OFL.txt). [tests/fixtures/fonts/PROVENANCE.txt](tests/fixtures/fonts/PROVENANCE.txt) records where the file came from.
+Tests and the `equity_chart` example need a single-face font from the environment: set `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT`. Font files are not vendored in git. OFL notes for a common Source Han reference face are in [tests/fixtures/fonts/](tests/fixtures/fonts/).

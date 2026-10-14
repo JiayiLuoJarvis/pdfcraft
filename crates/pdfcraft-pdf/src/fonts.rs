@@ -1,13 +1,17 @@
-//! Font identifiers and a crate-internal store for skrifa measurement.
+//! Font identifiers, the caller's font registry, and a crate-internal store for
+//! skrifa measurement.
 //!
 //! A [`FontId`] on a recorded [`crate::canvas::GlyphRun`] is read-only. The
-//! library assigns ids. Callers do not build an id from a raw integer.
+//! library assigns ids when it registers faces from a [`FontRegistry`]. Callers
+//! do not build an id from a raw integer.
 //!
 //! ```compile_fail
 //! let _id = pdfcraft_pdf::FontId::from_raw(0);
 //! ```
 
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use skrifa::instance::{LocationRef, Size};
@@ -52,11 +56,94 @@ pub(crate) struct FaceMetrics {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FontFace {
+pub(crate) struct LoadedFace {
     pub(crate) source: FontSource,
     pub(crate) metrics: FaceMetrics,
     pub(crate) advances: HashMap<u32, f32>,
 }
+
+/// One face in a font file. `index` selects a face inside a collection.
+///
+/// `bytes` are the font file. The library does not read a filesystem path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct FontFace {
+    /// Font file bytes.
+    pub bytes: Vec<u8>,
+    /// Face index inside `bytes`. Zero is the first face.
+    pub index: u32,
+}
+
+/// A normal face and an optional bold face, both supplied by the caller.
+///
+/// There is no Latin slot and no fallback chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct FontFamily {
+    /// Face used by [`crate::spec::InlineRun::Text`].
+    pub normal: FontFace,
+    /// Face used by [`crate::spec::InlineRun::Bold`]. `None` rejects bold runs.
+    pub bold: Option<FontFace>,
+}
+
+/// Faces keyed by the caller's own type `K`.
+///
+/// `K` is `Copy + Eq + Hash + Debug`. A document font enum is the usual key.
+/// [`Self::single`] covers a document that uses one family. Registering the
+/// same key again replaces that family's faces. An empty registry is valid for
+/// a document that draws no text.
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct FontRegistry<K> {
+    entries: Vec<(K, FontFamily)>,
+}
+
+impl<K> FontRegistry<K> {
+    /// An empty registry.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    pub(crate) fn into_entries(self) -> Vec<(K, FontFamily)> {
+        self.entries
+    }
+}
+
+impl<K> Default for FontRegistry<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K> FontRegistry<K>
+where
+    K: Copy + Eq + Hash + Debug,
+{
+    /// Inserts `family` under `key`. A repeated `key` replaces the previous family.
+    pub fn register(&mut self, key: K, family: FontFamily) {
+        if let Some((_, existing)) = self.entries.iter_mut().find(|(found, _)| *found == key) {
+            *existing = family;
+        } else {
+            self.entries.push((key, family));
+        }
+    }
+}
+
+impl FontRegistry<()> {
+    /// One family, addressed by the unit key `()`.
+    pub fn single(family: FontFamily) -> Self {
+        let mut fonts = Self::new();
+        fonts.register((), family);
+        fonts
+    }
+}
+
+/// Key carried by a [`crate::spec::DocumentSpec`].
+pub(crate) trait FontKey: Copy + Eq + Hash + Debug {}
+
+impl<T> FontKey for T where T: Copy + Eq + Hash + Debug {}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedFont {
@@ -67,8 +154,7 @@ pub(crate) struct ResolvedFont {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FontStore {
-    faces: Vec<FontFace>,
-    bold: Option<FontId>,
+    faces: Vec<LoadedFace>,
     max_bytes: usize,
 }
 
@@ -76,7 +162,6 @@ impl Default for FontStore {
     fn default() -> Self {
         Self {
             faces: Vec::new(),
-            bold: None,
             max_bytes: Limits::default().max_font_bytes(),
         }
     }
@@ -135,7 +220,7 @@ impl FontStore {
                 message: "too many registered fonts".to_owned(),
             })
         })?);
-        self.faces.push(FontFace {
+        self.faces.push(LoadedFace {
             source,
             metrics: FaceMetrics {
                 units_per_em: f32::from(metrics.units_per_em),
@@ -152,21 +237,13 @@ impl FontStore {
         Ok(&self.face(id)?.metrics)
     }
 
-    pub(crate) fn set_bold(&mut self, id: FontId) {
-        self.bold = Some(id);
-    }
-
-    pub(crate) fn bold(&self) -> Result<FontId> {
-        self.bold.ok_or(ErrorKind::BoldFaceRequired.into())
-    }
-
-    pub(crate) fn face(&self, id: FontId) -> Result<&FontFace> {
+    pub(crate) fn face(&self, id: FontId) -> Result<&LoadedFace> {
         self.faces
             .get(id.as_u32() as usize)
             .ok_or(Error::from(ErrorKind::UnknownFont { id: id.as_u32() }))
     }
 
-    pub(crate) fn face_mut(&mut self, id: FontId) -> Result<&mut FontFace> {
+    pub(crate) fn face_mut(&mut self, id: FontId) -> Result<&mut LoadedFace> {
         self.faces
             .get_mut(id.as_u32() as usize)
             .ok_or(Error::from(ErrorKind::UnknownFont { id: id.as_u32() }))
@@ -182,15 +259,20 @@ impl FontStore {
     }
 }
 
+/// Test face from `PDFCRAFT_PDF_FONT`, or `PDFCRAFT_CJK_FONT` if the former is unset.
+///
+/// Returns `None` when neither variable is set so font-dependent tests can skip.
 #[cfg(test)]
-pub(crate) fn fixture_bytes() -> Arc<Vec<u8>> {
-    Arc::new(
-        include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/quire-measure.ttf"
-        ))
-        .to_vec(),
-    )
+pub(crate) fn fixture_bytes() -> Option<Arc<Vec<u8>>> {
+    let path =
+        std::env::var_os("PDFCRAFT_PDF_FONT").or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "read test font {}: {error}",
+            std::path::Path::new(&path).display()
+        )
+    });
+    Some(Arc::new(bytes))
 }
 
 #[cfg(test)]
@@ -224,13 +306,11 @@ mod tests {
 
     #[test]
     fn fixture_descent_is_negative() {
+        let Some(bytes) = fixture_bytes() else {
+            return;
+        };
         let mut store = FontStore::new();
-        let id = store
-            .register(FontSource {
-                bytes: fixture_bytes(),
-                index: 0,
-            })
-            .unwrap();
+        let id = store.register(FontSource { bytes, index: 0 }).unwrap();
         assert_eq!(id.as_u32(), 0);
         let metrics = store.metrics(id).unwrap();
         assert!(metrics.descent < 0.0);
@@ -266,15 +346,40 @@ mod tests {
     }
 
     #[test]
-    fn bold_slot_rebinds_and_empty_slot_requires_bold_face() {
-        let mut store = FontStore::new();
-        assert_eq!(
-            store.bold().unwrap_err(),
-            ErrorKind::BoldFaceRequired.into()
+    fn register_replaces_the_same_key_and_single_uses_unit() {
+        let mut fonts = FontRegistry::new();
+        fonts.register(
+            "body",
+            FontFamily {
+                normal: FontFace {
+                    bytes: b"one".to_vec(),
+                    index: 0,
+                },
+                bold: None,
+            },
         );
-        store.set_bold(FontId::from_raw(2));
-        assert_eq!(store.bold().unwrap(), FontId::from_raw(2));
-        store.set_bold(FontId::from_raw(4));
-        assert_eq!(store.bold().unwrap(), FontId::from_raw(4));
+        fonts.register(
+            "body",
+            FontFamily {
+                normal: FontFace {
+                    bytes: b"two".to_vec(),
+                    index: 3,
+                },
+                bold: None,
+            },
+        );
+        let entries = fonts.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1.normal.bytes, b"two");
+        assert_eq!(entries[0].1.normal.index, 3);
+
+        let single = FontRegistry::single(FontFamily {
+            normal: FontFace {
+                bytes: b"only".to_vec(),
+                index: 1,
+            },
+            bold: None,
+        });
+        assert_eq!(single.into_entries()[0].0, ());
     }
 }

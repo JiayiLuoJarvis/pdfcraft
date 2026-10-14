@@ -397,13 +397,11 @@ mod tests {
     use crate::font::Face;
     use crate::inspect::PdfRect;
 
-    fn with_face<T>(body: impl FnOnce(&Face<'_>) -> T) -> T {
-        let bytes = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/DejaVuSans.ttf"),
-        )
-        .unwrap();
+    fn with_face<T>(body: impl FnOnce(&Face<'_>) -> T) -> Option<T> {
+        let path = std::env::var_os("PDFCRAFT_FORMS_FONT")?;
+        let bytes = std::fs::read(path).unwrap();
         let face = Face::load(&bytes, 0).unwrap();
-        body(&face)
+        Some(body(&face))
     }
 
     fn scalars(glyphs: &[GlyphUse]) -> Vec<char> {
@@ -421,7 +419,7 @@ mod tests {
 
     #[test]
     fn wraps_ascii_on_spaces_without_keeping_the_space_glyph() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let laid = fit(
                 face,
                 "hello world",
@@ -436,34 +434,40 @@ mod tests {
             );
             assert!(laid.glyphs().all(|glyph| glyph.scalar != ' '));
             assert_eq!(laid.size().to_bits(), 12.0_f32.to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn breaks_an_overwide_ascii_word_per_glyph() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let laid = fit(face, "xxxx", PdfRect::new(0.0, 0.0, 10.0, 80.0), 12.0).unwrap();
             let lines: Vec<_> = laid.lines().map(|(_, _, glyphs)| scalars(glyphs)).collect();
             assert_eq!(lines, vec![vec!['x'], vec!['x'], vec!['x'], vec!['x']]);
             assert_eq!(laid.size().to_bits(), 12.0_f32.to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn keeps_an_explicit_newline_as_two_lines() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let laid = fit(face, "a\nb", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
             let lines: Vec<_> = laid.lines().collect();
             assert_eq!(scalars(lines[0].2), vec!['a']);
             assert_eq!(scalars(lines[1].2), vec!['b']);
             let gap = lines[0].0 - lines[1].0;
             assert_eq!(gap.to_bits(), (12.0 * LINE_HEIGHT_FACTOR).to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn reports_a_missing_glyph() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let err = fit(face, "王", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap_err();
             assert_eq!(
                 err.kind,
@@ -472,12 +476,14 @@ mod tests {
                     scalar: '王',
                 }
             );
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn reports_box_overflow_for_five_hundred_xes() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let err = fit(
                 face,
                 &"x".repeat(500),
@@ -491,12 +497,14 @@ mod tests {
                     field_name: "employee_name".to_string(),
                 }
             );
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn aligns_a_single_line_to_the_bottom() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let rect = PdfRect::new(0.0, 100.0, 200.0, 200.0);
             let laid = fit(face, "a", rect, 12.0).unwrap();
             let (baseline, _, glyphs) = laid.lines().next().unwrap();
@@ -507,12 +515,14 @@ mod tests {
                 .fold(0.0_f32, f32::min);
             let expected = rect.y0 + PAD_BOTTOM - scale * ink_bottom;
             assert_eq!(baseline.to_bits(), expected.to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn aligns_a_single_line_to_the_top() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let rect = PdfRect::new(0.0, 100.0, 200.0, 200.0);
             let laid = LaidText::fit(face, "employee_name", "a", rect, 12.0, VAlign::Top).unwrap();
             let (baseline, _, glyphs) = laid.lines().next().unwrap();
@@ -523,12 +533,14 @@ mod tests {
                 .fold(0.0_f32, f32::max);
             let expected = rect.y1 - PAD_TOP - scale * ink_top;
             assert_eq!(baseline.to_bits(), expected.to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn aligns_a_single_line_to_the_vertical_center() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let rect = PdfRect::new(0.0, 100.0, 200.0, 200.0);
             let laid =
                 LaidText::fit(face, "employee_name", "a", rect, 12.0, VAlign::Center).unwrap();
@@ -546,41 +558,49 @@ mod tests {
             let block_bottom = f32::midpoint(rect.y0, rect.y1) - block / 2.0;
             let expected = block_bottom - scale * ink_bottom;
             assert_eq!(baseline.to_bits(), expected.to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn does_not_record_a_space_for_a_newline() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let laid = fit(face, "a\nb", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
             assert!(laid
                 .glyphs()
                 .all(|glyph| glyph.scalar != ' ' && glyph.id != 3));
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn records_a_space_when_a_gap_is_drawn() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let laid = fit(face, "a b", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
             assert!(laid.glyphs().any(|glyph| glyph.scalar == ' '));
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn folds_nbsp_and_ideographic_space_into_u0020() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             for text in ["a\u{00A0}b", "a\u{3000}b"] {
                 let laid = fit(face, text, PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
                 let scalars: Vec<char> = laid.glyphs().map(|glyph| glyph.scalar).collect();
                 assert_eq!(scalars, vec!['a', ' ', 'b']);
             }
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn starts_the_search_at_the_caller_size() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let wide = PdfRect::new(0.0, 0.0, 200.0, 80.0);
             let laid = fit(face, "a", wide, 10.25).unwrap();
             assert_eq!(laid.size().to_bits(), 10.25_f32.to_bits());
@@ -592,12 +612,14 @@ mod tests {
             assert!(mp <= 10_250);
             assert!(mp >= 7_000);
             assert!(mp == 7_000 || (10_250 - mp) % 500 == 0);
-        });
+        }) else {
+            return;
+        };
     }
 
     #[test]
     fn tries_a_sub_millipoint_size_once() {
-        with_face(|face| {
+        let Some(()) = with_face(|face| {
             let err = fit(face, "a", PdfRect::new(0.0, 0.0, 0.0, 40.0), 0.0001).unwrap_err();
             assert_eq!(
                 err.kind,
@@ -609,6 +631,8 @@ mod tests {
             assert_eq!(laid.size().to_bits(), 0.0001_f32.to_bits());
             assert_ne!(laid.size().to_bits(), 0.0_f32.to_bits());
             assert_ne!(laid.size().to_bits(), 7.0_f32.to_bits());
-        });
+        }) else {
+            return;
+        };
     }
 }

@@ -5,8 +5,9 @@
 //! ```
 //!
 //! Writes `out/hello.pdf` (gitignored). Pass another path as argv[1].
-//! The bundled fixture maps printable ASCII, U+2022, and 第 / 页 / 共. Other
-//! missing glyphs fail the document.
+//!
+//! Set `PDFCRAFT_PDF_FONT` or `PDFCRAFT_CJK_FONT` to a face that covers the
+//! demo text (ASCII, U+2022, and 第 / 页 / 共). Missing glyphs fail the document.
 
 use std::env;
 use std::fs;
@@ -15,16 +16,25 @@ use std::path::PathBuf;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
-    ColumnSpec, ColumnsSpec, HLineSpec, ImageSpec, InlineRun, ListItemSpec, ListKind, ListSpec,
-    ParagraphSpec, Resources, SectionSpec, TableSpec, TextRun,
+    ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec, InlineRun,
+    ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, SectionSpec, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
     Positive, Ratio, Result, Track,
 };
 
-const FONT: &[u8] = include_bytes!("../tests/fixtures/quire-measure.ttf");
 const PIXEL: &[u8] = include_bytes!("../tests/fixtures/one-pixel.png");
+
+fn load_font() -> Vec<u8> {
+    let path = env::var_os("PDFCRAFT_PDF_FONT")
+        .or_else(|| env::var_os("PDFCRAFT_CJK_FONT"))
+        .unwrap_or_else(|| {
+            panic!("set PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT to a .ttf/.otf path")
+        });
+    fs::read(&path)
+        .unwrap_or_else(|error| panic!("read font {}: {error}", PathBuf::from(path).display()))
+}
 
 fn main() -> Result<()> {
     let out = env::args()
@@ -34,8 +44,17 @@ fn main() -> Result<()> {
         fs::create_dir_all(parent).expect("create output dir");
     }
 
-    let mut resources = Resources::new(FONT.to_vec());
-    resources.bold_font = Some(FONT.to_vec());
+    let font = load_font();
+    let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: font.clone(),
+            index: 0,
+        },
+        bold: Some(FontFace {
+            bytes: font,
+            index: 0,
+        }),
+    }));
     let logo = resources.add_image(PIXEL.to_vec(), ImageFormat::Png);
     let rendered = layout_spec(pdfcraft_pdf::DocumentSpec {
         page_size: PageSize::A4,
@@ -47,23 +66,29 @@ fn main() -> Result<()> {
             header: Some(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(BandSlot::Link {
+                    font: (),
                     uri: vec![TextRun::Literal("https://example.test/quire".into())],
                     text: vec![TextRun::Literal("quire demo".into())],
                 }),
-                right: Some(BandSlot::Text(vec![
-                    TextRun::Literal("第 ".into()),
-                    TextRun::PageNumber,
-                    TextRun::Literal(" 页 / 共 ".into()),
-                    TextRun::PageCount,
-                    TextRun::Literal(" 页".into()),
-                ])),
+                right: Some(BandSlot::Text {
+                    runs: vec![
+                        TextRun::Literal("第 ".into()),
+                        TextRun::PageNumber,
+                        TextRun::Literal(" 页 / 共 ".into()),
+                        TextRun::PageCount,
+                        TextRun::Literal(" 页".into()),
+                    ],
+                    font: (),
+                }),
             }),
             footer: Some(BandSpec {
                 inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text(vec![TextRun::Literal(
-                    "layout smoke".into(),
-                )])),
+                left: Some(BandSlot::Text {
+                    runs: vec![TextRun::Literal("layout smoke".into())],
+                    font: (),
+                }),
                 right: Some(BandSlot::Link {
+                    font: (),
                     uri: vec![TextRun::Literal("https://example.test/footer".into())],
                     text: vec![TextRun::Literal("footer link".into())],
                 }),
@@ -86,15 +111,21 @@ fn nn(value: f32) -> Result<Length<NonNegative>> {
     NonNegative::pt(value).map_err(pdfcraft_pdf::Errors::from)
 }
 
-fn text(value: impl Into<String>) -> InlineRun {
-    InlineRun::Text(value.into())
+fn text(value: impl Into<String>) -> InlineRun<()> {
+    InlineRun::Text {
+        text: value.into(),
+        font: (),
+    }
 }
 
-fn bold(value: impl Into<String>) -> InlineRun {
-    InlineRun::Bold(value.into())
+fn bold(value: impl Into<String>) -> InlineRun<()> {
+    InlineRun::Bold {
+        text: value.into(),
+        font: (),
+    }
 }
 
-fn link(uri: &str, runs: Vec<InlineRun>) -> InlineRun {
+fn link(uri: &str, runs: Vec<InlineRun<()>>) -> InlineRun<()> {
     InlineRun::Link {
         uri: uri.into(),
         runs,
@@ -106,7 +137,7 @@ fn blank(
     thickness: f32,
     color: Option<Color>,
     offset: Option<f32>,
-) -> Result<InlineRun> {
+) -> Result<InlineRun<()>> {
     Ok(InlineRun::Blank(BlankSpec {
         width,
         thickness: Some(pos(thickness)?),
@@ -115,7 +146,7 @@ fn blank(
     }))
 }
 
-fn paragraph(runs: Vec<InlineRun>, align: Alignment, indent: f32) -> Result<Block> {
+fn paragraph(runs: Vec<InlineRun<()>>, align: Alignment, indent: f32) -> Result<Block<()>> {
     Ok(Block::Paragraph(ParagraphSpec {
         runs,
         first_line_indent: nn(indent)?,
@@ -131,7 +162,7 @@ fn rule(
     color: Color,
     before: f32,
     after: f32,
-) -> Result<Block> {
+) -> Result<Block<()>> {
     Ok(Block::HLine(HLineSpec {
         width: width.map(pos).transpose()?,
         align,
@@ -142,14 +173,14 @@ fn rule(
     }))
 }
 
-fn ratio(weight: f32, blocks: Vec<Block>) -> ColumnSpec {
+fn ratio(weight: f32, blocks: Vec<Block<()>>) -> ColumnSpec<()> {
     ColumnSpec {
         width: Track::Ratio(Ratio::new(weight).expect("weight is positive")),
         blocks,
     }
 }
 
-fn bullets() -> Result<Block> {
+fn bullets() -> Result<Block<()>> {
     Ok(Block::List(ListSpec {
         marker_width: pos(16.0)?,
         nest_indent: Some(pos(20.0)?),
@@ -202,7 +233,7 @@ fn bullets() -> Result<Block> {
     }))
 }
 
-fn ordered() -> Result<Block> {
+fn ordered() -> Result<Block<()>> {
     Ok(Block::List(ListSpec {
         kind: ListKind::Ordered(Numbering::LowerAlpha),
         start: NonZeroU32::new(2).unwrap(),
@@ -219,21 +250,21 @@ fn ordered() -> Result<Block> {
     }))
 }
 
-fn item(block: Block) -> ListItemSpec {
+fn item(block: Block<()>) -> ListItemSpec<()> {
     ListItemSpec {
         marker: None,
         blocks: vec![block],
     }
 }
 
-fn marked(marker: &str, block: Block) -> ListItemSpec {
+fn marked(marker: &str, block: Block<()>) -> ListItemSpec<()> {
     ListItemSpec {
         marker: Some(marker.into()),
         blocks: vec![block],
     }
 }
 
-fn head_cell(label: &str) -> CellSpec {
+fn head_cell(label: &str) -> CellSpec<()> {
     CellSpec {
         content: vec![CellBlock::Paragraph(ParagraphSpec {
             runs: vec![bold(label)],
@@ -245,26 +276,35 @@ fn head_cell(label: &str) -> CellSpec {
     }
 }
 
-fn text_cell(value: impl Into<String>) -> CellSpec {
+fn text_cell(value: impl Into<String>) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text(value.into())],
+        content: vec![CellBlock::Text {
+            text: value.into(),
+            font: (),
+        }],
         ..CellSpec::default()
     }
 }
 
-fn span_text(value: &str, cols: u16) -> CellSpec {
+fn span_text(value: &str, cols: u16) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text(value.into())],
+        content: vec![CellBlock::Text {
+            text: value.into(),
+            font: (),
+        }],
         col_span: NonZeroU16::new(cols).unwrap(),
         ..CellSpec::default()
     }
 }
 
-fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Vec<CellSpec>>> {
+fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Vec<CellSpec<()>>>> {
     let mut rows = vec![
         vec![
             CellSpec {
-                content: vec![CellBlock::Text("A1".into())],
+                content: vec![CellBlock::Text {
+                    text: "A1".into(),
+                    font: (),
+                }],
                 row_span: NonZeroU16::new(2).unwrap(),
                 ..CellSpec::default()
             },
@@ -345,7 +385,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Vec<CellSpec>
     Ok(rows)
 }
 
-fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block>> {
+fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
     Ok(vec![
         paragraph(vec![bold("Quire layout tour")], Alignment::Center, 0.0)?,
         rule(
@@ -433,7 +473,7 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block>> {
     ])
 }
 
-fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block> {
+fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block<()>> {
     Ok(Block::Table(TableSpec {
         header: vec![
             vec![
@@ -458,7 +498,7 @@ fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block> {
     }))
 }
 
-fn closing_blocks() -> Result<Vec<Block>> {
+fn closing_blocks() -> Result<Vec<Block<()>>> {
     Ok(vec![
         Block::KeepTogether(vec![
             paragraph(vec![bold("Keep-together block")], Alignment::Center, 0.0)?,
@@ -526,7 +566,7 @@ fn closing_blocks() -> Result<Vec<Block>> {
     ])
 }
 
-fn hello_body(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block>> {
+fn hello_body(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
     let mut body = title_blocks(logo)?;
     body.push(paragraph(
         vec![bold("Shipment table")],

@@ -39,7 +39,9 @@ fn item(s: &str, style: &Style) -> ListItem<FlowNode> {
 
 #[test]
 fn hanging_indent_and_marker_on_first_fragment_only() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let list = ListNode::new(spec(
         ordered(MarkerKind::Decimal, 1),
@@ -80,7 +82,9 @@ fn hanging_indent_and_marker_on_first_fragment_only() {
 
 #[test]
 fn nested_list_indents_by_its_own_marker_width() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let inner = ListNode::new(spec(
         ListKind::Bullet,
         16.0,
@@ -119,7 +123,9 @@ fn nested_list_indents_by_its_own_marker_width() {
 
 #[test]
 fn nest_indent_moves_the_body_column() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let mut s = spec(ListKind::Bullet, 14.0, &style, vec![item("A", &style)]);
     s.nest_indent = Some(Positive::pt(30.0).unwrap());
     let list = ListNode::new(s).unwrap();
@@ -136,7 +142,9 @@ fn nest_indent_moves_the_body_column() {
 
 #[test]
 fn upper_roman_custom_marker_does_not_consume_the_counter() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let list = ListNode::new(spec(
         ordered(MarkerKind::UpperRoman, 4),
         30.0,
@@ -160,7 +168,9 @@ fn upper_roman_custom_marker_does_not_consume_the_counter() {
 
 #[test]
 fn decimal_custom_marker_between_autos_does_not_consume() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let list = ListNode::new(spec(
         ordered(MarkerKind::Decimal, 1),
         20.0,
@@ -184,7 +194,9 @@ fn decimal_custom_marker_between_autos_does_not_consume() {
 
 #[test]
 fn leading_custom_marker_does_not_consume_the_first_number() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let list = ListNode::new(spec(
         ordered(MarkerKind::Decimal, 1),
         20.0,
@@ -225,7 +237,9 @@ fn labels_past_z_or_3999_are_errors() {
         MarkerKind::LowerRoman.label(4000),
         Err(GeometryKind::MarkerOutOfRange { number: 4000 }.into())
     );
-    let (_, style) = fonts_and_style();
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
     let items = (0..2).map(|_| item("a", &style)).collect();
     let err = ListNode::new(spec(
         ordered(MarkerKind::LowerAlpha, 26),
@@ -255,7 +269,9 @@ fn labels_past_z_or_3999_are_errors() {
 
 #[test]
 fn custom_marker_wider_than_marker_width_errors() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let list = ListNode::new(spec(
         ListKind::Bullet,
         10.0,
@@ -277,7 +293,9 @@ fn custom_marker_wider_than_marker_width_errors() {
 
 #[test]
 fn empty_custom_marker_is_rejected() {
-    let (_, style) = fonts_and_style();
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
     let err = ListItem::custom("", vec![text("A", &style)]).unwrap_err();
     assert_eq!(err, GeometryKind::EmptyListMarker.into());
 }

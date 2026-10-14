@@ -43,7 +43,9 @@ fn numbered_rows(style: &Style, n: usize) -> Vec<Vec<Cell<FlowNode>>> {
 
 #[test]
 fn repeats_all_header_rows_on_continuation_page() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let mut spec = TableSpec::new(halves());
     let (c2, r1) = span(2, 1);
@@ -78,7 +80,9 @@ fn repeats_all_header_rows_on_continuation_page() {
 
 #[test]
 fn repeat_header_off_continues_body_only() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let mut spec = TableSpec::new(halves());
     spec.header = vec![vec![cell("h", &style), cell("k", &style)]];
@@ -101,7 +105,9 @@ fn repeat_header_off_continues_body_only() {
 
 #[test]
 fn row_span_group_moves_to_next_page_whole() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let (c1, r2) = span(1, 2);
     let mut spec = TableSpec::new(halves());
@@ -138,7 +144,9 @@ fn row_span_group_moves_to_next_page_whole() {
 
 #[test]
 fn header_plus_group_taller_than_page_errors_with_no_output() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let mut spec = TableSpec::new(halves());
     spec.header = vec![vec![cell("h", &style), cell("k", &style)]];
@@ -167,7 +175,9 @@ fn header_plus_group_taller_than_page_errors_with_no_output() {
 
 #[test]
 fn borders_stroke_each_cell_centered_on_grid_lines() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let mut spec = TableSpec::new(vec![
         ColumnWidth::Fixed(Positive::pt(50.0).unwrap()),
@@ -223,7 +233,9 @@ fn borders_stroke_each_cell_centered_on_grid_lines() {
 
 #[test]
 fn zero_border_draws_no_strokes() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let mut spec = TableSpec::new(halves());
     spec.body = vec![vec![cell("A", &style), cell("B", &style)]];
     let table = TableNode::new(spec).unwrap();
@@ -240,7 +252,9 @@ fn zero_border_draws_no_strokes() {
 
 #[test]
 fn cell_height_includes_spacing_between_paragraphs() {
-    let (mut fonts, mut style) = fonts_and_style();
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
     let line_h = metrics(&fonts, &style).line_height.as_pt();
     let spacing = line_h + 1.0;
     style.paragraph_spacing = NonNegative::pt(spacing).unwrap();
@@ -265,7 +279,9 @@ fn cell_height_includes_spacing_between_paragraphs() {
 
 #[test]
 fn cell_rejects_columns_page_break_keep_together_and_tables() {
-    let (_, style) = fonts_and_style();
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
     let columns = ColumnsNode::new(
         default_column_gap(),
         vec![
@@ -299,7 +315,9 @@ fn cell_rejects_columns_page_break_keep_together_and_tables() {
 
 #[test]
 fn cell_fill_paints_behind_content_and_border() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let navy = Color::rgb(0x19, 0x2d, 0x74);
     let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(40.0).unwrap())]);
     spec.border = Border {
@@ -357,7 +375,9 @@ fn cell_allows_spacer() {
 
 #[test]
 fn overlapping_spans_are_rejected() {
-    let (_, style) = fonts_and_style();
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
     let (c1, r2) = span(1, 2);
     let mut spec = TableSpec::new(halves());
     spec.body = vec![
@@ -387,7 +407,9 @@ fn span_error(reason: CellSpanReason, row: usize, col: usize) -> Error {
 
 #[test]
 fn spans_past_the_grid_or_out_of_the_header_are_rejected() {
-    let (_, style) = fonts_and_style();
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
     let (c3, r1) = span(3, 1);
     let mut wide = TableSpec::new(halves());
     wide.body = vec![vec![cell("W", &style).with_span(c3, r1)]];

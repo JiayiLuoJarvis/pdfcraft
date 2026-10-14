@@ -4,7 +4,8 @@ use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::spec::{Alignment, CellBlock, CellSpec, ImageRef, ImageSpec, TableSpec};
 use pdfcraft_pdf::spec::{
-    BandInset, BandSlot, Block, LayerMark, PageWhen, Resources, SectionSpec, TextRun, TextStyle,
+    BandInset, BandSlot, Block, FontFace, FontFamily, FontRegistry, LayerMark, PageWhen, Resources,
+    SectionSpec, TextRun, TextStyle,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -14,8 +15,19 @@ use pdfcraft_pdf::{
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::{ErrorKind, ImageFormat};
 
-const FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
-const BASELINE: f32 = 13.812;
+#[path = "common/mod.rs"]
+mod common;
+
+fn skip_without_font() -> bool {
+    common::test_font_bytes().is_none()
+}
+
+fn font_bytes() -> Vec<u8> {
+    common::test_font_bytes().expect("set PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT")
+}
+fn baseline() -> f32 {
+    common::body_line_12(&font_bytes()).0
+}
 
 fn texts(page: &pdfcraft_pdf::RecordedPage) -> Vec<&str> {
     page.ops()
@@ -39,6 +51,9 @@ fn links(page: &pdfcraft_pdf::RecordedPage) -> Vec<&str> {
 
 #[test]
 fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
+    if skip_without_font() {
+        return;
+    }
     let margin = NonNegative::pt(36.0).unwrap();
     let mut section = SectionSpec {
         margins: Margins::uniform(margin),
@@ -47,26 +62,31 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
     section.header = Some(pdfcraft_pdf::spec::BandSpec {
         inset: BandInset::PageMargins,
         left: Some(BandSlot::Link {
+            font: (),
             uri: vec![
                 TextRun::Literal("https://example.com/".to_owned()),
                 TextRun::PageNumber,
             ],
             text: vec![TextRun::Literal("Home".to_owned())],
         }),
-        right: Some(BandSlot::Text(vec![
-            TextRun::Literal("第 ".to_owned()),
-            TextRun::PageNumber,
-            TextRun::Literal(" 页 / 共 ".to_owned()),
-            TextRun::PageCount,
-            TextRun::Literal(" 页".to_owned()),
-        ])),
+        right: Some(BandSlot::Text {
+            runs: vec![
+                TextRun::Literal("第 ".to_owned()),
+                TextRun::PageNumber,
+                TextRun::Literal(" 页 / 共 ".to_owned()),
+                TextRun::PageCount,
+                TextRun::Literal(" 页".to_owned()),
+            ],
+            font: (),
+        }),
     });
     section.body = vec![
-        Block::paragraph("Alpha"),
+        Block::paragraph((), "Alpha"),
         Block::PageBreak,
-        Block::paragraph("Beta"),
+        Block::paragraph((), "Beta"),
     ];
     section.front.push(LayerMark::Text {
+        font: (),
         when: PageWhen::Last,
         text: vec![TextRun::Literal("SEAL".to_owned())],
         at: Point::try_pt(430.0, 680.0).unwrap(),
@@ -75,7 +95,13 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
 
     let spec = DocumentSpec {
         page_size: PageSize::A4,
-        resources: Resources::new(FONT.to_vec()),
+        resources: Resources::with_fonts(FontRegistry::single(FontFamily {
+            normal: FontFace {
+                bytes: font_bytes(),
+                index: 0,
+            },
+            bold: None,
+        })),
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![section],
@@ -100,7 +126,7 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         })
         .unwrap();
     assert!(pt_near(seal.origin.x().as_pt(), 430.0));
-    assert!(pt_near(seal.origin.y().as_pt(), 680.0 + BASELINE));
+    assert!(pt_near(seal.origin.y().as_pt(), 680.0 + baseline()));
 
     #[cfg(feature = "backend-krilla")]
     {
@@ -117,10 +143,25 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn foreign_cell_image_ref_is_unknown() {
+    if skip_without_font() {
+        return;
+    }
     let png = include_bytes!("fixtures/one-pixel.png");
-    let mut other = Resources::new(FONT.to_vec());
+    let mut other = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: font_bytes(),
+            index: 0,
+        },
+        bold: None,
+    }));
     let foreign = other.add_image(png.to_vec(), ImageFormat::Png);
-    let mut dest = Resources::new(FONT.to_vec());
+    let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: font_bytes(),
+            index: 0,
+        },
+        bold: None,
+    }));
     let _owned = dest.add_image(png.to_vec(), ImageFormat::Png);
     let err = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -142,8 +183,17 @@ fn foreign_cell_image_ref_is_unknown() {
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn local_cell_image_ref_draws() {
+    if skip_without_font() {
+        return;
+    }
     let png = include_bytes!("fixtures/one-pixel.png");
-    let mut dest = Resources::new(FONT.to_vec());
+    let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: font_bytes(),
+            index: 0,
+        },
+        bold: None,
+    }));
     let owned = dest.add_image(png.to_vec(), ImageFormat::Png);
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -163,7 +213,7 @@ fn local_cell_image_ref_draws() {
 }
 
 #[cfg(feature = "backend-krilla")]
-fn cell_image_section(image: ImageRef) -> SectionSpec {
+fn cell_image_section(image: ImageRef) -> SectionSpec<()> {
     let mut section = SectionSpec::default();
     section.body.push(Block::Table(TableSpec {
         body: vec![vec![CellSpec {

@@ -407,14 +407,10 @@ mod tests {
     use crate::layout::style::{Style, TextAlign};
     use crate::text::measure::line_metrics;
 
-    fn fonts_and_style(align: TextAlign, spacing: f32) -> (FontStore, Style) {
+    fn fonts_and_style(align: TextAlign, spacing: f32) -> Option<(FontStore, Style)> {
+        let bytes = fixture_bytes()?;
         let mut fonts = FontStore::new();
-        let font = fonts
-            .register(FontSource {
-                bytes: fixture_bytes(),
-                index: 0,
-            })
-            .unwrap();
+        let font = fonts.register(FontSource { bytes, index: 0 }).unwrap();
         let style = Style::new(
             font,
             Positive::pt(12.0).unwrap(),
@@ -424,7 +420,7 @@ mod tests {
             align,
         )
         .unwrap();
-        (fonts, style)
+        Some((fonts, style))
     }
 
     fn config(page: Size) -> PaginateConfig {
@@ -475,7 +471,9 @@ mod tests {
         let indent = 24.0f32;
         let page = Size::try_pt(body_w, 400.0).unwrap();
         for align in [TextAlign::Start, TextAlign::Center, TextAlign::End] {
-            let (mut fonts, mut style) = fonts_and_style(align, 0.0);
+            let Some((mut fonts, mut style)) = fonts_and_style(align, 0.0) else {
+                return;
+            };
             style.first_line_indent = NonNegative::pt(indent).unwrap();
             let para = ParagraphNode::layout(&mut fonts, "AB", &style, body_w).unwrap();
             let face = fonts.metrics(style.font).unwrap();
@@ -521,7 +519,9 @@ mod tests {
 
     #[test]
     fn leading_page_break_is_noop_one_blank_page() {
-        let (mut fonts, _) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, _)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
             natural: false,
@@ -543,7 +543,9 @@ mod tests {
 
     #[test]
     fn leading_two_page_breaks_still_one_page() {
-        let (mut fonts, _) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, _)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
             natural: false,
@@ -564,7 +566,9 @@ mod tests {
 
     #[test]
     fn content_then_one_page_break_drops_pending() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let para = ParagraphNode::layout(&mut fonts, "A", &style, A4.width().as_pt()).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
@@ -587,7 +591,9 @@ mod tests {
 
     #[test]
     fn content_then_two_page_breaks_yields_blank_body_page() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let para = ParagraphNode::layout(&mut fonts, "A", &style, A4.width().as_pt()).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
@@ -614,7 +620,9 @@ mod tests {
 
     #[test]
     fn content_break_content_is_two_pages() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let w = A4.width().as_pt();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, w).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, w).unwrap();
@@ -643,7 +651,9 @@ mod tests {
 
     #[test]
     fn content_break_break_content_is_three_pages() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let w = A4.width().as_pt();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, w).unwrap();
         let b = ParagraphNode::layout(&mut fonts, "B", &style, w).unwrap();
@@ -676,7 +686,9 @@ mod tests {
 
     #[test]
     fn spacer_remainder_leads_next_page() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
@@ -715,7 +727,9 @@ mod tests {
 
     #[test]
     fn paragraph_resumes_at_top_of_next_page() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let line_h = metrics.line_height.as_pt();
@@ -756,7 +770,9 @@ mod tests {
 
     #[test]
     fn spacing_after_dropped_when_no_room() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 20.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 20.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let line_h = metrics.line_height.as_pt();
@@ -791,7 +807,9 @@ mod tests {
 
     #[test]
     fn keep_together_moves_to_next_page() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let line_h = metrics.line_height.as_pt();
@@ -836,7 +854,9 @@ mod tests {
 
     #[test]
     fn keep_together_taller_than_frame_errors() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let line_h = metrics.line_height.as_pt();
@@ -876,7 +896,9 @@ mod tests {
 
     #[test]
     fn keep_together_counts_spacing_between_members() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let line_h = metrics.line_height.as_pt();
@@ -919,7 +941,9 @@ mod tests {
 
     #[test]
     fn spacing_after_is_kept_when_it_fits() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 8.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 8.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let line_h = metrics.line_height.as_pt();
@@ -955,7 +979,9 @@ mod tests {
 
     #[test]
     fn body_origin_adds_margins() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 180.0).unwrap();
@@ -992,7 +1018,9 @@ mod tests {
 
     #[test]
     fn two_sections_keep_page_size_and_margins_when_the_first_page_is_not_full() {
-        let (mut fonts, style) = fonts_and_style(TextAlign::Start, 0.0);
+        let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
         let face = fonts.metrics(style.font).unwrap();
         let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();

@@ -222,8 +222,13 @@ pub enum ErrorKind {
         /// Raw identifier that was not found.
         id: u32,
     },
-    /// Bold text was requested but [`Resources::bold_font`](crate::spec::Resources::bold_font) was not set.
+    /// A bold run names a family that has no bold face.
     BoldFaceRequired,
+    /// `key` was not passed to [`FontRegistry::register`](crate::FontRegistry::register).
+    UnregisteredFont {
+        /// [`Debug`](std::fmt::Debug) text of the caller's font key.
+        key: String,
+    },
     /// skrifa and krilla read different units per em from the same bytes.
     FontMetricsMismatch {
         /// Units per em from skrifa.
@@ -338,6 +343,7 @@ impl fmt::Display for ErrorKind {
             ),
             Self::UnknownFont { id } => write!(f, "font {id} is not registered"),
             Self::BoldFaceRequired => f.write_str("bold text needs a registered bold font"),
+            Self::UnregisteredFont { key } => write!(f, "font {key} is not registered"),
             Self::FontMetricsMismatch {
                 skrifa_upem,
                 krilla_upem,
@@ -848,8 +854,6 @@ pub(crate) enum FontFault {
         /// Unmapped scalar.
         scalar: char,
     },
-    /// Bold was requested and no bold face is registered.
-    BoldFaceRequired,
     /// `id` is not in the font store.
     UnknownFont {
         /// Raw font id.
@@ -863,7 +867,6 @@ impl From<FontFault> for Error {
             FontFault::MissingGlyph { font, scalar } => {
                 ErrorKind::MissingGlyph { font, scalar }.into()
             }
-            FontFault::BoldFaceRequired => ErrorKind::BoldFaceRequired.into(),
             FontFault::UnknownFont { id } => ErrorKind::UnknownFont { id }.into(),
         }
     }

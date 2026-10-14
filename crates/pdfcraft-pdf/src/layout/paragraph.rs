@@ -3,7 +3,7 @@
 use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
 #[cfg(test)]
 use crate::error::ErrorBag;
-use crate::error::{ErrorKind, Fallible as Result, FontFault, GeometryKind};
+use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
 use crate::fonts::FontId;
 #[cfg(test)]
 use crate::fonts::FontStore;
@@ -15,24 +15,18 @@ use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
 use crate::text::line_break::{break_spans, Advance, LineBudget, Seg, Span, SpanLine};
 use crate::text::measure::measure_text;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Face {
-    Body,
-    Bold,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TextRun {
     pub(crate) text: String,
-    pub(crate) face: Face,
+    pub(crate) font: FontId,
     pub(crate) link: Option<LinkTarget>,
 }
 
 impl TextRun {
-    pub(crate) fn new(text: impl Into<String>, face: Face) -> Self {
+    pub(crate) fn new(text: impl Into<String>, font: FontId) -> Self {
         Self {
             text: text.into(),
-            face,
+            font,
             link: None,
         }
     }
@@ -119,7 +113,7 @@ impl TextNode {
         let items = if text.is_empty() {
             Vec::new()
         } else {
-            vec![InlineItem::Text(TextRun::new(text, Face::Body))]
+            vec![InlineItem::Text(TextRun::new(text, style.font))]
         };
         Self { items, style }
     }
@@ -173,7 +167,7 @@ impl ParagraphNode {
         let items = if text.is_empty() {
             Vec::new()
         } else {
-            vec![InlineItem::Text(TextRun::new(text, Face::Body))]
+            vec![InlineItem::Text(TextRun::new(text, style.font))]
         };
         let mut errors = ErrorBag::default();
         let laid = {
@@ -402,7 +396,7 @@ fn fragment_from_lines(
 
 #[derive(Debug, Clone, PartialEq)]
 struct MeasuredInline {
-    text: TaggedClusteredText<Face>,
+    text: TaggedClusteredText<FontId>,
     glyphs: Vec<InlineGlyph>,
     link: Option<LinkTarget>,
 }
@@ -440,12 +434,12 @@ fn prepare_inline(
         match item {
             InlineItem::Text(run) => {
                 if pending.first().is_some_and(|first| first.link != run.link) {
-                    flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
+                    flush_text(ctx, &mut pending, &mut groups, &mut spans)?;
                 }
                 pending.push(run.clone());
             }
             InlineItem::Blank(blank) => {
-                flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
+                flush_text(ctx, &mut pending, &mut groups, &mut spans)?;
                 spans.push(Span::Blank {
                     advance: blank_advance(blank.width, style.font_size)?,
                     payload: BlankDraw {
@@ -457,13 +451,12 @@ fn prepare_inline(
             }
         }
     }
-    flush_text(ctx, style.font, &mut pending, &mut groups, &mut spans)?;
+    flush_text(ctx, &mut pending, &mut groups, &mut spans)?;
     Ok(Prepared { groups, spans })
 }
 
 fn flush_text(
     ctx: &mut LayoutCtx<'_>,
-    body: FontId,
     pending: &mut Vec<TextRun>,
     groups: &mut Vec<MeasuredInline>,
     spans: &mut Vec<Span<BlankDraw>>,
@@ -471,7 +464,7 @@ fn flush_text(
     if pending.is_empty() {
         return Ok(());
     }
-    let measured = measure_inline(ctx, pending, body)?;
+    let measured = measure_inline(ctx, pending)?;
     spans.push(Span::Group(groups.len()));
     groups.push(measured);
     pending.clear();
@@ -568,38 +561,14 @@ fn empty_glyph_run(style: &Style, x: f32, baseline: f32) -> Result<GlyphRun> {
     })
 }
 
-fn measure_inline(
-    ctx: &mut LayoutCtx<'_>,
-    runs: &[TextRun],
-    body: FontId,
-) -> Result<MeasuredInline> {
+fn measure_inline(ctx: &mut LayoutCtx<'_>, runs: &[TextRun]) -> Result<MeasuredInline> {
     let link = runs.first().and_then(|run| run.link.clone());
     debug_assert!(
         runs.iter().all(|run| run.link == link),
         "one measured group must share one link"
     );
-    let text = cluster_tagged(runs.iter().map(|run| (run.face, run.text.as_str())));
-    let needs_bold = runs
-        .iter()
-        .any(|run| run.face == Face::Bold && !run.text.is_empty());
-    let bold = if needs_bold {
-        if let Ok(id) = ctx.fonts.bold() {
-            Some(id)
-        } else {
-            ctx.soft(FontFault::BoldFaceRequired);
-            Some(body)
-        }
-    } else {
-        None
-    };
-    let font_ids: Vec<_> = text
-        .glyph_tags()
-        .iter()
-        .map(|face| match face {
-            Face::Body => body,
-            Face::Bold => bold.unwrap_or(body),
-        })
-        .collect();
+    let text = cluster_tagged(runs.iter().map(|run| (run.font, run.text.as_str())));
+    let font_ids: Vec<_> = text.glyph_tags().to_vec();
     let glyph_text = text.clustered().glyph_text();
     let mut byte_boundaries: Vec<_> = glyph_text.char_indices().map(|(byte, _)| byte).collect();
     byte_boundaries.push(glyph_text.len());

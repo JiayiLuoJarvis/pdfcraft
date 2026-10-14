@@ -34,7 +34,7 @@ cargo test -p pdfcraft-forms
 cargo run -p pdfcraft-forms --example fill_basic
 ```
 
-This crate does not implement OTF fonts or font subsetting. CJK fill works when you pass a TrueType face that contains `glyf`. The repository does not vendor that font. The CJK tests run when `PDFCRAFT_FORMS_FONT` is set.
+This crate does not implement OTF fonts or font subsetting. CJK fill works when you pass a TrueType face that contains `glyf`. The repository does not vendor fonts; fill and layout tests that need a face read `PDFCRAFT_FORMS_FONT` / `PDFCRAFT_PDF_FONT` / `PDFCRAFT_CJK_FONT` / `PDFCRAFT_ORGCHART_FONT`.
 
 ## Contributing
 

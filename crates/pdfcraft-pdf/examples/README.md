@@ -14,7 +14,7 @@ Output paths default under `out/` (gitignored). Pass another path as argv[1].
 End-to-end smoke: sections, bands with page numbers, columns, tables, lists,
 links, blanks, images, and layers → `layout_spec` → `to_pdf`.
 
-Uses `tests/fixtures/quire-measure.ttf` (Latin + a few CJK page-label glyphs).
+Requires `PDFCRAFT_PDF_FONT` or `PDFCRAFT_CJK_FONT` (face must cover the demo glyphs).
 Any other missing cmap entry fails the document.
 
 ## bill

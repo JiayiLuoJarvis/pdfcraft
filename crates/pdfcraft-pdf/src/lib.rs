@@ -25,7 +25,8 @@
 //!
 //! # Fonts and glyphs
 //!
-//! Supply face bytes on [`spec::Resources`]. A character with no cmap entry
+//! Register faces on a [`FontRegistry`] and pass it to [`spec::Resources::with_fonts`].
+//! Each text run names a key in that registry. A character with no cmap entry
 //! fails the document ([`ErrorKind::MissingGlyph`]). There is no fallback font
 //! and no `.notdef` box. v1 targets horizontal Chinese and Latin (no bidi,
 //! vertical writing, kerning, ligatures, or justified lines).
@@ -39,7 +40,7 @@
 //! | [`error`] | [`Error`], [`Errors`], [`ErrorKind`], [`LimitKind`] |
 //! | [`limits`] | [`Limits`] caps. [`LimitKind`] is defined in [`error`] and re-exported here |
 //! | [`canvas`] | Recorded drawing commands |
-//! | [`fonts`] | [`FontId`] |
+//! | [`fonts`] | [`FontId`], [`FontRegistry`] |
 //!
 //! Layout and text engines are crate-private. The PDF backend is private and
 //! compiled behind feature `backend-krilla` (default). The drawing surface is
@@ -47,20 +48,28 @@
 //!
 //! # Example
 //!
-//! ```
-//! use pdfcraft_pdf::spec::{Block, DocumentInfo, Resources, SectionSpec};
+//! ```no_run
+//! use pdfcraft_pdf::spec::{
+//!     Block, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources, SectionSpec,
+//! };
 //! use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Margins, PageSize, Result};
 //!
 //! # fn main() -> Result<()> {
-//! let font = std::fs::read("tests/fixtures/quire-measure.ttf").expect("fixture font");
+//! let font = std::fs::read("path/to/face.ttf").expect("font");
 //! let rendered = layout_spec(DocumentSpec {
 //!     page_size: PageSize::A4,
-//!     resources: Resources::new(font),
+//!     resources: Resources::with_fonts(FontRegistry::single(FontFamily {
+//!         normal: FontFace {
+//!             bytes: font,
+//!             index: 0,
+//!         },
+//!         bold: None,
+//!     })),
 //!     limits: pdfcraft_pdf::Limits::default(),
 //!     info: DocumentInfo::default(),
 //!     sections: vec![SectionSpec {
 //!         margins: Margins::try_uniform(48.0)?,
-//!         body: vec![Block::paragraph("Hello from pdfcraft-pdf.")],
+//!         body: vec![Block::paragraph((), "Hello from pdfcraft-pdf.")],
 //!         ..SectionSpec::default()
 //!     }],
 //! })?;
@@ -101,7 +110,7 @@ pub use canvas::{
     CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId, LinkTarget,
     RecordedPage, RecordingCanvas,
 };
-pub use fonts::FontId;
+pub use fonts::{FontFace, FontFamily, FontId, FontRegistry};
 
 pub(crate) mod text;
 

@@ -6,28 +6,34 @@ use crate::fonts::fixture_bytes;
 use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect, Size};
 use crate::layout_spec;
 use crate::spec::{
-    Alignment, BlankSpec, BlankWidth, Block, InlineRun, LayerMark, LayerShape, ListItemSpec,
-    ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec, TextRun, TextStyle,
+    Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, InlineRun,
+    LayerMark, LayerShape, ListItemSpec, ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec,
+    TextRun, TextStyle,
 };
 use crate::DocumentSpec;
 
-fn resources() -> Resources {
-    let mut resources = Resources::new(fixture_bytes().as_ref().clone());
-    resources.bold_font = Some(fixture_bytes().as_ref().clone());
-    resources
+fn resources() -> Option<Resources<()>> {
+    let bytes = fixture_bytes()?.as_ref().clone();
+    Some(Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: bytes.clone(),
+            index: 0,
+        },
+        bold: Some(FontFace { bytes, index: 0 }),
+    })))
 }
 
-fn lay(page: PageSize, section: SectionSpec) -> crate::Result<crate::Rendered> {
-    layout_spec(DocumentSpec {
+fn lay(page: PageSize, section: SectionSpec<()>) -> Option<crate::Result<crate::Rendered>> {
+    Some(layout_spec(DocumentSpec {
         page_size: page,
-        resources: resources(),
+        resources: resources()?,
         limits: crate::Limits::default(),
         info: crate::spec::DocumentInfo::default(),
         sections: vec![section],
-    })
+    }))
 }
 
-fn body(blocks: Vec<Block>) -> SectionSpec {
+fn body(blocks: Vec<Block<()>>) -> SectionSpec<()> {
     SectionSpec {
         body: blocks,
         ..SectionSpec::default()
@@ -72,44 +78,72 @@ fn targets(rendered: &crate::Rendered) -> Vec<String> {
 
 #[test]
 fn adjacent_same_face_runs_paint_as_one_glyph_run() {
-    let rendered = lay(
+    let Some(rendered) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
             runs: vec![
-                InlineRun::Text("A".into()),
-                InlineRun::Text(String::new()),
-                InlineRun::Text("B".into()),
-                InlineRun::Bold("C".into()),
-                InlineRun::Bold("D".into()),
-                InlineRun::Text("E".into()),
+                InlineRun::Text {
+                    text: "A".into(),
+                    font: (),
+                },
+                InlineRun::Text {
+                    text: String::new(),
+                    font: (),
+                },
+                InlineRun::Text {
+                    text: "B".into(),
+                    font: (),
+                },
+                InlineRun::Bold {
+                    text: "C".into(),
+                    font: (),
+                },
+                InlineRun::Bold {
+                    text: "D".into(),
+                    font: (),
+                },
+                InlineRun::Text {
+                    text: "E".into(),
+                    font: (),
+                },
             ],
             ..ParagraphSpec::default()
         })]),
-    )
-    .unwrap();
+    ) else {
+        return;
+    };
+    let rendered = rendered.unwrap();
     assert_eq!(texts(&rendered), ["AB", "CD", "E"]);
     assert_eq!(fonts(&rendered), [0, 1, 0]);
 }
 
 #[test]
 fn a_blank_splits_adjacent_text_into_two_glyph_runs() {
-    let rendered = lay(
+    let Some(rendered) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
             runs: vec![
-                InlineRun::Text("A".into()),
+                InlineRun::Text {
+                    text: "A".into(),
+                    font: (),
+                },
                 InlineRun::Blank(BlankSpec {
                     width: BlankWidth::Fixed(NonNegative::pt(10.0).unwrap()),
                     thickness: Some(Positive::pt(0.5).unwrap()),
                     color: Some(Color::rgb(1, 2, 3)),
                     baseline_offset: Some(NonNegative::pt(2.0).unwrap()),
                 }),
-                InlineRun::Text("B".into()),
+                InlineRun::Text {
+                    text: "B".into(),
+                    font: (),
+                },
             ],
             ..ParagraphSpec::default()
         })]),
-    )
-    .unwrap();
+    ) else {
+        return;
+    };
+    let rendered = rendered.unwrap();
     assert_eq!(texts(&rendered), ["A", "B"]);
     let pages = rendered.pages();
     let strokes = pages[0]
@@ -128,14 +162,20 @@ fn a_run_after_fill_blank_fails_before_any_page() {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Text("x".into()),
+            InlineRun::Text {
+                text: "x".into(),
+                font: (),
+            },
         ],
         vec![
             InlineRun::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Bold("x".into()),
+            InlineRun::Bold {
+                text: "x".into(),
+                font: (),
+            },
         ],
         vec![
             InlineRun::Blank(BlankSpec {
@@ -168,15 +208,16 @@ fn a_run_after_fill_blank_fails_before_any_page() {
             }),
         ],
     ] {
-        let error = lay(
+        let Some(error) = lay(
             PageSize::A4,
             body(vec![Block::Paragraph(ParagraphSpec {
                 runs,
                 ..ParagraphSpec::default()
             })]),
-        )
-        .err()
-        .unwrap();
+        ) else {
+            return;
+        };
+        let error = error.err().unwrap();
         assert_eq!(error.first().kind, ErrorKind::RunAfterFillBlank);
     }
 }
@@ -192,7 +233,7 @@ fn blank_default() -> BlankSpec {
 
 #[test]
 fn a_fixed_blank_wider_than_the_indented_line_fails() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
         body(vec![Block::Paragraph(ParagraphSpec {
             runs: vec![InlineRun::Blank(BlankSpec {
@@ -202,9 +243,10 @@ fn a_fixed_blank_wider_than_the_indented_line_fails() {
             first_line_indent: NonNegative::pt(40.0).unwrap(),
             ..ParagraphSpec::default()
         })]),
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     let ErrorKind::UnbreakableWiderThanFrame { width, avail, .. } = &error.first().kind else {
         panic!("{error:?}");
     };
@@ -214,29 +256,49 @@ fn a_fixed_blank_wider_than_the_indented_line_fails() {
 
 #[test]
 fn nested_links_restore_the_outer_target() {
-    let rendered = lay(
+    let Some(rendered) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
             runs: vec![
                 InlineRun::Link {
                     uri: "https://a".into(),
                     runs: vec![
-                        InlineRun::Text("A".into()),
-                        InlineRun::Text("B".into()),
-                        InlineRun::Bold("C".into()),
+                        InlineRun::Text {
+                            text: "A".into(),
+                            font: (),
+                        },
+                        InlineRun::Text {
+                            text: "B".into(),
+                            font: (),
+                        },
+                        InlineRun::Bold {
+                            text: "C".into(),
+                            font: (),
+                        },
                         InlineRun::Link {
                             uri: "https://b".into(),
-                            runs: vec![InlineRun::Text("D".into())],
+                            runs: vec![InlineRun::Text {
+                                text: "D".into(),
+                                font: (),
+                            }],
                         },
-                        InlineRun::Text("E".into()),
+                        InlineRun::Text {
+                            text: "E".into(),
+                            font: (),
+                        },
                     ],
                 },
-                InlineRun::Text("F".into()),
+                InlineRun::Text {
+                    text: "F".into(),
+                    font: (),
+                },
             ],
             ..ParagraphSpec::default()
         })]),
-    )
-    .unwrap();
+    ) else {
+        return;
+    };
+    let rendered = rendered.unwrap();
     assert_eq!(texts(&rendered), ["AB", "C", "D", "E", "F"]);
     assert_eq!(fonts(&rendered), [0, 1, 0, 0, 0]);
     assert_eq!(targets(&rendered), ["https://a", "https://b", "https://a"]);
@@ -244,47 +306,57 @@ fn nested_links_restore_the_outer_target() {
 
 #[test]
 fn an_empty_uri_fails_before_any_page() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
             runs: vec![
-                InlineRun::Text("A".into()),
+                InlineRun::Text {
+                    text: "A".into(),
+                    font: (),
+                },
                 InlineRun::Link {
                     uri: String::new(),
-                    runs: vec![InlineRun::Text("x".into())],
+                    runs: vec![InlineRun::Text {
+                        text: "x".into(),
+                        font: (),
+                    }],
                 },
             ],
             ..ParagraphSpec::default()
         })]),
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     assert_eq!(error.first().kind, ErrorKind::EmptyLink);
 }
 
 #[test]
 fn an_empty_band_uri_is_located_in_the_header() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
             header: Some(crate::spec::BandSpec {
                 left: Some(crate::spec::BandSlot::Link {
+                    font: (),
                     uri: vec![TextRun::Literal(String::new())],
                     text: vec![TextRun::Literal("Home".into())],
                 }),
                 right: Some(crate::spec::BandSlot::Link {
+                    font: (),
                     uri: vec![TextRun::Literal("https://example.com".into())],
                     text: vec![TextRun::Literal("Later".into())],
                 }),
                 ..crate::spec::BandSpec::default()
             }),
-            body: vec![Block::paragraph("A")],
+            body: vec![Block::paragraph((), "A")],
             ..SectionSpec::default()
         },
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     assert_eq!(error.first().kind, ErrorKind::EmptyLink);
     assert_eq!(
         error.first().at,
@@ -297,26 +369,29 @@ fn an_empty_band_uri_is_located_in_the_header() {
     );
 }
 
-const MISSING: char = '\u{6f22}';
+/// Not a Unicode scalar that any cmap should map (same idea as measure tests).
+const MISSING: char = '\u{FFFF}';
 
 #[test]
 fn a_missing_header_glyph_is_located_in_the_header() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
             header: Some(crate::spec::BandSpec {
-                left: Some(crate::spec::BandSlot::Text(vec![TextRun::Literal(
-                    MISSING.to_string(),
-                )])),
+                left: Some(crate::spec::BandSlot::Text {
+                    runs: vec![TextRun::Literal(MISSING.to_string())],
+                    font: (),
+                }),
                 ..crate::spec::BandSpec::default()
             }),
-            body: vec![Block::paragraph("A")],
+            body: vec![Block::paragraph((), "A")],
             ..SectionSpec::default()
         },
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     assert_eq!(
         error.first().kind,
         ErrorKind::MissingGlyph {
@@ -335,7 +410,7 @@ fn a_zero_length_layer_segment_fails_before_any_page() {
     let point = Point::try_pt(4.0, 5.0).unwrap();
     let error = layout_spec(DocumentSpec {
         page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
-        resources: Resources::default(),
+        resources: Resources::<()>::default(),
         limits: crate::Limits::default(),
         info: crate::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
@@ -371,7 +446,7 @@ fn a_zero_length_layer_segment_fails_before_any_page() {
 fn a_non_finite_rotation_fails_before_any_page() {
     let error = layout_spec(DocumentSpec {
         page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
-        resources: Resources::default(),
+        resources: Resources::<()>::default(),
         limits: crate::Limits::default(),
         info: crate::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
@@ -401,10 +476,11 @@ fn a_non_finite_rotation_fails_before_any_page() {
 #[test]
 fn a_forced_break_in_layer_text_fails_before_any_page() {
     for sample in ["A\nB", "A\r\nB"] {
-        let error = lay(
+        let Some(error) = lay(
             PageSize::A4,
             SectionSpec {
                 behind: vec![LayerMark::Text {
+                    font: (),
                     when: PageWhen::All,
                     text: vec![TextRun::Literal(sample.into())],
                     at: Point::try_pt(10.0, 10.0).unwrap(),
@@ -412,9 +488,10 @@ fn a_forced_break_in_layer_text_fails_before_any_page() {
                 }],
                 ..SectionSpec::default()
             },
-        )
-        .err()
-        .unwrap();
+        ) else {
+            return;
+        };
+        let error = error.err().unwrap();
         assert_eq!(
             error.first().kind,
             ErrorKind::UnexpectedLineBreakInSingleLine {
@@ -431,18 +508,19 @@ fn a_forced_break_in_layer_text_fails_before_any_page() {
 
 #[test]
 fn a_forced_break_in_a_custom_marker_fails_before_any_page() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::A4,
         body(vec![Block::List(ListSpec {
             items: vec![ListItemSpec {
                 marker: Some("A\nB".into()),
-                blocks: vec![Block::paragraph("body")],
+                blocks: vec![Block::paragraph((), "body")],
             }],
             ..ListSpec::default()
         })]),
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     assert_eq!(
         error.first().kind,
         ErrorKind::UnexpectedLineBreakInSingleLine {
@@ -457,11 +535,12 @@ fn a_forced_break_in_a_custom_marker_fails_before_any_page() {
 
 #[test]
 fn a_missing_glyph_on_the_last_page_front_is_located_there() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
-            body: vec![Block::paragraph("A")],
+            body: vec![Block::paragraph((), "A")],
             front: vec![LayerMark::Text {
+                font: (),
                 when: PageWhen::Last,
                 text: vec![TextRun::Literal(MISSING.to_string())],
                 at: Point::try_pt(10.0, 10.0).unwrap(),
@@ -469,9 +548,10 @@ fn a_missing_glyph_on_the_last_page_front_is_located_there() {
             }],
             ..SectionSpec::default()
         },
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     assert_eq!(
         error.first().kind,
         ErrorKind::MissingGlyph {
@@ -487,14 +567,15 @@ fn a_missing_glyph_on_the_last_page_front_is_located_there() {
 
 #[test]
 fn keep_together_taller_than_the_page_names_the_body() {
-    let error = lay(
+    let Some(error) = lay(
         PageSize::A4,
         body(vec![Block::KeepTogether(
-            (0..100).map(|_| Block::paragraph("line")).collect(),
+            (0..100).map(|_| Block::paragraph((), "line")).collect(),
         )]),
-    )
-    .err()
-    .unwrap();
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
     let page_h = PageSize::A4.resolve().height().as_pt();
     assert!(
         matches!(
@@ -517,34 +598,44 @@ fn keep_together_taller_than_the_page_names_the_body() {
 
 #[test]
 fn one_value_path_paints_a_paragraph_and_a_cell() {
-    let rendered = lay(
+    let Some(rendered) = lay(
         PageSize::A4,
         body(vec![
-            Block::paragraph("Risk"),
+            Block::paragraph((), "Risk"),
             Block::Table(crate::spec::TableSpec {
                 body: vec![vec![crate::spec::CellSpec {
-                    content: vec![crate::spec::CellBlock::Text("cell".into())],
+                    content: vec![crate::spec::CellBlock::Text {
+                        text: "cell".into(),
+                        font: (),
+                    }],
                     ..crate::spec::CellSpec::default()
                 }]],
                 ..crate::spec::TableSpec::default()
             }),
         ]),
-    )
-    .unwrap();
+    ) else {
+        return;
+    };
+    let rendered = rendered.unwrap();
     assert_eq!(texts(&rendered), ["Risk", "cell"]);
 }
 
 #[test]
 fn paragraph_align_end_wins_when_center_is_not_set() {
-    let rendered = lay(
+    let Some(rendered) = lay(
         PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![InlineRun::Text("D".into())],
+            runs: vec![InlineRun::Text {
+                text: "D".into(),
+                font: (),
+            }],
             align: Alignment::End,
             ..ParagraphSpec::default()
         })]),
-    )
-    .unwrap();
+    ) else {
+        return;
+    };
+    let rendered = rendered.unwrap();
     let pages = rendered.pages();
     let CanvasCommand::DrawGlyphRun { run } = &pages[0].ops()[0] else {
         panic!("glyph");
@@ -557,4 +648,58 @@ fn paragraph_align_end_wins_when_center_is_not_set() {
         .sum::<f32>()
         * run.font_size.as_pt();
     assert!(pt_near(x + width, 120.0), "{x}");
+}
+
+#[test]
+fn an_unregistered_key_names_itself() {
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    enum DocFont {
+        Body,
+    }
+
+    let Err(error) = layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::with_fonts(FontRegistry::new()),
+        limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            body: vec![Block::paragraph(DocFont::Body, "A")],
+            ..SectionSpec::default()
+        }],
+    }) else {
+        panic!("unregistered key should fail layout");
+    };
+    assert_eq!(
+        error.first().kind.clone(),
+        ErrorKind::UnregisteredFont {
+            key: "Body".to_owned(),
+        }
+    );
+    assert_eq!(
+        error.first().kind.to_string(),
+        "font Body is not registered"
+    );
+}
+
+#[test]
+fn a_bad_collection_index_is_the_font_error() {
+    let Err(error) = layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::with_fonts(FontRegistry::single(FontFamily {
+            normal: FontFace {
+                bytes: b"not a font".to_vec(),
+                index: 4,
+            },
+            bold: None,
+        })),
+        limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec::default()],
+    }) else {
+        panic!("a bad collection index should fail layout");
+    };
+    assert!(matches!(
+        error.first().kind,
+        ErrorKind::Font { index: 4, .. }
+    ));
 }

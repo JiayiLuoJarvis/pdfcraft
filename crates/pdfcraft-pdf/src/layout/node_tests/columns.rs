@@ -97,7 +97,9 @@ fn column_widths_bad_ratio() {
 
 #[test]
 fn column_widths_column_count() {
-    let (_, style) = fonts_and_style();
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
     let one = ColumnsNode::new(
         default_column_gap(),
         vec![(fixed(10.0), vec![text("A", &style)])],
@@ -107,7 +109,9 @@ fn column_widths_column_count() {
 
 #[test]
 fn column_widths_gap_eats_the_frame() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let cols = ColumnsNode::new(
         NonNegative::pt(300.0).unwrap(),
         vec![
@@ -128,7 +132,9 @@ fn column_widths_gap_eats_the_frame() {
 
 #[test]
 fn columns_place_each_column_at_its_x() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let b = metrics(&fonts, &style).baseline.as_pt();
     let cols = ColumnsNode::new(
         default_column_gap(),
@@ -157,7 +163,9 @@ fn columns_place_each_column_at_its_x() {
 
 #[test]
 fn text_wraps_at_column_width_not_body_width() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let words = "AAAA AAAA AAAA";
     let cols = ColumnsNode::new(
@@ -181,7 +189,9 @@ fn text_wraps_at_column_width_not_body_width() {
 
 #[test]
 fn columns_split_across_pages_per_column() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let cols = ColumnsNode::new(
         default_column_gap(),
@@ -210,7 +220,9 @@ fn columns_split_across_pages_per_column() {
 
 #[test]
 fn columns_spacing_after_is_the_largest_column_spacing() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let mut wide = style.clone();
     wide.paragraph_spacing = NonNegative::pt(8.0).unwrap();
@@ -236,7 +248,9 @@ fn columns_spacing_after_is_the_largest_column_spacing() {
 
 #[test]
 fn stuck_column_on_full_page_errors_with_no_output() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let m = metrics(&fonts, &style);
     let cols = ColumnsNode::new(
         default_column_gap(),
@@ -268,7 +282,9 @@ fn stuck_column_on_full_page_errors_with_no_output() {
 
 #[test]
 fn pre_laid_paragraph_wider_than_column_errors() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let wide = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
     let cols = ColumnsNode::new(
         default_column_gap(),

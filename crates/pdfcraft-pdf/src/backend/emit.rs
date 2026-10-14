@@ -388,13 +388,11 @@ mod tests {
 
     #[test]
     fn measured_glyphs_emit_pdf() {
+        let Some(bytes) = fixture_bytes() else {
+            return;
+        };
         let mut store = FontStore::new();
-        let id = store
-            .register(FontSource {
-                bytes: fixture_bytes(),
-                index: 0,
-            })
-            .unwrap();
+        let id = store.register(FontSource { bytes, index: 0 }).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let measured = measure_text(&mut store, &mut errors, id, "A").unwrap();
         let fonts = Arc::new(store);
@@ -424,13 +422,11 @@ mod tests {
 
     #[test]
     fn mismatched_advance_writes_observed_tj_adjustment() {
+        let Some(bytes) = fixture_bytes() else {
+            return;
+        };
         let mut store = FontStore::new();
-        let id = store
-            .register(FontSource {
-                bytes: fixture_bytes(),
-                index: 0,
-            })
-            .unwrap();
+        let id = store.register(FontSource { bytes, index: 0 }).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let measured = measure_text(&mut store, &mut errors, id, "AA").unwrap();
         let fonts = Arc::new(store);
@@ -491,15 +487,23 @@ mod tests {
 
     #[test]
     fn fixture_upem_and_hmtx_match_across_skrifa_copies() {
-        // quire-measure.ttf, read from the file rather than from `measure_text`:
-        // head unitsPerEm is 1000, cmap format 4 maps U+0041 to glyph 34, and
-        // that glyph's hmtx advance is 707. krilla remaps the id to a CID, so
-        // the content stream does not contain 34. The TJ number is the hmtx
-        // comparison. A drawn advance of 0.707 + 0.25 is -250 in PDF's
-        // 1000-unit space only when krilla's advance for glyph 34 is also 707.
-        let bytes = fixture_bytes();
+        // Measure 'A' from the env face, then paint advance_norm + 0.25 vs hmtx.
+        // The TJ number is the 1000-unit hmtx delta (−250 for +0.25 em).
+        let Some(bytes) = fixture_bytes() else {
+            return;
+        };
         let font = Font::new(Data::from(Arc::clone(&bytes)), 0).unwrap();
-        assert_eq!(font.units_per_em().to_bits(), 1000.0f32.to_bits());
+        let skrifa_upem = {
+            let mut store = FontStore::new();
+            let id = store
+                .register(FontSource {
+                    bytes: Arc::clone(&bytes),
+                    index: 0,
+                })
+                .unwrap();
+            store.metrics(id).unwrap().units_per_em
+        };
+        assert_eq!(font.units_per_em().to_bits(), skrifa_upem.to_bits());
 
         let mut store = FontStore::new();
         let id = store
@@ -508,10 +512,11 @@ mod tests {
                 index: 0,
             })
             .unwrap();
-        assert_eq!(
-            store.metrics(id).unwrap().units_per_em.to_bits(),
-            1000.0f32.to_bits()
-        );
+        let mut errors = crate::error::ErrorBag::default();
+        let measured = measure_text(&mut store, &mut errors, id, "A").unwrap();
+        assert!(errors.is_empty());
+        let glyph = &measured.glyphs[0];
+        let advance = glyph.advance_norm;
 
         let run = GlyphRun {
             font: id,
@@ -520,13 +525,13 @@ mod tests {
             origin: Point::try_pt(72.0, 100.0).unwrap(),
             glyphs: vec![
                 GlyphPlacement {
-                    glyph_id: 34,
-                    advance_norm: 0.707 + 0.25,
+                    glyph_id: glyph.glyph_id,
+                    advance_norm: advance + 0.25,
                     byte_range: 0..1,
                 },
                 GlyphPlacement {
-                    glyph_id: 34,
-                    advance_norm: 0.707,
+                    glyph_id: glyph.glyph_id,
+                    advance_norm: advance,
                     byte_range: 1..2,
                 },
             ],

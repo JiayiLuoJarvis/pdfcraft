@@ -6,7 +6,7 @@
 //! | --- | --- |
 //! | [`DocumentSpec`] | Page default, [`Resources`], [`crate::Limits`], [`DocumentInfo`], sections |
 //! | [`SectionSpec`] | Margins, bands, layers, flow [`Block`] list |
-//! | [`Resources`] | Body/bold font bytes; [`Resources::add_image`] → [`ImageRef`] |
+//! | [`Resources`] | [`FontRegistry`] and [`Resources::add_image`] → [`ImageRef`] |
 //! | [`Block`] | Paragraphs, tables, columns, lists, images, rules, … |
 //! | [`BandSpec`] / [`TextRun`] | Header/footer; page numbers resolved at paint time |
 //! | [`LayerMark`] / [`PageWhen`] | Page-anchored marks (`behind` / `front`) |
@@ -25,6 +25,7 @@ mod types;
 mod tests;
 
 pub use crate::canvas::DocumentInfo;
+pub use crate::fonts::{FontFace, FontFamily, FontRegistry};
 pub use lower::layout_spec;
 pub use types::{Numbering, Ratio, Rendered, Track};
 
@@ -39,11 +40,11 @@ use self::token::DocToken;
 /// A complete data-only document description.
 #[derive(Debug)]
 #[must_use]
-pub struct DocumentSpec {
+pub struct DocumentSpec<K> {
     /// Default paper for sections that do not override it.
     pub page_size: PageSize,
     /// Fonts and images used by the document.
-    pub resources: Resources,
+    pub resources: Resources<K>,
     /// Resource and document-size caps.
     pub limits: Limits,
     /// PDF document information.
@@ -52,12 +53,12 @@ pub struct DocumentSpec {
     /// strings are omitted. The creator is `pdfcraft`. Producer is not set.
     pub info: DocumentInfo,
     /// Sections in document order. An empty list produces one empty default section.
-    pub sections: Vec<SectionSpec>,
+    pub sections: Vec<SectionSpec<K>>,
 }
 
-impl DocumentSpec {
+impl<K> DocumentSpec<K> {
     /// Starts a document with one default section.
-    pub fn new(page_size: PageSize, resources: Resources) -> Self {
+    pub fn new(page_size: PageSize, resources: Resources<K>) -> Self {
         Self {
             page_size,
             resources,
@@ -71,31 +72,29 @@ impl DocumentSpec {
 /// Fonts and encoded images owned by a specification.
 #[derive(Debug)]
 #[must_use]
-pub struct Resources {
-    /// Body font bytes. The first face is used by normal text.
-    pub body_font: Vec<u8>,
-    /// Optional face used by bold paragraph runs.
-    pub bold_font: Option<Vec<u8>>,
+pub struct Resources<K> {
+    fonts: FontRegistry<K>,
     token: DocToken,
     images: Vec<ImageResource>,
 }
 
-impl Default for Resources {
+impl<K> Default for Resources<K> {
     fn default() -> Self {
         Self {
-            body_font: Vec::new(),
-            bold_font: None,
+            fonts: FontRegistry::new(),
             token: DocToken::next(),
             images: Vec::new(),
         }
     }
 }
 
-impl Resources {
-    /// Creates resources with `body_font` as the normal text face.
-    pub fn new(body_font: Vec<u8>) -> Self {
+impl<K> Resources<K> {
+    /// Creates resources that draw text with `fonts`.
+    ///
+    /// An empty registry is valid when the document has no text.
+    pub fn with_fonts(fonts: FontRegistry<K>) -> Self {
         Self {
-            body_font,
+            fonts,
             ..Self::default()
         }
     }
@@ -126,31 +125,45 @@ pub struct ImageRef {
 }
 
 /// One section with its own page setup, decorations, and body.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[must_use]
-pub struct SectionSpec {
+pub struct SectionSpec<K> {
     /// Paper override. `None` uses [`DocumentSpec::page_size`].
     pub page_size: Option<PageSize>,
     /// Page margins and header/footer band heights.
     pub margins: Margins,
     /// Header rendered on every page in this section.
-    pub header: Option<BandSpec>,
+    pub header: Option<BandSpec<K>>,
     /// Footer rendered on every page in this section.
-    pub footer: Option<BandSpec>,
+    pub footer: Option<BandSpec<K>>,
     /// Marks painted below the header and body.
-    pub behind: Vec<LayerMark>,
+    pub behind: Vec<LayerMark<K>>,
     /// Marks painted above the footer and body.
-    pub front: Vec<LayerMark>,
+    pub front: Vec<LayerMark<K>>,
     /// Flow blocks in document order.
-    pub body: Vec<Block>,
+    pub body: Vec<Block<K>>,
+}
+
+impl<K> Default for SectionSpec<K> {
+    fn default() -> Self {
+        Self {
+            page_size: None,
+            margins: Margins::default(),
+            header: None,
+            footer: None,
+            behind: Vec::new(),
+            front: Vec::new(),
+            body: Vec::new(),
+        }
+    }
 }
 
 /// A flow block in a section, column, list item, or keep-together group.
 #[derive(Debug)]
 #[must_use]
-pub enum Block {
+pub enum Block<K> {
     /// A wrapping paragraph.
-    Paragraph(ParagraphSpec),
+    Paragraph(ParagraphSpec<K>),
     /// Vertical blank space.
     Spacer(Length<NonNegative>),
     /// Starts following content on a new page.
@@ -165,21 +178,21 @@ pub enum Block {
         children: Vec<Self>,
     },
     /// Side-by-side columns.
-    Columns(ColumnsSpec),
+    Columns(ColumnsSpec<K>),
     /// A table.
-    Table(TableSpec),
+    Table(TableSpec<K>),
     /// A bulleted or numbered list.
-    List(ListSpec),
+    List(ListSpec<K>),
     /// A flow image.
     Image(ImageSpec),
     /// A horizontal rule.
     HLine(HLineSpec),
 }
 
-impl Block {
-    /// A paragraph containing one normal-face text run.
-    pub fn paragraph(text: impl Into<String>) -> Self {
-        Self::Paragraph(ParagraphSpec::text(text))
+impl<K> Block<K> {
+    /// A paragraph containing one text run in `font`.
+    pub fn paragraph(font: K, text: impl Into<String>) -> Self {
+        Self::Paragraph(ParagraphSpec::text(font, text))
     }
 }
 
@@ -209,9 +222,9 @@ pub enum Alignment {
 /// A paragraph and its inline runs.
 #[derive(Debug)]
 #[must_use]
-pub struct ParagraphSpec {
+pub struct ParagraphSpec<K> {
     /// Inline content in order.
-    pub runs: Vec<InlineRun>,
+    pub runs: Vec<InlineRun<K>>,
     /// First-line inset.
     pub first_line_indent: Length<NonNegative>,
     /// Line alignment.
@@ -222,7 +235,7 @@ pub struct ParagraphSpec {
     pub font_size: Option<Length<Positive>>,
 }
 
-impl Default for ParagraphSpec {
+impl<K> Default for ParagraphSpec<K> {
     fn default() -> Self {
         Self {
             runs: Vec::new(),
@@ -234,11 +247,14 @@ impl Default for ParagraphSpec {
     }
 }
 
-impl ParagraphSpec {
-    /// Creates a paragraph containing one normal-face text run.
-    pub fn text(text: impl Into<String>) -> Self {
+impl<K> ParagraphSpec<K> {
+    /// Creates a paragraph containing one text run in `font`.
+    pub fn text(font: K, text: impl Into<String>) -> Self {
         Self {
-            runs: vec![InlineRun::Text(text.into())],
+            runs: vec![InlineRun::Text {
+                text: text.into(),
+                font,
+            }],
             ..Self::default()
         }
     }
@@ -247,11 +263,23 @@ impl ParagraphSpec {
 /// One paragraph run.
 #[derive(Debug)]
 #[must_use]
-pub enum InlineRun {
-    /// Normal-face text.
-    Text(String),
-    /// Bold-face text.
-    Bold(String),
+pub enum InlineRun<K> {
+    /// Text drawn with the family's normal face.
+    Text {
+        /// Run text.
+        text: String,
+        /// Key in the document [`FontRegistry`].
+        font: K,
+    },
+    /// Text drawn with the family's bold face.
+    ///
+    /// Fails with [`crate::ErrorKind::BoldFaceRequired`] when that family has no bold face.
+    Bold {
+        /// Run text.
+        text: String,
+        /// Key in the document [`FontRegistry`].
+        font: K,
+    },
     /// Runs linked to a URI.
     Link {
         /// Non-empty URI.
@@ -292,31 +320,31 @@ pub enum BlankWidth {
 /// A column and its flow content.
 #[derive(Debug)]
 #[must_use]
-pub struct ColumnSpec {
+pub struct ColumnSpec<K> {
     /// Fixed, ratio, or auto width.
     pub width: Track,
     /// Blocks in the column.
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<Block<K>>,
 }
 
 /// Side-by-side columns.
 #[derive(Debug)]
 #[must_use]
-pub struct ColumnsSpec {
+pub struct ColumnsSpec<K> {
     /// Gap between adjacent columns.
     pub gap: Length<NonNegative>,
     /// Columns from left to right.
-    pub columns: Vec<ColumnSpec>,
+    pub columns: Vec<ColumnSpec<K>>,
 }
 
 /// Table rows and presentation.
 #[derive(Debug)]
 #[must_use]
-pub struct TableSpec {
+pub struct TableSpec<K> {
     /// Header rows, repeated when [`Self::repeat_header`] is true.
-    pub header: Vec<Vec<CellSpec>>,
+    pub header: Vec<Vec<CellSpec<K>>>,
     /// Body rows.
-    pub body: Vec<Vec<CellSpec>>,
+    pub body: Vec<Vec<CellSpec<K>>>,
     /// Whether header rows repeat after a page break.
     pub repeat_header: bool,
     /// Optional per-column tracks.
@@ -329,7 +357,7 @@ pub struct TableSpec {
     pub border_color: Color,
 }
 
-impl Default for TableSpec {
+impl<K> Default for TableSpec<K> {
     fn default() -> Self {
         Self {
             header: Vec::new(),
@@ -346,9 +374,9 @@ impl Default for TableSpec {
 /// One table cell.
 #[derive(Debug)]
 #[must_use]
-pub struct CellSpec {
+pub struct CellSpec<K> {
     /// Allowed cell children in vertical order.
-    pub content: Vec<CellBlock>,
+    pub content: Vec<CellBlock<K>>,
     /// Horizontal span.
     pub col_span: NonZeroU16,
     /// Vertical span.
@@ -357,7 +385,7 @@ pub struct CellSpec {
     pub fill: Option<Color>,
 }
 
-impl Default for CellSpec {
+impl<K> Default for CellSpec<K> {
     fn default() -> Self {
         Self {
             content: Vec::new(),
@@ -371,11 +399,16 @@ impl Default for CellSpec {
 /// A child allowed inside a table cell.
 #[derive(Debug)]
 #[must_use]
-pub enum CellBlock {
-    /// Plain text in the table's inherited style.
-    Text(String),
+pub enum CellBlock<K> {
+    /// Plain text in `font`.
+    Text {
+        /// Cell text.
+        text: String,
+        /// Key in the document [`FontRegistry`].
+        font: K,
+    },
     /// A paragraph.
-    Paragraph(ParagraphSpec),
+    Paragraph(ParagraphSpec<K>),
     /// A horizontal rule.
     HLine(HLineSpec),
     /// A flow image.
@@ -383,13 +416,13 @@ pub enum CellBlock {
     /// Vertical blank space.
     Spacer(Length<NonNegative>),
     /// A nested list.
-    List(ListSpec),
+    List(ListSpec<K>),
 }
 
 /// Bulleted or numbered list settings.
 #[derive(Debug)]
 #[must_use]
-pub struct ListSpec {
+pub struct ListSpec<K> {
     /// Marker kind.
     pub kind: ListKind,
     /// First number for an ordered list.
@@ -399,10 +432,10 @@ pub struct ListSpec {
     /// Extra nested-body inset. `None` uses `marker_width`.
     pub nest_indent: Option<Length<Positive>>,
     /// List items in order.
-    pub items: Vec<ListItemSpec>,
+    pub items: Vec<ListItemSpec<K>>,
 }
 
-impl Default for ListSpec {
+impl<K> Default for ListSpec<K> {
     fn default() -> Self {
         Self {
             kind: ListKind::Bullet,
@@ -427,11 +460,13 @@ pub enum ListKind {
 /// One list item.
 #[derive(Debug)]
 #[must_use]
-pub struct ListItemSpec {
+pub struct ListItemSpec<K> {
     /// Custom marker. `None` uses the list's generated marker.
+    ///
+    /// Generated and custom markers use the first registered face.
     pub marker: Option<String>,
     /// Item blocks.
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<Block<K>>,
 }
 
 /// A flow image and its display box.
@@ -480,15 +515,25 @@ impl Default for HLineSpec {
 }
 
 /// Header or footer slots.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[must_use]
-pub struct BandSpec {
+pub struct BandSpec<K> {
     /// Horizontal inset rule.
     pub inset: BandInset,
     /// Start-aligned slot.
-    pub left: Option<BandSlot>,
+    pub left: Option<BandSlot<K>>,
     /// End-aligned slot.
-    pub right: Option<BandSlot>,
+    pub right: Option<BandSlot<K>>,
+}
+
+impl<K> Default for BandSpec<K> {
+    fn default() -> Self {
+        Self {
+            inset: BandInset::default(),
+            left: None,
+            right: None,
+        }
+    }
 }
 
 /// Horizontal inset for a band.
@@ -518,15 +563,22 @@ impl Default for BandInset {
 /// Text or linked text in one band slot.
 #[derive(Debug)]
 #[must_use]
-pub enum BandSlot {
+pub enum BandSlot<K> {
     /// Unlinked text.
-    Text(Vec<TextRun>),
+    Text {
+        /// Page-time runs.
+        runs: Vec<TextRun>,
+        /// Key in the document [`FontRegistry`].
+        font: K,
+    },
     /// Text linked to a URI assembled from page-time runs.
     Link {
         /// URI runs.
         uri: Vec<TextRun>,
         /// Visible text runs.
         text: Vec<TextRun>,
+        /// Key in the document [`FontRegistry`].
+        font: K,
     },
 }
 
@@ -559,13 +611,15 @@ pub enum PageWhen {
 /// One absolute page mark.
 #[derive(Debug)]
 #[must_use]
-pub enum LayerMark {
+pub enum LayerMark<K> {
     /// One unwrapped text line.
     Text {
         /// Page selection.
         when: PageWhen,
         /// Page-time text runs.
         text: Vec<TextRun>,
+        /// Key in the document [`FontRegistry`].
+        font: K,
         /// Line-box top-left in page coordinates.
         at: Point,
         /// Text style.

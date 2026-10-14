@@ -21,6 +21,8 @@ mod page;
 mod paging;
 mod prepare;
 mod render;
+#[cfg(test)]
+mod test_font;
 mod units;
 
 pub use error::{Error, ErrorCode};

@@ -1,31 +1,19 @@
 # Test fixtures
 
-`quire-measure.ttf` is an OFL subset of Adobe Source Han Serif ExtraLight.
-It covers printable ASCII, digits, U+2022, and 第 / 页 / 共.
-Family name is QuireMeasure so it does not use Adobe's reserved name Source.
-See `LICENSE-OFL.txt`.
+Font files are **not** stored in this repository. Integration and unit tests that
+need a face read:
 
-Rebuild with `.audit/fonts-skrifa/subset-fixture.sh` plus a local rename step.
-Do not vendor a full CJK font.
+| Variable | Used for |
+| --- | --- |
+| `PDFCRAFT_PDF_FONT` | General layout / measure tests (Latin is enough for most) |
+| `PDFCRAFT_CJK_FONT` | Letter layout and samples that need Chinese glyphs |
 
-`quire-letter.ttf` is an OFL subset of Noto Sans SC Regular, family name QuireLetter.
-The source file is `Sans/SubsetOTF/SC/NotoSansSC-Regular.otf` from
-<https://github.com/notofonts/noto-cjk>.
-It covers printable ASCII and the Simplified Chinese in `tests/letter_layout.rs`
-(two body paragraphs, the mixed line, table headers and cells, and the footer
-`第 {} 页 / 共 {} 页`).
-Download the source into `/tmp` only.
-
-Rebuild with fontTools 4.60 (`pyftsubset`) on `PATH`:
-
-```bash
-PYFTSUBSET=pyftsubset PYTHON=python3 .audit/fonts-skrifa/subset-letter.sh
-```
-
-The script subsets with `pyftsubset`, converts the CFF outlines to quadratic
-TrueType, and renames the family to QuireLetter.
-See `LICENSE-OFL.txt`.
+If unset, those tests return early (skip). Examples require the same variables.
 
 `one-pixel.png` is a 1 by 1 opaque red PNG for image tests.
+`bad-idat.png` is a corrupt PNG for decode-error paths.
 
-Integration tests load fixtures by path from `tests/`, not from `src/`.
+`LICENSE-OFL.txt` records the OFL terms that applied to the former subset
+fixtures (`quire-measure` / `quire-letter`) when they lived in-tree. Rebuild
+subsets locally with `.audit/fonts-skrifa/subset-fixture.sh` and
+`subset-letter.sh` if you want pinned glyph metrics again.

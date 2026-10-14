@@ -10,6 +10,8 @@ while remaining `0.x`.
 
 ### Changed
 
+- **Breaking.** `pdfcraft-pdf` selects faces with a caller-defined key. `FontFace`, `FontFamily`, and `FontRegistry<K>` replace `Resources::body_font` and `Resources::bold_font`. Build resources with `Resources::with_fonts`. `DocumentSpec`, sections, blocks, paragraphs, inline runs, table cells, bands, and layer text carry `K` (`Copy + Eq + Hash + Debug`). `InlineRun::Text` and `InlineRun::Bold` are `{ text, font }`. `Block::paragraph(font, text)` and `ParagraphSpec::text(font, text)` take that key. `FontRegistry::single` registers one family under `()`. A key that was not registered fails with `ErrorKind::UnregisteredFont`. A bold run whose family has no bold face fails with `ErrorKind::BoldFaceRequired`. `pdfcraft-forms` and `pdfcraft-orgchart` still take one font byte buffer.
+- Test and example fonts are no longer vendored in git. Set `PDFCRAFT_PDF_FONT` / `PDFCRAFT_CJK_FONT` (`pdfcraft-pdf`), `PDFCRAFT_FORMS_FONT` (`pdfcraft-forms`), and `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (`pdfcraft-orgchart`). Font-dependent tests skip when the variable is unset.
 - Renamed crates from `quire-*` to `pdfcraft-*` (`pdfcraft-pdf`, `pdfcraft-forms`, `pdfcraft-orgchart`). Rust imports use `pdfcraft_pdf` / `pdfcraft_forms` / `pdfcraft_orgchart`. Env vars are `PDFCRAFT_FORMS_FONT`, `PDFCRAFT_CJK_FONT`, and `PDFCRAFT_CJK_BOLD_FONT`. PDF `/Creator` is `pdfcraft`.
 - `pdfcraft-orgchart` docs describe both equity (shareholders above) and outbound investment (below the subject).
 

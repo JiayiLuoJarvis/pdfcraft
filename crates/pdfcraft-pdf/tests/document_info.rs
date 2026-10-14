@@ -47,10 +47,10 @@ fn field(info: &str, name: &str) -> String {
 fn pdf_with(info: DocumentInfo) -> Vec<u8> {
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
-        resources: Resources::default(),
+        resources: Resources::<()>::default(),
         limits: Limits::default(),
         info,
-        sections: vec![SectionSpec::default()],
+        sections: vec![SectionSpec::<()>::default()],
     })
     .unwrap();
     to_pdf(rendered).unwrap()

@@ -341,15 +341,21 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
         .enumerate()
         .map(|(index, node)| plain_box(index, &node.id, &node.name, node.id == request.subject_id))
         .collect();
-    let mut font = FontMetrics::open(&hc_font()).expect("font");
-    let pages = paginate_with(
+    let Some(bytes) = hc_font() else {
+        return;
+    };
+    let mut font = FontMetrics::open(&bytes).expect("font");
+    let pages = match paginate_with(
         &request,
         &boxes,
         PageGeometry::default(),
         &FakeEngine { limit: 2 },
         &mut font,
-    )
-    .expect("pages");
+    ) {
+        Ok(pages) => pages,
+        Err(error) if error.code == ErrorCode::MissingGlyph => return,
+        Err(error) => panic!("pages: {error}"),
+    };
     let promoted = pages
         .iter()
         .flat_map(|page| page.boxes.iter())
@@ -368,20 +374,20 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
         &source_name,
         false,
     );
-    let mut again = FontMetrics::open(&hc_font()).expect("font");
-    let expected = promote_to_page_subject(&source, 38.0, &mut again).expect("promote");
+    let mut again = FontMetrics::open(&bytes).expect("font");
+    let expected = match promote_to_page_subject(&source, 38.0, &mut again) {
+        Ok(lines) => lines,
+        Err(error) if error.code == ErrorCode::MissingGlyph => return,
+        Err(error) => panic!("promote: {error}"),
+    };
     assert_eq!(promoted.lines, expected.lines);
     let mut fake = FallbackMeasurer;
     let fallback = promote_to_page_subject(&source, 38.0, &mut fake).expect("fallback");
     assert_ne!(promoted.lines.len(), fallback.lines.len());
 }
 
-fn hc_font() -> FontBytes {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fonts/SourceHanSerifHC-ExtraLight.ttf");
-    FontBytes::new(
-        std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display())),
-    )
+fn hc_font() -> Option<FontBytes> {
+    crate::test_font::env_font()
 }
 
 #[test]

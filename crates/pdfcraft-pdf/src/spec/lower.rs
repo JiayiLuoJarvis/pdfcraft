@@ -1,13 +1,14 @@
 //! Pure-function lowering from [`DocumentSpec`] to layout nodes.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::canvas::{DecodedImage, ImageRegistry, LinkTarget, RecordingCanvas};
 use crate::error::{
     ColumnWidthsReason, Error, ErrorBag, ErrorKind, Fallible, GeometryKind, Location, Result,
 };
-use crate::fonts::{FontSource, FontStore};
-use crate::geom::{Ink, Length, Margins, NonNegative, PageSize, Path, Point, Positive};
+use crate::fonts::{FontFace, FontId, FontKey, FontSource, FontStore};
+use crate::geom::{Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::{Decorations, LayerContent, LayerItem, LayerText, PageInfo};
@@ -20,7 +21,7 @@ use crate::layout::list::{
 };
 use crate::layout::paginate::{layout_pages, paint_laid, PaginateConfig, SectionJob};
 use crate::layout::paragraph::{
-    BlankWidth, Face, InlineBlank, InlineItem, TextNode, TextRun as LayoutTextRun,
+    BlankWidth, InlineBlank, InlineItem, TextNode, TextRun as LayoutTextRun,
 };
 use crate::layout::style::{Style, TextAlign};
 use crate::layout::table::{self as layout_table, TableNode, TableSpec as LayoutTableSpec};
@@ -37,10 +38,17 @@ use super::{
 
 /// Lowers a data-only specification and records its laid-out pages.
 ///
+/// `K` is the caller's font key (`Copy + Eq + Hash + Debug`). A key that was not
+/// registered fails with [`ErrorKind::UnregisteredFont`]. A bold run whose family
+/// has no bold face fails with [`ErrorKind::BoldFaceRequired`].
+///
 /// # Errors
 ///
 /// Returns resource, construction, layout, or drawing failures collected for the document.
-pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
+pub fn layout_spec<K>(spec: DocumentSpec<K>) -> Result<Rendered>
+where
+    K: Copy + Eq + std::hash::Hash + std::fmt::Debug,
+{
     let DocumentSpec {
         page_size,
         resources,
@@ -54,7 +62,8 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
 
     let doc = DocToken::next();
     let mut errors = ErrorBag::default();
-    let (mut fonts, images, image_handles) = lower_resources(resources, limits, doc, &mut errors);
+    let (mut fonts, font_table, images, image_handles) =
+        lower_resources(resources, limits, doc, &mut errors);
     let style = default_style();
     let mut configs = Vec::with_capacity(sections.len());
     let mut roots = Vec::with_capacity(sections.len());
@@ -63,8 +72,14 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
     for (index, section) in sections.into_iter().enumerate() {
         let mark = errors.mark();
         validate_section_images(&section, &image_handles, &mut errors);
-        let (config, root, decoration, section_errors) =
-            lower_section(section, page_size, style.clone(), doc, &image_handles);
+        let (config, root, decoration, section_errors) = lower_section(
+            section,
+            page_size,
+            style.clone(),
+            &font_table,
+            doc,
+            &image_handles,
+        );
         errors.absorb(section_errors);
         errors.locate_since(mark, &Location::section(index));
         configs.push(config);
@@ -108,43 +123,74 @@ pub fn layout_spec(spec: DocumentSpec) -> Result<Rendered> {
     })
 }
 
-fn lower_resources(
-    resources: Resources,
+#[derive(Clone, Copy)]
+struct ResolvedFamily {
+    normal: FontId,
+    bold: Option<FontId>,
+}
+
+#[derive(Clone)]
+struct FontTable<K> {
+    by_key: HashMap<K, ResolvedFamily>,
+}
+
+fn register_face(fonts: &mut FontStore, face: FontFace, errors: &mut ErrorBag) -> Option<FontId> {
+    match fonts.register(FontSource {
+        bytes: Arc::new(face.bytes),
+        index: face.index,
+    }) {
+        Ok(id) => Some(id),
+        Err(error) => {
+            errors.record(error);
+            None
+        }
+    }
+}
+
+fn resolve_font<K: FontKey>(
+    fonts: &FontTable<K>,
+    key: K,
+    bold: bool,
+    errors: &mut ErrorBag,
+) -> Option<FontId> {
+    let Some(family) = fonts.by_key.get(&key) else {
+        errors.record(Error::from(ErrorKind::UnregisteredFont {
+            key: format!("{key:?}"),
+        }));
+        return None;
+    };
+    if bold {
+        if let Some(id) = family.bold {
+            return Some(id);
+        }
+        errors.record(Error::from(ErrorKind::BoldFaceRequired));
+        return Some(family.normal);
+    }
+    Some(family.normal)
+}
+
+fn lower_resources<K: FontKey>(
+    resources: Resources<K>,
     limits: Limits,
     doc: DocToken,
     errors: &mut ErrorBag,
-) -> (FontStore, Box<dyn ImageRegistry>, LoweredImages) {
+) -> (
+    FontStore,
+    FontTable<K>,
+    Box<dyn ImageRegistry>,
+    LoweredImages,
+) {
     let mut fonts = FontStore::new();
     fonts.set_max_bytes(limits.max_font_bytes());
-    let body_registered = if resources.body_font.is_empty() {
-        false
-    } else {
-        match fonts.register(FontSource {
-            bytes: Arc::new(resources.body_font),
-            index: 0,
-        }) {
-            Ok(_) => true,
-            Err(error) => {
-                errors.record(error);
-                false
-            }
-        }
-    };
-    if let Some(bytes) = resources.bold_font {
-        if body_registered {
-            match fonts.register(FontSource {
-                bytes: Arc::new(bytes),
-                index: 0,
-            }) {
-                Ok(id) => fonts.set_bold(id),
-                Err(error) => errors.record(error),
-            }
-        } else {
-            errors.record(Error::from(ErrorKind::Font {
-                index: 0,
-                message: "body font is not registered".to_owned(),
-            }));
-        }
+    let mut by_key = HashMap::new();
+    for (key, family) in resources.fonts.into_entries() {
+        let Some(normal) = register_face(&mut fonts, family.normal, errors) else {
+            continue;
+        };
+        let bold = family
+            .bold
+            .and_then(|face| register_face(&mut fonts, face, errors));
+        by_key.insert(key, ResolvedFamily { normal, bold });
     }
 
     let mut registry = crate::image_registry();
@@ -161,6 +207,7 @@ fn lower_resources(
     }
     (
         fonts,
+        FontTable { by_key },
         registry,
         LoweredImages {
             resources: resources.token,
@@ -181,10 +228,11 @@ struct LoweredImages {
     handles: Vec<Option<HeldImage>>,
 }
 
-fn lower_section(
-    spec: SectionSpec,
+fn lower_section<K: FontKey>(
+    spec: SectionSpec<K>,
     default_page: PageSize,
     style: Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
 ) -> (PaginateConfig, FlowNode, Decorations<'static>, ErrorBag) {
@@ -198,7 +246,11 @@ fn lower_section(
         body,
     } = spec;
     let mut errors = ErrorBag::default();
-    let nodes = lower_blocks(body, &style, doc, images, &mut errors);
+    let nodes = lower_blocks(body, &style, fonts, doc, images, &mut errors);
+    let header = header.and_then(|spec| own_band(spec, fonts, &mut errors));
+    let footer = footer.and_then(|spec| own_band(spec, fonts, &mut errors));
+    let behind = own_marks(behind, fonts, &mut errors);
+    let front = own_marks(front, fonts, &mut errors);
     let decorations = Decorations {
         header: header.map(|spec| band_content(spec, style.clone())),
         footer: footer.map(|spec| band_content(spec, style.clone())),
@@ -212,9 +264,10 @@ fn lower_section(
     (config, FlowNode::Stack(nodes), decorations, errors)
 }
 
-fn lower_blocks(
-    blocks: Vec<Block>,
+fn lower_blocks<K: FontKey>(
+    blocks: Vec<Block<K>>,
     style: &Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -224,14 +277,14 @@ fn lower_blocks(
     for block in blocks {
         match block {
             Block::Paragraph(spec) => {
-                if let Some(node) = lower_paragraph(spec, &style, errors) {
+                if let Some(node) = lower_paragraph(spec, &style, fonts, errors) {
                     nodes.push(node);
                 }
             }
             Block::Spacer(height) => nodes.push(FlowNode::Spacer(SpacerNode { height })),
             Block::PageBreak => nodes.push(FlowNode::PageBreak),
             Block::KeepTogether(children) => {
-                let child = lower_blocks(children, &style, doc, images, errors);
+                let child = lower_blocks(children, &style, fonts, doc, images, errors);
                 nodes.push(FlowNode::KeepTogether(KeepTogetherNode::Open(child)));
             }
             Block::Styled {
@@ -240,21 +293,21 @@ fn lower_blocks(
             } => {
                 let saved = style.clone();
                 apply_text_style(&mut style, patch);
-                nodes.extend(lower_blocks(children, &style, doc, images, errors));
+                nodes.extend(lower_blocks(children, &style, fonts, doc, images, errors));
                 style = saved;
             }
             Block::Columns(spec) => {
-                if let Some(node) = lower_columns(spec, &style, doc, images, errors) {
+                if let Some(node) = lower_columns(spec, &style, fonts, doc, images, errors) {
                     nodes.push(node);
                 }
             }
             Block::Table(spec) => {
-                if let Some(node) = lower_table(spec, &style, doc, images, errors) {
+                if let Some(node) = lower_table(spec, &style, fonts, doc, images, errors) {
                     nodes.push(node);
                 }
             }
             Block::List(spec) => {
-                if let Some(node) = lower_list(spec, &style, doc, images, errors) {
+                if let Some(node) = lower_list(spec, &style, fonts, doc, images, errors) {
                     nodes.push(node);
                 }
             }
@@ -278,17 +331,37 @@ fn apply_text_style(style: &mut Style, patch: TextStyle) {
     }
 }
 
-fn lower_paragraph(spec: ParagraphSpec, parent: &Style, errors: &mut ErrorBag) -> Option<FlowNode> {
+fn lower_paragraph<K: FontKey>(
+    spec: ParagraphSpec<K>,
+    parent: &Style,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Option<FlowNode> {
     let mut bag = ErrorBag::default();
     let mut items = Vec::new();
     let mut active_link = None;
-    push_inline_runs(spec.runs, &mut items, &mut active_link, &mut bag);
-    let failed = !bag.is_empty();
+    push_inline_runs(spec.runs, fonts, &mut items, &mut active_link, &mut bag);
+    let structural = bag.as_slice().iter().any(|error| {
+        !matches!(
+            error.kind,
+            ErrorKind::BoldFaceRequired | ErrorKind::UnregisteredFont { .. }
+        )
+    });
+    let font_only_empty = items.is_empty()
+        && bag.as_slice().iter().any(|error| {
+            matches!(
+                error.kind,
+                ErrorKind::UnregisteredFont { .. } | ErrorKind::BoldFaceRequired
+            )
+        });
     errors.absorb(bag);
-    if failed {
+    if structural || font_only_empty {
         return None;
     }
     let mut style = parent.clone();
+    if let Some(font) = first_run_font(&items) {
+        style.font = font;
+    }
     style.first_line_indent = spec.first_line_indent;
     style.align = match spec.align {
         Alignment::Start => TextAlign::Start,
@@ -304,24 +377,42 @@ fn lower_paragraph(spec: ParagraphSpec, parent: &Style, errors: &mut ErrorBag) -
     Some(FlowNode::Text(TextNode::from_items(items, style)))
 }
 
-fn push_inline_runs(
-    runs: Vec<InlineRun>,
+fn first_run_font(items: &[InlineItem]) -> Option<FontId> {
+    items.iter().find_map(|item| match item {
+        InlineItem::Text(run) => Some(run.font),
+        InlineItem::Blank(_) => None,
+    })
+}
+
+fn push_inline_runs<K: FontKey>(
+    runs: Vec<InlineRun<K>>,
+    fonts: &FontTable<K>,
     items: &mut Vec<InlineItem>,
     active_link: &mut Option<LinkTarget>,
     errors: &mut ErrorBag,
 ) {
     for run in runs {
         match run {
-            InlineRun::Text(text) => {
-                append_text(items, Face::Body, &text, active_link.as_ref(), errors);
+            InlineRun::Text { text, font } => {
+                if text.is_empty() {
+                    continue;
+                }
+                if let Some(id) = resolve_font(fonts, font, false, errors) {
+                    append_text(items, id, &text, active_link.as_ref(), errors);
+                }
             }
-            InlineRun::Bold(text) => {
-                append_text(items, Face::Bold, &text, active_link.as_ref(), errors);
+            InlineRun::Bold { text, font } => {
+                if text.is_empty() {
+                    continue;
+                }
+                if let Some(id) = resolve_font(fonts, font, true, errors) {
+                    append_text(items, id, &text, active_link.as_ref(), errors);
+                }
             }
             InlineRun::Link { uri, runs } => match LinkTarget::uri(&uri) {
                 Ok(target) => {
                     let previous = active_link.replace(target);
-                    push_inline_runs(runs, items, active_link, errors);
+                    push_inline_runs(runs, fonts, items, active_link, errors);
                     *active_link = previous;
                 }
                 Err(error) => errors.record(error),
@@ -361,7 +452,7 @@ fn sealed(items: &[InlineItem]) -> bool {
 
 fn append_text(
     items: &mut Vec<InlineItem>,
-    face: Face,
+    font: FontId,
     text: &str,
     active_link: Option<&LinkTarget>,
     errors: &mut ErrorBag,
@@ -374,13 +465,13 @@ fn append_text(
         return;
     }
     if let Some(InlineItem::Text(last)) = items.last_mut() {
-        if last.face == face && last.link.as_ref() == active_link {
+        if last.font == font && last.link.as_ref() == active_link {
             last.text.push_str(text);
             return;
         }
     }
     items.push(InlineItem::Text(
-        LayoutTextRun::new(text, face).with_link(active_link.cloned()),
+        LayoutTextRun::new(text, font).with_link(active_link.cloned()),
     ));
 }
 
@@ -427,9 +518,10 @@ fn lower_image(
     }
 }
 
-fn lower_columns(
-    spec: ColumnsSpec,
+fn lower_columns<K: FontKey>(
+    spec: ColumnsSpec<K>,
     style: &Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -449,7 +541,7 @@ fn lower_columns(
             Track::Auto => ColumnWidth::Auto,
         };
         let mark = bag.mark();
-        let nodes = lower_blocks(column.blocks, style, doc, images, &mut bag);
+        let nodes = lower_blocks(column.blocks, style, fonts, doc, images, &mut bag);
         if bag.clean_since(mark) {
             cols.push((width, nodes));
         }
@@ -472,9 +564,10 @@ fn lower_columns(
     }
 }
 
-fn lower_table(
-    spec: super::TableSpec,
+fn lower_table<K: FontKey>(
+    spec: super::TableSpec<K>,
     style: &Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -486,8 +579,8 @@ fn lower_table(
             .map(|cell| usize::from(cell.col_span.get()))
             .sum()
     });
-    let header = lower_table_rows(spec.header, style, doc, images, &mut bag);
-    let body = lower_table_rows(spec.body, style, doc, images, &mut bag);
+    let header = lower_table_rows(spec.header, style, fonts, doc, images, &mut bag);
+    let body = lower_table_rows(spec.body, style, fonts, doc, images, &mut bag);
     let mut blocked = !bag.is_empty() || header.is_none() || body.is_none();
     let widths = match spec.tracks {
         Some(tracks) => table_widths(tracks, cols, &mut blocked, &mut bag),
@@ -563,9 +656,10 @@ fn table_widths(
     }
 }
 
-fn lower_table_rows(
-    rows: Vec<Vec<CellSpec>>,
+fn lower_table_rows<K: FontKey>(
+    rows: Vec<Vec<CellSpec<K>>>,
     style: &Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -575,7 +669,7 @@ fn lower_table_rows(
     for row in rows {
         let mut stored = Vec::with_capacity(row.len());
         for cell in row {
-            match lower_cell(cell, style, doc, images, errors) {
+            match lower_cell(cell, style, fonts, doc, images, errors) {
                 Some(built) => stored.push(built),
                 None => ok = false,
             }
@@ -585,9 +679,10 @@ fn lower_table_rows(
     ok.then_some(out)
 }
 
-fn lower_cell(
-    spec: CellSpec,
+fn lower_cell<K: FontKey>(
+    spec: CellSpec<K>,
     style: &Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -596,11 +691,18 @@ fn lower_cell(
     let mut content = Vec::new();
     for block in spec.content {
         match block {
-            CellBlock::Text(text) => {
-                content.push(FlowNode::Text(TextNode::new(text, style.clone())));
+            CellBlock::Text { text, font } => {
+                if text.is_empty() {
+                    continue;
+                }
+                if let Some(id) = resolve_font(fonts, font, false, &mut bag) {
+                    let mut cell_style = style.clone();
+                    cell_style.font = id;
+                    content.push(FlowNode::Text(TextNode::new(text, cell_style)));
+                }
             }
             CellBlock::Paragraph(paragraph) => {
-                if let Some(node) = lower_paragraph(paragraph, style, &mut bag) {
+                if let Some(node) = lower_paragraph(paragraph, style, fonts, &mut bag) {
                     content.push(node);
                 }
             }
@@ -614,7 +716,7 @@ fn lower_cell(
                 content.push(FlowNode::Spacer(SpacerNode { height }));
             }
             CellBlock::List(list) => {
-                if let Some(node) = lower_list(list, style, doc, images, &mut bag) {
+                if let Some(node) = lower_list(list, style, fonts, doc, images, &mut bag) {
                     content.push(node);
                 }
             }
@@ -638,9 +740,10 @@ fn lower_cell(
     }
 }
 
-fn lower_list(
-    spec: ListSpec,
+fn lower_list<K: FontKey>(
+    spec: ListSpec<K>,
     style: &Style,
+    fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -649,7 +752,7 @@ fn lower_list(
     let mut items = Vec::new();
     for item in spec.items {
         let mark = bag.mark();
-        let nodes = lower_blocks(item.blocks, style, doc, images, &mut bag);
+        let nodes = lower_blocks(item.blocks, style, fonts, doc, images, &mut bag);
         if !bag.clean_since(mark) {
             continue;
         }
@@ -690,7 +793,46 @@ fn lower_list(
     }
 }
 
-fn band_content(spec: BandSpec, style: Style) -> crate::layout::decorate::BandContent<'static> {
+struct OwnedBand {
+    inset: BandInset,
+    left: Option<OwnedSlot>,
+    right: Option<OwnedSlot>,
+}
+
+struct OwnedSlot {
+    runs: Vec<TextRun>,
+    uri: Option<Vec<TextRun>>,
+    font: FontId,
+}
+
+fn own_band<K: FontKey>(
+    spec: BandSpec<K>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Option<OwnedBand> {
+    let BandSpec { inset, left, right } = spec;
+    let left = left.and_then(|slot| own_slot(slot, fonts, errors));
+    let right = right.and_then(|slot| own_slot(slot, fonts, errors));
+    if left.is_none() && right.is_none() {
+        return None;
+    }
+    Some(OwnedBand { inset, left, right })
+}
+
+fn own_slot<K: FontKey>(
+    slot: BandSlot<K>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Option<OwnedSlot> {
+    let (runs, uri, key) = match slot {
+        BandSlot::Text { runs, font } => (runs, None, font),
+        BandSlot::Link { uri, text, font } => (text, Some(uri), font),
+    };
+    let font = resolve_font(fonts, key, false, errors)?;
+    Some(OwnedSlot { runs, uri, font })
+}
+
+fn band_content(spec: OwnedBand, style: Style) -> crate::layout::decorate::BandContent<'static> {
     Box::new(move |info, errors| Ok(lower_band(&spec, info, &style, errors)))
 }
 
@@ -722,7 +864,7 @@ impl PageFacts {
 }
 
 fn lower_band(
-    spec: &BandSpec,
+    spec: &OwnedBand,
     info: &PageInfo,
     style: &Style,
     errors: &mut ErrorBag,
@@ -742,15 +884,14 @@ fn lower_band(
         .and_then(|slot| band_slot(slot, &page, errors));
 
     let column = |slot: BandSlotResolved, align: TextAlign| {
-        let style = Style {
-            align,
-            ..style.clone()
-        };
+        let mut style = style.clone();
+        style.align = align;
+        style.font = slot.font;
         let node = if slot.text.is_empty() {
             TextNode::from_items(Vec::new(), style)
         } else {
             TextNode::from_runs(
-                vec![LayoutTextRun::new(slot.text, Face::Body).with_link(slot.link)],
+                vec![LayoutTextRun::new(slot.text, slot.font).with_link(slot.link)],
                 style,
             )
         };
@@ -794,29 +935,32 @@ fn lower_band(
 struct BandSlotResolved {
     text: String,
     link: Option<LinkTarget>,
+    font: FontId,
 }
 
-fn band_slot(slot: &BandSlot, page: &PageFacts, errors: &mut ErrorBag) -> Option<BandSlotResolved> {
-    match slot {
-        BandSlot::Text(runs) => Some(BandSlotResolved {
-            text: render_text(runs, page),
-            link: None,
-        }),
-        BandSlot::Link { uri, text } => {
-            let uri = render_text(uri, page);
-            let text = render_text(text, page);
-            match LinkTarget::uri(&uri) {
-                Ok(target) => Some(BandSlotResolved {
-                    text,
-                    link: Some(target),
-                }),
-                Err(error) => {
-                    errors.record(error);
-                    None
-                }
+fn band_slot(
+    slot: &OwnedSlot,
+    page: &PageFacts,
+    errors: &mut ErrorBag,
+) -> Option<BandSlotResolved> {
+    let text = render_text(&slot.runs, page);
+    let link = if let Some(uri_runs) = &slot.uri {
+        let uri = render_text(uri_runs, page);
+        match LinkTarget::uri(&uri) {
+            Ok(target) => Some(target),
+            Err(error) => {
+                errors.record(error);
+                return None;
             }
         }
-    }
+    } else {
+        None
+    };
+    Some(BandSlotResolved {
+        text,
+        link,
+        font: slot.font,
+    })
 }
 
 fn render_text(runs: &[TextRun], page: &PageFacts) -> String {
@@ -833,8 +977,107 @@ fn render_text(runs: &[TextRun], page: &PageFacts) -> String {
     text
 }
 
+enum OwnedMark {
+    Text {
+        when: PageWhen,
+        text: Vec<TextRun>,
+        font: FontId,
+        at: Point,
+        style: TextStyle,
+    },
+    Image {
+        when: PageWhen,
+        image: ImageRef,
+        rect: Rect,
+    },
+    Line {
+        when: PageWhen,
+        from: Point,
+        to: Point,
+        pen: Pen,
+    },
+    Rect {
+        when: PageWhen,
+        rect: Rect,
+        ink: Ink,
+    },
+    Ellipse {
+        when: PageWhen,
+        rect: Rect,
+        ink: Ink,
+    },
+    Rotated {
+        when: PageWhen,
+        degrees: f32,
+        pivot: Point,
+        shapes: Vec<LayerShape>,
+    },
+}
+
+fn own_marks<K: FontKey>(
+    marks: Vec<LayerMark<K>>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Vec<OwnedMark> {
+    let mut owned = Vec::with_capacity(marks.len());
+    for mark in marks {
+        match mark {
+            LayerMark::Text {
+                when,
+                text,
+                font,
+                at,
+                style,
+            } => {
+                let Some(font) = resolve_font(fonts, font, false, errors) else {
+                    continue;
+                };
+                owned.push(OwnedMark::Text {
+                    when,
+                    text,
+                    font,
+                    at,
+                    style,
+                });
+            }
+            LayerMark::Image { when, image, rect } => {
+                owned.push(OwnedMark::Image { when, image, rect });
+            }
+            LayerMark::Line {
+                when,
+                from,
+                to,
+                pen,
+            } => owned.push(OwnedMark::Line {
+                when,
+                from,
+                to,
+                pen,
+            }),
+            LayerMark::Rect { when, rect, ink } => {
+                owned.push(OwnedMark::Rect { when, rect, ink });
+            }
+            LayerMark::Ellipse { when, rect, ink } => {
+                owned.push(OwnedMark::Ellipse { when, rect, ink });
+            }
+            LayerMark::Rotated {
+                when,
+                degrees,
+                pivot,
+                shapes,
+            } => owned.push(OwnedMark::Rotated {
+                when,
+                degrees,
+                pivot,
+                shapes,
+            }),
+        }
+    }
+    owned
+}
+
 fn layer_content(
-    marks: Vec<LayerMark>,
+    marks: Vec<OwnedMark>,
     style: Style,
     doc: DocToken,
     images: LoweredImages,
@@ -850,7 +1093,7 @@ fn layer_content(
 }
 
 fn lower_layer_marks(
-    marks: &[LayerMark],
+    marks: &[OwnedMark],
     info: &PageInfo,
     style: &Style,
     doc: DocToken,
@@ -861,32 +1104,34 @@ fn lower_layer_marks(
     let mut items = Vec::new();
     for mark in marks {
         let when = match mark {
-            LayerMark::Text { when, .. }
-            | LayerMark::Image { when, .. }
-            | LayerMark::Line { when, .. }
-            | LayerMark::Rect { when, .. }
-            | LayerMark::Ellipse { when, .. }
-            | LayerMark::Rotated { when, .. } => *when,
+            OwnedMark::Text { when, .. }
+            | OwnedMark::Image { when, .. }
+            | OwnedMark::Line { when, .. }
+            | OwnedMark::Rect { when, .. }
+            | OwnedMark::Ellipse { when, .. }
+            | OwnedMark::Rotated { when, .. } => *when,
         };
         if !when.matches(&page) {
             continue;
         }
         match mark {
-            LayerMark::Text {
+            OwnedMark::Text {
                 text,
+                font,
                 at,
                 style: patch,
                 ..
             } => {
                 let mut item_style = style.clone();
                 apply_text_style(&mut item_style, *patch);
+                item_style.font = *font;
                 items.push(LayerItem::Text(LayerText {
                     text: render_text(text, &page),
                     at: *at,
                     style: item_style,
                 }));
             }
-            LayerMark::Image { image, rect, .. } => {
+            OwnedMark::Image { image, rect, .. } => {
                 if let Some(image) = image_for(*image, images) {
                     if image.doc == doc {
                         items.push(LayerItem::Image {
@@ -900,7 +1145,7 @@ fn lower_layer_marks(
                     }
                 }
             }
-            LayerMark::Line { from, to, pen, .. } => {
+            OwnedMark::Line { from, to, pen, .. } => {
                 push_shape(
                     &mut items,
                     errors,
@@ -909,13 +1154,13 @@ fn lower_layer_marks(
                     None,
                 );
             }
-            LayerMark::Rect { rect, ink, .. } => {
+            OwnedMark::Rect { rect, ink, .. } => {
                 push_shape(&mut items, errors, Path::rect(*rect), *ink, None);
             }
-            LayerMark::Ellipse { rect, ink, .. } => {
+            OwnedMark::Ellipse { rect, ink, .. } => {
                 push_shape(&mut items, errors, Path::ellipse(*rect), *ink, None);
             }
-            LayerMark::Rotated {
+            OwnedMark::Rotated {
                 degrees,
                 pivot,
                 shapes,
@@ -994,13 +1239,17 @@ impl PageWhen {
     }
 }
 
-fn validate_section_images(section: &SectionSpec, images: &LoweredImages, errors: &mut ErrorBag) {
+fn validate_section_images<K>(
+    section: &SectionSpec<K>,
+    images: &LoweredImages,
+    errors: &mut ErrorBag,
+) {
     validate_marks(&section.behind, images, errors);
     validate_marks(&section.front, images, errors);
     validate_blocks(&section.body, images, errors);
 }
 
-fn validate_blocks(blocks: &[Block], images: &LoweredImages, errors: &mut ErrorBag) {
+fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for block in blocks {
         match block {
             Block::KeepTogether(children) | Block::Styled { children, .. } => {
@@ -1029,7 +1278,7 @@ fn validate_blocks(blocks: &[Block], images: &LoweredImages, errors: &mut ErrorB
     }
 }
 
-fn validate_cell_blocks(blocks: &[CellBlock], images: &LoweredImages, errors: &mut ErrorBag) {
+fn validate_cell_blocks<K>(blocks: &[CellBlock<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for block in blocks {
         match block {
             CellBlock::Image(spec) => reject_image(spec.image, images, errors),
@@ -1038,7 +1287,7 @@ fn validate_cell_blocks(blocks: &[CellBlock], images: &LoweredImages, errors: &m
                     validate_blocks(&item.blocks, images, errors);
                 }
             }
-            CellBlock::Text(_)
+            CellBlock::Text { .. }
             | CellBlock::Paragraph(_)
             | CellBlock::HLine(_)
             | CellBlock::Spacer(_) => {}
@@ -1046,7 +1295,7 @@ fn validate_cell_blocks(blocks: &[CellBlock], images: &LoweredImages, errors: &m
     }
 }
 
-fn validate_marks(marks: &[LayerMark], images: &LoweredImages, errors: &mut ErrorBag) {
+fn validate_marks<K>(marks: &[LayerMark<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for mark in marks {
         if let LayerMark::Image { image, .. } = mark {
             reject_image(*image, images, errors);

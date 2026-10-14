@@ -14,3 +14,8 @@
 *.deb
 .fonts/
 /out/
+
+# Test / example fonts are supplied via env vars, not vendored in git.
+*.ttf
+*.otf
+*.ttc

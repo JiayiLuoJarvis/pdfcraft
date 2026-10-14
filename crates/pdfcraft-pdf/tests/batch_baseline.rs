@@ -15,16 +15,17 @@ use std::process::Command;
 use std::time::Instant;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, ImageSpec, Resources, SectionSpec,
-    TableSpec, TextRun,
+    Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
+    ImageSpec, Resources, SectionSpec, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize, Positive,
     Ratio, Rendered, Result, Track, A4,
 };
 
-const LETTER_FONT: &[u8] = include_bytes!("fixtures/quire-letter.ttf");
-const MEASURE_FONT: &[u8] = include_bytes!("fixtures/quire-measure.ttf");
+#[path = "common/mod.rs"]
+mod common;
+
 const ONE_PIXEL: &[u8] = include_bytes!("fixtures/one-pixel.png");
 
 const BODY_1: &str =
@@ -68,15 +69,21 @@ fn time_sample(name: &str, build: impl FnOnce() -> Result<Rendered>) -> Result<(
 }
 
 fn letter_doc(copies: usize) -> Result<Rendered> {
-    let mut resources = Resources::new(LETTER_FONT.to_vec());
+    let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
+        normal: FontFace {
+            bytes: common::cjk_font_bytes().expect("PDFCRAFT_CJK_FONT"),
+            index: 0,
+        },
+        bold: None,
+    }));
     let mut body = Vec::new();
     for index in 0..copies {
         if index > 0 {
             body.push(Block::PageBreak);
         }
-        body.push(Block::paragraph(BODY_1));
-        body.push(Block::paragraph(BODY_2));
-        body.push(Block::paragraph(MIXED));
+        body.push(Block::paragraph((), BODY_1));
+        body.push(Block::paragraph((), BODY_2));
+        body.push(Block::paragraph((), MIXED));
         body.push(Block::Table(TableSpec {
             header: vec![vec![
                 text_cell("项目"),
@@ -113,13 +120,16 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
         sections: vec![SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0)?),
             footer: Some(BandSpec {
-                left: Some(BandSlot::Text(vec![
-                    TextRun::Literal("第 ".into()),
-                    TextRun::PageNumber,
-                    TextRun::Literal(" 页 / 共 ".into()),
-                    TextRun::PageCount,
-                    TextRun::Literal(" 页".into()),
-                ])),
+                left: Some(BandSlot::Text {
+                    runs: vec![
+                        TextRun::Literal("第 ".into()),
+                        TextRun::PageNumber,
+                        TextRun::Literal(" 页 / 共 ".into()),
+                        TextRun::PageCount,
+                        TextRun::Literal(" 页".into()),
+                    ],
+                    font: (),
+                }),
                 ..BandSpec::default()
             }),
             body,
@@ -128,9 +138,12 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
     })
 }
 
-fn text_cell(text: &str) -> CellSpec {
+fn text_cell(text: &str) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text(text.into())],
+        content: vec![CellBlock::Text {
+            text: text.into(),
+            font: (),
+        }],
         ..CellSpec::default()
     }
 }
@@ -147,7 +160,13 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
     }
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
-        resources: Resources::new(MEASURE_FONT.to_vec()),
+        resources: Resources::with_fonts(FontRegistry::single(FontFamily {
+            normal: FontFace {
+                bytes: common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
+                index: 0,
+            },
+            bold: None,
+        })),
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
@@ -166,14 +185,23 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
 fn paragraphs_doc(count: usize) -> Result<Rendered> {
     let body = (0..count)
         .map(|i| {
-            Block::paragraph(format!(
-                "Paragraph {i}: the quick brown fox jumps over the lazy dog and back again."
-            ))
+            Block::paragraph(
+                (),
+                format!(
+                    "Paragraph {i}: the quick brown fox jumps over the lazy dog and back again."
+                ),
+            )
         })
         .collect();
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
-        resources: Resources::new(MEASURE_FONT.to_vec()),
+        resources: Resources::with_fonts(FontRegistry::single(FontFamily {
+            normal: FontFace {
+                bytes: common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
+                index: 0,
+            },
+            bold: None,
+        })),
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {

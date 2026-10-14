@@ -1,16 +1,22 @@
 //! Draw a small equity chart to `out/equity_chart.pdf`.
+//!
+//! Requires `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (single-face TTF/OTF).
 
+use std::env;
 use std::path::PathBuf;
 
 use pdfcraft_orgchart::{generate_pdf, ChartRequest, Edge, FontBytes, Node};
 
 fn main() {
-    let font_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fonts/SourceHanSerifHC-ExtraLight.ttf");
-    let font = FontBytes::new(
-        std::fs::read(&font_path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", font_path.display())),
-    );
+    let font_path = env::var_os("PDFCRAFT_ORGCHART_FONT")
+        .or_else(|| env::var_os("PDFCRAFT_CJK_FONT"))
+        .unwrap_or_else(|| {
+            panic!("set PDFCRAFT_ORGCHART_FONT or PDFCRAFT_CJK_FONT to a single-face .ttf")
+        });
+    let font =
+        FontBytes::new(std::fs::read(&font_path).unwrap_or_else(|error| {
+            panic!("read {}: {error}", PathBuf::from(&font_path).display())
+        }));
     let request = ChartRequest::new(
         "root",
         vec![

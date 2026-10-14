@@ -42,7 +42,9 @@ fn three_pages_with_blank(style: &Style) -> FlowNode {
 
 #[test]
 fn bands_span_the_page_and_number_every_page_including_blank_ones() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let b = metrics(&fonts, &style).baseline.as_pt();
     let decorations = Decorations {
         header: Some(numbered(&style)),
@@ -68,7 +70,9 @@ fn bands_span_the_page_and_number_every_page_including_blank_ones() {
 
 #[test]
 fn body_coordinates_are_identical_with_and_without_decorations() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let config = margins(30.0, 20.0, 30.0);
     let bare = render(
         three_pages_with_blank(&style),
@@ -108,7 +112,9 @@ fn body_coordinates_are_identical_with_and_without_decorations() {
 
 #[test]
 fn header_with_zero_margin_errors_before_any_page_starts() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let line = metrics(&fonts, &style).line_height.as_pt();
     let decorations = Decorations {
         header: Some(band("H", &style)),
@@ -136,7 +142,9 @@ fn header_with_zero_margin_errors_before_any_page_starts() {
 
 #[test]
 fn header_taller_than_the_page_reports_its_full_height() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let line = metrics(&fonts, &style).line_height.as_pt();
     let body = text("A", &style);
     let lines = vec!["H"; 40].join("\n");
@@ -157,7 +165,9 @@ fn header_taller_than_the_page_reports_its_full_height() {
 
 #[test]
 fn footer_taller_than_its_band_errors() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let line = metrics(&fonts, &style).line_height.as_pt();
     let decorations = Decorations {
         header: None,
@@ -181,7 +191,9 @@ fn footer_taller_than_its_band_errors() {
 
 #[test]
 fn header_wider_than_page_errors() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let decorations = Decorations {
         header: Some(band("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", &style)),
         footer: None,
@@ -201,7 +213,9 @@ fn header_wider_than_page_errors() {
 
 #[test]
 fn band_rejects_images() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let image = crate::layout::image::ImageNode::new(
         crate::canvas::DecodedImage {
             id: crate::canvas::ImageId::from_raw(0),
@@ -240,7 +254,9 @@ fn band_rejects_images() {
 
 #[test]
 fn band_rejects_tables() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let decorations = Decorations {
         header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
             Ok(vec![FlowNode::Table(TableNode::new(TableSpec::new(
@@ -277,7 +293,9 @@ fn two_columns(left: Vec<FlowNode>, right: Vec<FlowNode>) -> FlowNode {
 
 #[test]
 fn band_columns_share_one_line() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let b = metrics(&fonts, &style).baseline.as_pt();
     let header_style = style.clone();
     let decorations = Decorations {
@@ -308,7 +326,9 @@ fn band_columns_share_one_line() {
 
 #[test]
 fn band_columns_still_reject_a_nested_table() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let header_style = style.clone();
     let decorations = Decorations {
         header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
@@ -352,7 +372,9 @@ fn layer(label: &'static str, x: f32, y: f32, style: &Style) -> LayerContent<'st
 
 #[test]
 fn layers_paint_behind_header_body_footer_front() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let b = metrics(&fonts, &style).baseline.as_pt();
     let decorations = Decorations {
         header: Some(band("H", &style)),
@@ -381,7 +403,9 @@ fn layers_paint_behind_header_body_footer_front() {
 
 #[test]
 fn layer_ignores_alignment_and_page_bounds() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let b = metrics(&fonts, &style).baseline.as_pt();
     let centered = Style {
         align: TextAlign::Center,
@@ -409,9 +433,11 @@ fn layer_ignores_alignment_and_page_bounds() {
 
 #[test]
 fn missing_glyph_in_a_layer_fails_before_any_page_starts() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let decorations = Decorations {
-        behind: Some(layer("\u{6f22}", 0.0, 0.0, &style)),
+        behind: Some(layer("\u{FFFF}", 0.0, 0.0, &style)),
         ..Decorations::none()
     };
     let (result, rec) = render(
@@ -423,7 +449,7 @@ fn missing_glyph_in_a_layer_fails_before_any_page_starts() {
     assert!(matches!(
         result.map_err(|error| error.kind),
         Err(ErrorKind::MissingGlyph {
-            scalar: '\u{6f22}',
+            scalar: '\u{FFFF}',
             ..
         })
     ));
@@ -432,7 +458,9 @@ fn missing_glyph_in_a_layer_fails_before_any_page_starts() {
 
 #[test]
 fn path_behind_paints_before_header_glyphs() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let path = Path::line(
         Point::try_pt(0.0, 0.0).unwrap(),
         Point::try_pt(40.0, 10.0).unwrap(),
@@ -463,7 +491,9 @@ fn path_behind_paints_before_header_glyphs() {
 
 #[test]
 fn fill_stroke_paints_fill_then_stroke() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let rect = Rect::try_pt(10.0, 20.0, 40.0, 20.0).unwrap();
     let path = Path::ellipse(rect).unwrap();
     let decorations = Decorations {
@@ -512,7 +542,9 @@ fn fill_stroke_paints_fill_then_stroke() {
 
 #[test]
 fn band_error_returns_before_any_page_starts() {
-    let (mut fonts, style) = fonts_and_style();
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
     let decorations = Decorations {
         header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
             Err(Error::from(ErrorKind::EmptyLink))

@@ -1,6 +1,9 @@
 //! Fill `tests/fixtures/basic_form.pdf` and write `out/fill_basic.pdf`.
+//!
+//! Requires `PDFCRAFT_FORMS_FONT` pointing at a TrueType face with `glyf`.
 
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,7 +12,11 @@ use pdfcraft_forms::{fill_and_flatten, FieldValue, FillOptions, FontBytes};
 fn main() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let pdf = fs::read(root.join("tests/fixtures/basic_form.pdf")).unwrap();
-    let font = fs::read(root.join("tests/fixtures/DejaVuSans.ttf")).unwrap();
+    let font_path = env::var_os("PDFCRAFT_FORMS_FONT")
+        .unwrap_or_else(|| panic!("set PDFCRAFT_FORMS_FONT to a .ttf path"));
+    let font = fs::read(&font_path).unwrap_or_else(|error| {
+        panic!("read font {}: {error}", PathBuf::from(font_path).display())
+    });
     let mut fields = HashMap::new();
     fields.insert(
         "employee_name".to_string(),
