@@ -8,6 +8,10 @@ while remaining `0.x`.
 
 ## [Unreleased]
 
+### Added
+
+- `pdfcraft-post` `0.1.0`: `SetMetadata`, `Encrypt` (presets `EncryptionPreset::READ_ONLY`, `READ_ONLY_PRINTABLE`, `FULL_PERMISSIONS`), `StampAndEncrypt`, `merge_pdfs`, and `Pipeline`. AES-256 / revision 6 (lopdf V5). Owner password is required from the caller. Empty user password opens. Errors are `Error` + `ErrorKind`. Depends on workspace `lopdf =0.45.0` and `getrandom =0.4.3`. No edges to sibling crates. Examples: `encrypt`, `stamp`, `merge`.
+
 ### Documentation
 
 - Confirmed `pdfcraft-post` in the proposal (§11), workspace crate map, and `AGENTS.md`. The crate post-processes existing PDF bytes: `SetMetadata`, `Encrypt` (presets `READ_ONLY`, `READ_ONLY_PRINTABLE`, `FULL_PERMISSIONS`), `StampAndEncrypt`, `merge_pdfs` (`preserve_outlines`), and `Pipeline`. Watermark and input limits are deferred. HTTP mapping and finalize orchestration stay out. `SetMetadata` may set Creator and Producer; that differs from `DocumentSpec.info`, which keeps Creator fixed and does not expose Producer. No dependency edges to or from `pdfcraft-pdf`, `pdfcraft-forms`, or `pdfcraft-orgchart`. Pins workspace `lopdf =0.45.0`. Errors are `Error` + `ErrorKind`. Version `0.1.0` may publish. Implementation stays in this repository; hcsw trees are read-only for behavior reference.

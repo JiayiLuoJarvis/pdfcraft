@@ -125,11 +125,14 @@ jobs:
             fi
           } >> "${GITHUB_ENV}"
 
-      - name: clippy forms and orgchart
-        run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings
+      - name: clippy forms, orgchart, and post
+        run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --all-targets -- -D warnings
 
       - name: test pdfcraft-forms
         run: cargo test -p pdfcraft-forms
+
+      - name: test pdfcraft-post
+        run: cargo test -p pdfcraft-post
 
       - name: clippy pdfcraft-pdf (no default features)
         run: cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings
@@ -153,4 +156,4 @@ jobs:
         run: cargo doc -p pdfcraft-pdf --no-deps --features backend-krilla
 
       - name: doc shells
-        run: cargo doc -p pdfcraft-forms -p pdfcraft-orgchart --no-deps
+        run: cargo doc -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --no-deps

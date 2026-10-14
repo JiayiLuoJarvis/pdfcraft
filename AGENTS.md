@@ -137,7 +137,9 @@ cargo test -p pdfcraft-forms
 cargo doc -p pdfcraft-forms --no-deps
 cargo test -p pdfcraft-orgchart
 cargo doc -p pdfcraft-orgchart --no-deps
-# pdfcraft-post 落地后另加 clippy / test / doc -p pdfcraft-post
+cargo clippy -p pdfcraft-post --all-targets -- -D warnings
+cargo test -p pdfcraft-post
+cargo doc -p pdfcraft-post --no-deps
 # CI 另设 RUSTFLAGS=-D warnings 与 RUSTDOCFLAGS=-D warnings
 # 集成测试用 `pdfcraft_pdf::canvas::pt_near`，不依赖 `test-utils`。
 # 该 feature 只把同一函数再导出到 crate 根。
