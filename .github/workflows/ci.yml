@@ -17,7 +17,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
@@ -58,7 +58,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: module dag
         run: python3 scripts/check_pdfcraft_pdf_modules.py
