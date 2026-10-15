@@ -31,6 +31,19 @@ pub fn cjk_font_bytes() -> Option<Vec<u8>> {
     }))
 }
 
+/// Line height at `size` pt and `factor`, same formula as `line_metrics`.
+#[allow(dead_code)]
+#[must_use]
+pub fn line_height_at(font: &[u8], size: f32, factor: f32) -> f32 {
+    let font_ref = FontRef::new(font).unwrap_or_else(|_| {
+        FontRef::from_index(font, 0).expect("PDFCRAFT_PDF_FONT must be a usable face")
+    });
+    let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
+    let scale = size / f32::from(metrics.units_per_em);
+    let natural = metrics.ascent * scale - metrics.descent * scale + metrics.leading * scale;
+    natural.max(size * factor)
+}
+
 /// `(baseline, line_height)` at 12 pt with factor 1.2 — same formula as layout.
 #[allow(dead_code)] // used by document / letter_layout / spec_parity via #[path]
 pub fn body_line_12(font: &[u8]) -> (f32, f32) {

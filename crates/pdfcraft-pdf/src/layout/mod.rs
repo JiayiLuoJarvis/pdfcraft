@@ -1,5 +1,7 @@
 //! Layout engine: split/draw flowables, check nested content, paginate, decorate.
 
+pub mod atomic;
+pub mod canvas;
 pub mod column_width;
 pub mod columns;
 pub mod decorate;

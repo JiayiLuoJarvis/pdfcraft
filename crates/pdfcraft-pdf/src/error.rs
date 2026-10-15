@@ -191,6 +191,8 @@ pub enum ErrorKind {
     },
     /// A link URI was empty.
     EmptyLink,
+    /// A canvas text mark was an empty string.
+    EmptyCanvasText,
     /// A drawing call used an illegal page lifecycle state.
     InvalidCanvasState {
         /// The method that failed.
@@ -331,6 +333,7 @@ impl fmt::Display for ErrorKind {
             Self::NegativeLength { value } => write!(f, "{value} is a negative length"),
             Self::NonPositiveLength { value } => write!(f, "{value} is not a positive length"),
             Self::EmptyLink => f.write_str("link URI is empty"),
+            Self::EmptyCanvasText => f.write_str("canvas text is empty"),
             Self::InvalidCanvasState { operation, state } => {
                 write!(f, "{operation} is invalid while {state}")
             }

@@ -32,7 +32,9 @@ pub use types::{Numbering, Ratio, Rendered, Track};
 use std::num::{NonZeroU16, NonZeroU32};
 
 use crate::canvas::ImageFormat;
-use crate::geom::{Color, Ink, Length, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect};
+use crate::geom::{
+    Color, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect, Size,
+};
 use crate::limits::Limits;
 
 use self::token::DocToken;
@@ -185,6 +187,8 @@ pub enum Block<K> {
     List(ListSpec<K>),
     /// A flow image.
     Image(ImageSpec),
+    /// A fixed-size vector block. Marks occupy `size` and do not split.
+    Canvas(CanvasSpec<K>),
     /// A horizontal rule.
     HLine(HLineSpec),
 }
@@ -413,6 +417,8 @@ pub enum CellBlock<K> {
     HLine(HLineSpec),
     /// A flow image.
     Image(ImageSpec),
+    /// A fixed-size vector block.
+    Canvas(CanvasSpec<K>),
     /// Vertical blank space.
     Spacer(Length<NonNegative>),
     /// A nested list.
@@ -467,6 +473,62 @@ pub struct ListItemSpec<K> {
     pub marker: Option<String>,
     /// Item blocks.
     pub blocks: Vec<Block<K>>,
+}
+
+/// A vector block that occupies `size` in the flow.
+///
+/// The origin is the block's top-left. X increases to the right and y increases
+/// downward. Marks are painted in order. Ink outside `size` is still painted.
+/// The block does not split.
+#[derive(Debug)]
+#[must_use]
+pub struct CanvasSpec<K> {
+    /// Occupied width and height. Both are strictly positive.
+    pub size: Size,
+    /// Horizontal placement in the current frame.
+    pub align: Alignment,
+    /// Drawing commands. Later marks paint over earlier ones.
+    pub marks: Vec<CanvasMark<K>>,
+}
+
+/// One drawing command inside a [`CanvasSpec`].
+#[derive(Debug)]
+#[must_use]
+pub enum CanvasMark<K> {
+    /// A straight stroke from `from` to `to`.
+    Line {
+        /// Start, block coordinates.
+        from: Point,
+        /// End, block coordinates.
+        to: Point,
+        /// Stroke color and width.
+        pen: Pen,
+    },
+    /// An axis-aligned rectangle.
+    Rect {
+        /// Box. Width and height are positive.
+        rect: Rect,
+        /// Fill, stroke, or both.
+        ink: Ink,
+    },
+    /// A filled path. The path is not stroked.
+    Fill {
+        /// Path in block coordinates.
+        path: Path,
+        /// Fill color.
+        color: Color,
+    },
+    /// One unwrapped line. `at` is the baseline left, not the line-box top.
+    Text {
+        /// Text. An empty string is rejected at layout.
+        text: String,
+        /// Key in the document [`FontRegistry`].
+        font: K,
+        /// Baseline left, block coordinates, y down.
+        at: Point,
+        /// Size and color. `None` uses the document seed (12 pt, black), not an enclosing [`Block::Styled`].
+        style: TextStyle,
+    },
 }
 
 /// A flow image and its display box.

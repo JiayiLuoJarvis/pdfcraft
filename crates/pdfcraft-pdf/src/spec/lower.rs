@@ -8,7 +8,10 @@ use crate::error::{
     ColumnWidthsReason, Error, ErrorBag, ErrorKind, Fallible, GeometryKind, Location, Result,
 };
 use crate::fonts::{FontFace, FontId, FontKey, FontSource, FontStore};
-use crate::geom::{Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect};
+use crate::geom::{
+    Color, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
+};
+use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::{Decorations, LayerContent, LayerItem, LayerText, PageInfo};
@@ -30,10 +33,10 @@ use crate::limits::Limits;
 use super::token::DocToken;
 use super::types::{default_style, numbering_kind, reject_auto_with_ratio, Rendered, Track};
 use super::{
-    Alignment, BandInset, BandSlot, BandSpec, BlankWidth as SpecBlankWidth, Block, CellBlock,
-    CellSpec, ColumnsSpec, DocumentSpec, HLineSpec, ImageRef, ImageSpec, InlineRun, LayerMark,
-    LayerShape, ListKind, ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec, TextRun,
-    TextStyle,
+    Alignment, BandInset, BandSlot, BandSpec, BlankWidth as SpecBlankWidth, Block, CanvasMark,
+    CanvasSpec, CellBlock, CellSpec, ColumnsSpec, DocumentSpec, HLineSpec, ImageRef, ImageSpec,
+    InlineRun, LayerMark, LayerShape, ListKind, ListSpec, PageWhen, ParagraphSpec, Resources,
+    SectionSpec, TextRun, TextStyle,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
@@ -316,6 +319,11 @@ fn lower_blocks<K: FontKey>(
                     nodes.push(node);
                 }
             }
+            Block::Canvas(spec) => {
+                if let Some(node) = lower_canvas(spec, fonts, errors) {
+                    nodes.push(node);
+                }
+            }
             Block::HLine(spec) => nodes.push(lower_hline(spec)),
         }
     }
@@ -518,6 +526,66 @@ fn lower_image(
     }
 }
 
+fn text_align(align: Alignment) -> TextAlign {
+    match align {
+        Alignment::Start => TextAlign::Start,
+        Alignment::Center => TextAlign::Center,
+        Alignment::End => TextAlign::End,
+    }
+}
+
+fn lower_canvas<K: FontKey>(
+    spec: CanvasSpec<K>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Option<FlowNode> {
+    let mut marks = Vec::with_capacity(spec.marks.len());
+    for mark in spec.marks {
+        match mark {
+            CanvasMark::Line { from, to, pen } => {
+                marks.push(CanvasMarkNode::Line { from, to, pen });
+            }
+            CanvasMark::Rect { rect, ink } => marks.push(CanvasMarkNode::Rect { rect, ink }),
+            CanvasMark::Fill { path, color } => marks.push(CanvasMarkNode::Fill { path, color }),
+            CanvasMark::Text {
+                text,
+                font,
+                at,
+                style,
+            } => {
+                if text.is_empty() {
+                    errors.record(Error::from(ErrorKind::EmptyCanvasText));
+                    return None;
+                }
+                let id = resolve_font(fonts, font, false, errors)?;
+                marks.push(CanvasMarkNode::Text {
+                    text,
+                    font: id,
+                    at,
+                    size: style.font_size.unwrap_or_else(seed_font_size),
+                    color: style.color.unwrap_or_else(seed_color),
+                });
+            }
+        }
+    }
+    match CanvasNode::new(spec.size, text_align(spec.align), marks) {
+        Ok(node) => Some(FlowNode::Canvas(node)),
+        Err(error) => {
+            errors.record(error);
+            None
+        }
+    }
+}
+
+/// Document seed from `default_style`, not an enclosing `Block::Styled`.
+fn seed_font_size() -> Length<Positive> {
+    Positive::pt(12.0).expect("12 pt is positive")
+}
+
+fn seed_color() -> Color {
+    Color::rgb(0, 0, 0)
+}
+
 fn lower_columns<K: FontKey>(
     spec: ColumnsSpec<K>,
     style: &Style,
@@ -709,6 +777,11 @@ fn lower_cell<K: FontKey>(
             CellBlock::HLine(line) => content.push(lower_hline(line)),
             CellBlock::Image(image) => {
                 if let Some(node) = lower_image(image, doc, images, &mut bag) {
+                    content.push(node);
+                }
+            }
+            CellBlock::Canvas(canvas) => {
+                if let Some(node) = lower_canvas(canvas, fonts, &mut bag) {
                     content.push(node);
                 }
             }
@@ -1273,7 +1346,11 @@ fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut 
                 }
             }
             Block::Image(spec) => reject_image(spec.image, images, errors),
-            Block::Paragraph(_) | Block::Spacer(_) | Block::PageBreak | Block::HLine(_) => {}
+            Block::Paragraph(_)
+            | Block::Spacer(_)
+            | Block::PageBreak
+            | Block::HLine(_)
+            | Block::Canvas(_) => {}
         }
     }
 }
@@ -1290,7 +1367,8 @@ fn validate_cell_blocks<K>(blocks: &[CellBlock<K>], images: &LoweredImages, erro
             CellBlock::Text { .. }
             | CellBlock::Paragraph(_)
             | CellBlock::HLine(_)
-            | CellBlock::Spacer(_) => {}
+            | CellBlock::Spacer(_)
+            | CellBlock::Canvas(_) => {}
         }
     }
 }

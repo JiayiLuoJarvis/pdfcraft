@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{Finite, Length, NonNegative};
+use crate::layout::canvas::CanvasNode;
 use crate::layout::columns::ColumnsNode;
 use crate::layout::frame::{natural_height, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split};
 use crate::layout::hline::HLineNode;
@@ -45,6 +46,7 @@ pub(crate) enum FlowNode {
     Table(TableNode<FlowNode>),
     List(ListNode<FlowNode>),
     Image(ImageNode),
+    Canvas(CanvasNode),
     HLine(HLineNode),
 }
 
@@ -61,6 +63,7 @@ impl Flowable for FlowNode {
             FlowNode::Table(node) => node.split(ctx, avail)?.map(FlowNode::Table),
             FlowNode::List(node) => node.split(ctx, avail)?.map(FlowNode::List),
             FlowNode::Image(node) => node.split(avail)?.map(FlowNode::Image),
+            FlowNode::Canvas(node) => node.split(ctx, avail)?.map(FlowNode::Canvas),
             FlowNode::HLine(node) => node.split(avail)?.map(FlowNode::HLine),
         })
     }
@@ -80,6 +83,7 @@ impl Flowable for FlowNode {
             FlowNode::Table(_) => NodeKind::Table,
             FlowNode::List(_) => NodeKind::List,
             FlowNode::Image(_) => NodeKind::Image,
+            FlowNode::Canvas(_) => NodeKind::Canvas,
             FlowNode::HLine(_) => NodeKind::HLine,
         }
     }
@@ -325,6 +329,7 @@ fn census(roots: &[FlowNode]) -> Census {
             | FlowNode::Spacer(_)
             | FlowNode::PageBreak
             | FlowNode::Image(_)
+            | FlowNode::Canvas(_)
             | FlowNode::HLine(_) => {
                 census.blocks = census.blocks.saturating_add(1);
             }

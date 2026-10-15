@@ -1,8 +1,9 @@
 //! Atomic raster block. Size is resolved at build time. Split only places it.
 
 use crate::canvas::DecodedImage;
-use crate::error::{Error, ErrorKind, Fallible as Result};
+use crate::error::Fallible as Result;
 use crate::geom::{Length, NonNegative, Positive, Rect, Size};
+use crate::layout::atomic::{place_atomic, AtomicPlace};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
 
@@ -27,41 +28,25 @@ impl ImageNode {
     }
 
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
-        let width = self.size.width();
-        let height = self.size.height();
-        if width.as_pt() > avail.width.as_pt() {
-            return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
-                text: None,
-                width: width.as_pt(),
-                avail: avail.width.as_pt(),
-            }));
+        let width = self.size.width().as_pt();
+        let height = self.size.height().as_pt();
+        match place_atomic(self.size, self.align, &avail)? {
+            AtomicPlace::MoveToNextPage => Ok(Split::MoveToNextPage(self)),
+            AtomicPlace::Fit {
+                x,
+                height: occupied,
+            } => Ok(Split::Fit {
+                height: occupied,
+                fragment: Fragment {
+                    height: occupied,
+                    spacing_after: NonNegative::ZERO,
+                    commands: vec![FragmentCommand::Image {
+                        image: self.image,
+                        rect: Rect::try_pt(x, 0.0, width, height)?,
+                    }],
+                },
+            }),
         }
-        if height.as_pt() > avail.full_height.as_pt() {
-            return Err(ErrorKind::UnsplittableTallerThanFrame {
-                height: height.as_pt(),
-                avail: avail.full_height.as_pt(),
-            }
-            .into());
-        }
-        if height.as_pt() > avail.height.as_pt() {
-            return Ok(Split::MoveToNextPage(self));
-        }
-        let x = match self.align {
-            TextAlign::Start => 0.0,
-            TextAlign::Center => (avail.width - width).as_pt() / 2.0,
-            TextAlign::End => (avail.width - width).as_pt(),
-        };
-        Ok(Split::Fit {
-            height: height.into(),
-            fragment: Fragment {
-                height: height.into(),
-                spacing_after: NonNegative::ZERO,
-                commands: vec![FragmentCommand::Image {
-                    image: self.image,
-                    rect: Rect::try_pt(x, 0.0, width.as_pt(), height.as_pt())?,
-                }],
-            },
-        })
     }
 }
 

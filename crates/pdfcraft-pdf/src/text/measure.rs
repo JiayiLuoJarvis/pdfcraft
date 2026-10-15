@@ -8,7 +8,7 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::MetadataProvider;
 
 use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
-use crate::fonts::{parse_face, FaceMetrics, FontId, FontStore};
+use crate::fonts::{face_metrics, parse_face, FaceMetrics, FontFace, FontId, FontStore};
 use crate::geom::{Finite, Length, Positive};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,7 +90,7 @@ pub(crate) fn measure_text(
                 width
             }
         };
-        let advance_norm = advance_font_units / units_per_em;
+        let advance_norm = width_norm(advance_font_units, units_per_em);
         total_norm += advance_norm;
         glyphs.push(MeasuredGlyph {
             scalar,
@@ -132,6 +132,11 @@ fn omitted_text(text: &str) -> MeasuredText {
     }
 }
 
+/// `advance / units_per_em`. No kerning. Body text and [`FontFace::text_width`] both use this.
+pub(crate) fn width_norm(advance_font_units: f32, units_per_em: f32) -> f32 {
+    advance_font_units / units_per_em
+}
+
 pub(crate) fn line_metrics(
     face: &FaceMetrics,
     font_size: Length<Positive>,
@@ -154,6 +159,50 @@ pub(crate) fn line_metrics(
         line_height: Length::from_trusted_pt(line_height),
         baseline: Length::from_trusted_pt(ascent),
     })
+}
+
+impl FontFace {
+    /// Advance of `text` at `size`, in pt. An empty string is `0`.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MissingGlyph`] when a scalar is not in the cmap. The `font`
+    /// field is `0` because this face has no document font id yet.
+    /// [`ErrorKind::Font`] when the bytes cannot be parsed.
+    pub fn text_width(&self, text: &str, size: Length<Positive>) -> Result<f32> {
+        if text.is_empty() {
+            return Ok(0.0);
+        }
+        let font_ref = parse_face(&self.bytes, self.index)?;
+        let metrics = face_metrics(&font_ref, self.index)?;
+        let charmap = font_ref.charmap();
+        let glyph_metrics = font_ref.glyph_metrics(Size::unscaled(), LocationRef::default());
+        let mut total = 0.0;
+        for scalar in text.chars() {
+            let Some(gid) = charmap.map(scalar) else {
+                return Err(Error::from(ErrorKind::MissingGlyph { font: 0, scalar }));
+            };
+            let units = glyph_metrics.advance_width(gid).ok_or_else(|| {
+                Error::from(ErrorKind::Font {
+                    index: self.index,
+                    message: format!("no unscaled advance for glyph {}", gid.to_u32()),
+                })
+            })?;
+            total += width_norm(units, metrics.units_per_em);
+        }
+        Ok(total * size.as_pt())
+    }
+
+    /// Natural line height at a spacing factor of 1. Body text stays at 1.2.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Font`] when the bytes cannot be parsed or the em square is 0.
+    pub fn line_height(&self, size: Length<Positive>) -> Result<f32> {
+        let font_ref = parse_face(&self.bytes, self.index)?;
+        let face = face_metrics(&font_ref, self.index)?;
+        Ok(line_metrics(&face, size, 1.0)?.line_height.as_pt())
+    }
 }
 
 #[cfg(test)]

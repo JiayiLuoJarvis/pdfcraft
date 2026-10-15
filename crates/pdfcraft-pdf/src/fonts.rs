@@ -167,6 +167,23 @@ impl Default for FontStore {
     }
 }
 
+/// Ascent, descent, leading, and units per em, the same numbers [`FontStore::register`] stores.
+pub(crate) fn face_metrics(font_ref: &FontRef<'_>, index: u32) -> Result<FaceMetrics> {
+    let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
+    if metrics.units_per_em == 0 {
+        return Err(Error::from(ErrorKind::Font {
+            index,
+            message: "units per em is 0".to_owned(),
+        }));
+    }
+    Ok(FaceMetrics {
+        units_per_em: f32::from(metrics.units_per_em),
+        ascent: metrics.ascent,
+        descent: metrics.descent,
+        leading: metrics.leading,
+    })
+}
+
 /// Parses face `index` of `bytes`. skrifa's error stays reachable as the source.
 pub(crate) fn parse_face(bytes: &[u8], index: u32) -> Result<FontRef<'_>> {
     FontRef::from_index(bytes, index).map_err(|error| {
@@ -206,13 +223,7 @@ impl FontStore {
         }
 
         let font_ref = parse_face(source.bytes.as_slice(), source.index)?;
-        let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
-        if metrics.units_per_em == 0 {
-            return Err(Error::from(ErrorKind::Font {
-                index: source.index,
-                message: "units per em is 0".to_owned(),
-            }));
-        }
+        let metrics = face_metrics(&font_ref, source.index)?;
 
         let id = FontId::from_raw(u32::try_from(self.faces.len()).map_err(|_| {
             Error::from(ErrorKind::Font {
@@ -222,12 +233,7 @@ impl FontStore {
         })?);
         self.faces.push(LoadedFace {
             source,
-            metrics: FaceMetrics {
-                units_per_em: f32::from(metrics.units_per_em),
-                ascent: metrics.ascent,
-                descent: metrics.descent,
-                leading: metrics.leading,
-            },
+            metrics,
             advances: HashMap::new(),
         });
         Ok(id)

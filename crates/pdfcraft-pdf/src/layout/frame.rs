@@ -160,6 +160,7 @@ pub(crate) enum NodeKind {
     Table,
     List,
     Image,
+    Canvas,
     HLine,
 }
 

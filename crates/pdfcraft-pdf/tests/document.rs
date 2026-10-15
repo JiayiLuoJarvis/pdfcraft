@@ -6,10 +6,10 @@ use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::spec::ImageSpec;
 use pdfcraft_pdf::spec::{
-    Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
-    ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, InlineRun, LayerMark,
-    LayerShape, ListItemSpec, ListKind, ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec,
-    TableSpec, TextRun, TextStyle,
+    Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CanvasMark, CanvasSpec,
+    CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec,
+    InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, PageWhen, ParagraphSpec,
+    Resources, SectionSpec, TableSpec, TextRun, TextStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
@@ -3745,6 +3745,211 @@ fn paragraph_center_and_end_align_each_visual_line() {
     assert!(pt_near(b.x, (page_w - b.width) / 2.0));
     assert!(pt_near(c.x + c.width, page_w));
     assert!(pt_near(d.x + d.width, page_w));
+}
+
+fn canvas_label() -> Block<()> {
+    let label = "送貨";
+    Block::Canvas(CanvasSpec {
+        size: Size::try_pt(120.0, 80.0).unwrap(),
+        align: Alignment::Start,
+        marks: vec![
+            CanvasMark::Rect {
+                rect: Rect::try_pt(0.0, 0.0, 120.0, 40.0).unwrap(),
+                ink: Ink::Stroke(Pen::new(Color::rgb(170, 170, 170), pos(1.0)).unwrap()),
+            },
+            CanvasMark::Line {
+                from: Point::try_pt(10.0, 8.0).unwrap(),
+                to: Point::try_pt(10.0, 36.0).unwrap(),
+                pen: Pen::new(Color::rgb(170, 170, 170), pos(1.0)).unwrap(),
+            },
+            CanvasMark::Fill {
+                path: Path::begin(Point::try_pt(8.0, 30.0).unwrap())
+                    .line_to(Point::try_pt(16.0, 38.0).unwrap())
+                    .line_to(Point::try_pt(24.0, 30.0).unwrap())
+                    .close(),
+                color: Color::rgb(170, 170, 170),
+            },
+            CanvasMark::Text {
+                text: label.into(),
+                font: (),
+                at: Point::try_pt(12.0, 40.0).unwrap(),
+                style: TextStyle {
+                    font_size: Some(pos(11.0)),
+                    ..TextStyle::default()
+                },
+            },
+        ],
+    })
+}
+
+fn pdftotext_of(pdf: &[u8]) -> String {
+    let path = std::env::temp_dir().join(format!("pdfcraft-canvas-{}.pdf", std::process::id()));
+    std::fs::write(&path, pdf).unwrap();
+    let output = std::process::Command::new("pdftotext")
+        .arg(&path)
+        .arg("-")
+        .output()
+        .expect("pdftotext");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn canvas_round_trip_paints_the_label() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        sec(vec![canvas_label()]),
+    )
+    .unwrap();
+    let drawn = glyph(&rendered.pages()[0], "送貨");
+    assert!(pt_near(drawn.x, 12.0));
+    assert!(pt_near(drawn.y, 40.0));
+    let pdf = to_pdf(rendered).unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+    assert!(pdftotext_of(&pdf).contains("送貨"));
+}
+
+#[test]
+fn canvas_moves_whole_when_remainder_is_short() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(30.0)),
+            Block::Canvas(CanvasSpec {
+                size: Size::try_pt(40.0, 20.0).unwrap(),
+                align: Alignment::Start,
+                marks: vec![CanvasMark::Rect {
+                    rect: Rect::try_pt(0.0, 0.0, 40.0, 20.0).unwrap(),
+                    ink: Ink::Fill(Color::rgb(1, 2, 3)),
+                }],
+            }),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert!(pages[0]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::FillPath { .. })));
+    assert!(matches!(
+        pages[1].ops().first(),
+        Some(CanvasCommand::FillPath { .. })
+    ));
+}
+
+#[test]
+fn canvas_taller_than_the_body_fails() {
+    let error = render(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![Block::Canvas(CanvasSpec {
+            size: Size::try_pt(10.0, 50.0).unwrap(),
+            align: Alignment::Start,
+            marks: Vec::new(),
+        })])],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind.clone(),
+        ErrorKind::UnsplittableTallerThanFrame {
+            height: 50.0,
+            avail: 40.0,
+        }
+    );
+}
+
+#[test]
+fn canvas_wider_than_the_column_fails() {
+    let error = render(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![Block::Canvas(CanvasSpec {
+            size: Size::try_pt(150.0, 10.0).unwrap(),
+            align: Alignment::Start,
+            marks: Vec::new(),
+        })])],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind.clone(),
+        ErrorKind::UnbreakableWiderThanFrame {
+            text: None,
+            width: 150.0,
+            avail: 100.0,
+        }
+    );
+}
+
+#[test]
+fn text_width_matches_the_laid_out_advance() {
+    if skip_without_font() {
+        return;
+    }
+    let bytes = font_bytes();
+    let face = FontFace {
+        bytes: bytes.clone(),
+        index: 0,
+    };
+    let page = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 80.0).unwrap()),
+        sec(vec![para("Hi")]),
+    )
+    .unwrap()
+    .pages()
+    .into_iter()
+    .next()
+    .unwrap();
+    let drawn = glyph(&page, "Hi");
+    assert_eq!(
+        face.text_width("Hi", pos(12.0)).unwrap().to_bits(),
+        drawn.width.to_bits()
+    );
+    assert!(matches!(
+        face.text_width("\u{E000}", pos(12.0)).unwrap_err().kind,
+        ErrorKind::MissingGlyph {
+            scalar: '\u{E000}',
+            ..
+        }
+    ));
+    assert_eq!(
+        face.line_height(pos(11.0)).unwrap().to_bits(),
+        common::line_height_at(&bytes, 11.0, 1.0).to_bits()
+    );
+}
+
+#[test]
+fn empty_canvas_text_fails_layout() {
+    if skip_without_font() {
+        return;
+    }
+    let error = font_pages(
+        PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
+        sec(vec![Block::Canvas(CanvasSpec {
+            size: Size::try_pt(40.0, 20.0).unwrap(),
+            align: Alignment::Start,
+            marks: vec![CanvasMark::Text {
+                text: String::new(),
+                font: (),
+                at: Point::try_pt(0.0, 10.0).unwrap(),
+                style: TextStyle::default(),
+            }],
+        })]),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.first().kind.clone(), ErrorKind::EmptyCanvasText);
 }
 
 #[test]

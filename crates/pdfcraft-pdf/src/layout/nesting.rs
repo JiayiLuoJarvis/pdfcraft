@@ -50,7 +50,9 @@ pub(crate) fn check_content<N: Flowable>(container: Container, nodes: &[N]) -> R
             },
             NodeKind::Table => container == Container::Column,
             NodeKind::List => container != Container::Band,
-            NodeKind::Image => matches!(container, Container::Column | Container::TableCell),
+            NodeKind::Image | NodeKind::Canvas => {
+                matches!(container, Container::Column | Container::TableCell)
+            }
             NodeKind::PageBreak => false,
         };
         if !allowed {
@@ -74,6 +76,7 @@ fn kind_name(kind: NodeKind) -> &'static str {
         NodeKind::Table => "table",
         NodeKind::List => "list",
         NodeKind::Image => "image",
+        NodeKind::Canvas => "canvas",
         NodeKind::HLine => "horizontal line",
     }
 }
