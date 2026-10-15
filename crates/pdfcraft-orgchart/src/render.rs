@@ -75,7 +75,7 @@ fn draw_page(
                 .iter()
                 .map(|point| (point.x + origin_x, point.y + origin_y))
                 .collect();
-            stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, false);
+            stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, false, edge.draw_arrow);
         }
         let box_by_id: HashMap<NodeId, &NodeBox> =
             page.boxes.iter().map(|box_| (box_.id, box_)).collect();
@@ -495,7 +495,13 @@ fn stroke_round(
     surface.draw_path(&path);
 }
 
-fn stroke_poly(surface: &mut Surface<'_>, points: &[(f64, f64)], width_pt: f64, dashed: bool) {
+fn stroke_poly(
+    surface: &mut Surface<'_>,
+    points: &[(f64, f64)],
+    width_pt: f64,
+    dashed: bool,
+    draw_arrow: bool,
+) {
     if points.len() < 2 {
         return;
     }
@@ -511,7 +517,9 @@ fn stroke_poly(surface: &mut Surface<'_>, points: &[(f64, f64)], width_pt: f64, 
     surface.set_fill(None);
     surface.set_stroke(Some(stroke(pt_f32(width_pt), dashed)));
     surface.draw_path(&path);
-    arrow(surface, points);
+    if draw_arrow {
+        arrow(surface, points);
+    }
 }
 
 fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {

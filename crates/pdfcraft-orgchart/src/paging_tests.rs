@@ -109,6 +109,37 @@ fn a_fork_that_fits_is_one_landscape_page() {
 }
 
 #[test]
+fn multi_holder_bus_keeps_one_arrow_on_the_trunk() {
+    let pages = pages_of(&chart(2, 0));
+    assert_eq!(pages.len(), 1);
+    let subject = pages[0]
+        .layout
+        .nodes
+        .iter()
+        .find(|node| node.protocol_id == "root")
+        .expect("subject");
+    let into_subject: Vec<_> = pages[0]
+        .layout
+        .edges
+        .iter()
+        .filter(|edge| edge.to_id == subject.id)
+        .collect();
+    assert_eq!(into_subject.len(), 2);
+    assert_eq!(
+        into_subject.iter().filter(|edge| edge.draw_arrow).count(),
+        1,
+        "only the shared trunk should carry an arrow tip"
+    );
+    for edge in into_subject.iter().filter(|edge| !edge.draw_arrow) {
+        let tip = edge.points.last().expect("points");
+        assert!(
+            (tip.y - subject.y).abs() > 0.5,
+            "feeder edges must stop on the bus, not at the subject top"
+        );
+    }
+}
+
+#[test]
 fn a_chain_stays_portrait_and_the_holder_sits_above_the_subject() {
     let pages = pages_of(&chart(1, 0));
     assert_eq!(pages.len(), 1);
