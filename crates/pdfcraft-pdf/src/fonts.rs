@@ -68,10 +68,25 @@ pub(crate) struct LoadedFace {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct FontFace {
-    /// Font file bytes.
-    pub bytes: Vec<u8>,
+    /// Shared font file bytes.
+    pub bytes: Arc<Vec<u8>>,
     /// Face index inside `bytes`. Zero is the first face.
     pub index: u32,
+}
+
+impl FontFace {
+    /// Wrap owned bytes without parsing them.
+    pub fn new(bytes: impl Into<Vec<u8>>, index: u32) -> Self {
+        Self {
+            bytes: Arc::new(bytes.into()),
+            index,
+        }
+    }
+
+    /// Reuse an existing shared font buffer without copying its contents.
+    pub fn from_shared(bytes: Arc<Vec<u8>>, index: u32) -> Self {
+        Self { bytes, index }
+    }
 }
 
 /// A normal face and an optional bold face, both supplied by the caller.
@@ -357,35 +372,39 @@ mod tests {
         fonts.register(
             "body",
             FontFamily {
-                normal: FontFace {
-                    bytes: b"one".to_vec(),
-                    index: 0,
-                },
+                normal: FontFace::new(b"one".to_vec(), 0),
                 bold: None,
             },
         );
         fonts.register(
             "body",
             FontFamily {
-                normal: FontFace {
-                    bytes: b"two".to_vec(),
-                    index: 3,
-                },
+                normal: FontFace::new(b"two".to_vec(), 3),
                 bold: None,
             },
         );
         let entries = fonts.into_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].1.normal.bytes, b"two");
+        assert_eq!(entries[0].1.normal.bytes.as_slice(), b"two");
         assert_eq!(entries[0].1.normal.index, 3);
 
         let single = FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: b"only".to_vec(),
-                index: 1,
-            },
+            normal: FontFace::new(b"only".to_vec(), 1),
             bold: None,
         });
         assert_eq!(single.into_entries()[0].0, ());
+    }
+
+    #[test]
+    fn new_wraps_owned_bytes() {
+        let face = FontFace::new(b"face".to_vec(), 0);
+        assert_eq!(face.bytes.as_slice(), b"face");
+    }
+
+    #[test]
+    fn from_shared_keeps_the_arc() {
+        let source = Arc::new(b"face".to_vec());
+        let face = FontFace::from_shared(Arc::clone(&source), 0);
+        assert!(Arc::ptr_eq(&source, &face.bytes));
     }
 }

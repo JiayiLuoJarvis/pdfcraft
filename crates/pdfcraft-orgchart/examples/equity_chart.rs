@@ -1,6 +1,8 @@
 //! Draw a small equity chart to `out/equity_chart.pdf`.
 //!
 //! Requires `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (single-face TTF/OTF).
+//! `FontBytes::new` wraps those file bytes. `FontBytes::from_shared` reuses an
+//! `Arc<Vec<u8>>` when the caller already shares that buffer.
 
 use std::env;
 use std::path::PathBuf;

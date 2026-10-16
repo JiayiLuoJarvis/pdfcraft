@@ -13,6 +13,7 @@ use std::env;
 use std::fs;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
@@ -44,16 +45,10 @@ fn main() -> Result<()> {
         fs::create_dir_all(parent).expect("create output dir");
     }
 
-    let font = load_font();
+    let font = Arc::new(load_font());
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: font.clone(),
-            index: 0,
-        },
-        bold: Some(FontFace {
-            bytes: font,
-            index: 0,
-        }),
+        normal: FontFace::from_shared(Arc::clone(&font), 0),
+        bold: Some(FontFace::from_shared(font, 0)),
     }));
     let logo = resources.add_image(PIXEL.to_vec(), ImageFormat::Png);
     let rendered = layout_spec(pdfcraft_pdf::DocumentSpec {

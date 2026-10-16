@@ -21,8 +21,9 @@
 //!
 //! # Fonts
 //!
-//! Pass owned face bytes as [`FontBytes`]. Paths are not accepted. A font
-//! collection is rejected. Measurement and drawing use the same face.
+//! Pass face bytes as [`FontBytes`]. [`FontBytes::new`] wraps owned bytes.
+//! [`FontBytes::from_shared`] reuses an `Arc<Vec<u8>>`. Paths are not accepted.
+//! A font collection is rejected. Measurement and drawing use the same face.
 //!
 //! # Modules
 //!
@@ -33,7 +34,7 @@
 //! | --- | --- |
 //! | [`ChartRequest`] / [`ChartOptions`] | Chart values and caps |
 //! | [`Node`] / [`Edge`] / [`NodeType`] | Parties and holding edges |
-//! | [`FontBytes`] | Owned TrueType / OpenType face bytes |
+//! | [`FontBytes`] | Shared TrueType / OpenType face bytes |
 //! | [`validate_request`] | Protocol check (no font open) |
 //! | [`document_title`] | Title string for caller-owned PDF info |
 //! | [`generate_pdf`] | Draw chart → PDF bytes |

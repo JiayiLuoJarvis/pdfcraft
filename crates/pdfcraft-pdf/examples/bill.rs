@@ -41,14 +41,11 @@ fn main() -> Result<()> {
     }
 
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: load_font("PDFCRAFT_CJK_FONT", &[".fonts/body.ttf"])?,
-            index: 0,
-        },
-        bold: Some(FontFace {
-            bytes: load_font("PDFCRAFT_CJK_BOLD_FONT", &[".fonts/bold.ttf"])?,
-            index: 0,
-        }),
+        normal: FontFace::new(load_font("PDFCRAFT_CJK_FONT", &[".fonts/body.ttf"])?, 0),
+        bold: Some(FontFace::new(
+            load_font("PDFCRAFT_CJK_BOLD_FONT", &[".fonts/bold.ttf"])?,
+            0,
+        )),
     }));
     let logo = resources.add_image(LOGO.to_vec(), ImageFormat::Png);
     let mark = resources.add_image(MARK.to_vec(), ImageFormat::Png);

@@ -52,7 +52,7 @@ use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize,
 fn main() -> Result<()> {
     let font = std::fs::read("path/to/face.ttf").expect("font");
     let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace { bytes: font, index: 0 },
+        normal: FontFace::new(font, 0),
         bold: None,
     }));
 
@@ -93,6 +93,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 ```
+
+`FontFace.bytes` is `Arc<Vec<u8>>`. `FontFace::new` wraps owned bytes. `FontFace::from_shared` reuses an `Arc`.
 
 Runnable demos:
 

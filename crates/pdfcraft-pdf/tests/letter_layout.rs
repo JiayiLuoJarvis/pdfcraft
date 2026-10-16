@@ -45,10 +45,7 @@ struct GlyphSample {
 fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
     let font = cjk_font()?;
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: font,
-            index: 0,
-        },
+        normal: FontFace::new(font, 0),
         bold: None,
     }));
     let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);

@@ -96,10 +96,7 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
     let spec = DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: font_bytes(),
-                index: 0,
-            },
+            normal: FontFace::new(font_bytes(), 0),
             bold: None,
         })),
         limits: pdfcraft_pdf::Limits::default(),
@@ -148,18 +145,12 @@ fn foreign_cell_image_ref_is_unknown() {
     }
     let png = include_bytes!("fixtures/one-pixel.png");
     let mut other = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: font_bytes(),
-            index: 0,
-        },
+        normal: FontFace::new(font_bytes(), 0),
         bold: None,
     }));
     let foreign = other.add_image(png.to_vec(), ImageFormat::Png);
     let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: font_bytes(),
-            index: 0,
-        },
+        normal: FontFace::new(font_bytes(), 0),
         bold: None,
     }));
     let _owned = dest.add_image(png.to_vec(), ImageFormat::Png);
@@ -188,10 +179,7 @@ fn local_cell_image_ref_draws() {
     }
     let png = include_bytes!("fixtures/one-pixel.png");
     let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: font_bytes(),
-            index: 0,
-        },
+        normal: FontFace::new(font_bytes(), 0),
         bold: None,
     }));
     let owned = dest.add_image(png.to_vec(), ImageFormat::Png);

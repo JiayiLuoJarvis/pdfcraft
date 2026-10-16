@@ -47,7 +47,7 @@ struct Contract { id: String, kind: Kind, items: Vec<Item> }
 
 fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
     let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace { bytes: font, index: 0 },
+        normal: FontFace::new(font, 0),
         bold: None,
     }));
     let mut body = vec![Block::paragraph((), format!("Contract {}", contract.id))];
@@ -149,11 +149,11 @@ enum DocFont { Body, Cjk }
 
 let mut fonts = FontRegistry::new();
 fonts.register(DocFont::Body, FontFamily {
-    normal: FontFace { bytes: body_ttf, index: 0 },
-    bold: Some(FontFace { bytes: bold_ttf, index: 0 }),
+    normal: FontFace::new(body_ttf, 0),
+    bold: Some(FontFace::new(bold_ttf, 0)),
 });
 fonts.register(DocFont::Cjk, FontFamily {
-    normal: FontFace { bytes: cjk_ttf, index: 0 },
+    normal: FontFace::new(cjk_ttf, 0),
     bold: None,
 });
 let mut resources = Resources::with_fonts(fonts);
@@ -164,7 +164,7 @@ A document that uses one family can skip the enum. `FontRegistry::single` regist
 
 ```rust
 let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-    normal: FontFace { bytes: body_ttf, index: 0 },
+    normal: FontFace::new(body_ttf, 0),
     bold: None,
 }));
 ```
@@ -175,6 +175,7 @@ let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
 | Registry | `FontRegistry::register`. Registering the same key again replaces that family. |
 | One family | `FontRegistry::single` uses the key `()`. |
 | Collection index | `FontFace.index` selects a face inside a collection. `0` is the first face. |
+| Face bytes | `FontFace.bytes` is `Arc<Vec<u8>>`. `FontFace::new` wraps owned bytes. `FontFace::from_shared` reuses an `Arc`. |
 | Bold | `InlineRun::Bold` needs `FontFamily.bold`. Otherwise layout records `ErrorKind::BoldFaceRequired`. |
 | Unknown key | `ErrorKind::UnregisteredFont`. The document fails. |
 | Missing glyph | `ErrorKind::MissingGlyph`. There is no fallback face and no `.notdef` box. |
@@ -281,6 +282,7 @@ let paragraph = ParagraphSpec {
     align: Alignment::Start,
     color: None,
     font_size: None,
+    line_height_factor: None,
 };
 ```
 

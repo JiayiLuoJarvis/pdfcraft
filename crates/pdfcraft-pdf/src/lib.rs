@@ -59,10 +59,7 @@
 //! let rendered = layout_spec(DocumentSpec {
 //!     page_size: PageSize::A4,
 //!     resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-//!         normal: FontFace {
-//!             bytes: font,
-//!             index: 0,
-//!         },
+//!         normal: FontFace::new(font, 0),
 //!         bold: None,
 //!     })),
 //!     limits: pdfcraft_pdf::Limits::default(),

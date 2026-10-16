@@ -105,12 +105,17 @@ Constants: `MAX_NODES`, `MIN_NODE_WIDTH_MM`, `MAX_NODE_WIDTH_MM`, `MAX_MARGIN_MM
 ## Fonts
 
 ```rust
+use std::sync::Arc;
+
 use pdfcraft_orgchart::FontBytes;
 
-let font = FontBytes::new(std::fs::read("face.ttf")?);
+let owned = FontBytes::new(std::fs::read("face.ttf")?);
+let shared = Arc::new(std::fs::read("face.ttf")?);
+let reused = FontBytes::from_shared(shared);
 ```
 
-- Caller-owned bytes only. Paths are not accepted.
+- `FontBytes::new` wraps owned bytes. `FontBytes::from_shared` reuses an `Arc<Vec<u8>>`.
+- Paths are not accepted.
 - One face per call. TrueType collections / OTC are rejected (`FONT_ERROR`).
 - Measurement and drawing share the same glyph pipeline. Missing cmap entries
   fail with `MISSING_GLYPH`.

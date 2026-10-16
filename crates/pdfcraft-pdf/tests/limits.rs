@@ -38,10 +38,7 @@ fn fonted(
     let font = common::test_font_bytes()?;
     Some(lay(
         Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: font,
-                index: 0,
-            },
+            normal: FontFace::new(font, 0),
             bold: None,
         })),
         limits,
@@ -56,10 +53,7 @@ fn fonted(
 fn font_byte_limit_rejects_before_parse() {
     let err = lay(
         Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: b"ab".to_vec(),
-                index: 0,
-            },
+            normal: FontFace::new(b"ab".to_vec(), 0),
             bold: None,
         })),
         tighten(|limits| limits.set_max_font_bytes(1).unwrap()),

@@ -63,7 +63,7 @@ pub struct GlyphUse {
 /// One face, opened from memory.
 #[derive(Debug, Clone)]
 pub struct FontMetrics {
-    bytes: Arc<[u8]>,
+    bytes: Arc<Vec<u8>>,
     upem: f64,
     ascent: f64,
     descent: f64,
@@ -116,7 +116,7 @@ impl FontMetrics {
                 ),
             ));
         }
-        let bytes: Arc<[u8]> = Arc::from(font.data.as_slice());
+        let bytes = Arc::clone(&font.data);
         Ok(Self {
             bytes,
             upem,
@@ -185,7 +185,7 @@ impl FontMetrics {
 
     /// Face bytes passed to krilla. The same buffer skrifa measured.
     #[must_use]
-    pub(crate) fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &Arc<Vec<u8>> {
         &self.bytes
     }
 

@@ -244,11 +244,11 @@ prepare_request
 
 行为规格：拒绝 `ttcf`、缺字 `MISSING_GLYPH`、行高 = hhea ascent + descent 的绝对值比例尺 + `LINE_GAP_PT`、与绘制同一 glyph id。这些不变。
 
-`FontMetrics::open` 仍接受 `&FontBytes`（公共签名不变），内部把字节放进 `Arc<[u8]>`，**只克隆这一次**。`render` 再建 krilla `Font` 时再拥有一份字节，整份文档一次，不按页、不按字符串克隆。
+`FontBytes.data` 是共享的 `Arc<Vec<u8>>`。`FontMetrics` 存下这份 `Arc`。`render` 把这份 `Arc` 克隆进 krilla `Data`。不按页、不按字符串复制字体内容。
 
 ```rust
 pub(crate) struct FontMetrics {
-    bytes: Arc<[u8]>,
+    bytes: Arc<Vec<u8>>,
     upem: f64,
     ascent: f64,
     descent: f64,

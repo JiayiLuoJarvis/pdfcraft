@@ -473,6 +473,15 @@ fn hc_font() -> Option<crate::FontBytes> {
 }
 
 #[test]
+fn open_keeps_the_shared_buffer() {
+    let Some(font) = hc_font() else {
+        return;
+    };
+    let metrics = FontMetrics::open(&font).expect("open");
+    assert!(std::sync::Arc::ptr_eq(&font.data, metrics.bytes()));
+}
+
+#[test]
 fn hc_line_height_matches_hhea_plus_gap() {
     let Some(bytes) = hc_font() else {
         return;

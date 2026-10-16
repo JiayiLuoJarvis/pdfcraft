@@ -75,7 +75,7 @@ ChartRequest ──document_title──► String (you write /Info)
 2. **Validate** — protocol and optional `top_n` fold without opening a font.
 3. **Draw** — fold again, measure, paginate, emit PDF.
 
-Fonts: owned single-face bytes. Collections are rejected.  
+Fonts: one face, shared as `Arc<Vec<u8>>`. `FontBytes::new` wraps owned bytes. `FontBytes::from_shared` reuses an `Arc`. Collections are rejected.  
 Title: `generate_pdf` does not write document info. Use `document_title` if you
 need a `/Title` string.
 
@@ -90,7 +90,7 @@ testing).
 | --- | --- |
 | `ChartRequest` / `ChartOptions` | Chart values, `top_n`, size caps |
 | `Node` / `Edge` / `NodeType` | Parties and holding edges |
-| `FontBytes` | Owned face bytes (`FontBytes::new`) |
+| `FontBytes` | Shared face bytes. `new` wraps owned bytes. `from_shared` reuses an `Arc`. |
 | `validate_request` | Protocol check |
 | `document_title` | Title string for caller-owned PDF info |
 | `generate_pdf` | Draw chart → `Vec<u8>` |

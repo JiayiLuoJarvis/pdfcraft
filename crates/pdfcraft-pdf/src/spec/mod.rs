@@ -237,6 +237,8 @@ pub struct ParagraphSpec<K> {
     pub color: Option<Color>,
     /// Paragraph font-size override.
     pub font_size: Option<Length<Positive>>,
+    /// Line-height factor override. `None` keeps the document seed (1.2).
+    pub line_height_factor: Option<f32>,
 }
 
 impl<K> Default for ParagraphSpec<K> {
@@ -247,6 +249,7 @@ impl<K> Default for ParagraphSpec<K> {
             align: Alignment::Start,
             color: None,
             font_size: None,
+            line_height_factor: None,
         }
     }
 }

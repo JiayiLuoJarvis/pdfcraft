@@ -136,7 +136,12 @@ pub enum NodeType {
 }
 
 pub struct FontBytes {
-    pub data: Vec<u8>,
+    pub data: Arc<Vec<u8>>,
+}
+
+impl FontBytes {
+    pub fn new(data: impl Into<Vec<u8>>) -> Self;
+    pub fn from_shared(data: Arc<Vec<u8>>) -> Self;
 }
 ```
 
@@ -295,7 +300,7 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 
 ### 9.1 字体
 
-- 入参 `FontBytes`。拒绝 TTC/OTC → `FONT_ERROR`。
+- 入参 `FontBytes`。`data` 是 `Arc<Vec<u8>>`。`new` 包住拥有的字节。`from_shared` 复用已有的 `Arc`。可观察行为不变。拒绝 TTC/OTC → `FONT_ERROR`。
 - 无法解析 → `FONT_ERROR`。
 - 测宽前对每个字符 ensure glyph。缺字 → `MISSING_GLYPH`（消息可含文本前缀）。
 - 行高用 ascent+descent 比例尺 + `LINE_GAP_PT`。与绘制共用同一 charmap / advance 管线。禁止 krilla `draw_text` 反推宽度。

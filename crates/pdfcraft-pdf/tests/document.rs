@@ -113,10 +113,7 @@ fn render(
 
 fn font_resources() -> Resources<()> {
     Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: font_bytes(),
-            index: 0,
-        },
+        normal: FontFace::new(font_bytes(), 0),
         bold: None,
     }))
 }
@@ -124,11 +121,8 @@ fn font_resources() -> Resources<()> {
 fn bold_resources() -> Resources<()> {
     let bytes = font_bytes();
     Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: bytes.clone(),
-            index: 0,
-        },
-        bold: Some(FontFace { bytes, index: 0 }),
+        normal: FontFace::new(bytes.clone(), 0),
+        bold: Some(FontFace::new(bytes, 0)),
     }))
 }
 
@@ -206,6 +200,7 @@ fn paragraph(
         align,
         color,
         font_size: size.map(pos),
+        line_height_factor: None,
     })
 }
 
@@ -1184,7 +1179,7 @@ fn each_font_key_keeps_its_own_face() {
     let bytes = font_bytes();
     let mut fonts = FontRegistry::new();
     let family = |bytes: Vec<u8>| FontFamily {
-        normal: FontFace { bytes, index: 0 },
+        normal: FontFace::new(bytes, 0),
         bold: None,
     };
     fonts.register(DocFont::Latin, family(bytes.clone()));
@@ -3898,10 +3893,7 @@ fn text_width_matches_the_laid_out_advance() {
         return;
     }
     let bytes = font_bytes();
-    let face = FontFace {
-        bytes: bytes.clone(),
-        index: 0,
-    };
+    let face = FontFace::new(bytes.clone(), 0);
     let page = font_pages(
         PageSize::custom(Size::try_pt(200.0, 80.0).unwrap()),
         sec(vec![para("Hi")]),

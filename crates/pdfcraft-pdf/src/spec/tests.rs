@@ -1,5 +1,7 @@
 //! Painted and error behavior of values lowered by `layout_spec`.
 
+use std::sync::Arc;
+
 use crate::canvas::{pt_near, CanvasCommand};
 use crate::error::{ErrorKind, GeometryKind, Location, Region};
 use crate::fonts::fixture_bytes;
@@ -13,13 +15,10 @@ use crate::spec::{
 use crate::DocumentSpec;
 
 fn resources() -> Option<Resources<()>> {
-    let bytes = fixture_bytes()?.as_ref().clone();
+    let bytes = fixture_bytes()?;
     Some(Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: bytes.clone(),
-            index: 0,
-        },
-        bold: Some(FontFace { bytes, index: 0 }),
+        normal: FontFace::from_shared(Arc::clone(&bytes), 0),
+        bold: Some(FontFace::from_shared(bytes, 0)),
     })))
 }
 
@@ -686,10 +685,7 @@ fn a_bad_collection_index_is_the_font_error() {
     let Err(error) = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: b"not a font".to_vec(),
-                index: 4,
-            },
+            normal: FontFace::new(b"not a font".to_vec(), 4),
             bold: None,
         })),
         limits: crate::Limits::default(),

@@ -1,7 +1,6 @@
 //! Pure-function lowering from [`DocumentSpec`] to layout nodes.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::canvas::{DecodedImage, ImageRegistry, LinkTarget, RecordingCanvas};
 use crate::error::{
@@ -139,7 +138,7 @@ struct FontTable<K> {
 
 fn register_face(fonts: &mut FontStore, face: FontFace, errors: &mut ErrorBag) -> Option<FontId> {
     match fonts.register(FontSource {
-        bytes: Arc::new(face.bytes),
+        bytes: face.bytes,
         index: face.index,
     }) {
         Ok(id) => Some(id),
@@ -381,6 +380,9 @@ fn lower_paragraph<K: FontKey>(
     }
     if let Some(font_size) = spec.font_size {
         style.font_size = font_size;
+    }
+    if let Some(factor) = spec.line_height_factor {
+        style.line_height_factor = factor;
     }
     Some(FlowNode::Text(TextNode::from_items(items, style)))
 }
@@ -1399,4 +1401,29 @@ fn image_for(image: ImageRef, images: &LoweredImages) -> Option<HeldImage> {
 
 fn unknown_image(image: ImageRef, images: &LoweredImages) -> bool {
     image.resources != images.resources || images.handles.get(image.index as usize).is_none()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::error::ErrorBag;
+    use crate::fonts::{fixture_bytes, FontFace, FontStore};
+
+    use super::register_face;
+
+    #[test]
+    fn register_face_keeps_the_callers_arc() {
+        let Some(bytes) = fixture_bytes() else {
+            return;
+        };
+        let face = FontFace::from_shared(Arc::clone(&bytes), 0);
+        let mut store = FontStore::new();
+        let mut errors = ErrorBag::default();
+        let id = register_face(&mut store, face, &mut errors).expect("face");
+        assert!(Arc::ptr_eq(
+            &bytes,
+            &store.face(id).expect("loaded").source.bytes
+        ));
+    }
 }

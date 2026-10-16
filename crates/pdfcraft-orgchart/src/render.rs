@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use krilla::annotation::{LinkAnnotation, Target};
 use krilla::color::rgb;
@@ -39,7 +40,7 @@ pub(crate) fn render(pages: &[PageSpec], font: &mut FontMetrics) -> Result<Vec<u
         enable_tagging: false,
         ..SerializeSettings::default()
     });
-    let face = Font::new(Data::from(font.bytes().to_vec()), 0)
+    let face = Font::new(Data::from(Arc::clone(font.bytes())), 0)
         .ok_or_else(|| Error::new(ErrorCode::FontError, "krilla rejected the font face"))?;
     for (index, page) in pages.iter().enumerate() {
         draw_page(&mut document, page, pages.len(), font, &face, index)?;

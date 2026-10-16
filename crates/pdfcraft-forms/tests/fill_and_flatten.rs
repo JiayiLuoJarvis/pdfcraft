@@ -795,3 +795,14 @@ fn page_text(doc: &lopdf::Document) -> String {
     let bytes = doc.get_page_content(page_id);
     String::from_utf8_lossy(&bytes).into_owned()
 }
+
+#[test]
+fn shared_arc_is_borrowed_as_font_bytes() {
+    let shared = std::sync::Arc::new(b"shared-face".to_vec());
+    let font = FontBytes {
+        bytes: shared.as_slice(),
+        index: 0,
+    };
+    assert!(std::ptr::eq(font.bytes, shared.as_slice()));
+    assert_eq!(font.bytes, b"shared-face");
+}

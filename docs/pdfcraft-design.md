@@ -445,7 +445,9 @@ impl KrillaCanvas {
 
 ### 字体与测量
 
-一份字体字节只加载一次，两家库共用 `Arc<Vec<u8>>`：
+一份字体字节只加载一次，两家库共用 `Arc<Vec<u8>>`。
+
+公共 `FontFace.bytes` 是 `Arc<Vec<u8>>`。`FontFace::new` 包住调用方拥有的字节。`FontFace::from_shared` 保存已有的 `Arc`。
 
 ```rust
 pub struct FontId(pub(crate) u32);

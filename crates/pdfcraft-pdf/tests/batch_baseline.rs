@@ -70,10 +70,7 @@ fn time_sample(name: &str, build: impl FnOnce() -> Result<Rendered>) -> Result<(
 
 fn letter_doc(copies: usize) -> Result<Rendered> {
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace {
-            bytes: common::cjk_font_bytes().expect("PDFCRAFT_CJK_FONT"),
-            index: 0,
-        },
+        normal: FontFace::new(common::cjk_font_bytes().expect("PDFCRAFT_CJK_FONT"), 0),
         bold: None,
     }));
     let mut body = Vec::new();
@@ -161,10 +158,10 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
-                index: 0,
-            },
+            normal: FontFace::new(
+                common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
+                0,
+            ),
             bold: None,
         })),
         limits: pdfcraft_pdf::Limits::default(),
@@ -196,10 +193,10 @@ fn paragraphs_doc(count: usize) -> Result<Rendered> {
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace {
-                bytes: common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
-                index: 0,
-            },
+            normal: FontFace::new(
+                common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
+                0,
+            ),
             bold: None,
         })),
         limits: pdfcraft_pdf::Limits::default(),
