@@ -1132,6 +1132,14 @@ impl PathBuilder {
         self
     }
 
+    /// Appends a cubic Bézier: current point → `c1` → `c2` → `to`.
+    ///
+    /// Matches SVG `C` / `curveTo` and [`PathVerb::CubicTo`].
+    pub fn cubic_to(mut self, c1: Point, c2: Point, to: Point) -> Self {
+        self.verbs.push(PathVerb::CubicTo { c1, c2, to });
+        self
+    }
+
     /// Starts another open subpath.
     pub fn move_to(mut self, point: Point) -> Self {
         self.verbs.push(PathVerb::MoveTo(point));
@@ -1373,6 +1381,26 @@ mod tests {
         assert!(matches!(
             closed.verbs(),
             [PathVerb::MoveTo(_), PathVerb::LineTo(_), PathVerb::Close]
+        ));
+    }
+
+    #[test]
+    fn path_builder_cubic_to_appends_cubic_verb() {
+        let start = Point::try_pt(0.0, 0.0).unwrap();
+        let c1 = Point::try_pt(10.0, 0.0).unwrap();
+        let c2 = Point::try_pt(10.0, 20.0).unwrap();
+        let to = Point::try_pt(0.0, 20.0).unwrap();
+        let path = Path::begin(start).cubic_to(c1, c2, to).finish();
+        assert!(matches!(
+            path.verbs(),
+            [
+                PathVerb::MoveTo(from),
+                PathVerb::CubicTo {
+                    c1: control1,
+                    c2: control2,
+                    to: end
+                }
+            ] if *from == start && *control1 == c1 && *control2 == c2 && *end == to
         ));
     }
 

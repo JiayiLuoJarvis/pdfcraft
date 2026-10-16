@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Added
 
+- `PathBuilder::cubic_to` on `pdfcraft-pdf`: append a cubic Bézier (`PathVerb::CubicTo`) so callers can build SVG-style curve paths for `CanvasMark::Fill` without approximating them as polylines.
 - `pdfcraft-post` `0.1.0`: `SetMetadata`, `Encrypt` (presets `EncryptionPreset::READ_ONLY`, `READ_ONLY_PRINTABLE`, `FULL_PERMISSIONS`), `StampAndEncrypt`, `merge_pdfs`, and `Pipeline`. AES-256 / revision 6 (lopdf V5). Owner password is required from the caller. Empty user password opens. Errors are `Error` + `ErrorKind`. Depends on workspace `lopdf =0.45.0` and `getrandom =0.4.3`. No edges to sibling crates. Examples: `encrypt`, `stamp`, `merge`.
 
 ### Documentation
