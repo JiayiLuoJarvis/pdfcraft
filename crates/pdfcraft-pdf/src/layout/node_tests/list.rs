@@ -7,7 +7,7 @@ use crate::layout::decorate::Decorations;
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{Fragment, FragmentCommand};
 use crate::layout::list::{first_baseline, ListItem, ListKind, ListNode, ListSpec, MarkerKind};
-use crate::layout::style::Style;
+use crate::layout::style::{GlyphStyle, Style};
 use crate::layout::table::{TableNode, TableSpec};
 use crate::layout::test_util::{bits, fonts_and_style, metrics, page, render, runs, text, texts};
 
@@ -21,7 +21,7 @@ fn spec(
         kind,
         marker_width: Positive::pt(marker_width).unwrap(),
         nest_indent: None,
-        marker_style: style.clone(),
+        marker_style: GlyphStyle::plain(style),
         items,
     }
 }

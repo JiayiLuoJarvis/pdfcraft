@@ -10,9 +10,9 @@ use crate::layout::flow::FlowNode;
 use crate::layout::frame::{
     stacked_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
 };
-use crate::layout::line_run::single_line_run;
+use crate::layout::line_run::{append_commands, single_line_run};
 use crate::layout::nesting::{check_content, Container};
-use crate::layout::style::{Style, TextAlign};
+use crate::layout::style::GlyphStyle;
 
 /// One-based page number across the whole document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +53,7 @@ pub(crate) type BandContent<'a> =
 pub(crate) struct LayerText {
     pub(crate) text: String,
     pub(crate) at: Point,
-    pub(crate) style: Style,
+    pub(crate) style: GlyphStyle,
 }
 
 /// One behind or front primitive, painted in the order the closure added it.
@@ -238,16 +238,14 @@ fn measure_layer(
     for item in content(page, ctx.errors)? {
         match item {
             LayerItem::Text(item) => {
-                let style = Style {
-                    align: TextAlign::Start,
-                    ..item.style
-                };
-                let mut run = single_line_run(ctx, &item.text, &style, None)?;
-                run.origin = Point::try_pt(
-                    item.at.x().as_pt() + run.origin.x().as_pt(),
-                    item.at.y().as_pt() + run.origin.y().as_pt(),
+                let line = single_line_run(ctx, &item.text, &item.style, None)?;
+                append_commands(
+                    &mut commands,
+                    &line.pieces,
+                    item.at.x().as_pt(),
+                    item.at.y().as_pt() + line.baseline,
+                    0.0,
                 )?;
-                commands.push(FragmentCommand::Glyphs(run));
             }
             LayerItem::Image { image, rect } => {
                 commands.push(FragmentCommand::Image { image, rect });

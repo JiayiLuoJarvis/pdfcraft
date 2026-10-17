@@ -5,7 +5,7 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, SectionSpec, TableSpec, TextRun,
+    ImageSpec, Resources, RunStyle, SectionSpec, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
@@ -45,8 +45,10 @@ struct GlyphSample {
 fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
     let font = cjk_font()?;
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font, 0),
+        regular: FontFace::new(font, 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
     let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
     let margin = NonNegative::pt(MARGIN).ok()?;
@@ -67,6 +69,7 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
                         TextRun::Literal(" 页".into()),
                     ],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
             }),

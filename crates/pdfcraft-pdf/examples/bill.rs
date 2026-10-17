@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec, ColumnsSpec,
     FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, InlineRun, ParagraphSpec,
-    Resources, SectionSpec, TableSpec, TextRun, TextStyle,
+    Resources, RunStyle, SectionSpec, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -41,11 +41,13 @@ fn main() -> Result<()> {
     }
 
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(load_font("PDFCRAFT_CJK_FONT", &[".fonts/body.ttf"])?, 0),
+        regular: FontFace::new(load_font("PDFCRAFT_CJK_FONT", &[".fonts/body.ttf"])?, 0),
         bold: Some(FontFace::new(
             load_font("PDFCRAFT_CJK_BOLD_FONT", &[".fonts/bold.ttf"])?,
             0,
         )),
+        italic: None,
+        bold_italic: None,
     }));
     let logo = resources.add_image(LOGO.to_vec(), ImageFormat::Png);
     let mark = resources.add_image(MARK.to_vec(), ImageFormat::Png);
@@ -63,6 +65,7 @@ fn main() -> Result<()> {
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("恒誠商務有限公司".into())],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 right: Some(BandSlot::Text {
                     runs: vec![
@@ -73,6 +76,7 @@ fn main() -> Result<()> {
                         TextRun::Literal(" 頁".into()),
                     ],
                     font: (),
+                    style: RunStyle::default(),
                 }),
             }),
             footer: Some(BandSpec {
@@ -80,10 +84,12 @@ fn main() -> Result<()> {
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("Tel.: 00852 - 2668 1868".into())],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 right: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("Web.: www.hc.biz".into())],
                     font: (),
+                    style: RunStyle::default(),
                 }),
             }),
             body: bill_body(logo, mark, diamond)?,
@@ -113,6 +119,7 @@ fn aligned(text: &str, align: Alignment) -> Block<()> {
         runs: vec![InlineRun::Text {
             text: text.into(),
             font: (),
+            style: RunStyle::default(),
         }],
         align,
         ..ParagraphSpec::default()
@@ -121,9 +128,10 @@ fn aligned(text: &str, align: Alignment) -> Block<()> {
 
 fn styled(size: f32, color: Color, children: Vec<Block<()>>) -> Result<Block<()>> {
     Ok(Block::Styled {
-        style: TextStyle {
+        style: RunStyle {
             font_size: Some(pos(size)?),
             color: Some(color),
+            ..RunStyle::default()
         },
         children,
     })
@@ -167,6 +175,7 @@ fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec<()>> {
             runs: vec![InlineRun::Text {
                 text: text.into(),
                 font: (),
+                style: RunStyle::default(),
             }],
             color: Some(color),
             font_size: Some(pos(size)?),
@@ -283,6 +292,7 @@ fn service_table() -> Result<Vec<Block<()>>> {
                         runs: vec![InlineRun::Text {
                             text: "Key item (s) / outlay (s) 主要項目/代支".into(),
                             font: (),
+                            style: RunStyle::default(),
                         }],
                         color: Some(WHITE),
                         font_size: Some(pos(11.0)?),
@@ -295,6 +305,7 @@ fn service_table() -> Result<Vec<Block<()>>> {
                         runs: vec![InlineRun::Text {
                             text: "Amt. 金額".into(),
                             font: (),
+                            style: RunStyle::default(),
                         }],
                         color: Some(WHITE),
                         font_size: Some(pos(10.5)?),
@@ -365,6 +376,7 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
                     runs: vec![InlineRun::Text {
                         text: "Payment by bank transfer (T/T) and other info".into(),
                         font: (),
+                        style: RunStyle::default(),
                     }],
                     color: Some(WHITE),
                     font_size: Some(pos(8.0)?),
@@ -377,6 +389,7 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
                     runs: vec![InlineRun::Text {
                         text: "以電匯付款及其他注意事項".into(),
                         font: (),
+                        style: RunStyle::default(),
                     }],
                     color: Some(WHITE),
                     font_size: Some(pos(8.0)?),

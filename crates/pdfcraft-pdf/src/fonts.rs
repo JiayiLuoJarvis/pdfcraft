@@ -89,16 +89,24 @@ impl FontFace {
     }
 }
 
-/// A normal face and an optional bold face, both supplied by the caller.
+/// A regular face and optional bold, italic, and bold italic faces, all supplied by the caller.
 ///
-/// There is no Latin slot and no fallback chain.
+/// A run picks one face from its resolved [`crate::spec::RunStyle`] bold and italic flags.
+/// Underline and strikethrough positions come from `regular`. The stroke is 1 pt.
+/// There is no Latin slot. [`crate::spec::InlineRun::split_latin`] assigns keys.
+/// There is no fallback chain and no synthetic bold or slant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct FontFamily {
-    /// Face used by [`crate::spec::InlineRun::Text`].
-    pub normal: FontFace,
-    /// Face used by [`crate::spec::InlineRun::Bold`]. `None` rejects bold runs.
+    /// Face for text that is neither bold nor italic.
+    pub regular: FontFace,
+    /// Bold face. `None` fails bold runs with [`crate::ErrorKind::BoldFaceRequired`].
     pub bold: Option<FontFace>,
+    /// Italic face. `None` fails italic runs with [`crate::ErrorKind::ItalicFaceRequired`].
+    pub italic: Option<FontFace>,
+    /// Bold italic face. `None` fails bold italic runs with
+    /// [`crate::ErrorKind::BoldItalicFaceRequired`].
+    pub bold_italic: Option<FontFace>,
 }
 
 /// Faces keyed by the caller's own type `K`.
@@ -199,6 +207,34 @@ pub(crate) fn face_metrics(font_ref: &FontRef<'_>, index: u32) -> Result<FaceMet
     })
 }
 
+/// Baseline to a decoration's top edge, in em, y up. Always finite.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EmOffset(f32);
+
+impl EmOffset {
+    /// `None` when `em` is not finite.
+    pub(crate) fn new(em: f32) -> Option<Self> {
+        em.is_finite().then_some(Self(em))
+    }
+
+    /// The offset in em, y up.
+    pub(crate) fn em(self) -> f32 {
+        self.0
+    }
+}
+
+/// Underline from `post` and strikethrough from `OS/2`. `None` when the table
+/// is missing or the offset is not finite. The font's thickness is not stored.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct FaceDecorations {
+    pub(crate) underline: Option<EmOffset>,
+    pub(crate) strikethrough: Option<EmOffset>,
+}
+
+fn em_offset(offset: Option<f32>, units_per_em: f32) -> Option<EmOffset> {
+    EmOffset::new(offset? / units_per_em)
+}
+
 /// Parses face `index` of `bytes`. skrifa's error stays reachable as the source.
 pub(crate) fn parse_face(bytes: &[u8], index: u32) -> Result<FontRef<'_>> {
     FontRef::from_index(bytes, index).map_err(|error| {
@@ -270,6 +306,17 @@ impl FontStore {
             .ok_or(Error::from(ErrorKind::UnknownFont { id: id.as_u32() }))
     }
 
+    pub(crate) fn decorations(&self, id: FontId) -> Result<FaceDecorations> {
+        let face = self.face(id)?;
+        let font_ref = parse_face(face.source.bytes.as_slice(), face.source.index)?;
+        let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
+        let units_per_em = face.metrics.units_per_em;
+        Ok(FaceDecorations {
+            underline: em_offset(metrics.underline.map(|line| line.offset), units_per_em),
+            strikethrough: em_offset(metrics.strikeout.map(|line| line.offset), units_per_em),
+        })
+    }
+
     pub(crate) fn resolve(&self, id: FontId) -> Result<ResolvedFont> {
         let face = self.face(id)?;
         Ok(ResolvedFont {
@@ -298,6 +345,8 @@ pub(crate) fn fixture_bytes() -> Option<Arc<Vec<u8>>> {
 
 #[cfg(test)]
 mod tests {
+    use skrifa::metrics::Decoration;
+
     use super::*;
 
     #[test]
@@ -339,6 +388,41 @@ mod tests {
     }
 
     #[test]
+    fn fixture_decorations_are_em_scaled_post_and_os2_values() {
+        let Some(bytes) = fixture_bytes() else {
+            return;
+        };
+        let font_ref = FontRef::from_index(bytes.as_slice(), 0).unwrap();
+        let raw = font_ref.metrics(Size::unscaled(), LocationRef::default());
+        let upem = f32::from(raw.units_per_em);
+        let mut store = FontStore::new();
+        let id = store.register(FontSource { bytes, index: 0 }).unwrap();
+        let found = store.decorations(id).unwrap();
+        let underline = found.underline.expect("fixture has post underline");
+        let post = raw.underline.unwrap();
+        assert_eq!(underline.em().to_bits(), (post.offset / upem).to_bits());
+        assert!(
+            underline.em() < 0.0,
+            "post underline sits below the baseline"
+        );
+        let strike = found.strikethrough.expect("fixture has OS/2 strikeout");
+        assert!(strike.em() > 0.0, "OS/2 strikeout sits above the baseline");
+    }
+
+    #[test]
+    fn zero_thickness_with_a_finite_offset_stays_usable() {
+        let zero = Decoration {
+            offset: -100.0,
+            thickness: 0.0,
+        };
+        let found = em_offset(Some(zero.offset), 1000.0).unwrap();
+        assert_eq!(found.em().to_bits(), (-0.1f32).to_bits());
+        assert_eq!(em_offset(None, 1000.0), None);
+        assert_eq!(em_offset(Some(f32::NAN), 1000.0), None);
+        assert_eq!(em_offset(Some(f32::INFINITY), 1000.0), None);
+    }
+
+    #[test]
     fn oversize_bytes_are_a_font_byte_limit() {
         const MAX: usize = 32 * 1024 * 1024;
         let mut store = FontStore::new();
@@ -372,25 +456,31 @@ mod tests {
         fonts.register(
             "body",
             FontFamily {
-                normal: FontFace::new(b"one".to_vec(), 0),
+                regular: FontFace::new(b"one".to_vec(), 0),
                 bold: None,
+                italic: None,
+                bold_italic: None,
             },
         );
         fonts.register(
             "body",
             FontFamily {
-                normal: FontFace::new(b"two".to_vec(), 3),
+                regular: FontFace::new(b"two".to_vec(), 3),
                 bold: None,
+                italic: None,
+                bold_italic: None,
             },
         );
         let entries = fonts.into_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].1.normal.bytes.as_slice(), b"two");
-        assert_eq!(entries[0].1.normal.index, 3);
+        assert_eq!(entries[0].1.regular.bytes.as_slice(), b"two");
+        assert_eq!(entries[0].1.regular.index, 3);
 
         let single = FontRegistry::single(FontFamily {
-            normal: FontFace::new(b"only".to_vec(), 1),
+            regular: FontFace::new(b"only".to_vec(), 1),
             bold: None,
+            italic: None,
+            bold_italic: None,
         });
         assert_eq!(single.into_entries()[0].0, ());
     }

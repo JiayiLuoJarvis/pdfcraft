@@ -1,16 +1,13 @@
 //! Fixed-size vector block. Marks are shaped once, then only placed.
 
 use crate::error::{Error, ErrorKind, Fallible as Result};
-use crate::fonts::FontId;
-use crate::geom::{
-    Color, Finite, Ink, Length, NonNegative, Paint, Path, Pen, Point, Positive, Rect, Size, Stroke,
-};
+use crate::geom::{Color, Finite, Ink, NonNegative, Paint, Path, Pen, Point, Rect, Size, Stroke};
 use crate::layout::atomic::{place_atomic, AtomicPlace};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::line_run::single_line_run;
-use crate::layout::style::{Style, TextAlign};
+use crate::layout::line_run::{append_commands, single_line_run};
+use crate::layout::style::{GlyphStyle, TextAlign};
 
-/// A mark after the font key has been resolved. Text size and color are concrete.
+/// A mark after the font key has been resolved. Text style is concrete.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum CanvasMarkNode {
     /// Straight stroke.
@@ -40,14 +37,10 @@ pub(crate) enum CanvasMarkNode {
     Text {
         /// Non-empty.
         text: String,
-        /// Registered face.
-        font: FontId,
         /// Baseline left, block coordinates, y down.
         at: Point,
-        /// Concrete size. Enclosing `Styled` is not consulted.
-        size: Length<Positive>,
-        /// Fill.
-        color: Color,
+        /// Seed plus the mark's own style. Enclosing `Styled` is not consulted.
+        style: GlyphStyle,
     },
 }
 
@@ -130,27 +123,9 @@ fn push_mark(
                 paint: Paint::solid(color),
             });
         }
-        CanvasMarkNode::Text {
-            text,
-            font,
-            at,
-            size,
-            color,
-        } => {
-            let style = Style {
-                font,
-                font_size: size,
-                line_height_factor: 1.0,
-                color,
-                paragraph_spacing: NonNegative::ZERO,
-                first_line_indent: NonNegative::ZERO,
-                align: TextAlign::Start,
-            };
-            let mut run = single_line_run(ctx, &text, &style, None)?;
-            // `at` is the baseline. `single_line_run` stores the ascent there because
-            // layer text's `at` is the line-box top.
-            run.origin = Point::try_pt(at.x().as_pt(), at.y().as_pt())?;
-            commands.push(FragmentCommand::Glyphs(run));
+        CanvasMarkNode::Text { text, at, style } => {
+            let line = single_line_run(ctx, &text, &style, None)?;
+            append_commands(commands, &line.pieces, at.x().as_pt(), at.y().as_pt(), 0.0)?;
         }
     }
     Ok(())

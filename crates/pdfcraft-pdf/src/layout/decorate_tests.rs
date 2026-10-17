@@ -11,7 +11,7 @@ use crate::layout::decorate::{
     BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
 };
 use crate::layout::flow::FlowNode;
-use crate::layout::style::{Style, TextAlign};
+use crate::layout::style::{GlyphStyle, Style, TextAlign};
 use crate::layout::table::{TableNode, TableSpec};
 use crate::layout::test_util::{
     bits, ellipse_center_radii, fills, fonts_and_style, margins, metrics, page, render, runs, text,
@@ -365,7 +365,7 @@ fn layer(label: &'static str, x: f32, y: f32, style: &Style) -> LayerContent<'st
         Ok(vec![LayerItem::Text(LayerText {
             text: label.to_owned(),
             at: Point::try_pt(x, y).unwrap(),
-            style: style.clone(),
+            style: GlyphStyle::plain(&style),
         })])
     })
 }

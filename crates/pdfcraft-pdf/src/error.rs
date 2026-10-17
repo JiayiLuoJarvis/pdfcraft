@@ -165,6 +165,25 @@ impl fmt::Display for LimitKind {
     }
 }
 
+/// Which text decoration line lacked font metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DecorationKind {
+    /// Underline, from the `post` table.
+    Underline,
+    /// Strikethrough, from the `OS/2` table.
+    Strikethrough,
+}
+
+impl fmt::Display for DecorationKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Underline => "underline",
+            Self::Strikethrough => "strikethrough",
+        })
+    }
+}
+
 /// What went wrong.
 ///
 /// Length variants carry `value`, the argument of `pt` or `mm`, in the unit
@@ -226,6 +245,27 @@ pub enum ErrorKind {
     },
     /// A bold run names a family that has no bold face.
     BoldFaceRequired,
+    /// An italic run names a family that has no italic face.
+    ItalicFaceRequired,
+    /// A bold italic run names a family that has no bold italic face.
+    BoldItalicFaceRequired,
+    /// A decorated run's regular face has no usable metrics for that line.
+    ///
+    /// The table is missing or its thickness is not positive. No default
+    /// position is substituted.
+    MissingDecorationMetrics {
+        /// Raw id of the family's regular face, as [`FontId::as_u32`](crate::FontId::as_u32) returns.
+        font: u32,
+        /// The requested line.
+        decoration: DecorationKind,
+    },
+    /// The glyph that receives tracking would get a negative advance.
+    NegativeTracking {
+        /// That glyph's advance in pt.
+        advance: f32,
+        /// Tracking in pt.
+        tracking: f32,
+    },
     /// `key` was not passed to [`FontRegistry::register`](crate::FontRegistry::register).
     UnregisteredFont {
         /// [`Debug`](std::fmt::Debug) text of the caller's font key.
@@ -346,6 +386,16 @@ impl fmt::Display for ErrorKind {
             ),
             Self::UnknownFont { id } => write!(f, "font {id} is not registered"),
             Self::BoldFaceRequired => f.write_str("bold text needs a registered bold font"),
+            Self::ItalicFaceRequired => f.write_str("italic text needs a registered italic font"),
+            Self::BoldItalicFaceRequired => {
+                f.write_str("bold italic text needs a registered bold italic font")
+            }
+            Self::MissingDecorationMetrics { font, decoration } => {
+                write!(f, "font {font} has no usable {decoration} metrics")
+            }
+            Self::NegativeTracking { advance, tracking } => {
+                write!(f, "advance {advance} plus tracking {tracking} is negative")
+            }
             Self::UnregisteredFont { key } => write!(f, "font {key} is not registered"),
             Self::FontMetricsMismatch {
                 skrifa_upem,

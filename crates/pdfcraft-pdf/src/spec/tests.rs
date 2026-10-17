@@ -9,16 +9,18 @@ use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positi
 use crate::layout_spec;
 use crate::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, InlineRun,
-    LayerMark, LayerShape, ListItemSpec, ListSpec, PageWhen, ParagraphSpec, Resources, SectionSpec,
-    TextRun, TextStyle,
+    LayerMark, LayerShape, ListItemSpec, ListSpec, PageWhen, ParagraphSpec, Resources, RunStyle,
+    SectionSpec, TextRun,
 };
 use crate::DocumentSpec;
 
 fn resources() -> Option<Resources<()>> {
     let bytes = fixture_bytes()?;
     Some(Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::from_shared(Arc::clone(&bytes), 0),
+        regular: FontFace::from_shared(Arc::clone(&bytes), 0),
         bold: Some(FontFace::from_shared(bytes, 0)),
+        italic: None,
+        bold_italic: None,
     })))
 }
 
@@ -84,26 +86,38 @@ fn adjacent_same_face_runs_paint_as_one_glyph_run() {
                 InlineRun::Text {
                     text: "A".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
                 InlineRun::Text {
                     text: String::new(),
                     font: (),
+                    style: RunStyle::default(),
                 },
                 InlineRun::Text {
                     text: "B".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
-                InlineRun::Bold {
+                InlineRun::Text {
                     text: "C".into(),
                     font: (),
+                    style: RunStyle {
+                        bold: Some(true),
+                        ..RunStyle::default()
+                    },
                 },
-                InlineRun::Bold {
+                InlineRun::Text {
                     text: "D".into(),
                     font: (),
+                    style: RunStyle {
+                        bold: Some(true),
+                        ..RunStyle::default()
+                    },
                 },
                 InlineRun::Text {
                     text: "E".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
             ],
             ..ParagraphSpec::default()
@@ -125,6 +139,7 @@ fn a_blank_splits_adjacent_text_into_two_glyph_runs() {
                 InlineRun::Text {
                     text: "A".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
                 InlineRun::Blank(BlankSpec {
                     width: BlankWidth::Fixed(NonNegative::pt(10.0).unwrap()),
@@ -135,6 +150,7 @@ fn a_blank_splits_adjacent_text_into_two_glyph_runs() {
                 InlineRun::Text {
                     text: "B".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
             ],
             ..ParagraphSpec::default()
@@ -164,6 +180,7 @@ fn a_run_after_fill_blank_fails_before_any_page() {
             InlineRun::Text {
                 text: "x".into(),
                 font: (),
+                style: RunStyle::default(),
             },
         ],
         vec![
@@ -171,9 +188,13 @@ fn a_run_after_fill_blank_fails_before_any_page() {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Bold {
+            InlineRun::Text {
                 text: "x".into(),
                 font: (),
+                style: RunStyle {
+                    bold: Some(true),
+                    ..RunStyle::default()
+                },
             },
         ],
         vec![
@@ -265,31 +286,40 @@ fn nested_links_restore_the_outer_target() {
                         InlineRun::Text {
                             text: "A".into(),
                             font: (),
+                            style: RunStyle::default(),
                         },
                         InlineRun::Text {
                             text: "B".into(),
                             font: (),
+                            style: RunStyle::default(),
                         },
-                        InlineRun::Bold {
+                        InlineRun::Text {
                             text: "C".into(),
                             font: (),
+                            style: RunStyle {
+                                bold: Some(true),
+                                ..RunStyle::default()
+                            },
                         },
                         InlineRun::Link {
                             uri: "https://b".into(),
                             runs: vec![InlineRun::Text {
                                 text: "D".into(),
                                 font: (),
+                                style: RunStyle::default(),
                             }],
                         },
                         InlineRun::Text {
                             text: "E".into(),
                             font: (),
+                            style: RunStyle::default(),
                         },
                     ],
                 },
                 InlineRun::Text {
                     text: "F".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
             ],
             ..ParagraphSpec::default()
@@ -312,12 +342,14 @@ fn an_empty_uri_fails_before_any_page() {
                 InlineRun::Text {
                     text: "A".into(),
                     font: (),
+                    style: RunStyle::default(),
                 },
                 InlineRun::Link {
                     uri: String::new(),
                     runs: vec![InlineRun::Text {
                         text: "x".into(),
                         font: (),
+                        style: RunStyle::default(),
                     }],
                 },
             ],
@@ -341,11 +373,13 @@ fn an_empty_band_uri_is_located_in_the_header() {
                     font: (),
                     uri: vec![TextRun::Literal(String::new())],
                     text: vec![TextRun::Literal("Home".into())],
+                    style: RunStyle::default(),
                 }),
                 right: Some(crate::spec::BandSlot::Link {
                     font: (),
                     uri: vec![TextRun::Literal("https://example.com".into())],
                     text: vec![TextRun::Literal("Later".into())],
+                    style: RunStyle::default(),
                 }),
                 ..crate::spec::BandSpec::default()
             }),
@@ -381,6 +415,7 @@ fn a_missing_header_glyph_is_located_in_the_header() {
                 left: Some(crate::spec::BandSlot::Text {
                     runs: vec![TextRun::Literal(MISSING.to_string())],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 ..crate::spec::BandSpec::default()
             }),
@@ -483,7 +518,7 @@ fn a_forced_break_in_layer_text_fails_before_any_page() {
                     when: PageWhen::All,
                     text: vec![TextRun::Literal(sample.into())],
                     at: Point::try_pt(10.0, 10.0).unwrap(),
-                    style: TextStyle::default(),
+                    style: RunStyle::default(),
                 }],
                 ..SectionSpec::default()
             },
@@ -543,7 +578,7 @@ fn a_missing_glyph_on_the_last_page_front_is_located_there() {
                 when: PageWhen::Last,
                 text: vec![TextRun::Literal(MISSING.to_string())],
                 at: Point::try_pt(10.0, 10.0).unwrap(),
-                style: TextStyle::default(),
+                style: RunStyle::default(),
             }],
             ..SectionSpec::default()
         },
@@ -627,6 +662,7 @@ fn paragraph_align_end_wins_when_center_is_not_set() {
             runs: vec![InlineRun::Text {
                 text: "D".into(),
                 font: (),
+                style: RunStyle::default(),
             }],
             align: Alignment::End,
             ..ParagraphSpec::default()
@@ -685,8 +721,10 @@ fn a_bad_collection_index_is_the_font_error() {
     let Err(error) = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace::new(b"not a font".to_vec(), 4),
+            regular: FontFace::new(b"not a font".to_vec(), 4),
             bold: None,
+            italic: None,
+            bold_italic: None,
         })),
         limits: crate::Limits::default(),
         info: crate::spec::DocumentInfo::default(),

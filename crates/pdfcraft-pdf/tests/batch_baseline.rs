@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, SectionSpec, TableSpec, TextRun,
+    ImageSpec, Resources, RunStyle, SectionSpec, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize, Positive,
@@ -70,8 +70,10 @@ fn time_sample(name: &str, build: impl FnOnce() -> Result<Rendered>) -> Result<(
 
 fn letter_doc(copies: usize) -> Result<Rendered> {
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(common::cjk_font_bytes().expect("PDFCRAFT_CJK_FONT"), 0),
+        regular: FontFace::new(common::cjk_font_bytes().expect("PDFCRAFT_CJK_FONT"), 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
     let mut body = Vec::new();
     for index in 0..copies {
@@ -126,6 +128,7 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
                         TextRun::Literal(" 页".into()),
                     ],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
             }),
@@ -158,11 +161,13 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace::new(
+            regular: FontFace::new(
                 common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
                 0,
             ),
             bold: None,
+            italic: None,
+            bold_italic: None,
         })),
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
@@ -193,11 +198,13 @@ fn paragraphs_doc(count: usize) -> Result<Rendered> {
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace::new(
+            regular: FontFace::new(
                 common::test_font_bytes().expect("PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT"),
                 0,
             ),
             bold: None,
+            italic: None,
+            bold_italic: None,
         })),
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),

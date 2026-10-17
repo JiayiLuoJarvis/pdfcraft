@@ -18,7 +18,8 @@ use std::sync::Arc;
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
     ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec, InlineRun,
-    ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, SectionSpec, TableSpec, TextRun,
+    ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, RunStyle, SectionSpec, TableSpec,
+    TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
@@ -47,8 +48,10 @@ fn main() -> Result<()> {
 
     let font = Arc::new(load_font());
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::from_shared(Arc::clone(&font), 0),
+        regular: FontFace::from_shared(Arc::clone(&font), 0),
         bold: Some(FontFace::from_shared(font, 0)),
+        italic: None,
+        bold_italic: None,
     }));
     let logo = resources.add_image(PIXEL.to_vec(), ImageFormat::Png);
     let rendered = layout_spec(pdfcraft_pdf::DocumentSpec {
@@ -64,6 +67,7 @@ fn main() -> Result<()> {
                     font: (),
                     uri: vec![TextRun::Literal("https://example.test/quire".into())],
                     text: vec![TextRun::Literal("quire demo".into())],
+                    style: RunStyle::default(),
                 }),
                 right: Some(BandSlot::Text {
                     runs: vec![
@@ -74,6 +78,7 @@ fn main() -> Result<()> {
                         TextRun::Literal(" 页".into()),
                     ],
                     font: (),
+                    style: RunStyle::default(),
                 }),
             }),
             footer: Some(BandSpec {
@@ -81,11 +86,13 @@ fn main() -> Result<()> {
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("layout smoke".into())],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 right: Some(BandSlot::Link {
                     font: (),
                     uri: vec![TextRun::Literal("https://example.test/footer".into())],
                     text: vec![TextRun::Literal("footer link".into())],
+                    style: RunStyle::default(),
                 }),
             }),
             body: hello_body(logo)?,
@@ -110,13 +117,18 @@ fn text(value: impl Into<String>) -> InlineRun<()> {
     InlineRun::Text {
         text: value.into(),
         font: (),
+        style: RunStyle::default(),
     }
 }
 
 fn bold(value: impl Into<String>) -> InlineRun<()> {
-    InlineRun::Bold {
+    InlineRun::Text {
         text: value.into(),
         font: (),
+        style: RunStyle {
+            bold: Some(true),
+            ..RunStyle::default()
+        },
     }
 }
 

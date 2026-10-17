@@ -5,7 +5,7 @@ use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{Alignment, CellBlock, CellSpec, ImageRef, ImageSpec, TableSpec};
 use pdfcraft_pdf::spec::{
     BandInset, BandSlot, Block, FontFace, FontFamily, FontRegistry, LayerMark, PageWhen, Resources,
-    SectionSpec, TextRun, TextStyle,
+    RunStyle, SectionSpec, TextRun,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -68,6 +68,7 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
                 TextRun::PageNumber,
             ],
             text: vec![TextRun::Literal("Home".to_owned())],
+            style: RunStyle::default(),
         }),
         right: Some(BandSlot::Text {
             runs: vec![
@@ -78,6 +79,7 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
                 TextRun::Literal(" 页".to_owned()),
             ],
             font: (),
+            style: RunStyle::default(),
         }),
     });
     section.body = vec![
@@ -90,14 +92,16 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         when: PageWhen::Last,
         text: vec![TextRun::Literal("SEAL".to_owned())],
         at: Point::try_pt(430.0, 680.0).unwrap(),
-        style: TextStyle::default(),
+        style: RunStyle::default(),
     });
 
     let spec = DocumentSpec {
         page_size: PageSize::A4,
         resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-            normal: FontFace::new(font_bytes(), 0),
+            regular: FontFace::new(font_bytes(), 0),
             bold: None,
+            italic: None,
+            bold_italic: None,
         })),
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
@@ -145,13 +149,17 @@ fn foreign_cell_image_ref_is_unknown() {
     }
     let png = include_bytes!("fixtures/one-pixel.png");
     let mut other = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font_bytes(), 0),
+        regular: FontFace::new(font_bytes(), 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
     let foreign = other.add_image(png.to_vec(), ImageFormat::Png);
     let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font_bytes(), 0),
+        regular: FontFace::new(font_bytes(), 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
     let _owned = dest.add_image(png.to_vec(), ImageFormat::Png);
     let err = layout_spec(DocumentSpec {
@@ -179,8 +187,10 @@ fn local_cell_image_ref_draws() {
     }
     let png = include_bytes!("fixtures/one-pixel.png");
     let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font_bytes(), 0),
+        regular: FontFace::new(font_bytes(), 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
     let owned = dest.add_image(png.to_vec(), ImageFormat::Png);
     let rendered = layout_spec(DocumentSpec {
