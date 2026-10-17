@@ -31,7 +31,7 @@ pub fn cjk_font_bytes() -> Option<Vec<u8>> {
     }))
 }
 
-/// Line height at `size` pt and `factor`, same formula as `line_metrics`.
+/// Line height of one face at `size` pt and `factor`.
 #[allow(dead_code)]
 #[must_use]
 pub fn line_height_at(font: &[u8], size: f32, factor: f32) -> f32 {

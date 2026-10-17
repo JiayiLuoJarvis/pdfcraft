@@ -9,8 +9,8 @@ use crate::layout::flow::FlowNode;
 use crate::layout::frame::LayoutCtx;
 use crate::layout::paginate::{paginate_root, PaginateConfig};
 use crate::layout::paragraph::TextNode;
-use crate::layout::style::{Style, TextAlign};
-use crate::text::measure::{line_metrics, LineMetrics};
+use crate::layout::style::{GlyphStyle, Style, TextAlign};
+use crate::text::measure::{FaceExtent, LineMetrics};
 
 pub(crate) fn fonts_and_style() -> Option<(FontStore, Style)> {
     let bytes = fixture_bytes()?;
@@ -29,12 +29,18 @@ pub(crate) fn fonts_and_style() -> Option<(FontStore, Style)> {
 }
 
 pub(crate) fn metrics(fonts: &FontStore, style: &Style) -> LineMetrics {
-    let face = fonts.metrics(style.font).unwrap();
-    line_metrics(face, style.font_size, style.line_height_factor).unwrap()
+    let face = fonts
+        .metrics(style.font.expect("test style has a face"))
+        .unwrap();
+    LineMetrics::new(
+        FaceExtent::scaled(face, style.font_size).into(),
+        style.line_height_factor,
+    )
+    .unwrap()
 }
 
 pub(crate) fn text(s: &str, style: &Style) -> FlowNode {
-    FlowNode::Text(TextNode::new(s, style.clone()))
+    FlowNode::Text(TextNode::new(s, GlyphStyle::plain(style), style.clone()))
 }
 
 pub(crate) fn pt(value: f32) -> crate::geom::Length<NonNegative> {

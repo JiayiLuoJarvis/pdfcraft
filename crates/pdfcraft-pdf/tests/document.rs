@@ -9,7 +9,7 @@ use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CanvasMark, CanvasSpec,
     CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec,
     InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, PageWhen, ParagraphSpec,
-    Resources, SectionSpec, TableSpec, TextRun, TextStyle,
+    Resources, RunStyle, SectionSpec, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
@@ -113,16 +113,20 @@ fn render(
 
 fn font_resources() -> Resources<()> {
     Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font_bytes(), 0),
+        regular: FontFace::new(font_bytes(), 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }))
 }
 
 fn bold_resources() -> Resources<()> {
     let bytes = font_bytes();
     Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(bytes.clone(), 0),
+        regular: FontFace::new(bytes.clone(), 0),
         bold: Some(FontFace::new(bytes, 0)),
+        italic: None,
+        bold_italic: None,
     }))
 }
 
@@ -149,13 +153,18 @@ fn text_run(text: impl Into<String>) -> InlineRun<()> {
     InlineRun::Text {
         text: text.into(),
         font: (),
+        style: RunStyle::default(),
     }
 }
 
 fn bold_run(text: impl Into<String>) -> InlineRun<()> {
-    InlineRun::Bold {
+    InlineRun::Text {
         text: text.into(),
         font: (),
+        style: RunStyle {
+            bold: Some(true),
+            ..RunStyle::default()
+        },
     }
 }
 
@@ -206,9 +215,10 @@ fn paragraph(
 
 fn styled(size: Option<f32>, color: Option<Color>, children: Vec<Block<()>>) -> Block<()> {
     Block::Styled {
-        style: TextStyle {
+        style: RunStyle {
             font_size: size.map(pos),
             color,
+            ..RunStyle::default()
         },
         children,
     }
@@ -346,6 +356,7 @@ fn left_band(text: &str) -> BandSpec<()> {
         left: Some(BandSlot::Text {
             runs: vec![TextRun::Literal(text.into())],
             font: (),
+            style: RunStyle::default(),
         }),
         ..BandSpec::default()
     }
@@ -362,7 +373,11 @@ fn page_label() -> Vec<TextRun> {
 }
 
 fn slot_text(runs: Vec<TextRun>) -> BandSlot<()> {
-    BandSlot::Text { runs, font: () }
+    BandSlot::Text {
+        runs,
+        font: (),
+        style: RunStyle::default(),
+    }
 }
 
 fn slot_link(uri: Vec<TextRun>, text: &str) -> BandSlot<()> {
@@ -370,10 +385,11 @@ fn slot_link(uri: Vec<TextRun>, text: &str) -> BandSlot<()> {
         font: (),
         uri,
         text: vec![TextRun::Literal(text.into())],
+        style: RunStyle::default(),
     }
 }
 
-fn mark_text(when: PageWhen, text: &str, x: f32, y: f32, style: TextStyle) -> LayerMark<()> {
+fn mark_text(when: PageWhen, text: &str, x: f32, y: f32, style: RunStyle) -> LayerMark<()> {
     LayerMark::Text {
         font: (),
         when,
@@ -483,14 +499,14 @@ fn full_template(c: &Contract, company: &str) -> Result<Rendered> {
                 "DRAFT",
                 180.0,
                 400.0,
-                TextStyle::default(),
+                RunStyle::default(),
             )],
             front: vec![mark_text(
                 PageWhen::Last,
                 "SEAL",
                 430.0,
                 680.0,
-                TextStyle::default(),
+                RunStyle::default(),
             )],
             body: vec![
                 para(format!("Contract no. {}", c.id)),
@@ -632,9 +648,10 @@ fn stack_style_is_inherited_and_text_at_can_override() {
                     "CC",
                     8.0,
                     8.0,
-                    TextStyle {
+                    RunStyle {
                         font_size: Some(pos(14.0)),
                         color: Some(Color::rgb(1, 2, 3)),
+                        ..RunStyle::default()
                     },
                 ),
                 mark_text(
@@ -642,9 +659,10 @@ fn stack_style_is_inherited_and_text_at_can_override() {
                     "DD",
                     8.0,
                     28.0,
-                    TextStyle {
+                    RunStyle {
                         font_size: Some(pos(9.0)),
                         color: Some(Color::rgb(9, 8, 7)),
+                        ..RunStyle::default()
                     },
                 ),
             ],
@@ -1179,8 +1197,10 @@ fn each_font_key_keeps_its_own_face() {
     let bytes = font_bytes();
     let mut fonts = FontRegistry::new();
     let family = |bytes: Vec<u8>| FontFamily {
-        normal: FontFace::new(bytes, 0),
+        regular: FontFace::new(bytes, 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     };
     fonts.register(DocFont::Latin, family(bytes.clone()));
     fonts.register(DocFont::Cjk, family(bytes));
@@ -1195,10 +1215,12 @@ fn each_font_key_keeps_its_own_face() {
                     InlineRun::Text {
                         text: "A".into(),
                         font: DocFont::Latin,
+                        style: RunStyle::default(),
                     },
                     InlineRun::Text {
                         text: "B".into(),
                         font: DocFont::Cjk,
+                        style: RunStyle::default(),
                     },
                 ],
                 ..ParagraphSpec::default()
@@ -1737,7 +1759,7 @@ fn painted_layer_paths() -> Rendered {
                 },
             ],
             front: vec![
-                mark_text(PageWhen::All, "SEAL", 12.0, 30.0, TextStyle::default()),
+                mark_text(PageWhen::All, "SEAL", 12.0, 30.0, RunStyle::default()),
                 LayerMark::Ellipse {
                     when: PageWhen::All,
                     rect: Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
@@ -2312,7 +2334,10 @@ fn blank_em_is_font_size_times_count_and_needs_no_bold_face() {
         "{}",
         stroke.x1 - stroke.x0
     );
-    assert!(runs(&pages[0]).iter().any(|run| run.text.is_empty()));
+    assert!(
+        runs(&pages[0]).is_empty(),
+        "a blank-only paragraph does not emit a glyph run"
+    );
 }
 
 #[test]
@@ -2813,6 +2838,7 @@ fn header_uri_can_differ_per_page() {
                         TextRun::PageNumber,
                     ],
                     text: vec![TextRun::Literal("Home".into())],
+                    style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
             }),
@@ -2948,7 +2974,7 @@ fn cell_and_layer_text_do_not_annotate() {
                 "mark",
                 10.0,
                 10.0,
-                TextStyle::default(),
+                RunStyle::default(),
             )],
             ..SectionSpec::default()
         },
@@ -3768,9 +3794,9 @@ fn canvas_label() -> Block<()> {
                 text: label.into(),
                 font: (),
                 at: Point::try_pt(12.0, 40.0).unwrap(),
-                style: TextStyle {
+                style: RunStyle {
                     font_size: Some(pos(11.0)),
-                    ..TextStyle::default()
+                    ..RunStyle::default()
                 },
             },
         ],
@@ -3935,7 +3961,7 @@ fn empty_canvas_text_fails_layout() {
                 text: String::new(),
                 font: (),
                 at: Point::try_pt(0.0, 10.0).unwrap(),
-                style: TextStyle::default(),
+                style: RunStyle::default(),
             }],
         })]),
     )

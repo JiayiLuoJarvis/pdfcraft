@@ -17,6 +17,7 @@
 //!
 //! See the crate README and `docs/guide.md` for end-to-end usage.
 
+mod latin;
 mod lower;
 mod token;
 mod types;
@@ -33,7 +34,8 @@ use std::num::{NonZeroU16, NonZeroU32};
 
 use crate::canvas::ImageFormat;
 use crate::geom::{
-    Color, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect, Size,
+    Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
+    Size,
 };
 use crate::limits::Limits;
 
@@ -172,10 +174,13 @@ pub enum Block<K> {
     PageBreak,
     /// Keeps all children on one page.
     KeepTogether(Vec<Self>),
-    /// Applies a parent text style to its children.
+    /// Applies a parent run style to its children.
+    ///
+    /// Paragraph runs inherit every field. Table cell text and list markers
+    /// inherit only size and color. Bands, layers, and canvas text do not see it.
     Styled {
         /// Style patch inherited by descendants.
-        style: TextStyle,
+        style: RunStyle,
         /// Styled blocks.
         children: Vec<Self>,
     },
@@ -200,14 +205,39 @@ impl<K> Block<K> {
     }
 }
 
-/// Parent text properties used by [`Block::Styled`] and layer text.
+/// Inline text properties. `None` inherits the enclosing value.
+///
+/// Body runs resolve in this order, later `Some` values winning: the document
+/// seed (12 pt, black, regular, no lines, no tracking), each enclosing
+/// [`Block::Styled`] from outside in, [`ParagraphSpec::font_size`] and
+/// [`ParagraphSpec::color`], then the run's own style. `Some(false)` turns off
+/// a flag an outer style turned on.
+///
+/// Header, footer, layer, and canvas text start from the seed and apply only
+/// their own style.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[must_use]
-pub struct TextStyle {
-    /// Font-size override.
-    pub font_size: Option<Length<Positive>>,
-    /// Text-color override.
+pub struct RunStyle {
+    /// Use the family's bold face. Missing it fails with [`crate::ErrorKind::BoldFaceRequired`].
+    pub bold: Option<bool>,
+    /// Use the family's italic face. Missing it fails with
+    /// [`crate::ErrorKind::ItalicFaceRequired`]. Bold and italic together need
+    /// [`FontFamily::bold_italic`], or fail with
+    /// [`crate::ErrorKind::BoldItalicFaceRequired`].
+    pub italic: Option<bool>,
+    /// Draw a 1 pt underline. The position comes from the regular face's `post` table
+    /// and scales with the run's font size.
+    pub underline: Option<bool>,
+    /// Draw a 1 pt strikethrough. The position comes from the regular face's `OS/2`
+    /// table and scales with the run's font size.
+    pub strikethrough: Option<bool>,
+    /// Extra space after each grapheme cluster that is followed by more text on
+    /// the same line. May be negative. Counts toward line breaking.
+    pub tracking: Option<Length<Finite>>,
+    /// Text and decoration color.
     pub color: Option<Color>,
+    /// Font size. Decoration position scales with it. Thickness stays 1 pt.
+    pub font_size: Option<Length<Positive>>,
 }
 
 /// Horizontal alignment within the current frame.
@@ -233,9 +263,14 @@ pub struct ParagraphSpec<K> {
     pub first_line_indent: Length<NonNegative>,
     /// Line alignment.
     pub align: Alignment,
-    /// Paragraph color override.
+    /// Paragraph color override, applied over [`Block::Styled`] and under each run.
     pub color: Option<Color>,
-    /// Paragraph font-size override.
+    /// Paragraph font-size override, applied over [`Block::Styled`] and under each run.
+    ///
+    /// Paragraph size. Em blanks use it. A line of only blanks uses the first text
+    /// run's resolved face at this size. A paragraph with no text runs uses
+    /// `size * line-height factor` and does not read a font. A line with glyphs
+    /// scales each face by that face's own size.
     pub font_size: Option<Length<Positive>>,
     /// Line-height factor override. `None` keeps the document seed (1.2).
     pub line_height_factor: Option<f32>,
@@ -261,6 +296,7 @@ impl<K> ParagraphSpec<K> {
             runs: vec![InlineRun::Text {
                 text: text.into(),
                 font,
+                style: RunStyle::default(),
             }],
             ..Self::default()
         }
@@ -271,21 +307,16 @@ impl<K> ParagraphSpec<K> {
 #[derive(Debug)]
 #[must_use]
 pub enum InlineRun<K> {
-    /// Text drawn with the family's normal face.
+    /// Text in a face of the keyed family, chosen by the resolved bold and italic flags.
+    ///
+    /// An empty string is skipped and needs no face.
     Text {
         /// Run text.
         text: String,
         /// Key in the document [`FontRegistry`].
         font: K,
-    },
-    /// Text drawn with the family's bold face.
-    ///
-    /// Fails with [`crate::ErrorKind::BoldFaceRequired`] when that family has no bold face.
-    Bold {
-        /// Run text.
-        text: String,
-        /// Key in the document [`FontRegistry`].
-        font: K,
+        /// Patch over the inherited style.
+        style: RunStyle,
     },
     /// Runs linked to a URI.
     Link {
@@ -472,7 +503,8 @@ pub enum ListKind {
 pub struct ListItemSpec<K> {
     /// Custom marker. `None` uses the list's generated marker.
     ///
-    /// Generated and custom markers use the first registered face.
+    /// Generated and custom markers use the first registered face. They take
+    /// size and color from [`Block::Styled`] and nothing else.
     pub marker: Option<String>,
     /// Item blocks.
     pub blocks: Vec<Block<K>>,
@@ -529,8 +561,8 @@ pub enum CanvasMark<K> {
         font: K,
         /// Baseline left, block coordinates, y down.
         at: Point,
-        /// Size and color. `None` uses the document seed (12 pt, black), not an enclosing [`Block::Styled`].
-        style: TextStyle,
+        /// Patch over the document seed (12 pt, black), not an enclosing [`Block::Styled`].
+        style: RunStyle,
     },
 }
 
@@ -635,6 +667,8 @@ pub enum BandSlot<K> {
         runs: Vec<TextRun>,
         /// Key in the document [`FontRegistry`].
         font: K,
+        /// Patch over the document seed.
+        style: RunStyle,
     },
     /// Text linked to a URI assembled from page-time runs.
     Link {
@@ -644,6 +678,8 @@ pub enum BandSlot<K> {
         text: Vec<TextRun>,
         /// Key in the document [`FontRegistry`].
         font: K,
+        /// Patch over the document seed.
+        style: RunStyle,
     },
 }
 
@@ -687,8 +723,8 @@ pub enum LayerMark<K> {
         font: K,
         /// Line-box top-left in page coordinates.
         at: Point,
-        /// Text style.
-        style: TextStyle,
+        /// Patch over the document seed, not an enclosing [`Block::Styled`].
+        style: RunStyle,
     },
     /// An image stretched into a page-coordinate rectangle.
     Image {

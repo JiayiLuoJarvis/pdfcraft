@@ -1,32 +1,36 @@
-//! Paragraph measurement, wrapping, and fragment drawing.
+//! Paragraph wrapping, per-line boxes, and fragment drawing.
 
-use crate::canvas::{pt_near, GlyphPlacement, GlyphRun, LinkTarget};
+use crate::canvas::{pt_near, LinkTarget};
 #[cfg(test)]
 use crate::error::ErrorBag;
 use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
-use crate::fonts::FontId;
 #[cfg(test)]
 use crate::fonts::FontStore;
-use crate::geom::{Color, Finite, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
-use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::line_run::{align_x, line_metrics_or_soft};
-use crate::layout::style::Style;
-use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
-use crate::text::line_break::{break_spans, Advance, LineBudget, Seg, Span, SpanLine};
-use crate::text::measure::measure_text;
+use crate::geom::{Color, Length, NonNegative, Positive};
+use crate::layout::frame::{Fragment, Frame, LayoutCtx, Split};
+use crate::layout::line_run::{
+    align_x, append_commands, face_extent, measure_inline, BlankStroke, LinePainter, LinePiece,
+    MeasuredInline,
+};
+use crate::layout::style::{GlyphStyle, Style};
+use crate::text::cluster::{ClusterCursor, ClusteredText};
+use crate::text::line_break::{
+    break_spans, draw_widths, Advance, LineBudget, Seg, Span, SpanLine, WidthPart,
+};
+use crate::text::measure::{LineExtent, LineMetrics};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TextRun {
     pub(crate) text: String,
-    pub(crate) font: FontId,
+    pub(crate) style: GlyphStyle,
     pub(crate) link: Option<LinkTarget>,
 }
 
 impl TextRun {
-    pub(crate) fn new(text: impl Into<String>, font: FontId) -> Self {
+    pub(crate) fn new(text: impl Into<String>, style: GlyphStyle) -> Self {
         Self {
             text: text.into(),
-            font,
+            style,
             link: None,
         }
     }
@@ -74,30 +78,11 @@ impl InlineBlank {
     }
 }
 
-/// One laid-out line, coordinates relative to the paragraph fragment origin.
+/// One laid-out line. Pieces are relative to the line-box top-left.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LineBox {
     pub(crate) pieces: Vec<LinePiece>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum LinePiece {
-    Glyphs(GlyphRun),
-    Stroke(InlineStroke),
-    Link {
-        x0: f32,
-        x1: f32,
-        target: LinkTarget,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InlineStroke {
-    x0: f32,
-    x1: f32,
-    y: f32,
-    color: Color,
-    thickness: Length<Positive>,
+    pub(crate) height: Length<Positive>,
 }
 
 /// Unwrapped text. Wraps at the width of the first frame it is split against.
@@ -108,12 +93,12 @@ pub(crate) struct TextNode {
 }
 
 impl TextNode {
-    pub(crate) fn new(text: impl Into<String>, style: Style) -> Self {
+    pub(crate) fn new(text: impl Into<String>, glyph: GlyphStyle, style: Style) -> Self {
         let text = text.into();
         let items = if text.is_empty() {
             Vec::new()
         } else {
-            vec![InlineItem::Text(TextRun::new(text, style.font))]
+            vec![InlineItem::Text(TextRun::new(text, glyph))]
         };
         Self { items, style }
     }
@@ -150,7 +135,6 @@ impl TextNode {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ParagraphNode {
     pub(crate) lines: Vec<LineBox>,
-    pub(crate) line_height: Length<Positive>,
     pub(crate) spacing_after: Length<NonNegative>,
     width: Length<Positive>,
 }
@@ -167,7 +151,10 @@ impl ParagraphNode {
         let items = if text.is_empty() {
             Vec::new()
         } else {
-            vec![InlineItem::Text(TextRun::new(text, style.font))]
+            vec![InlineItem::Text(TextRun::new(
+                text,
+                GlyphStyle::plain(style),
+            ))]
         };
         let mut errors = ErrorBag::default();
         let laid = {
@@ -217,16 +204,8 @@ impl ParagraphNode {
                 first: first_width,
                 rest: width,
             },
-            |group, cluster| {
-                cluster_width_pt(
-                    &prepared.groups[group],
-                    cluster.glyph_range(),
-                    style.font_size,
-                )
-            },
+            |group, cluster| prepared.groups[group].ink_width(cluster.glyph_range()),
         )?;
-        let metrics = line_metrics_or_soft(ctx, style)?;
-        let line_height = metrics.line_height;
 
         let mut lines = Vec::with_capacity(broken.len());
         for (index, line) in broken.iter().enumerate() {
@@ -236,20 +215,23 @@ impl ParagraphNode {
             } else {
                 NonNegative::ZERO
             };
-            lines.push(place_line(
+            let metrics = line_box(ctx, &prepared.groups, line, style)?;
+            let pieces = place_line(
                 &prepared.groups,
                 line,
                 style,
                 frame_width,
                 frame_x,
-                metrics.baseline,
-                style.font_size,
-            )?);
+                metrics.baseline.as_pt(),
+            )?;
+            lines.push(LineBox {
+                pieces,
+                height: metrics.line_height,
+            });
         }
 
         Ok(Self {
             lines,
-            line_height,
             spacing_after: style.paragraph_spacing,
             width,
         })
@@ -275,41 +257,49 @@ impl ParagraphNode {
             }
             .into());
         }
-        if self.lines.is_empty() {
+        let Some(first) = self.lines.first() else {
             return Ok(Split::Fit {
                 height: NonNegative::ZERO,
                 fragment: Fragment::empty(),
             });
-        }
-        if self.line_height.as_pt() > avail.full_height.as_pt() {
+        };
+        let tallest = self
+            .lines
+            .iter()
+            .map(|line| line.height.as_pt())
+            .fold(0.0_f32, f32::max);
+        if tallest > avail.full_height.as_pt() {
             return Err(ErrorKind::UnsplittableTallerThanFrame {
-                height: self.line_height.as_pt(),
+                height: tallest,
                 avail: avail.full_height.as_pt(),
             }
             .into());
         }
-        if avail.height.as_pt() < self.line_height.as_pt() {
+        if avail.height.as_pt() < first.height.as_pt() {
             return Ok(Split::MoveToNextPage(self));
         }
 
-        let max_lines = lines_fitting(avail.height, self.line_height).min(self.lines.len());
+        let tops = line_tops(&self.lines);
+        let max_lines = tops[1..]
+            .iter()
+            .take_while(|&&bottom| bottom <= avail.height.as_pt())
+            .count();
         if max_lines == 0 {
             return Ok(Split::MoveToNextPage(self));
         }
 
         if max_lines >= self.lines.len() {
-            let height = lines_height(self.lines.len(), self.line_height);
-            let fragment = fragment_from_lines(&self.lines, self.line_height, self.spacing_after)?;
+            let height = Length::from_trusted_pt(tops[self.lines.len()]);
+            let fragment = fragment_from_lines(&self.lines, self.spacing_after)?;
             return Ok(Split::Fit { height, fragment });
         }
 
         let mut lines = self.lines;
         let tail_lines = lines.split_off(max_lines);
-        let height = lines_height(max_lines, self.line_height);
-        let head = fragment_from_lines(&lines, self.line_height, NonNegative::ZERO)?;
+        let height = Length::from_trusted_pt(tops[max_lines]);
+        let head = fragment_from_lines(&lines, NonNegative::ZERO)?;
         let tail = ParagraphNode {
             lines: tail_lines,
-            line_height: self.line_height,
             spacing_after: self.spacing_after,
             width: self.width,
         };
@@ -321,93 +311,38 @@ impl ParagraphNode {
     }
 }
 
-fn lines_fitting(avail_height: Length<NonNegative>, line_height: Length<Positive>) -> usize {
-    let avail_height = avail_height.as_pt();
-    let line_height = line_height.as_pt();
-    if !avail_height.is_finite()
-        || !line_height.is_finite()
-        || line_height <= 0.0
-        || avail_height < line_height
-    {
-        return 0;
-    }
-    let mut count: u16 = 1;
-    while count < u16::MAX {
-        let next = count + 1;
-        if line_height * f32::from(next) <= avail_height {
-            count = next;
-        } else {
-            break;
-        }
-    }
-    usize::from(count)
-}
-
-fn lines_height(count: usize, line_height: Length<Positive>) -> Length<NonNegative> {
-    let count = u16::try_from(count).unwrap_or(u16::MAX);
-    Length::from_trusted_pt(f32::from(count) * line_height.as_pt())
-}
-
-fn fragment_from_lines(
-    lines: &[LineBox],
-    line_height: Length<Positive>,
-    spacing_after: Length<NonNegative>,
-) -> Result<Fragment> {
-    let mut commands = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let y0 = lines_height(index, line_height).as_pt();
-        for piece in &line.pieces {
-            match piece {
-                LinePiece::Glyphs(run) => {
-                    let mut run = run.clone();
-                    let y = y0 + run.origin.y().as_pt();
-                    run.origin = Point::try_pt(run.origin.x().as_pt(), y)?;
-                    commands.push(FragmentCommand::Glyphs(run));
-                }
-                LinePiece::Stroke(stroke) => {
-                    let y = y0 + stroke.y;
-                    commands.push(FragmentCommand::Stroke {
-                        path: Path::line(
-                            Point::try_pt(stroke.x0, y)?,
-                            Point::try_pt(stroke.x1, y)?,
-                        ),
-                        paint: Paint::solid(stroke.color),
-                        stroke: Stroke::new(stroke.thickness),
-                    });
-                }
-                LinePiece::Link { x0, x1, target } => {
-                    let width = x1 - x0;
-                    if width > 0.0 {
-                        commands.push(FragmentCommand::Link {
-                            rect: Rect::try_pt(*x0, y0, width, line_height.as_pt())?,
-                            target: target.clone(),
-                        });
-                    }
-                }
+/// Top of each line and, last, the total height. A run of equal heights is
+/// `count * height` from the run's start, so uniform lines never accumulate drift.
+fn line_tops(lines: &[LineBox]) -> Vec<f32> {
+    let mut tops = Vec::with_capacity(lines.len() + 1);
+    tops.push(0.0_f32);
+    let mut base = 0.0_f32;
+    let mut run: Option<(Length<Positive>, u16)> = None;
+    for line in lines {
+        let count = match run {
+            Some((height, count)) if height == line.height && count < u16::MAX => count + 1,
+            _ => {
+                base = tops[tops.len() - 1];
+                1
             }
-        }
+        };
+        run = Some((line.height, count));
+        tops.push(base + f32::from(count) * line.height.as_pt());
+    }
+    tops
+}
+
+fn fragment_from_lines(lines: &[LineBox], spacing_after: Length<NonNegative>) -> Result<Fragment> {
+    let tops = line_tops(lines);
+    let mut commands = Vec::new();
+    for (line, top) in lines.iter().zip(&tops) {
+        append_commands(&mut commands, &line.pieces, 0.0, *top, line.height.as_pt())?;
     }
     Ok(Fragment {
-        height: lines_height(lines.len(), line_height),
+        height: Length::from_trusted_pt(tops[lines.len()]),
         spacing_after,
         commands,
     })
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct MeasuredInline {
-    text: TaggedClusteredText<FontId>,
-    glyphs: Vec<InlineGlyph>,
-    link: Option<LinkTarget>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct InlineGlyph {
-    font: FontId,
-    glyph_id: u32,
-    advance_norm: f32,
-    byte_range: std::ops::Range<usize>,
-    omit: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -461,10 +396,19 @@ fn flush_text(
     groups: &mut Vec<MeasuredInline>,
     spans: &mut Vec<Span<BlankDraw>>,
 ) -> Result<()> {
-    if pending.is_empty() {
+    let Some(first) = pending.first() else {
         return Ok(());
-    }
-    let measured = measure_inline(ctx, pending)?;
+    };
+    let link = first.link.clone();
+    debug_assert!(
+        pending.iter().all(|run| run.link == link),
+        "one measured group must share one link"
+    );
+    let measured = measure_inline(
+        ctx,
+        pending.iter().map(|run| (run.style, run.text.as_str())),
+        link,
+    )?;
     spans.push(Span::Group(groups.len()));
     groups.push(measured);
     pending.clear();
@@ -485,192 +429,117 @@ fn blank_advance(width: BlankWidth, font_size: Length<Positive>) -> Result<Advan
     }
 }
 
+/// Glyph ranges of the clusters between two cursors of one group.
+fn seg_clusters(
+    group: &MeasuredInline,
+    start: ClusterCursor,
+    end: ClusterCursor,
+) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    let tape = group.text.clustered();
+    (start.cluster..end.cluster)
+        .map(move |index| tape.cluster(index).glyph_range())
+        .filter(|range| !range.is_empty())
+}
+
+fn glyph_extent(
+    ctx: &mut LayoutCtx<'_>,
+    groups: &[MeasuredInline],
+    line: &SpanLine<BlankDraw>,
+) -> Result<Option<LineExtent>> {
+    let mut extent: Option<LineExtent> = None;
+    let mut seen = Vec::new();
+    for seg in line.segs() {
+        let Seg::Glyphs { group, start, end } = *seg else {
+            continue;
+        };
+        let group = &groups[group];
+        for range in seg_clusters(group, start, end) {
+            let Some(style) = group.style_of(range) else {
+                continue;
+            };
+            let key = (style.font, style.font_size);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            let face = face_extent(ctx, style.font, style.font_size)?;
+            extent = Some(match extent {
+                Some(folded) => folded.include(face),
+                None => face.into(),
+            });
+        }
+    }
+    Ok(extent)
+}
+
+fn line_box(
+    ctx: &mut LayoutCtx<'_>,
+    groups: &[MeasuredInline],
+    line: &SpanLine<BlankDraw>,
+    style: &Style,
+) -> Result<LineMetrics> {
+    match glyph_extent(ctx, groups, line)? {
+        Some(extent) => LineMetrics::new(extent, style.line_height_factor),
+        None => match style.font {
+            Some(face) => LineMetrics::new(
+                face_extent(ctx, face, style.font_size)?.into(),
+                style.line_height_factor,
+            ),
+            None => LineMetrics::fontless(style.font_size, style.line_height_factor),
+        },
+    }
+}
+
 fn place_line(
     groups: &[MeasuredInline],
     line: &SpanLine<BlankDraw>,
     style: &Style,
     frame_width: Length<Positive>,
     frame_x: Length<NonNegative>,
-    baseline: Length<Finite>,
-    font_size: Length<Positive>,
-) -> Result<LineBox> {
-    let line_x = frame_x.as_pt() + align_x(frame_width, line.width(), style.align).as_pt();
-    let baseline = baseline.as_pt();
-    let mut x = line_x;
-    let mut pieces = Vec::new();
-    let mut saw_glyphs = false;
+    baseline: f32,
+) -> Result<Vec<LinePiece>> {
+    let mut parts = Vec::new();
     for seg in line.segs() {
         match *seg {
             Seg::Glyphs { group, start, end } => {
-                let range = start.glyph..end.glyph;
-                if range.is_empty() {
-                    continue;
+                for range in seg_clusters(&groups[group], start, end) {
+                    parts.push(WidthPart::Ink(groups[group].ink_width(range)?));
                 }
-                let advance = cluster_width_pt(&groups[group], range.clone(), font_size).as_pt();
-                let runs = glyph_runs_for_line(&groups[group], range, style, x, baseline)?;
-                pieces.extend(runs.into_iter().map(LinePiece::Glyphs));
-                if advance > 0.0 {
-                    if let Some(target) = groups[group].link.clone() {
-                        pieces.push(LinePiece::Link {
-                            x0: x,
-                            x1: x + advance,
-                            target,
-                        });
-                    }
-                }
-                x += advance;
-                saw_glyphs = true;
+            }
+            Seg::Blank { width, .. } => parts.push(WidthPart::Blank(width)),
+        }
+    }
+    let draws: Vec<_> = draw_widths(&parts).collect();
+
+    let line_x = frame_x.as_pt() + align_x(frame_width, line.width(), style.align).as_pt();
+    let mut painter = LinePainter::new(line_x, baseline);
+    let mut at = 0usize;
+    for seg in line.segs() {
+        match *seg {
+            Seg::Glyphs { group, start, end } => {
+                let clusters: Vec<_> = seg_clusters(&groups[group], start, end).collect();
+                let count = clusters.len();
+                painter.text(&groups[group], &clusters, &draws[at..at + count])?;
+                at += count;
             }
             Seg::Blank { width, payload } => {
-                let width = width.as_pt();
-                if width > 0.0 {
-                    pieces.push(LinePiece::Stroke(InlineStroke {
-                        x0: x,
-                        x1: x + width,
-                        y: baseline + payload.baseline_offset.as_pt(),
+                painter.blank(
+                    width,
+                    BlankStroke {
+                        offset: payload.baseline_offset.as_pt(),
                         color: payload.color.unwrap_or(style.color),
                         thickness: payload.thickness,
-                    }));
-                }
-                x += width;
+                    },
+                );
+                at += 1;
             }
         }
     }
-    if !saw_glyphs {
-        pieces.insert(
-            0,
-            LinePiece::Glyphs(empty_glyph_run(style, line_x, baseline)?),
-        );
-    }
     debug_assert!(
-        pt_near(x - line_x, line.width().as_pt()),
-        "placed {x} from {line_x}, line width {}",
+        pt_near(painter.x() - line_x, line.width().as_pt()),
+        "placed {} from {line_x}, line width {}",
+        painter.x(),
         line.width().as_pt()
     );
-    Ok(LineBox { pieces })
-}
-
-fn empty_glyph_run(style: &Style, x: f32, baseline: f32) -> Result<GlyphRun> {
-    Ok(GlyphRun {
-        font: style.font,
-        font_size: style.font_size,
-        color: style.color,
-        origin: Point::try_pt(x, baseline)?,
-        glyphs: Vec::new(),
-        text: String::new(),
-    })
-}
-
-fn measure_inline(ctx: &mut LayoutCtx<'_>, runs: &[TextRun]) -> Result<MeasuredInline> {
-    let link = runs.first().and_then(|run| run.link.clone());
-    debug_assert!(
-        runs.iter().all(|run| run.link == link),
-        "one measured group must share one link"
-    );
-    let text = cluster_tagged(runs.iter().map(|run| (run.font, run.text.as_str())));
-    let font_ids: Vec<_> = text.glyph_tags().to_vec();
-    let glyph_text = text.clustered().glyph_text();
-    let mut byte_boundaries: Vec<_> = glyph_text.char_indices().map(|(byte, _)| byte).collect();
-    byte_boundaries.push(glyph_text.len());
-
-    let mut glyphs = Vec::with_capacity(font_ids.len());
-    let mut start = 0usize;
-    while start < font_ids.len() {
-        let font = font_ids[start];
-        let mut end = start + 1;
-        while end < font_ids.len() && font_ids[end] == font {
-            end += 1;
-        }
-        let byte_start = byte_boundaries[start];
-        let measured = measure_text(
-            ctx.fonts,
-            ctx.errors,
-            font,
-            &glyph_text[byte_start..byte_boundaries[end]],
-        )?;
-        debug_assert_eq!(measured.glyphs.len(), end - start);
-        glyphs.extend(measured.glyphs.into_iter().map(|glyph| InlineGlyph {
-            font,
-            glyph_id: glyph.glyph_id,
-            advance_norm: glyph.advance_norm,
-            byte_range: (glyph.byte_range.start + byte_start)..(glyph.byte_range.end + byte_start),
-            omit: glyph.omit,
-        }));
-        start = end;
-    }
-
-    Ok(MeasuredInline { text, glyphs, link })
-}
-
-fn cluster_width_pt(
-    measured: &MeasuredInline,
-    glyph_range: std::ops::Range<usize>,
-    font_size: Length<Positive>,
-) -> Length<NonNegative> {
-    let width = measured.glyphs[glyph_range]
-        .iter()
-        .map(|glyph| glyph.advance_norm * font_size.as_pt())
-        .sum();
-    Length::from_trusted_pt(width)
-}
-
-fn glyph_runs_for_line(
-    measured: &MeasuredInline,
-    glyph_range: std::ops::Range<usize>,
-    style: &Style,
-    line_x: f32,
-    baseline: f32,
-) -> Result<Vec<GlyphRun>> {
-    if glyph_range.is_empty() {
-        return Ok(vec![GlyphRun {
-            font: style.font,
-            font_size: style.font_size,
-            color: style.color,
-            origin: Point::try_pt(line_x, baseline)?,
-            glyphs: Vec::new(),
-            text: String::new(),
-        }]);
-    }
-
-    let mut runs = Vec::new();
-    let mut x = line_x;
-    let mut start = glyph_range.start;
-    while start < glyph_range.end {
-        let font = measured.glyphs[start].font;
-        let mut end = start + 1;
-        while end < glyph_range.end && measured.glyphs[end].font == font {
-            end += 1;
-        }
-        let byte_start = measured.glyphs[start].byte_range.start;
-        let byte_end = measured.glyphs[end - 1].byte_range.end;
-        let glyphs: Vec<_> = measured.glyphs[start..end]
-            .iter()
-            .filter(|glyph| !glyph.omit)
-            .map(|glyph| GlyphPlacement {
-                glyph_id: glyph.glyph_id,
-                advance_norm: glyph.advance_norm,
-                byte_range: (glyph.byte_range.start - byte_start)
-                    ..(glyph.byte_range.end - byte_start),
-            })
-            .collect();
-        if glyphs.is_empty() {
-            start = end;
-            continue;
-        }
-        let advance = measured.glyphs[start..end]
-            .iter()
-            .map(|glyph| glyph.advance_norm * style.font_size.as_pt())
-            .sum::<f32>();
-        runs.push(GlyphRun {
-            font,
-            font_size: style.font_size,
-            color: style.color,
-            origin: Point::try_pt(x, baseline)?,
-            glyphs,
-            text: measured.text.clustered().glyph_text()[byte_start..byte_end].to_owned(),
-        });
-        x += advance;
-        start = end;
-    }
-    Ok(runs)
+    painter.finish(style.font, style.font_size, style.color)
 }

@@ -7,6 +7,7 @@ errors, limits, and testing.
 | --- | --- |
 | [crate README](../README.md) | Install and quick start |
 | This guide | How-to for real documents |
+| [migrate-inline.md](migrate-inline.md) | Required edits from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
 | [rustdoc](https://docs.rs/pdfcraft-pdf) | Every public signature (`cargo doc -p pdfcraft-pdf --open`) |
 
 Related crates (separate packages, separate docs):
@@ -47,8 +48,10 @@ struct Contract { id: String, kind: Kind, items: Vec<Item> }
 
 fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
     let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font, 0),
+        regular: FontFace::new(font, 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
     let mut body = vec![Block::paragraph((), format!("Contract {}", contract.id))];
     match contract.kind {
@@ -149,12 +152,16 @@ enum DocFont { Body, Cjk }
 
 let mut fonts = FontRegistry::new();
 fonts.register(DocFont::Body, FontFamily {
-    normal: FontFace::new(body_ttf, 0),
+    regular: FontFace::new(body_ttf, 0),
     bold: Some(FontFace::new(bold_ttf, 0)),
+    italic: Some(FontFace::new(italic_ttf, 0)),
+    bold_italic: None,
 });
 fonts.register(DocFont::Cjk, FontFamily {
-    normal: FontFace::new(cjk_ttf, 0),
+    regular: FontFace::new(cjk_ttf, 0),
     bold: None,
+    italic: None,
+    bold_italic: None,
 });
 let mut resources = Resources::with_fonts(fonts);
 let logo = resources.add_image(png_bytes, ImageFormat::Png);
@@ -164,8 +171,10 @@ A document that uses one family can skip the enum. `FontRegistry::single` regist
 
 ```rust
 let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-    normal: FontFace::new(body_ttf, 0),
+    regular: FontFace::new(body_ttf, 0),
     bold: None,
+    italic: None,
+    bold_italic: None,
 }));
 ```
 
@@ -176,7 +185,8 @@ let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
 | One family | `FontRegistry::single` uses the key `()`. |
 | Collection index | `FontFace.index` selects a face inside a collection. `0` is the first face. |
 | Face bytes | `FontFace.bytes` is `Arc<Vec<u8>>`. `FontFace::new` wraps owned bytes. `FontFace::from_shared` reuses an `Arc`. |
-| Bold | `InlineRun::Bold` needs `FontFamily.bold`. Otherwise layout records `ErrorKind::BoldFaceRequired`. |
+| Faces | `RunStyle.bold` needs `FontFamily.bold`, `italic` needs `FontFamily.italic`, and both together need `FontFamily.bold_italic`. A missing face records `ErrorKind::BoldFaceRequired`, `ItalicFaceRequired`, or `BoldItalicFaceRequired`. There is no synthetic bold or slant. |
+| Decorations | Underline position comes from the regular face's `post` table and strikethrough position from its `OS/2` table. Both strokes are 1 pt thick. A face without a finite offset fails with `ErrorKind::MissingDecorationMetrics` when a run asks for that line. |
 | Unknown key | `ErrorKind::UnregisteredFont`. The document fails. |
 | Missing glyph | `ErrorKind::MissingGlyph`. There is no fallback face and no `.notdef` box. |
 | Empty registry | Valid when the document has no text. |
@@ -234,7 +244,7 @@ available.
 | `Spacer(Length<NonNegative>)` | Vertical gap (may be `0`) |
 | `PageBreak` | Force a new page (a leading break is a no-op) |
 | `KeepTogether(Vec<Block>)` | Children must fit on one page |
-| `Styled { style, children }` | Inherit font size / color |
+| `Styled { style, children }` | Children inherit a `RunStyle` (face, lines, tracking, size, color) |
 | `Columns(ColumnsSpec)` | Side-by-side columns (not newspaper snaking) |
 | `Table(TableSpec)` | Table; may split with repeating header |
 | `List(ListSpec)` | Bulleted or numbered list |
@@ -256,27 +266,32 @@ available.
 ## Paragraphs, blanks, and links
 
 ```rust
-use pdfcraft_pdf::spec::{Alignment, BlankSpec, BlankWidth, InlineRun, ParagraphSpec};
+use pdfcraft_pdf::spec::{Alignment, BlankSpec, BlankWidth, InlineRun, ParagraphSpec, RunStyle};
 use pdfcraft_pdf::{Color, NonNegative, Positive};
 
 let paragraph = ParagraphSpec {
     runs: vec![
-        InlineRun::Text { text: "Amount: ".into(), font: () },
+        InlineRun::Text {
+            text: "Amount: ".into(),
+            font: (),
+            style: RunStyle { bold: Some(true), ..RunStyle::default() },
+        },
         InlineRun::Blank(BlankSpec {
             width: BlankWidth::Em(8),
             thickness: Some(Positive::pt(0.75).unwrap()),
             color: Some(Color::rgb(0, 0, 0)),
             baseline_offset: Some(NonNegative::ZERO),
         }),
-        InlineRun::Text { text: ". See ".into(), font: () },
+        InlineRun::Text { text: ". See ".into(), font: (), style: RunStyle::default() },
         InlineRun::Link {
             uri: "https://example.test/pay".into(),
             runs: vec![InlineRun::Text {
                 text: "payment terms".into(),
                 font: (),
+                style: RunStyle { underline: Some(true), ..RunStyle::default() },
             }],
         },
-        InlineRun::Text { text: ".".into(), font: () },
+        InlineRun::Text { text: ".".into(), font: (), style: RunStyle::default() },
     ],
     first_line_indent: NonNegative::ZERO,
     align: Alignment::Start,
@@ -288,7 +303,11 @@ let paragraph = ParagraphSpec {
 
 | Topic | Rule |
 | --- | --- |
-| `InlineRun::Text` / `Bold` | `{ text, font }`. `Bold` uses `FontFamily.bold` for that key. |
+| `InlineRun::Text` | `{ text, font, style }`. `RunStyle` fields left `None` inherit. `Some(false)` turns off an inherited flag. |
+| Inheritance | Seed (12 pt, black, regular, no lines, no tracking), then each `Block::Styled`, then `ParagraphSpec` size and color, then the run. Bands, layers, and canvas text start from the seed. Table cell text and list markers use the regular face and inherit only size and color. |
+| Underline / strikethrough | Position scales with the run's size. Thickness is 1 pt. Adjacent runs on one line with the same size and color share one stroke, placed from the first segment. Spaces inside the line are covered. A blank keeps its own stroke. |
+| `tracking` | Extra space after each cluster followed by more text on the line. It counts toward line breaking. Negative values may not push a glyph's advance below zero (`ErrorKind::NegativeTracking`). |
+| Mixed sizes | Each face on a line is scaled by its own size. The line box takes the largest ascent, the deepest descent, and the largest leading, then the larger of that natural height and the largest size times the line-height factor. A line of only blanks uses the first text run's resolved face at the paragraph size. A paragraph with no text runs does not read a font. |
 | `InlineRun::Link` | Writes PDF link annotations over the glyph boxes; does not fetch the URI. Empty URI fails layout |
 | `BlankWidth::Fixed` / `Em` / `ToEndOfLine` | Underline-style blanks in forms |
 | Band / layer copy | Uses `TextRun` (resolved at paint time), not `InlineRun` |
@@ -393,13 +412,14 @@ not provided. Nest lists instead.
 ## Header, footer, and page numbers
 
 ```rust
-use pdfcraft_pdf::spec::{BandInset, BandSlot, BandSpec, TextRun};
+use pdfcraft_pdf::spec::{BandInset, BandSlot, BandSpec, RunStyle, TextRun};
 
 BandSpec {
     inset: BandInset::PageMargins, // or BandInset::Fixed { left, right }
     left: Some(BandSlot::Text {
         runs: vec![TextRun::Literal("Acme Co.".into())],
         font: (),
+        style: RunStyle { bold: Some(true), ..RunStyle::default() },
     }),
     right: Some(BandSlot::Text {
         runs: vec![
@@ -409,6 +429,7 @@ BandSpec {
             TextRun::PageCount,
         ],
         font: (),
+        style: RunStyle::default(),
     }),
 }
 ```
@@ -422,6 +443,7 @@ BandSpec {
 Bands span the full page width unless inset. Content taller than the margin
 band fails with `ErrorKind::DecorationTallerThanMargin` before any page starts.
 `BandSlot::Link` builds the URI from `TextRun`s at paint time the same way.
+Band, layer, and canvas text take a `RunStyle` that starts from the seed, not from any enclosing block.
 
 ---
 

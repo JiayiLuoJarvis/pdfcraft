@@ -18,6 +18,16 @@ canvas limits
 fonts error
 fonts limits
 geom error
+layout/atomic error
+layout/atomic geom
+layout/atomic layout/frame
+layout/atomic layout/style
+layout/canvas error
+layout/canvas geom
+layout/canvas layout/atomic
+layout/canvas layout/frame
+layout/canvas layout/line_run
+layout/canvas layout/style
 layout/column_width error
 layout/column_width geom
 layout/columns error
@@ -35,6 +45,7 @@ layout/decorate layout/nesting
 layout/decorate layout/style
 layout/flow error
 layout/flow geom
+layout/flow layout/canvas
 layout/flow layout/columns
 layout/flow layout/frame
 layout/flow layout/hline
@@ -54,10 +65,12 @@ layout/hline layout/style
 layout/image canvas
 layout/image error
 layout/image geom
+layout/image layout/atomic
 layout/image layout/frame
 layout/image layout/style
 layout/line_run canvas
 layout/line_run error
+layout/line_run fonts
 layout/line_run geom
 layout/line_run layout/frame
 layout/line_run layout/style
@@ -79,7 +92,6 @@ layout/paginate layout/frame
 layout/paginate limits
 layout/paragraph canvas
 layout/paragraph error
-layout/paragraph fonts
 layout/paragraph geom
 layout/paragraph layout/frame
 layout/paragraph layout/line_run
@@ -104,6 +116,7 @@ spec canvas
 spec error
 spec fonts
 spec geom
+spec layout/canvas
 spec layout/column_width
 spec layout/columns
 spec layout/decorate

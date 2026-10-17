@@ -29,13 +29,116 @@ pub(crate) struct MeasuredText {
     pub(crate) advance_norm: f32,
 }
 
+/// One face's vertical metrics, scaled by the size that face is drawn at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FaceExtent {
+    ascent: f32,
+    descent: f32,
+    leading: f32,
+    size: Length<Positive>,
+}
+
+impl FaceExtent {
+    /// Scales `face` by `size`. The size stays paired with this face.
+    pub(crate) fn scaled(face: &FaceMetrics, size: Length<Positive>) -> Self {
+        let scale = size.as_pt() / face.units_per_em;
+        Self {
+            ascent: face.ascent * scale,
+            descent: face.descent * scale,
+            leading: face.leading * scale,
+            size,
+        }
+    }
+
+    /// Unknown font id: ascent equals `size`, descent and leading are 0.
+    pub(crate) fn unknown(size: Length<Positive>) -> Self {
+        Self {
+            ascent: size.as_pt(),
+            descent: 0.0,
+            leading: 0.0,
+            size,
+        }
+    }
+}
+
+/// Every face drawn on one line: max ascent, deepest descent, max leading, largest size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LineExtent {
+    ascent: f32,
+    descent: f32,
+    leading: f32,
+    largest_size: Length<Positive>,
+}
+
+impl From<FaceExtent> for LineExtent {
+    fn from(face: FaceExtent) -> Self {
+        Self {
+            ascent: face.ascent,
+            descent: face.descent,
+            leading: face.leading,
+            largest_size: face.size,
+        }
+    }
+}
+
+impl LineExtent {
+    /// Folds `face` into this line. Descent uses the minimum, so a more negative value wins.
+    pub(crate) fn include(self, face: FaceExtent) -> Self {
+        Self {
+            ascent: self.ascent.max(face.ascent),
+            descent: self.descent.min(face.descent),
+            leading: self.leading.max(face.leading),
+            largest_size: self.largest_size.max(face.size),
+        }
+    }
+}
+
+/// Line box height and baseline for one line.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LineMetrics {
-    pub(crate) ascent: Length<Finite>,
-    pub(crate) descent: Length<Finite>,
-    pub(crate) leading: Length<Finite>,
     pub(crate) line_height: Length<Positive>,
     pub(crate) baseline: Length<Finite>,
+}
+
+impl LineMetrics {
+    /// `natural = ascent - descent + leading`. Height is the larger of `natural` and
+    /// `largest_size * factor`. Baseline is the folded ascent.
+    ///
+    /// # Errors
+    ///
+    /// [`GeometryKind::LineHeightFactor`] when `factor` is not finite and positive.
+    pub(crate) fn new(extent: LineExtent, factor: f32) -> Result<Self> {
+        let height = checked_height(
+            extent.ascent - extent.descent + extent.leading,
+            extent.largest_size,
+            factor,
+        )?;
+        Ok(Self {
+            line_height: height,
+            baseline: Length::from_trusted_pt(extent.ascent),
+        })
+    }
+
+    /// No font is read. Height is `size * factor`. Baseline is `size` below the line-box top.
+    ///
+    /// # Errors
+    ///
+    /// [`GeometryKind::LineHeightFactor`] when `factor` is not finite and positive.
+    pub(crate) fn fontless(size: Length<Positive>, factor: f32) -> Result<Self> {
+        let height = checked_height(size.as_pt() * factor, size, factor)?;
+        Ok(Self {
+            line_height: height,
+            baseline: Length::from_trusted_pt(size.as_pt()),
+        })
+    }
+}
+
+fn checked_height(natural: f32, size: Length<Positive>, factor: f32) -> Result<Length<Positive>> {
+    if !factor.is_finite() || factor <= 0.0 {
+        return Err(GeometryKind::LineHeightFactor { factor }.into());
+    }
+    let line_height = natural.max(size.as_pt() * factor);
+    Positive::pt(line_height)
 }
 
 pub(crate) fn measure_text(
@@ -137,30 +240,6 @@ pub(crate) fn width_norm(advance_font_units: f32, units_per_em: f32) -> f32 {
     advance_font_units / units_per_em
 }
 
-pub(crate) fn line_metrics(
-    face: &FaceMetrics,
-    font_size: Length<Positive>,
-    factor: f32,
-) -> Result<LineMetrics> {
-    if !factor.is_finite() || factor <= 0.0 {
-        return Err(GeometryKind::LineHeightFactor { factor }.into());
-    }
-    let size = font_size.as_pt();
-    let scale = size / face.units_per_em;
-    let ascent = face.ascent * scale;
-    let descent = face.descent * scale;
-    let leading = face.leading * scale;
-    let natural = ascent - descent + leading;
-    let line_height = natural.max(size * factor);
-    Ok(LineMetrics {
-        ascent: Length::from_trusted_pt(ascent),
-        descent: Length::from_trusted_pt(descent),
-        leading: Length::from_trusted_pt(leading),
-        line_height: Length::from_trusted_pt(line_height),
-        baseline: Length::from_trusted_pt(ascent),
-    })
-}
-
 impl FontFace {
     /// Advance of `text` at `size`, in pt. An empty string is `0`.
     ///
@@ -201,7 +280,11 @@ impl FontFace {
     pub fn line_height(&self, size: Length<Positive>) -> Result<f32> {
         let font_ref = parse_face(&self.bytes, self.index)?;
         let face = face_metrics(&font_ref, self.index)?;
-        Ok(line_metrics(&face, size, 1.0)?.line_height.as_pt())
+        Ok(
+            LineMetrics::new(FaceExtent::scaled(&face, size).into(), 1.0)?
+                .line_height
+                .as_pt(),
+        )
     }
 }
 
@@ -265,13 +348,11 @@ mod tests {
         };
         let face = fonts.metrics(id).unwrap();
         assert!(face.descent < 0.0);
-        let line = line_metrics(face, Positive::pt(12.0).unwrap(), 1.2).unwrap();
-        assert!(line.descent.as_pt() < 0.0);
+        let extent = FaceExtent::scaled(face, Positive::pt(12.0).unwrap());
+        assert!(extent.descent < 0.0);
+        let line = LineMetrics::new(extent.into(), 1.2).unwrap();
         assert!(line.line_height.as_pt() > 0.0);
-        assert_eq!(
-            line.baseline.as_pt().to_bits(),
-            line.ascent.as_pt().to_bits()
-        );
+        assert_eq!(line.baseline.as_pt().to_bits(), extent.ascent.to_bits());
     }
 
     #[test]
@@ -283,13 +364,18 @@ mod tests {
             leading: 0.0,
         };
         let size = Positive::pt(12.0).unwrap();
+        let extent = FaceExtent::scaled(&face, size).into();
         assert_eq!(
-            line_metrics(&face, size, 0.0).unwrap_err(),
+            LineMetrics::new(extent, 0.0).unwrap_err(),
             GeometryKind::LineHeightFactor { factor: 0.0 }.into()
         );
         assert!(matches!(
-            line_metrics(&face, size, f32::NAN).unwrap_err().kind,
+            LineMetrics::new(extent, f32::NAN).unwrap_err().kind,
             ErrorKind::InvalidGeometry(GeometryKind::LineHeightFactor { factor }) if factor.is_nan()
         ));
+        assert_eq!(
+            LineMetrics::fontless(size, 0.0).unwrap_err(),
+            GeometryKind::LineHeightFactor { factor: 0.0 }.into()
+        );
     }
 }

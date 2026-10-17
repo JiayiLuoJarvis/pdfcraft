@@ -2,7 +2,7 @@
 
 use crate::canvas::{DocumentInfo, ImageRegistry, RecordedPage, RecordingCanvas};
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible};
-use crate::fonts::{FontId, FontStore};
+use crate::fonts::FontStore;
 use crate::geom::{Length, Positive};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
 use crate::layout::list::MarkerKind;
@@ -89,7 +89,7 @@ pub(crate) fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Fallible<()> {
 
 pub(crate) fn default_style() -> Style {
     Style {
-        font: FontId::from_raw(0),
+        font: None,
         font_size: Positive::pt(12.0).expect("12 pt is positive"),
         line_height_factor: 1.2,
         color: crate::geom::Color::rgb(0, 0, 0),

@@ -4,11 +4,11 @@ use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
 use crate::error::{Fallible as Result, GeometryKind};
-use crate::geom::{Length, NonNegative, Point, Positive};
+use crate::geom::{Length, NonNegative, Positive};
 use crate::layout::frame::{Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::line_run::single_line_run;
+use crate::layout::line_run::{append_commands, single_line_run};
 use crate::layout::nesting::ItemBody;
-use crate::layout::style::Style;
+use crate::layout::style::GlyphStyle;
 
 /// Ordered marker numbering. Each label gets a trailing `.`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ pub(crate) struct ListSpec<N> {
     pub(crate) kind: ListKind,
     pub(crate) marker_width: Length<Positive>,
     pub(crate) nest_indent: Option<Length<Positive>>,
-    pub(crate) marker_style: Style,
+    pub(crate) marker_style: GlyphStyle,
     pub(crate) items: Vec<ListItem<N>>,
 }
 
@@ -134,7 +134,7 @@ struct PendingItem<N> {
 pub(crate) struct ListNode<N> {
     marker_width: Length<Positive>,
     indent: Length<Positive>,
-    marker_style: Style,
+    marker_style: GlyphStyle,
     items: VecDeque<PendingItem<N>>,
 }
 
@@ -228,11 +228,16 @@ impl<N: Flowable> ListNode<N> {
             };
 
             if let Some(label) = &item.pending_marker {
-                let mut run =
+                let marker =
                     single_line_run(ctx, label, &self.marker_style, Some(self.marker_width))?;
-                let baseline = first_baseline(&fragment).unwrap_or(run.origin.y().as_pt());
-                run.origin = Point::try_pt(0.0, y.as_pt() + baseline)?;
-                commands.push(FragmentCommand::Glyphs(run));
+                let baseline = first_baseline(&fragment).unwrap_or(marker.baseline);
+                append_commands(
+                    &mut commands,
+                    &marker.pieces,
+                    0.0,
+                    y.as_pt() + baseline,
+                    0.0,
+                )?;
             }
             let spacing = fragment.spacing_after;
             commands.extend(fragment.with_offset(self.indent.into(), y.into())?.commands);

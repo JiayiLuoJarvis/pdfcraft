@@ -4,9 +4,40 @@
 use std::ops::Range;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
-use crate::geom::{Length, NonNegative, Positive};
+use crate::geom::{Finite, Length, NonNegative, Positive};
 use crate::text::break_class::{allows, BreakClass, PairClass};
 use crate::text::cluster::{Cluster, ClusterCursor, ClusteredText};
+
+/// Width of one text cluster. `gap` is tracking that counts only before more text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct InkWidth {
+    pub(crate) body: Length<NonNegative>,
+    pub(crate) gap: Length<Finite>,
+}
+
+/// One atom on a line, in line order, as [`draw_widths`] sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum WidthPart {
+    Ink(InkWidth),
+    Blank(Length<NonNegative>),
+}
+
+/// Drawn width of each part. A cluster's `gap` counts only when the next part is
+/// also a cluster, so a blank, a hard break, or the line end drops it.
+pub(crate) fn draw_widths(parts: &[WidthPart]) -> impl Iterator<Item = Length<NonNegative>> + '_ {
+    parts
+        .iter()
+        .enumerate()
+        .map(move |(index, part)| match *part {
+            WidthPart::Blank(width) => width,
+            WidthPart::Ink(ink) => match parts.get(index + 1) {
+                Some(WidthPart::Ink(_)) => {
+                    Length::from_trusted_pt((ink.body.as_pt() + ink.gap.as_pt()).max(0.0))
+                }
+                Some(WidthPart::Blank(_)) | None => ink.body,
+            },
+        })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Advance {
@@ -41,7 +72,7 @@ enum Atom<T> {
     },
     Ink {
         pair: PairClass,
-        width: Length<NonNegative>,
+        width: InkWidth,
         group: usize,
         cluster: usize,
     },
@@ -137,7 +168,10 @@ pub(crate) fn break_lines(
 
     let spans = [Span::<()>::Group(0)];
     let broken = break_spans(std::slice::from_ref(&text), &spans, budget, |_, cluster| {
-        width_of(cluster)
+        Ok(InkWidth {
+            body: width_of(cluster),
+            gap: Finite::ZERO,
+        })
     })?;
     let records = broken
         .lines
@@ -152,7 +186,7 @@ pub(crate) fn break_spans<T: Copy>(
     groups: &[&ClusteredText],
     spans: &[Span<T>],
     budget: LineBudget,
-    mut width_of: impl FnMut(usize, Cluster<'_>) -> Length<NonNegative>,
+    mut width_of: impl FnMut(usize, Cluster<'_>) -> Result<InkWidth>,
 ) -> Result<BrokenSpans<T>> {
     if let Some(pos) = spans.iter().position(|span| {
         matches!(
@@ -178,7 +212,7 @@ pub(crate) fn break_spans<T: Copy>(
 fn project_atoms<T: Copy>(
     groups: &[&ClusteredText],
     spans: &[Span<T>],
-    width_of: &mut impl FnMut(usize, Cluster<'_>) -> Length<NonNegative>,
+    width_of: &mut impl FnMut(usize, Cluster<'_>) -> Result<InkWidth>,
 ) -> Result<Vec<Atom<T>>> {
     let mut atoms = Vec::new();
     for span in spans {
@@ -193,12 +227,10 @@ fn project_atoms<T: Copy>(
                             cluster: index,
                         }),
                         BreakClass::Pair(pair) => {
-                            let width = width_of(group, cluster);
-                            if !width.as_pt().is_finite() || width.as_pt() < 0.0 {
-                                return Err(GeometryKind::AdvanceWidth {
-                                    width: width.as_pt(),
-                                }
-                                .into());
+                            let width = width_of(group, cluster)?;
+                            let body = width.body.as_pt();
+                            if !body.is_finite() || body < 0.0 || !width.gap.as_pt().is_finite() {
+                                return Err(GeometryKind::AdvanceWidth { width: body }.into());
                             }
                             atoms.push(Atom::Ink {
                                 pair,
@@ -242,7 +274,9 @@ fn pack_lines<T: Copy>(
     let mut records = Vec::new();
     let mut line_start = 0usize;
     let mut i = 0usize;
-    let mut line_width = NonNegative::ZERO;
+    // Drawn widths of every line atom before `tail`. `tail`'s gap waits for the next atom.
+    let mut settled = NonNegative::ZERO;
+    let mut tail: Option<WidthPart> = None;
 
     while i < atoms.len() {
         let avail = budget.for_line(records.len());
@@ -260,15 +294,18 @@ fn pack_lines<T: Copy>(
 
         match atoms[i] {
             Atom::Hard { .. } => {
-                records.push(emit_line(groups, &atoms, line_start, i, line_width));
+                let width = closed_width(settled, tail);
+                records.push(emit_line(groups, &atoms, line_start, i, width));
                 i += 1;
                 line_start = i;
-                line_width = NonNegative::ZERO;
+                settled = NonNegative::ZERO;
+                tail = None;
             }
             Atom::Blank {
                 advance: Advance::Fill,
                 ..
             } => {
+                let line_width = closed_width(settled, tail);
                 debug_assert!(line_width.as_pt() <= avail.as_pt());
                 let remain = (avail - line_width).as_pt();
                 let width = if remain.is_finite() && remain > 0.0 {
@@ -279,29 +316,32 @@ fn pack_lines<T: Copy>(
                 if let Atom::Blank { width: slot, .. } = &mut atoms[i] {
                     *slot = width;
                 }
-                line_width = avail.into();
+                settled = avail.into();
+                tail = None;
                 i += 1;
             }
-            Atom::Ink { width, .. } | Atom::Blank { width, .. } => {
-                if (line_width + width).as_pt() <= avail.as_pt() {
-                    line_width += width;
+            Atom::Ink { .. } | Atom::Blank { .. } => {
+                let part = width_part(&atoms[i]).expect("ink and blank atoms have widths");
+                let (before, trial) = append_width(settled, tail, part);
+                if trial.as_pt() <= avail.as_pt() {
+                    settled = before;
+                    tail = Some(part);
                     i += 1;
                     continue;
                 }
                 match nearest_break(&atoms, line_start, i) {
                     Some(split) => {
-                        let committed: Length<NonNegative> = (line_start..split)
-                            .filter_map(|idx| atom_width(&atoms[idx]))
-                            .sum();
+                        let committed = line_width(&atoms[line_start..split]);
                         records.push(emit_line(groups, &atoms, line_start, split, committed));
                         line_start = split;
                         i = split;
-                        line_width = NonNegative::ZERO;
+                        settled = NonNegative::ZERO;
+                        tail = None;
                     }
                     None => {
                         return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
                             text: overflow_text(groups, &atoms, line_start, i),
-                            width: (line_width + width).as_pt(),
+                            width: trial.as_pt(),
                             avail: avail.as_pt(),
                         }));
                     }
@@ -316,7 +356,7 @@ fn pack_lines<T: Copy>(
             &atoms,
             line_start,
             atoms.len(),
-            line_width,
+            closed_width(settled, tail),
         ));
     } else {
         records.push(emit_line(
@@ -328,6 +368,35 @@ fn pack_lines<T: Copy>(
         ));
     }
     Ok(records)
+}
+
+/// Settled width once `tail` is followed by `part`, and the line width if
+/// `part` then ends the line.
+fn append_width(
+    settled: Length<NonNegative>,
+    tail: Option<WidthPart>,
+    part: WidthPart,
+) -> (Length<NonNegative>, Length<NonNegative>) {
+    let Some(prev) = tail else {
+        return (settled, closed_width(settled, Some(part)));
+    };
+    let pair = [prev, part];
+    let mut drawn = draw_widths(&pair);
+    let before = settled + drawn.next().unwrap_or(NonNegative::ZERO);
+    (before, before + drawn.next().unwrap_or(NonNegative::ZERO))
+}
+
+/// Line width when `tail` ends the line, so its gap is dropped.
+fn closed_width(settled: Length<NonNegative>, tail: Option<WidthPart>) -> Length<NonNegative> {
+    match tail {
+        Some(part) => settled + draw_widths(&[part]).sum::<Length<NonNegative>>(),
+        None => settled,
+    }
+}
+
+fn line_width<T>(atoms: &[Atom<T>]) -> Length<NonNegative> {
+    let parts: Vec<_> = atoms.iter().filter_map(width_part).collect();
+    draw_widths(&parts).sum()
 }
 
 fn overflow_text<T>(
@@ -406,9 +475,10 @@ fn ink_pair<T>(atom: &Atom<T>) -> Option<PairClass> {
     }
 }
 
-fn atom_width<T>(atom: &Atom<T>) -> Option<Length<NonNegative>> {
+fn width_part<T>(atom: &Atom<T>) -> Option<WidthPart> {
     match *atom {
-        Atom::Ink { width, .. } | Atom::Blank { width, .. } => Some(width),
+        Atom::Ink { width, .. } => Some(WidthPart::Ink(width)),
+        Atom::Blank { width, .. } => Some(WidthPart::Blank(width)),
         Atom::Hard { .. } => None,
     }
 }
@@ -840,7 +910,10 @@ mod tests {
             let count = f32::from(
                 u16::try_from(cluster.scalar_count()).expect("stub cluster scalar count"),
             );
-            Length::from_trusted_pt(count)
+            Ok(InkWidth {
+                body: Length::from_trusted_pt(count),
+                gap: Finite::ZERO,
+            })
         })
     }
 
@@ -1053,5 +1126,60 @@ mod tests {
         assert_eq!(glyph_text(&groups, &broken.get(0).segs()[0]), "：");
         assert!(matches!(broken.get(1).segs()[0], Seg::Blank { .. }));
         assert_eq!(glyph_text(&groups, &broken.get(1).segs()[1]), "。");
+    }
+
+    fn ink(body: f32, gap: f32) -> WidthPart {
+        WidthPart::Ink(InkWidth {
+            body: nn(body),
+            gap: Finite::pt(gap).unwrap(),
+        })
+    }
+
+    fn drawn(parts: &[WidthPart]) -> Vec<f32> {
+        draw_widths(parts).map(Length::as_pt).collect()
+    }
+
+    #[test]
+    fn tracking_gap_follows_every_cluster_but_the_last() {
+        assert_eq!(
+            drawn(&[ink(1.0, 0.5), ink(1.0, 0.5), ink(1.0, 0.5)]),
+            [1.5, 1.5, 1.0]
+        );
+    }
+
+    #[test]
+    fn a_blank_drops_the_tracking_gap_before_it() {
+        assert_eq!(
+            drawn(&[ink(1.0, 0.5), WidthPart::Blank(nn(2.0)), ink(1.0, 0.5)]),
+            [1.0, 2.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn negative_tracking_narrows_the_drawn_width() {
+        assert_eq!(drawn(&[ink(1.0, -0.25), ink(1.0, -0.25)]), [0.75, 1.0]);
+    }
+
+    #[test]
+    fn the_trailing_gap_does_not_count_toward_the_fit() {
+        let groups = [ClusteredText::new("字字字")];
+        let refs: Vec<&ClusteredText> = groups.iter().collect();
+        let broken = break_spans(
+            &refs,
+            &[Span::<()>::Group(0)],
+            LineBudget::uniform(pos(3.0)),
+            |_, _| {
+                Ok(InkWidth {
+                    body: nn(1.0),
+                    gap: Finite::pt(1.0).unwrap(),
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(broken.len(), 2);
+        assert_eq!(glyph_text(&groups, &broken.get(0).segs()[0]), "字字");
+        assert_width(broken.get(0).width().as_pt(), 3.0);
+        assert_eq!(glyph_text(&groups, &broken.get(1).segs()[0]), "字");
+        assert_width(broken.get(1).width().as_pt(), 1.0);
     }
 }

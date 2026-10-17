@@ -403,9 +403,10 @@ mod tests {
     use crate::fonts::{fixture_bytes, FontSource, FontStore};
     use crate::geom::{Color, NonNegative, Positive, A4};
     use crate::layout::flow::{KeepTogetherNode, SpacerNode};
-    use crate::layout::paragraph::{LinePiece, ParagraphNode};
+    use crate::layout::line_run::LinePiece;
+    use crate::layout::paragraph::ParagraphNode;
     use crate::layout::style::{Style, TextAlign};
-    use crate::text::measure::line_metrics;
+    use crate::text::measure::{FaceExtent, LineMetrics};
 
     fn fonts_and_style(align: TextAlign, spacing: f32) -> Option<(FontStore, Style)> {
         let bytes = fixture_bytes()?;
@@ -476,8 +477,14 @@ mod tests {
             };
             style.first_line_indent = NonNegative::pt(indent).unwrap();
             let para = ParagraphNode::layout(&mut fonts, "AB", &style, body_w).unwrap();
-            let face = fonts.metrics(style.font).unwrap();
-            let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+            let face = fonts
+                .metrics(style.font.expect("test style has a face"))
+                .unwrap();
+            let metrics = LineMetrics::new(
+                FaceExtent::scaled(face, style.font_size).into(),
+                style.line_height_factor,
+            )
+            .unwrap();
             let line_width = {
                 // Recompute via first run advance.
                 let LinePiece::Glyphs(run) = &para.lines[0].pieces[0] else {
@@ -689,8 +696,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let page = Size::try_pt(200.0, 50.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
@@ -730,8 +743,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let line_h = metrics.line_height.as_pt();
         let page = Size::try_pt(200.0, line_h * 2.0).unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A\nB\nC", &style, 200.0).unwrap();
@@ -773,8 +792,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 20.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let line_h = metrics.line_height.as_pt();
         // Body fits exactly one line; spacing_after 20 cannot fit.
         let page = Size::try_pt(200.0, line_h).unwrap();
@@ -810,8 +835,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let line_h = metrics.line_height.as_pt();
         // Two lines fit in the full frame. One leading line leaves only one line of room.
         let page = Size::try_pt(200.0, line_h * 2.0 + 10.0).unwrap();
@@ -857,8 +888,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let line_h = metrics.line_height.as_pt();
         let page = Size::try_pt(200.0, line_h + 1.0).unwrap();
         let a = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
@@ -899,8 +936,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let line_h = metrics.line_height.as_pt();
         let spacing = line_h + 1.0;
         let mut spaced = style;
@@ -944,8 +987,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 8.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let line_h = metrics.line_height.as_pt();
         let page = Size::try_pt(200.0, line_h * 2.0 + 8.0).unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
@@ -982,8 +1031,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let para = ParagraphNode::layout(&mut fonts, "A", &style, 180.0).unwrap();
         let mut errors = crate::error::ErrorBag::default();
         let mut ctx = LayoutCtx {
@@ -1021,8 +1076,14 @@ mod tests {
         let Some((mut fonts, style)) = fonts_and_style(TextAlign::Start, 0.0) else {
             return;
         };
-        let face = fonts.metrics(style.font).unwrap();
-        let metrics = line_metrics(face, style.font_size, style.line_height_factor).unwrap();
+        let face = fonts
+            .metrics(style.font.expect("test style has a face"))
+            .unwrap();
+        let metrics = LineMetrics::new(
+            FaceExtent::scaled(face, style.font_size).into(),
+            style.line_height_factor,
+        )
+        .unwrap();
         let first = ParagraphNode::layout(&mut fonts, "A", &style, 200.0).unwrap();
         let second_width = 400.0 - 30.0 - 8.0;
         let second = ParagraphNode::layout(&mut fonts, "B", &style, second_width).unwrap();

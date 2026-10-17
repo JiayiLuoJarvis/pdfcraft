@@ -1,18 +1,24 @@
 use crate::canvas::{pt_near, CanvasCommand, LinkTarget, RecordingCanvas};
-use crate::fonts::{fixture_bytes, FontId, FontSource, FontStore};
-use crate::geom::{Finite, NonNegative, Point, Positive};
+use crate::fonts::{fixture_bytes, EmOffset, FontId, FontSource, FontStore};
+use crate::geom::{Finite, NonNegative, PathVerb, Point, Positive};
+use crate::layout::decorate::Decorations;
+use crate::layout::flow::FlowNode;
 use crate::layout::frame::{draw_fragment, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::paragraph::{BlankWidth, InlineBlank, InlineItem, TextNode, TextRun};
-use crate::layout::style::{Style, TextAlign};
-use crate::layout::test_util::fonts_and_style;
-use crate::text::measure::line_metrics;
+use crate::layout::style::{Decoration, GlyphStyle, Style, TextAlign};
+use crate::layout::test_util::{fonts_and_style, page, render};
+use crate::text::measure::{FaceExtent, LineMetrics};
 
 fn uri(text: &str) -> LinkTarget {
     LinkTarget::uri(text).unwrap()
 }
 
-fn text_item(text: &str, font: FontId, link: Option<&str>) -> InlineItem {
-    InlineItem::Text(TextRun::new(text, font).with_link(link.map(uri)))
+fn text_item(text: &str, style: &Style, font: FontId, link: Option<&str>) -> InlineItem {
+    let glyph = GlyphStyle {
+        font,
+        ..GlyphStyle::plain(style)
+    };
+    InlineItem::Text(TextRun::new(text, glyph).with_link(link.map(uri)))
 }
 
 fn fit(
@@ -89,11 +95,16 @@ fn glyph_spans(fragment: &Fragment) -> Vec<(String, f32, f32)> {
 }
 
 fn body_line(fonts: &FontStore, style: &Style) -> f32 {
-    let face = fonts.metrics(style.font).unwrap();
-    line_metrics(face, style.font_size, style.line_height_factor)
-        .unwrap()
-        .line_height
-        .as_pt()
+    let face = fonts
+        .metrics(style.font.expect("test style has a face"))
+        .unwrap();
+    LineMetrics::new(
+        FaceExtent::scaled(face, style.font_size).into(),
+        style.line_height_factor,
+    )
+    .unwrap()
+    .line_height
+    .as_pt()
 }
 
 #[test]
@@ -104,7 +115,7 @@ fn centered_fill_blank_starts_at_the_frame_x() {
     style.align = TextAlign::Center;
     let node = TextNode::from_items(
         vec![
-            InlineItem::Text(TextRun::new("A", style.font)),
+            InlineItem::Text(TextRun::new("A", GlyphStyle::plain(&style))),
             InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
         ],
         style,
@@ -151,9 +162,24 @@ fn partial_link_rect_covers_only_the_linked_glyphs() {
     let line = body_line(&fonts, &style);
     let fragment = fit(
         vec![
-            text_item("A", style.font, None),
-            text_item("BC", style.font, Some("https://example.com/bc")),
-            text_item("D", style.font, None),
+            text_item(
+                "A",
+                &style,
+                style.font.expect("test style has a face"),
+                None,
+            ),
+            text_item(
+                "BC",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("https://example.com/bc"),
+            ),
+            text_item(
+                "D",
+                &style,
+                style.font.expect("test style has a face"),
+                None,
+            ),
         ],
         &style,
         &mut fonts,
@@ -187,7 +213,8 @@ fn wrapped_link_emits_one_rect_per_visual_line() {
     let fragment = fit(
         vec![text_item(
             "第第",
-            style.font,
+            &style,
+            style.font.expect("test style has a face"),
             Some("https://example.com/wrap"),
         )],
         &style,
@@ -226,9 +253,19 @@ fn same_link_keeps_body_and_bold_in_one_rect() {
         .unwrap();
     let fragment = fit(
         vec![
-            text_item("A", style.font, Some("u")),
-            text_item("B", bold, Some("u")),
-            text_item("C", style.font, Some("u")),
+            text_item(
+                "A",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("u"),
+            ),
+            text_item("B", &style, bold, Some("u")),
+            text_item(
+                "C",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("u"),
+            ),
         ],
         &style,
         &mut fonts,
@@ -254,10 +291,30 @@ fn link_changes_flush_and_a_repeat_uri_stays_its_own_rect() {
     };
     let fragment = fit(
         vec![
-            text_item("A", style.font, Some("a")),
-            text_item("B", style.font, Some("b")),
-            text_item("C", style.font, None),
-            text_item("D", style.font, Some("a")),
+            text_item(
+                "A",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("a"),
+            ),
+            text_item(
+                "B",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("b"),
+            ),
+            text_item(
+                "C",
+                &style,
+                style.font.expect("test style has a face"),
+                None,
+            ),
+            text_item(
+                "D",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("a"),
+            ),
         ],
         &style,
         &mut fonts,
@@ -290,8 +347,18 @@ fn adjacent_runs_with_the_same_link_share_one_rect() {
     };
     let fragment = fit(
         vec![
-            text_item("A", style.font, Some("u")),
-            text_item("B", style.font, Some("u")),
+            text_item(
+                "A",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("u"),
+            ),
+            text_item(
+                "B",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("u"),
+            ),
         ],
         &style,
         &mut fonts,
@@ -313,11 +380,21 @@ fn blank_splits_a_link_and_is_not_inside_either_rect() {
     };
     let fragment = fit(
         vec![
-            text_item("A", style.font, Some("u")),
+            text_item(
+                "A",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("u"),
+            ),
             InlineItem::Blank(InlineBlank::new(BlankWidth::Fixed(
                 NonNegative::pt(30.0).unwrap(),
             ))),
-            text_item("B", style.font, Some("u")),
+            text_item(
+                "B",
+                &style,
+                style.font.expect("test style has a face"),
+                Some("u"),
+            ),
         ],
         &style,
         &mut fonts,
@@ -340,7 +417,12 @@ fn link_rect_follows_alignment_and_first_line_indent() {
     };
     style.align = TextAlign::Center;
     let centered = fit(
-        vec![text_item("A", style.font, Some("u"))],
+        vec![text_item(
+            "A",
+            &style,
+            style.font.expect("test style has a face"),
+            Some("u"),
+        )],
         &style,
         &mut fonts,
         120.0,
@@ -353,7 +435,12 @@ fn link_rect_follows_alignment_and_first_line_indent() {
 
     style.align = TextAlign::End;
     let ended = fit(
-        vec![text_item("A", style.font, Some("u"))],
+        vec![text_item(
+            "A",
+            &style,
+            style.font.expect("test style has a face"),
+            Some("u"),
+        )],
         &style,
         &mut fonts,
         120.0,
@@ -367,7 +454,12 @@ fn link_rect_follows_alignment_and_first_line_indent() {
     style.align = TextAlign::Start;
     style.first_line_indent = NonNegative::pt(10.0).unwrap();
     let indented = fit(
-        vec![text_item("A", style.font, Some("u"))],
+        vec![text_item(
+            "A",
+            &style,
+            style.font.expect("test style has a face"),
+            Some("u"),
+        )],
         &style,
         &mut fonts,
         120.0,
@@ -384,7 +476,12 @@ fn offset_and_paint_move_the_link_rect() {
         return;
     };
     let fragment = fit(
-        vec![text_item("A", style.font, Some("https://example.com/a"))],
+        vec![text_item(
+            "A",
+            &style,
+            style.font.expect("test style has a face"),
+            Some("https://example.com/a"),
+        )],
         &style,
         &mut fonts,
         80.0,
@@ -426,11 +523,68 @@ fn empty_linked_text_emits_no_rect() {
         return;
     };
     let fragment = fit(
-        vec![text_item("", style.font, Some("u"))],
+        vec![text_item(
+            "",
+            &style,
+            style.font.expect("test style has a face"),
+            Some("u"),
+        )],
         &style,
         &mut fonts,
         80.0,
         40.0,
     );
     assert!(hits(&fragment).is_empty());
+}
+
+#[test]
+fn merged_underline_uses_the_first_segment_and_draws_1pt() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    assert_eq!(style.font_size.as_pt().to_bits(), 12.0f32.to_bits());
+    let size = style.font_size;
+    let first = Decoration::at(EmOffset::new(-0.25).unwrap(), size).unwrap();
+    let second = Decoration::at(EmOffset::new(-0.8).unwrap(), size).unwrap();
+    let face = style.font.expect("test style has a face");
+    let item = |text: &str, line: Decoration| {
+        InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle {
+                font: face,
+                underline: Some(line),
+                ..GlyphStyle::plain(&style)
+            },
+        ))
+    };
+    let node = TextNode::from_items(vec![item("A", first), item("B", second)], style);
+    let (result, rec) = render(
+        FlowNode::Text(node),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.expect("line lays out");
+    let recorded = &rec.pages()[0];
+    let mut baseline = None;
+    let mut drawn = Vec::new();
+    for op in recorded.ops() {
+        match op {
+            CanvasCommand::DrawGlyphRun { run } => {
+                baseline.get_or_insert(run.origin.y().as_pt());
+            }
+            CanvasCommand::StrokePath { path, stroke, .. } => {
+                if let [PathVerb::MoveTo(from), PathVerb::LineTo(_)] = path.verbs() {
+                    drawn.push((from.y().as_pt(), stroke.width().as_pt()));
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(drawn.len(), 1, "{drawn:?}");
+    let baseline = baseline.expect("glyphs");
+    // -(offset/upem)*size + 0.5 at 12 pt. Offsets are already in em.
+    assert!(pt_near(drawn[0].0, baseline + 3.5));
+    assert!(!pt_near(drawn[0].0, baseline + 10.1));
+    assert!(pt_near(drawn[0].1, 1.0));
 }

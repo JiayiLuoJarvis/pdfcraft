@@ -29,7 +29,9 @@
 //! Each text run names a key in that registry. A character with no cmap entry
 //! fails the document ([`ErrorKind::MissingGlyph`]). There is no fallback font
 //! and no `.notdef` box. v1 targets horizontal Chinese and Latin (no bidi,
-//! vertical writing, kerning, ligatures, or justified lines).
+//! vertical writing, kerning, ligatures, or justified lines). Bold, italic, and
+//! bold italic are separate registered faces. A run that needs a face its
+//! family lacks fails the document. There is no synthetic bold or slant.
 //!
 //! # Modules
 //!
@@ -59,8 +61,10 @@
 //! let rendered = layout_spec(DocumentSpec {
 //!     page_size: PageSize::A4,
 //!     resources: Resources::with_fonts(FontRegistry::single(FontFamily {
-//!         normal: FontFace::new(font, 0),
+//!         regular: FontFace::new(font, 0),
 //!         bold: None,
+//!         italic: None,
+//!         bold_italic: None,
 //!     })),
 //!     limits: pdfcraft_pdf::Limits::default(),
 //!     info: DocumentInfo::default(),
@@ -88,8 +92,8 @@ pub mod geom;
 pub mod limits;
 
 pub use error::{
-    CellIndex, CellSpanReason, ColumnWidthsReason, Error, ErrorKind, Errors, GeometryKind,
-    Location, Region, Result,
+    CellIndex, CellSpanReason, ColumnWidthsReason, DecorationKind, Error, ErrorKind, Errors,
+    GeometryKind, Location, Region, Result,
 };
 pub use geom::{
     Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length,

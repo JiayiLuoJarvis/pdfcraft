@@ -4,11 +4,12 @@ use std::collections::HashMap;
 
 use crate::canvas::{DecodedImage, ImageRegistry, LinkTarget, RecordingCanvas};
 use crate::error::{
-    ColumnWidthsReason, Error, ErrorBag, ErrorKind, Fallible, GeometryKind, Location, Result,
+    ColumnWidthsReason, DecorationKind, Error, ErrorBag, ErrorKind, Fallible, GeometryKind,
+    Location, Result,
 };
-use crate::fonts::{FontFace, FontId, FontKey, FontSource, FontStore};
+use crate::fonts::{EmOffset, FaceDecorations, FontFace, FontId, FontKey, FontSource, FontStore};
 use crate::geom::{
-    Color, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
+    Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
 };
 use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
@@ -25,7 +26,7 @@ use crate::layout::paginate::{layout_pages, paint_laid, PaginateConfig, SectionJ
 use crate::layout::paragraph::{
     BlankWidth, InlineBlank, InlineItem, TextNode, TextRun as LayoutTextRun,
 };
-use crate::layout::style::{Style, TextAlign};
+use crate::layout::style::{Decoration, GlyphStyle, Style, TextAlign};
 use crate::layout::table::{self as layout_table, TableNode, TableSpec as LayoutTableSpec};
 use crate::limits::Limits;
 
@@ -35,14 +36,18 @@ use super::{
     Alignment, BandInset, BandSlot, BandSpec, BlankWidth as SpecBlankWidth, Block, CanvasMark,
     CanvasSpec, CellBlock, CellSpec, ColumnsSpec, DocumentSpec, HLineSpec, ImageRef, ImageSpec,
     InlineRun, LayerMark, LayerShape, ListKind, ListSpec, PageWhen, ParagraphSpec, Resources,
-    SectionSpec, TextRun, TextStyle,
+    RunStyle, SectionSpec, TextRun,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
 ///
 /// `K` is the caller's font key (`Copy + Eq + Hash + Debug`). A key that was not
-/// registered fails with [`ErrorKind::UnregisteredFont`]. A bold run whose family
-/// has no bold face fails with [`ErrorKind::BoldFaceRequired`].
+/// registered fails with [`ErrorKind::UnregisteredFont`]. A run whose family lacks
+/// the face its style needs fails with [`ErrorKind::BoldFaceRequired`],
+/// [`ErrorKind::ItalicFaceRequired`], or [`ErrorKind::BoldItalicFaceRequired`]. An
+/// underline or strikethrough the regular face has no metrics for fails with
+/// [`ErrorKind::MissingDecorationMetrics`]. Tracking that would give a glyph a
+/// negative advance fails with [`ErrorKind::NegativeTracking`].
 ///
 /// # Errors
 ///
@@ -66,7 +71,6 @@ where
     let mut errors = ErrorBag::default();
     let (mut fonts, font_table, images, image_handles) =
         lower_resources(resources, limits, doc, &mut errors);
-    let style = default_style();
     let mut configs = Vec::with_capacity(sections.len());
     let mut roots = Vec::with_capacity(sections.len());
     let mut decorations = Vec::with_capacity(sections.len());
@@ -74,14 +78,8 @@ where
     for (index, section) in sections.into_iter().enumerate() {
         let mark = errors.mark();
         validate_section_images(&section, &image_handles, &mut errors);
-        let (config, root, decoration, section_errors) = lower_section(
-            section,
-            page_size,
-            style.clone(),
-            &font_table,
-            doc,
-            &image_handles,
-        );
+        let (config, root, decoration, section_errors) =
+            lower_section(section, page_size, &font_table, doc, &image_handles);
         errors.absorb(section_errors);
         errors.locate_since(mark, &Location::section(index));
         configs.push(config);
@@ -127,13 +125,109 @@ where
 
 #[derive(Clone, Copy)]
 struct ResolvedFamily {
-    normal: FontId,
+    regular: FontId,
     bold: Option<FontId>,
+    italic: Option<FontId>,
+    bold_italic: Option<FontId>,
+    decorations: FaceDecorations,
+}
+
+impl ResolvedFamily {
+    /// List markers draw with the first registered face and never pick another.
+    fn first_face() -> Self {
+        Self {
+            regular: FontId::from_raw(0),
+            bold: None,
+            italic: None,
+            bold_italic: None,
+            decorations: FaceDecorations::default(),
+        }
+    }
 }
 
 #[derive(Clone)]
 struct FontTable<K> {
     by_key: HashMap<K, ResolvedFamily>,
+}
+
+/// Bold and italic flags. Together they pick one of the family's four faces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FaceFlags {
+    bold: bool,
+    italic: bool,
+}
+
+/// Which decoration lines a run draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct LineFlags {
+    underline: bool,
+    strikethrough: bool,
+}
+
+/// Inherited run values with every field decided.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InheritedPaint {
+    face: FaceFlags,
+    lines: LineFlags,
+    tracking: Length<Finite>,
+    color: Color,
+    font_size: Length<Positive>,
+}
+
+impl InheritedPaint {
+    fn seed() -> Self {
+        Self {
+            face: FaceFlags::default(),
+            lines: LineFlags::default(),
+            tracking: Finite::ZERO,
+            color: Color::rgb(0, 0, 0),
+            font_size: Positive::pt(12.0).expect("12 pt is positive"),
+        }
+    }
+
+    /// `None` keeps the outer value. Destructuring `style` makes a new
+    /// [`RunStyle`] field a compile error until it is applied here.
+    fn patch(self, style: RunStyle) -> Self {
+        let RunStyle {
+            bold,
+            italic,
+            underline,
+            strikethrough,
+            tracking,
+            color,
+            font_size,
+        } = style;
+        Self {
+            face: FaceFlags {
+                bold: bold.unwrap_or(self.face.bold),
+                italic: italic.unwrap_or(self.face.italic),
+            },
+            lines: LineFlags {
+                underline: underline.unwrap_or(self.lines.underline),
+                strikethrough: strikethrough.unwrap_or(self.lines.strikethrough),
+            },
+            tracking: tracking.unwrap_or(self.tracking),
+            color: color.unwrap_or(self.color),
+            font_size: font_size.unwrap_or(self.font_size),
+        }
+    }
+
+    /// Size and color only, for table cell text and list markers.
+    fn plain(self) -> Self {
+        Self {
+            color: self.color,
+            font_size: self.font_size,
+            ..Self::seed()
+        }
+    }
+
+    fn frame(self) -> Style {
+        Style {
+            font_size: self.font_size,
+            color: self.color,
+            ..default_style()
+        }
+    }
 }
 
 fn register_face(fonts: &mut FontStore, face: FontFace, errors: &mut ErrorBag) -> Option<FontId> {
@@ -149,26 +243,83 @@ fn register_face(fonts: &mut FontStore, face: FontFace, errors: &mut ErrorBag) -
     }
 }
 
-fn resolve_font<K: FontKey>(
-    fonts: &FontTable<K>,
+fn family_of<'a, K: FontKey>(
+    fonts: &'a FontTable<K>,
     key: K,
-    bold: bool,
     errors: &mut ErrorBag,
-) -> Option<FontId> {
-    let Some(family) = fonts.by_key.get(&key) else {
+) -> Option<&'a ResolvedFamily> {
+    let family = fonts.by_key.get(&key);
+    if family.is_none() {
         errors.record(Error::from(ErrorKind::UnregisteredFont {
             key: format!("{key:?}"),
         }));
-        return None;
-    };
-    if bold {
-        if let Some(id) = family.bold {
-            return Some(id);
-        }
-        errors.record(Error::from(ErrorKind::BoldFaceRequired));
-        return Some(family.normal);
     }
-    Some(family.normal)
+    family
+}
+
+/// The only producer of [`GlyphStyle`]. A missing face is recorded and the
+/// regular face stands in, so later missing glyphs are still collected.
+fn resolve_run(
+    family: &ResolvedFamily,
+    paint: InheritedPaint,
+    errors: &mut ErrorBag,
+) -> GlyphStyle {
+    let variant = match (paint.face.bold, paint.face.italic) {
+        (false, false) => None,
+        (true, false) => Some((family.bold, ErrorKind::BoldFaceRequired)),
+        (false, true) => Some((family.italic, ErrorKind::ItalicFaceRequired)),
+        (true, true) => Some((family.bold_italic, ErrorKind::BoldItalicFaceRequired)),
+    };
+    let font = match variant {
+        None => family.regular,
+        Some((Some(face), _)) => face,
+        Some((None, missing)) => {
+            errors.record(Error::from(missing));
+            family.regular
+        }
+    };
+    let decoration = |wanted: bool, metrics: Option<EmOffset>, kind, errors: &mut ErrorBag| {
+        if !wanted {
+            return None;
+        }
+        let scaled = metrics.and_then(|offset| Decoration::at(offset, paint.font_size));
+        if scaled.is_none() {
+            errors.record(Error::from(ErrorKind::MissingDecorationMetrics {
+                font: family.regular.as_u32(),
+                decoration: kind,
+            }));
+        }
+        scaled
+    };
+    GlyphStyle {
+        font,
+        font_size: paint.font_size,
+        color: paint.color,
+        tracking: paint.tracking,
+        underline: decoration(
+            paint.lines.underline,
+            family.decorations.underline,
+            DecorationKind::Underline,
+            errors,
+        ),
+        strikethrough: decoration(
+            paint.lines.strikethrough,
+            family.decorations.strikethrough,
+            DecorationKind::Strikethrough,
+            errors,
+        ),
+    }
+}
+
+fn is_face_choice(kind: &ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::UnregisteredFont { .. }
+            | ErrorKind::BoldFaceRequired
+            | ErrorKind::ItalicFaceRequired
+            | ErrorKind::BoldItalicFaceRequired
+            | ErrorKind::MissingDecorationMetrics { .. }
+    )
 }
 
 fn lower_resources<K: FontKey>(
@@ -186,13 +337,31 @@ fn lower_resources<K: FontKey>(
     fonts.set_max_bytes(limits.max_font_bytes());
     let mut by_key = HashMap::new();
     for (key, family) in resources.fonts.into_entries() {
-        let Some(normal) = register_face(&mut fonts, family.normal, errors) else {
+        let Some(regular) = register_face(&mut fonts, family.regular, errors) else {
             continue;
         };
-        let bold = family
-            .bold
-            .and_then(|face| register_face(&mut fonts, face, errors));
-        by_key.insert(key, ResolvedFamily { normal, bold });
+        let decorations = match fonts.decorations(regular) {
+            Ok(decorations) => decorations,
+            Err(error) => {
+                errors.record(error);
+                continue;
+            }
+        };
+        let mut optional =
+            |face: Option<FontFace>| face.and_then(|face| register_face(&mut fonts, face, errors));
+        let bold = optional(family.bold);
+        let italic = optional(family.italic);
+        let bold_italic = optional(family.bold_italic);
+        by_key.insert(
+            key,
+            ResolvedFamily {
+                regular,
+                bold,
+                italic,
+                bold_italic,
+                decorations,
+            },
+        );
     }
 
     let mut registry = crate::image_registry();
@@ -233,7 +402,6 @@ struct LoweredImages {
 fn lower_section<K: FontKey>(
     spec: SectionSpec<K>,
     default_page: PageSize,
-    style: Style,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
@@ -248,16 +416,17 @@ fn lower_section<K: FontKey>(
         body,
     } = spec;
     let mut errors = ErrorBag::default();
-    let nodes = lower_blocks(body, &style, fonts, doc, images, &mut errors);
+    let seed = InheritedPaint::seed();
+    let nodes = lower_blocks(body, &seed, fonts, doc, images, &mut errors);
     let header = header.and_then(|spec| own_band(spec, fonts, &mut errors));
     let footer = footer.and_then(|spec| own_band(spec, fonts, &mut errors));
     let behind = own_marks(behind, fonts, &mut errors);
     let front = own_marks(front, fonts, &mut errors);
     let decorations = Decorations {
-        header: header.map(|spec| band_content(spec, style.clone())),
-        footer: footer.map(|spec| band_content(spec, style.clone())),
-        behind: layer_content(behind, style.clone(), doc, images.clone()),
-        front: layer_content(front, style, doc, images.clone()),
+        header: header.map(band_content),
+        footer: footer.map(band_content),
+        behind: layer_content(behind, doc, images.clone()),
+        front: layer_content(front, doc, images.clone()),
     };
     let config = PaginateConfig {
         page_size: page_size.unwrap_or(default_page).resolve(),
@@ -268,48 +437,45 @@ fn lower_section<K: FontKey>(
 
 fn lower_blocks<K: FontKey>(
     blocks: Vec<Block<K>>,
-    style: &Style,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
 ) -> Vec<FlowNode> {
     let mut nodes = Vec::new();
-    let mut style = style.clone();
     for block in blocks {
         match block {
             Block::Paragraph(spec) => {
-                if let Some(node) = lower_paragraph(spec, &style, fonts, errors) {
+                if let Some(node) = lower_paragraph(spec, paint, fonts, errors) {
                     nodes.push(node);
                 }
             }
             Block::Spacer(height) => nodes.push(FlowNode::Spacer(SpacerNode { height })),
             Block::PageBreak => nodes.push(FlowNode::PageBreak),
             Block::KeepTogether(children) => {
-                let child = lower_blocks(children, &style, fonts, doc, images, errors);
+                let child = lower_blocks(children, paint, fonts, doc, images, errors);
                 nodes.push(FlowNode::KeepTogether(KeepTogetherNode::Open(child)));
             }
             Block::Styled {
                 style: patch,
                 children,
             } => {
-                let saved = style.clone();
-                apply_text_style(&mut style, patch);
-                nodes.extend(lower_blocks(children, &style, fonts, doc, images, errors));
-                style = saved;
+                let inner = paint.patch(patch);
+                nodes.extend(lower_blocks(children, &inner, fonts, doc, images, errors));
             }
             Block::Columns(spec) => {
-                if let Some(node) = lower_columns(spec, &style, fonts, doc, images, errors) {
+                if let Some(node) = lower_columns(spec, paint, fonts, doc, images, errors) {
                     nodes.push(node);
                 }
             }
             Block::Table(spec) => {
-                if let Some(node) = lower_table(spec, &style, fonts, doc, images, errors) {
+                if let Some(node) = lower_table(spec, paint, fonts, doc, images, errors) {
                     nodes.push(node);
                 }
             }
             Block::List(spec) => {
-                if let Some(node) = lower_list(spec, &style, fonts, doc, images, errors) {
+                if let Some(node) = lower_list(spec, paint, fonts, doc, images, errors) {
                     nodes.push(node);
                 }
             }
@@ -329,58 +495,45 @@ fn lower_blocks<K: FontKey>(
     nodes
 }
 
-fn apply_text_style(style: &mut Style, patch: TextStyle) {
-    if let Some(size) = patch.font_size {
-        style.font_size = size;
-    }
-    if let Some(color) = patch.color {
-        style.color = color;
-    }
-}
-
 fn lower_paragraph<K: FontKey>(
     spec: ParagraphSpec<K>,
-    parent: &Style,
+    parent: &InheritedPaint,
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
+    let paint = parent.patch(RunStyle {
+        color: spec.color,
+        font_size: spec.font_size,
+        ..RunStyle::default()
+    });
     let mut bag = ErrorBag::default();
     let mut items = Vec::new();
     let mut active_link = None;
-    push_inline_runs(spec.runs, fonts, &mut items, &mut active_link, &mut bag);
-    let structural = bag.as_slice().iter().any(|error| {
-        !matches!(
-            error.kind,
-            ErrorKind::BoldFaceRequired | ErrorKind::UnregisteredFont { .. }
-        )
-    });
+    push_inline_runs(
+        spec.runs,
+        &paint,
+        fonts,
+        &mut items,
+        &mut active_link,
+        &mut bag,
+    );
+    let structural = bag
+        .as_slice()
+        .iter()
+        .any(|error| !is_face_choice(&error.kind));
     let font_only_empty = items.is_empty()
-        && bag.as_slice().iter().any(|error| {
-            matches!(
-                error.kind,
-                ErrorKind::UnregisteredFont { .. } | ErrorKind::BoldFaceRequired
-            )
-        });
+        && bag
+            .as_slice()
+            .iter()
+            .any(|error| is_face_choice(&error.kind));
     errors.absorb(bag);
     if structural || font_only_empty {
         return None;
     }
-    let mut style = parent.clone();
-    if let Some(font) = first_run_font(&items) {
-        style.font = font;
-    }
+    let mut style = paint.frame();
+    style.font = first_run_font(&items);
     style.first_line_indent = spec.first_line_indent;
-    style.align = match spec.align {
-        Alignment::Start => TextAlign::Start,
-        Alignment::Center => TextAlign::Center,
-        Alignment::End => TextAlign::End,
-    };
-    if let Some(color) = spec.color {
-        style.color = color;
-    }
-    if let Some(font_size) = spec.font_size {
-        style.font_size = font_size;
-    }
+    style.align = text_align(spec.align);
     if let Some(factor) = spec.line_height_factor {
         style.line_height_factor = factor;
     }
@@ -389,13 +542,14 @@ fn lower_paragraph<K: FontKey>(
 
 fn first_run_font(items: &[InlineItem]) -> Option<FontId> {
     items.iter().find_map(|item| match item {
-        InlineItem::Text(run) => Some(run.font),
+        InlineItem::Text(run) => Some(run.style.font),
         InlineItem::Blank(_) => None,
     })
 }
 
 fn push_inline_runs<K: FontKey>(
     runs: Vec<InlineRun<K>>,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     items: &mut Vec<InlineItem>,
     active_link: &mut Option<LinkTarget>,
@@ -403,26 +557,19 @@ fn push_inline_runs<K: FontKey>(
 ) {
     for run in runs {
         match run {
-            InlineRun::Text { text, font } => {
+            InlineRun::Text { text, font, style } => {
                 if text.is_empty() {
                     continue;
                 }
-                if let Some(id) = resolve_font(fonts, font, false, errors) {
-                    append_text(items, id, &text, active_link.as_ref(), errors);
-                }
-            }
-            InlineRun::Bold { text, font } => {
-                if text.is_empty() {
-                    continue;
-                }
-                if let Some(id) = resolve_font(fonts, font, true, errors) {
-                    append_text(items, id, &text, active_link.as_ref(), errors);
+                if let Some(family) = family_of(fonts, font, errors) {
+                    let glyph = resolve_run(family, paint.patch(style), errors);
+                    append_text(items, glyph, &text, active_link.as_ref(), errors);
                 }
             }
             InlineRun::Link { uri, runs } => match LinkTarget::uri(&uri) {
                 Ok(target) => {
                     let previous = active_link.replace(target);
-                    push_inline_runs(runs, fonts, items, active_link, errors);
+                    push_inline_runs(runs, paint, fonts, items, active_link, errors);
                     *active_link = previous;
                 }
                 Err(error) => errors.record(error),
@@ -462,7 +609,7 @@ fn sealed(items: &[InlineItem]) -> bool {
 
 fn append_text(
     items: &mut Vec<InlineItem>,
-    font: FontId,
+    style: GlyphStyle,
     text: &str,
     active_link: Option<&LinkTarget>,
     errors: &mut ErrorBag,
@@ -475,13 +622,13 @@ fn append_text(
         return;
     }
     if let Some(InlineItem::Text(last)) = items.last_mut() {
-        if last.font == font && last.link.as_ref() == active_link {
+        if last.style == style && last.link.as_ref() == active_link {
             last.text.push_str(text);
             return;
         }
     }
     items.push(InlineItem::Text(
-        LayoutTextRun::new(text, font).with_link(active_link.cloned()),
+        LayoutTextRun::new(text, style).with_link(active_link.cloned()),
     ));
 }
 
@@ -559,14 +706,9 @@ fn lower_canvas<K: FontKey>(
                     errors.record(Error::from(ErrorKind::EmptyCanvasText));
                     return None;
                 }
-                let id = resolve_font(fonts, font, false, errors)?;
-                marks.push(CanvasMarkNode::Text {
-                    text,
-                    font: id,
-                    at,
-                    size: style.font_size.unwrap_or_else(seed_font_size),
-                    color: style.color.unwrap_or_else(seed_color),
-                });
+                let family = family_of(fonts, font, errors)?;
+                let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
+                marks.push(CanvasMarkNode::Text { text, at, style });
             }
         }
     }
@@ -579,18 +721,9 @@ fn lower_canvas<K: FontKey>(
     }
 }
 
-/// Document seed from `default_style`, not an enclosing `Block::Styled`.
-fn seed_font_size() -> Length<Positive> {
-    Positive::pt(12.0).expect("12 pt is positive")
-}
-
-fn seed_color() -> Color {
-    Color::rgb(0, 0, 0)
-}
-
 fn lower_columns<K: FontKey>(
     spec: ColumnsSpec<K>,
-    style: &Style,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
@@ -611,7 +744,7 @@ fn lower_columns<K: FontKey>(
             Track::Auto => ColumnWidth::Auto,
         };
         let mark = bag.mark();
-        let nodes = lower_blocks(column.blocks, style, fonts, doc, images, &mut bag);
+        let nodes = lower_blocks(column.blocks, paint, fonts, doc, images, &mut bag);
         if bag.clean_since(mark) {
             cols.push((width, nodes));
         }
@@ -636,7 +769,7 @@ fn lower_columns<K: FontKey>(
 
 fn lower_table<K: FontKey>(
     spec: super::TableSpec<K>,
-    style: &Style,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
@@ -649,8 +782,8 @@ fn lower_table<K: FontKey>(
             .map(|cell| usize::from(cell.col_span.get()))
             .sum()
     });
-    let header = lower_table_rows(spec.header, style, fonts, doc, images, &mut bag);
-    let body = lower_table_rows(spec.body, style, fonts, doc, images, &mut bag);
+    let header = lower_table_rows(spec.header, paint, fonts, doc, images, &mut bag);
+    let body = lower_table_rows(spec.body, paint, fonts, doc, images, &mut bag);
     let mut blocked = !bag.is_empty() || header.is_none() || body.is_none();
     let widths = match spec.tracks {
         Some(tracks) => table_widths(tracks, cols, &mut blocked, &mut bag),
@@ -728,7 +861,7 @@ fn table_widths(
 
 fn lower_table_rows<K: FontKey>(
     rows: Vec<Vec<CellSpec<K>>>,
-    style: &Style,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
@@ -739,7 +872,7 @@ fn lower_table_rows<K: FontKey>(
     for row in rows {
         let mut stored = Vec::with_capacity(row.len());
         for cell in row {
-            match lower_cell(cell, style, fonts, doc, images, errors) {
+            match lower_cell(cell, paint, fonts, doc, images, errors) {
                 Some(built) => stored.push(built),
                 None => ok = false,
             }
@@ -751,7 +884,7 @@ fn lower_table_rows<K: FontKey>(
 
 fn lower_cell<K: FontKey>(
     spec: CellSpec<K>,
-    style: &Style,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
@@ -765,14 +898,15 @@ fn lower_cell<K: FontKey>(
                 if text.is_empty() {
                     continue;
                 }
-                if let Some(id) = resolve_font(fonts, font, false, &mut bag) {
-                    let mut cell_style = style.clone();
-                    cell_style.font = id;
-                    content.push(FlowNode::Text(TextNode::new(text, cell_style)));
+                if let Some(family) = family_of(fonts, font, &mut bag) {
+                    let glyph = resolve_run(family, paint.plain(), &mut bag);
+                    let mut cell_style = paint.frame();
+                    cell_style.font = Some(glyph.font);
+                    content.push(FlowNode::Text(TextNode::new(text, glyph, cell_style)));
                 }
             }
             CellBlock::Paragraph(paragraph) => {
-                if let Some(node) = lower_paragraph(paragraph, style, fonts, &mut bag) {
+                if let Some(node) = lower_paragraph(paragraph, paint, fonts, &mut bag) {
                     content.push(node);
                 }
             }
@@ -791,7 +925,7 @@ fn lower_cell<K: FontKey>(
                 content.push(FlowNode::Spacer(SpacerNode { height }));
             }
             CellBlock::List(list) => {
-                if let Some(node) = lower_list(list, style, fonts, doc, images, &mut bag) {
+                if let Some(node) = lower_list(list, paint, fonts, doc, images, &mut bag) {
                     content.push(node);
                 }
             }
@@ -817,7 +951,7 @@ fn lower_cell<K: FontKey>(
 
 fn lower_list<K: FontKey>(
     spec: ListSpec<K>,
-    style: &Style,
+    paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
     images: &LoweredImages,
@@ -827,7 +961,7 @@ fn lower_list<K: FontKey>(
     let mut items = Vec::new();
     for item in spec.items {
         let mark = bag.mark();
-        let nodes = lower_blocks(item.blocks, style, fonts, doc, images, &mut bag);
+        let nodes = lower_blocks(item.blocks, paint, fonts, doc, images, &mut bag);
         if !bag.clean_since(mark) {
             continue;
         }
@@ -847,6 +981,7 @@ fn lower_list<K: FontKey>(
             start: spec.start,
         },
     };
+    let marker_style = resolve_run(&ResolvedFamily::first_face(), paint.plain(), &mut bag);
     let failed = !bag.is_empty();
     errors.absorb(bag);
     if failed {
@@ -856,7 +991,7 @@ fn lower_list<K: FontKey>(
         kind,
         marker_width: spec.marker_width,
         nest_indent: spec.nest_indent,
-        marker_style: style.clone(),
+        marker_style,
         items,
     };
     match ListNode::new(layout_spec) {
@@ -877,7 +1012,7 @@ struct OwnedBand {
 struct OwnedSlot {
     runs: Vec<TextRun>,
     uri: Option<Vec<TextRun>>,
-    font: FontId,
+    style: GlyphStyle,
 }
 
 fn own_band<K: FontKey>(
@@ -899,16 +1034,22 @@ fn own_slot<K: FontKey>(
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Option<OwnedSlot> {
-    let (runs, uri, key) = match slot {
-        BandSlot::Text { runs, font } => (runs, None, font),
-        BandSlot::Link { uri, text, font } => (text, Some(uri), font),
+    let (runs, uri, key, style) = match slot {
+        BandSlot::Text { runs, font, style } => (runs, None, font, style),
+        BandSlot::Link {
+            uri,
+            text,
+            font,
+            style,
+        } => (text, Some(uri), font, style),
     };
-    let font = resolve_font(fonts, key, false, errors)?;
-    Some(OwnedSlot { runs, uri, font })
+    let family = family_of(fonts, key, errors)?;
+    let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
+    Some(OwnedSlot { runs, uri, style })
 }
 
-fn band_content(spec: OwnedBand, style: Style) -> crate::layout::decorate::BandContent<'static> {
-    Box::new(move |info, errors| Ok(lower_band(&spec, info, &style, errors)))
+fn band_content(spec: OwnedBand) -> crate::layout::decorate::BandContent<'static> {
+    Box::new(move |info, errors| Ok(lower_band(&spec, info, errors)))
 }
 
 #[derive(Clone, Copy)]
@@ -938,12 +1079,7 @@ impl PageFacts {
     }
 }
 
-fn lower_band(
-    spec: &OwnedBand,
-    info: &PageInfo,
-    style: &Style,
-    errors: &mut ErrorBag,
-) -> Vec<FlowNode> {
+fn lower_band(spec: &OwnedBand, info: &PageInfo, errors: &mut ErrorBag) -> Vec<FlowNode> {
     let page = PageFacts::from(info);
     let (inset_left, inset_right) = match spec.inset {
         BandInset::Fixed { left, right } => (left, right),
@@ -959,14 +1095,18 @@ fn lower_band(
         .and_then(|slot| band_slot(slot, &page, errors));
 
     let column = |slot: BandSlotResolved, align: TextAlign| {
-        let mut style = style.clone();
-        style.align = align;
-        style.font = slot.font;
+        let style = Style {
+            font: Some(slot.style.font),
+            font_size: slot.style.font_size,
+            color: slot.style.color,
+            align,
+            ..default_style()
+        };
         let node = if slot.text.is_empty() {
             TextNode::from_items(Vec::new(), style)
         } else {
             TextNode::from_runs(
-                vec![LayoutTextRun::new(slot.text, slot.font).with_link(slot.link)],
+                vec![LayoutTextRun::new(slot.text, slot.style).with_link(slot.link)],
                 style,
             )
         };
@@ -1010,7 +1150,7 @@ fn lower_band(
 struct BandSlotResolved {
     text: String,
     link: Option<LinkTarget>,
-    font: FontId,
+    style: GlyphStyle,
 }
 
 fn band_slot(
@@ -1034,7 +1174,7 @@ fn band_slot(
     Some(BandSlotResolved {
         text,
         link,
-        font: slot.font,
+        style: slot.style,
     })
 }
 
@@ -1056,9 +1196,8 @@ enum OwnedMark {
     Text {
         when: PageWhen,
         text: Vec<TextRun>,
-        font: FontId,
         at: Point,
-        style: TextStyle,
+        style: GlyphStyle,
     },
     Image {
         when: PageWhen,
@@ -1104,13 +1243,13 @@ fn own_marks<K: FontKey>(
                 at,
                 style,
             } => {
-                let Some(font) = resolve_font(fonts, font, false, errors) else {
+                let Some(family) = family_of(fonts, font, errors) else {
                     continue;
                 };
+                let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
                 owned.push(OwnedMark::Text {
                     when,
                     text,
-                    font,
                     at,
                     style,
                 });
@@ -1153,7 +1292,6 @@ fn own_marks<K: FontKey>(
 
 fn layer_content(
     marks: Vec<OwnedMark>,
-    style: Style,
     doc: DocToken,
     images: LoweredImages,
 ) -> Option<LayerContent<'static>> {
@@ -1161,16 +1299,13 @@ fn layer_content(
         return None;
     }
     Some(Box::new(move |info, errors| {
-        Ok(lower_layer_marks(
-            &marks, info, &style, doc, &images, errors,
-        ))
+        Ok(lower_layer_marks(&marks, info, doc, &images, errors))
     }))
 }
 
 fn lower_layer_marks(
     marks: &[OwnedMark],
     info: &PageInfo,
-    style: &Style,
     doc: DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
@@ -1191,19 +1326,12 @@ fn lower_layer_marks(
         }
         match mark {
             OwnedMark::Text {
-                text,
-                font,
-                at,
-                style: patch,
-                ..
+                text, at, style, ..
             } => {
-                let mut item_style = style.clone();
-                apply_text_style(&mut item_style, *patch);
-                item_style.font = *font;
                 items.push(LayerItem::Text(LayerText {
                     text: render_text(text, &page),
                     at: *at,
-                    style: item_style,
+                    style: *style,
                 }));
             }
             OwnedMark::Image { image, rect, .. } => {
@@ -1407,10 +1535,51 @@ fn unknown_image(image: ImageRef, images: &LoweredImages) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use crate::error::ErrorBag;
-    use crate::fonts::{fixture_bytes, FontFace, FontStore};
+    use crate::error::{DecorationKind, ErrorBag, ErrorKind};
+    use crate::fonts::{fixture_bytes, EmOffset, FontFace, FontStore};
+    use crate::geom::Positive;
+    use crate::layout::style::Decoration;
+    use crate::spec::RunStyle;
 
-    use super::register_face;
+    use super::{register_face, resolve_run, InheritedPaint, ResolvedFamily};
+
+    #[test]
+    fn scaled_decoration_offset_is_the_centerline_below_the_baseline() {
+        let decoration =
+            Decoration::at(EmOffset::new(-0.125).unwrap(), Positive::pt(16.0).unwrap()).unwrap();
+        assert_eq!(Decoration::THICKNESS.as_pt().to_bits(), 1.0f32.to_bits());
+        assert_eq!(decoration.centerline().as_pt().to_bits(), 2.5f32.to_bits());
+    }
+
+    #[test]
+    fn missing_decoration_metrics_fail_without_a_default_offset() {
+        let mut errors = ErrorBag::default();
+        let paint = InheritedPaint::seed().patch(RunStyle {
+            underline: Some(true),
+            strikethrough: Some(true),
+            ..RunStyle::default()
+        });
+        let glyph = resolve_run(&ResolvedFamily::first_face(), paint, &mut errors);
+        assert_eq!(glyph.underline, None);
+        assert_eq!(glyph.strikethrough, None);
+        assert_eq!(
+            errors
+                .as_slice()
+                .iter()
+                .map(|error| error.kind.clone())
+                .collect::<Vec<_>>(),
+            [
+                ErrorKind::MissingDecorationMetrics {
+                    font: 0,
+                    decoration: DecorationKind::Underline,
+                },
+                ErrorKind::MissingDecorationMetrics {
+                    font: 0,
+                    decoration: DecorationKind::Strikethrough,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn register_face_keeps_the_callers_arc() {

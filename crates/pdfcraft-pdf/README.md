@@ -12,6 +12,7 @@ part of the public API.
 | | |
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
+| Migration | [docs/migrate-inline.md](docs/migrate-inline.md) |
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.92 |
 | License | MIT OR Apache-2.0 |
@@ -45,15 +46,17 @@ pdfcraft-pdf = { version = "0.1.0", features = ["test-utils"] }
 ```rust
 use pdfcraft_pdf::spec::{
     BandInset, BandSlot, BandSpec, Block, DocumentInfo, FontFace, FontFamily, FontRegistry,
-    Resources, SectionSpec, TextRun,
+    Resources, RunStyle, SectionSpec, TextRun,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize, Result};
 
 fn main() -> Result<()> {
     let font = std::fs::read("path/to/face.ttf").expect("font");
     let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
-        normal: FontFace::new(font, 0),
+        regular: FontFace::new(font, 0),
         bold: None,
+        italic: None,
+        bold_italic: None,
     }));
 
     let rendered = layout_spec(DocumentSpec {
@@ -68,6 +71,7 @@ fn main() -> Result<()> {
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("pdfcraft-pdf".into())],
                     font: (),
+                    style: RunStyle::default(),
                 }),
                 right: Some(BandSlot::Text {
                     runs: vec![
@@ -77,6 +81,7 @@ fn main() -> Result<()> {
                         TextRun::PageCount,
                     ],
                     font: (),
+                    style: RunStyle::default(),
                 }),
             }),
             body: vec![
@@ -123,6 +128,7 @@ cargo run -p pdfcraft-pdf --example bill   # needs a CJK face; see examples/READ
 
 Coordinates: PDF points, **top-left origin, y downward**.  
 Fonts: register face bytes under your own key type. A missing cmap entry fails the document.  
+Inline style: `RunStyle` selects bold, italic, and bold italic faces you register, plus underline, strikethrough, tracking, size, and color.  
 Dynamic data: use Rust `if` / `for` when building values — there is no template
 DSL and no caller-provided layout closures.
 
