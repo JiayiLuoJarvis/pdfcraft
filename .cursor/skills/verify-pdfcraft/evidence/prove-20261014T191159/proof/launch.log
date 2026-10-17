@@ -1,0 +1,17 @@
+repo=/mnt/data/demo/quire
+run_id=prove-20261014T191159
+PDFCRAFT_PDF_FONT=/mnt/data/demo/quire/.fonts/body.ttf
+PDFCRAFT_FORMS_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+PDFCRAFT_ORGCHART_FONT=/mnt/data/demo/quire/.fonts/body.ttf
+   Compiling lopdf v0.45.0
+   Compiling pdfcraft-orgchart v0.1.0 (/mnt/data/demo/quire/crates/pdfcraft-orgchart)
+   Compiling pdfcraft-pdf v0.1.0 (/mnt/data/demo/quire/crates/pdfcraft-pdf)
+   Compiling pdfcraft-post v0.1.0 (/mnt/data/demo/quire/crates/pdfcraft-post)
+   Compiling pdfcraft-forms v0.1.0 (/mnt/data/demo/quire/crates/pdfcraft-forms)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 29.20s
+ready binary hello
+ready binary fill_basic
+ready binary equity_chart
+ready binary encrypt
+ready binary merge
+launch: ready (examples built)

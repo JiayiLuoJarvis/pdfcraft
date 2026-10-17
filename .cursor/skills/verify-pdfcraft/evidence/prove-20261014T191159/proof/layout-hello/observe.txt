@@ -1,0 +1,59 @@
+=== pdfinfo ===
+Creator:         pdfcraft
+Custom Metadata: no
+Metadata Stream: yes
+Tagged:          no
+UserProperties:  no
+Suspects:        no
+Form:            none
+JavaScript:      no
+Pages:           3
+Encrypted:       no
+Page size:       595.276 x 841.89 pts (A4)
+Page rot:        0
+File size:       19619 bytes
+Optimized:       no
+PDF version:     1.7
+=== head bytes / magic ===
+ 25 50 44 46 2d 31 2e 37
+=== pdftotext (first 40 lines) ===
+quire demo                                                             第1页/共3页
+
+
+                                  Quire layout tour
+
+
+
+
+   This example exercises paragraph runs, bold, links, blanks, lists, columns, tables,
+images, keep-together, and page breaks.
+Signed:                  date
+Notes
+Bullets                                Ordered
+• measure with skrifa                  b. paginate
+   • cluster                           c. decorate
+   • advance                           (x) marked, no number burn
+• break lines in the frame             d. emit PDF
+* custom marker item
+
+
+Shipment table
+Code      Item                                         Notes                  Qty
+
+group A
+
+A1        Pen set                                      • black                12
+                                                       • blue
+
+          Ink                                          1. bottle              3
+                                                       + refill
+
+B2
+
+R0        part 0                                       stock                  1
+
+R1        part 1                                       stock                  2
+
+R2        part 2                                       stock                  3
+
+R3        part 3                                       stock                  4

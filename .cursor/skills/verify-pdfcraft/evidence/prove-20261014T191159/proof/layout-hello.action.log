@@ -1,0 +1,6 @@
+feature=layout-hello
+cmd=cargo run -p pdfcraft-pdf --example hello -- /mnt/data/demo/quire/.cursor/skills/verify-pdfcraft/evidence/prove-20261014T191159/scratch/hello.pdf
+font=/mnt/data/demo/quire/.fonts/body.ttf
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/examples/hello /mnt/data/demo/quire/.cursor/skills/verify-pdfcraft/evidence/prove-20261014T191159/scratch/hello.pdf`
+wrote /mnt/data/demo/quire/.cursor/skills/verify-pdfcraft/evidence/prove-20261014T191159/scratch/hello.pdf (19619 bytes)
