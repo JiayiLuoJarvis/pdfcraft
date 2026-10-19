@@ -26,7 +26,8 @@
 //! Pass a TrueType face with a `glyf` table on [`FillOptions::font`] as
 //! [`FontBytes`]. Checkbox marks do not need a font. Empty text strings do not
 //! either. `FontBytes.index` selects one face in a TrueType collection before
-//! embed. OTF and font subsetting are out of scope.
+//! embed. Successful text embed uses a `glyf` subset that keeps the original
+//! glyph ids. OTF remains out of scope.
 //!
 //! # Modules
 //!
@@ -86,6 +87,7 @@ mod fill;
 mod font;
 mod inspect;
 mod layout;
+mod subset;
 
 pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason, FontReason};
 pub use fields::{

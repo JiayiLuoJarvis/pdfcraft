@@ -90,6 +90,17 @@ fn empty_map_strips_widgets() {
 }
 
 #[test]
+fn checkbox_only_fill_does_not_embed_a_font() {
+    let mut fields = HashMap::new();
+    fields.insert("agree".to_string(), FieldValue::CheckBox(true));
+    let pdf =
+        fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap();
+    assert!(!pdf
+        .windows(b"/FontFile2".len())
+        .any(|window| window == b"/FontFile2"));
+}
+
+#[test]
 fn unchecked_box_draws_no_mark() {
     let Some(font_bytes) = font() else {
         return;
@@ -579,6 +590,12 @@ fn fills_chinese_text_when_pdfcraft_forms_font_is_set() {
         Err(error) => panic!("{error}"),
     };
     assert!(pdftotext(&pdf).contains('王'));
+    if font_bytes.len() > 1024 * 1024 {
+        let lengths = font_file2_lengths(&pdf);
+        assert_eq!(lengths.len(), 1);
+        assert!(lengths[0] < 256 * 1024, "FontFile2 is {} bytes", lengths[0]);
+        assert!(pdf.len() < 512 * 1024, "PDF is {} bytes", pdf.len());
+    }
 }
 
 #[test]
@@ -770,6 +787,20 @@ fn pdftotext(pdf: &[u8]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()
+}
+
+fn font_file2_lengths(pdf: &[u8]) -> Vec<usize> {
+    let doc = lopdf::Document::load_mem(pdf).unwrap();
+    doc.objects
+        .values()
+        .filter_map(|object| {
+            let dictionary = object.as_dict().ok()?;
+            let id = dictionary.get(b"FontFile2").ok()?.as_reference().ok()?;
+            let stream = doc.get_object(id).ok()?.as_stream().ok()?;
+            assert!(stream.dict.get(b"Filter").is_err());
+            Some(stream.content.len())
+        })
+        .collect()
 }
 
 const AGREE_MARK: &[&str] = &[
