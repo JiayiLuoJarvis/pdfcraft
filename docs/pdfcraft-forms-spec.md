@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-12 |
-| 状态 | **已与提案书 §10 对齐，2026-10-12 确认。** 公共 API 已在 `crates/pdfcraft-forms`。OTF 与字体子集仍未做 |
+| 状态 | **已与提案书 §10 对齐，2026-10-12 确认。** 公共 API 已在 `crates/pdfcraft-forms`。成功路径嵌入保留原 glyph id 的 `glyf` 子集。OTF 仍未做 |
 | 相关 | [`workspace-crates-spec.md`](workspace-crates-spec.md)；[`提案书.md`](提案书.md) §10 |
 | 意图来源 | pdfcraft-forms 的行为合同（bytes → flatten）。API 按本仓库重做，不逐文件翻译 |
 
@@ -157,7 +157,8 @@ FieldValue =
 
 - 至少一个将绘制的文本或 choice 字符串时，必须提供可用 TrueType（含 `glyf`）字体字节。
 - 未配置字体或字体不可用 → `FontNotConfigured { reason: FontReason }`。解析失败是 `FontReason::Unreadable`，解析器错误留在 `source`。
-- 子集（或 v1 过渡期整份缩入）后，cmap 缺字 → `MissingGlyph`，不输出降级 PDF。
+- `fill_and_flatten` 成功时，`FontFile2` 嵌入用到的 glyph 的 `glyf` 子集，并保留原 glyph id。
+- cmap 缺字 → `MissingGlyph`，不输出降级 PDF。
 - 无内置 CJK 回退字体。
 - 同一输入两次 `fill_and_flatten` 应得到相同字节（实现须清零字体时间戳或等价手段）。
 
@@ -215,7 +216,7 @@ FieldValue =
 | 读结构 / merge / 剥表 | `lopdf = "=0.45.0"`，`default-features = false` | 已用夹具验证可列字段 |
 | 量宽 / glyphs | `skrifa = "=0.48.0"` | 与 `pdfcraft-pdf` 同钉，不依赖该 package |
 | overlay 绘制 | `lopdf` 拼内容流 | **不**默认引入 `pdf-writer` / `printpdf` |
-| 字体子集 | 未做 | 成功路径嵌入整份 TrueType 面。缺字仍然失败 |
+| 字体子集 | crate 内实现 | 成功路径嵌入用到的 glyph 的 `glyf` 子集，并保留原 glyph id。缺字仍然失败 |
 
 禁止：`krilla`、`pdfcraft-pdf`、运行时 PyMuPDF。
 
@@ -230,13 +231,13 @@ FieldValue =
 
 ## 8. 确认清单
 
-提案书 §10 已确认下列范围。文末总表仍把加密、书签，以及在 `pdfcraft-pdf` 里生成或填写交互表单，列为不做。填写已有 AcroForm 的产品是 `pdfcraft-forms`。OTF 与字体子集仍未做。
+提案书 §10 已确认下列范围。文末总表仍把加密、书签，以及在 `pdfcraft-pdf` 里生成或填写交互表单，列为不做。填写已有 AcroForm 的产品是 `pdfcraft-forms`。TrueType `glyf` 子集已实现并保留原 glyph id。OTF 仍未做。
 
 - [x] §1 与 §2 的范围和边界
 - [x] §3 的公共 API，含字体字节，不含全局默认字体
 - [x] §4 的行为合同，含绘制后剥离、空字段表也 flatten、同名规则
 - [x] §5 的错误模型
-- [x] §6 的依赖。`lopdf` 与 `skrifa` 已钉版本。字体子集仍未做
+- [x] §6 的依赖。`lopdf` 与 `skrifa` 已钉版本。TrueType `glyf` 子集已实现
 - [x] [`workspace-crates-spec.md`](workspace-crates-spec.md) 里的产品状态与 §10 一致
 
 ## 9. 附录：相对 pdfcraft-forms 的有意差异

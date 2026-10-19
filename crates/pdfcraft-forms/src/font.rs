@@ -7,6 +7,7 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider, Tag};
 
 use crate::error::{font_unusable, FontReason, Result};
+use crate::subset::subset_sfnt;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Glyph {
@@ -176,7 +177,9 @@ impl<'a> PreparedFont<'a> {
     }
 
     pub(crate) fn embed(&self, doc: &mut PdfDoc) -> Result<ObjectId> {
-        let file = Stream::new(Dictionary::new(), self.bytes.to_vec()).with_compression(false);
+        let subset = subset_sfnt(self.bytes, &self.used)?;
+        let stamped = FontFile::from_source(&subset, 0)?;
+        let file = Stream::new(Dictionary::new(), stamped.bytes().to_vec()).with_compression(false);
         let file_id = doc.add_object(Object::Stream(file));
         let descriptor = doc.add_object(Object::Dictionary(descriptor(
             file_id,
@@ -379,7 +382,7 @@ fn u32be(bytes: &[u8]) -> u32 {
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
 
-fn checksum(data: &[u8]) -> u32 {
+pub(crate) fn checksum(data: &[u8]) -> u32 {
     let mut sum = 0_u32;
     let mut index = 0;
     while index + 4 <= data.len() {

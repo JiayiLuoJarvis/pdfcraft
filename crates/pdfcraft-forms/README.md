@@ -85,6 +85,7 @@ PDF bytes + field map + FillOptions ──fill_and_flatten──► PDF bytes
 
 Coordinates: PDF user space, **bottom-left origin, y upward**.  
 Fonts: caller TrueType with `glyf`. `FontBytes.index` selects a TTC face.
+`FontFile2` embeds the glyphs that `fill_and_flatten` draws, not the whole font.
 
 Deep dive: **[docs/guide.md](docs/guide.md)** (values, fit/wrap, errors, testing).
 
@@ -108,7 +109,7 @@ Deep dive: **[docs/guide.md](docs/guide.md)** (values, fit/wrap, errors, testing
 
 ## Design constraints (v1)
 
-- No OTF fonts and no font subsetting
+- No OTF fonts
 - Signature, radio, and push-button widgets are not writable
 - Choice strings must match a widget `/Opt` export or display value
 - No dependency on `pdfcraft-pdf`
