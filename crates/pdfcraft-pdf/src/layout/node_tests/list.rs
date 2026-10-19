@@ -313,6 +313,7 @@ fn image_command_has_no_baseline() {
             },
             rect: crate::geom::Rect::try_pt(0.0, 4.0, 10.0, 10.0).unwrap(),
         }],
+        anchors: Vec::new(),
     };
     assert_eq!(first_baseline(&fragment), None);
 }

@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use krilla::action::LinkAction;
 use krilla::annotation::{LinkAnnotation, Target};
+use krilla::destination::{Destination, XyzDestination};
 use krilla::metadata::Metadata;
+use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
 use krilla::surface::Surface;
 use krilla::text::{Font, GlyphId, KrillaGlyph};
@@ -25,18 +27,22 @@ use crate::backend::convert::{
     to_stroke,
 };
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
-use crate::canvas::DocumentInfo;
+use crate::canvas::{DocumentInfo, LinkTarget, OutlineItem};
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::geom::Paint;
 
 /// Renders closed page plans into PDF bytes.
 pub(super) fn render(
     info: Option<&DocumentInfo>,
+    outline: &[OutlineItem],
     pages: &[PagePlan],
     serialization: Serialization,
 ) -> Result<Vec<u8>> {
     let mut document = Document::new_with(to_serialize_settings(serialization));
     document.set_metadata(to_metadata(info));
+    if let Some(tree) = to_outline(outline) {
+        document.set_outline(tree);
+    }
 
     for (index, page_plan) in pages.iter().enumerate() {
         emit_page(&mut document, page_plan).map_err(|error| error.on_page_index(index))?;
@@ -48,6 +54,45 @@ pub(super) fn render(
         })
         .with_source(error)
     })
+}
+
+fn to_outline(items: &[OutlineItem]) -> Option<Outline> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut root_children: Vec<OutlineNode> = Vec::new();
+    let mut stack: Vec<(u8, OutlineNode)> = Vec::new();
+    for item in items {
+        let node = OutlineNode::new(
+            item.title.clone(),
+            XyzDestination::new(item.xyz.page_index(), to_krilla_point(item.xyz.point())),
+        );
+        while stack.last().is_some_and(|(level, _)| item.level <= *level) {
+            let (_, finished) = stack.pop().expect("stack non-empty");
+            attach_outline_child(&mut root_children, &mut stack, finished);
+        }
+        stack.push((item.level, node));
+    }
+    while let Some((_, finished)) = stack.pop() {
+        attach_outline_child(&mut root_children, &mut stack, finished);
+    }
+    let mut root = Outline::new();
+    for child in root_children {
+        root.push_child(child);
+    }
+    Some(root)
+}
+
+fn attach_outline_child(
+    root_children: &mut Vec<OutlineNode>,
+    stack: &mut [(u8, OutlineNode)],
+    finished: OutlineNode,
+) {
+    if let Some((_, parent)) = stack.last_mut() {
+        parent.push_child(finished);
+    } else {
+        root_children.push(finished);
+    }
 }
 
 fn to_serialize_settings(serialization: Serialization) -> SerializeSettings {
@@ -239,7 +284,18 @@ fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
     }))?;
     Ok(LinkAnnotation::new(
         rect,
-        Target::Action(LinkAction::new(link.target.as_str().to_owned()).into()),
+        match &link.target {
+            LinkTarget::Uri(uri) => Target::Action(LinkAction::new(uri.clone()).into()),
+            LinkTarget::Xyz(xyz) => Target::Destination(Destination::Xyz(XyzDestination::new(
+                xyz.page_index(),
+                to_krilla_point(xyz.point()),
+            ))),
+            LinkTarget::Anchor(_) => {
+                return Err(Error::from(ErrorKind::Backend {
+                    message: "unresolved anchor link reached emit".to_owned(),
+                }));
+            }
+        },
     ))
 }
 

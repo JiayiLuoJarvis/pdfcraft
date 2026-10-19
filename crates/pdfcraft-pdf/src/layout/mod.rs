@@ -1,5 +1,6 @@
 //! Layout engine: split/draw flowables, check nested content, paginate, decorate.
 
+pub(crate) mod anchor;
 pub mod atomic;
 pub mod canvas;
 pub mod column_width;

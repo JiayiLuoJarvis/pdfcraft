@@ -364,6 +364,7 @@ impl GridPaint<'_> {
                 height: Length::from_trusted_pt(self.row_y[rows.end] - self.row_y[rows.start]),
                 spacing_after: NonNegative::ZERO,
                 commands: Vec::new(),
+                anchors: Vec::new(),
             })
             .collect();
         for LaidCell {
@@ -382,23 +383,21 @@ impl GridPaint<'_> {
             let y = self.row_y[cell.row] - self.row_y[self.groups[group].start];
             let w = self.col_x[cell.col + cell.cols] - x;
             let h = self.row_y[cell.row + cell.rows] - self.row_y[cell.row];
-            let commands = &mut fragments[group].commands;
+            let fragment = &mut fragments[group];
             if let Some(color) = fill {
-                commands.push(FragmentCommand::Fill {
+                fragment.commands.push(FragmentCommand::Fill {
                     path: rect_path(x, y, w, h)?,
                     paint: Paint::solid(color),
                 });
             }
-            commands.extend(
-                content
-                    .with_offset(
-                        Length::from_trusted_pt(x + self.content_inset),
-                        Length::from_trusted_pt(y + self.content_inset),
-                    )?
-                    .commands,
-            );
+            let offset = content.with_offset(
+                Length::from_trusted_pt(x + self.content_inset),
+                Length::from_trusted_pt(y + self.content_inset),
+            )?;
+            fragment.commands.extend(offset.commands);
+            fragment.anchors.extend(offset.anchors);
             if let Some((stroke, paint)) = self.border {
-                commands.push(FragmentCommand::Stroke {
+                fragment.commands.push(FragmentCommand::Stroke {
                     path: rect_path(x, y, w, h)?,
                     paint,
                     stroke,
@@ -466,6 +465,7 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
     }
     let mut y = NonNegative::ZERO;
     let mut commands = Vec::new();
+    let mut anchors = Vec::new();
     if table.draw_header_next {
         if let Some(header) = &table.header {
             let first = table
@@ -478,6 +478,7 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
                 ))));
             }
             commands.extend(header.commands.iter().cloned());
+            anchors.extend(header.anchors.iter().cloned());
             y = header.height;
         }
     }
@@ -488,7 +489,9 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
         }
         let block = table.body.pop_front().expect("front exists");
         let h = block.height;
-        commands.extend(block.with_offset(Finite::ZERO, y.into())?.commands);
+        let offset = block.with_offset(Finite::ZERO, y.into())?;
+        commands.extend(offset.commands);
+        anchors.extend(offset.anchors);
         y += h;
         placed += 1;
     }
@@ -496,6 +499,7 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
         height: y,
         spacing_after: NonNegative::ZERO,
         commands,
+        anchors,
     };
     if table.body.is_empty() {
         return Ok(Split::Fit {

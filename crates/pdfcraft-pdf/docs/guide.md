@@ -283,7 +283,7 @@ let paragraph = ParagraphSpec {
         }),
         InlineRun::Text { text: ". See ".into(), font: (), style: RunStyle::default() },
         InlineRun::Link {
-            uri: "https://example.test/pay".into(),
+            target: pdfcraft_pdf::LinkTarget::uri("https://example.test/pay").unwrap(),
             runs: vec![InlineRun::Text {
                 text: "payment terms".into(),
                 font: (),
@@ -308,9 +308,11 @@ let paragraph = ParagraphSpec {
 | `tracking` | Extra space after each cluster followed by more text on the line. It counts toward line breaking. Negative values may not push a glyph's advance below zero (`ErrorKind::NegativeTracking`). |
 | Mixed sizes | Each face on a line is scaled by its own size. The line box takes the largest ascent, the deepest descent, and the largest leading, then the larger of that natural height and the largest size times the line-height factor. A line of only blanks uses the first text run's resolved face at the paragraph size. A paragraph with no text runs does not read a font. |
 | `Alignment::Justify` | Placement only; line breaking is unchanged. Phase 1 widens U+0020 spaces up to 0.5em of that space's run size. Phase 2 averages leftover into eligible cluster gaps (Han / fullwidth punctuation; CJK–Latin boundaries yes; Latin word interiors no). The last paragraph line, a hard-break line, a `BlankWidth::ToEndOfLine` line, a line with no stretch slots, and a non-positive remainder stay Start-shaped. `ImageSpec` / `HLineSpec` / `CanvasSpec` treat `Justify` as Start. |
-| `InlineRun::Link` | Writes PDF link annotations over the glyph boxes; does not fetch the URI. Empty URI fails layout |
+| `InlineRun::Link` | `target: LinkTarget` is `Uri` or `Anchor`. Layout resolves `Anchor` to page-local `Xyz` before paint. Empty URI → `EmptyLink`. Empty anchor id → `EmptyAnchorId`. |
+| `Block::Anchor` | `{ id, outline, child }`. Destination is the first placed fragment of `child` (top-left, y down). Optional `OutlineEntry { title, level }` builds the bookmark tree. |
+| Outline levels | First outline item must be level `1`. Later items deepen by at most +1; jumping up (e.g. 3→1) is allowed. Level `0` and empty titles fail. No outline entries → `to_pdf` does not write an outline. |
 | `BlankWidth::Fixed` / `Em` / `ToEndOfLine` | Underline-style blanks in forms |
-| Band / layer copy | Uses `TextRun` (resolved at paint time), not `InlineRun` |
+| Band / layer copy | Uses `TextRun` (resolved at paint time), not `InlineRun`. `BandSlot::Link` stays URI-only. |
 
 ---
 

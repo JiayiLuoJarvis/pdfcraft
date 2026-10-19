@@ -64,6 +64,7 @@ impl<N: Flowable> ColumnsNode<N> {
         let mut spacing_after = NonNegative::ZERO;
         let mut progress = false;
         let mut commands = Vec::new();
+        let mut anchors = Vec::new();
         let mut rest = Vec::with_capacity(self.columns.len());
         let mut unfinished = false;
         for (column, width) in self.columns.into_iter().zip(&widths) {
@@ -85,7 +86,9 @@ impl<N: Flowable> ColumnsNode<N> {
             unfinished |= tail.is_some();
             height = height.max(placed);
             spacing_after = spacing_after.max(fragment.spacing_after);
-            commands.extend(fragment.with_offset(x.into(), Finite::ZERO)?.commands);
+            let offset = fragment.with_offset(x.into(), Finite::ZERO)?;
+            commands.extend(offset.commands);
+            anchors.extend(offset.anchors);
             rest.push(tail.unwrap_or_else(|| N::stack(Vec::new())));
             x += *width + self.gap;
         }
@@ -102,6 +105,7 @@ impl<N: Flowable> ColumnsNode<N> {
                     height,
                     spacing_after,
                     commands,
+                    anchors,
                 },
             });
         }
@@ -114,6 +118,7 @@ impl<N: Flowable> ColumnsNode<N> {
                 height,
                 spacing_after: NonNegative::ZERO,
                 commands,
+                anchors,
             },
             tail,
         })

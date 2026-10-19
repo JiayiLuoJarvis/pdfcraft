@@ -18,6 +18,11 @@ canvas limits
 fonts error
 fonts limits
 geom error
+layout/anchor canvas
+layout/anchor error
+layout/anchor geom
+layout/anchor layout/frame
+layout/anchor layout/paginate
 layout/atomic error
 layout/atomic geom
 layout/atomic layout/frame
@@ -120,6 +125,7 @@ spec canvas
 spec error
 spec fonts
 spec geom
+spec layout/anchor
 spec layout/canvas
 spec layout/column_width
 spec layout/columns

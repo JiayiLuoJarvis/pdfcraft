@@ -106,13 +106,13 @@ pub mod canvas;
 pub mod fonts;
 pub mod spec;
 
-pub use spec::{layout_spec, DocumentSpec, Numbering, Ratio, Rendered, Track};
+pub use spec::{layout_spec, DocumentSpec, Numbering, OutlineEntry, Ratio, Rendered, Track};
 
 #[cfg(feature = "test-utils")]
 pub use canvas::{pt_near, PT_ABS_TOLERANCE};
 pub use canvas::{
     CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId, LinkTarget,
-    RecordedPage, RecordingCanvas,
+    LinkXyz, RecordedPage, RecordingCanvas,
 };
 pub use fonts::{FontFace, FontFamily, FontId, FontRegistry};
 
@@ -154,6 +154,7 @@ pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
         rendered.fonts,
         rendered.images,
         &rendered.info,
+        &rendered.outline,
     )
     .map_err(Errors::from)
 }

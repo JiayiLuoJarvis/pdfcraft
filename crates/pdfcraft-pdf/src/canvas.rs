@@ -50,10 +50,54 @@ pub struct DocumentInfo {
     pub language: Option<String>,
 }
 
-/// A non-empty URI for a hyperlink annotation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Hyperlink target. Callers construct [`Uri`](Self::Uri) or [`Anchor`](Self::Anchor).
+/// [`Xyz`](Self::Xyz) is written only by layout after resolving an anchor id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 #[must_use]
-pub struct LinkTarget(String);
+pub enum LinkTarget {
+    /// External URI (same rules as §8 / former newtype).
+    Uri(String),
+    /// In-document anchor id (must match some `Block::Anchor.id`).
+    Anchor(String),
+    /// Resolved page destination. Not a caller-facing “jump to page N” API.
+    Xyz(LinkXyz),
+}
+
+/// Page-local XYZ point in pdfcraft page space (origin top-left, y down).
+///
+/// Fields are crate-private so external crates cannot construct page jumps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct LinkXyz {
+    page_index: usize,
+    point: Point,
+}
+
+impl LinkXyz {
+    pub(crate) fn new(page_index: usize, point: Point) -> Self {
+        Self { page_index, point }
+    }
+
+    /// Zero-based page index in the document.
+    #[must_use]
+    pub fn page_index(self) -> usize {
+        self.page_index
+    }
+
+    /// Destination point in page space.
+    pub fn point(self) -> Point {
+        self.point
+    }
+}
+
+/// Flat outline entry carried on [`crate::Rendered`] for emit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OutlineItem {
+    pub(crate) title: String,
+    pub(crate) level: u8,
+    pub(crate) xyz: LinkXyz,
+}
 
 impl LinkTarget {
     /// Builds a URI target.
@@ -67,13 +111,34 @@ impl LinkTarget {
         if uri.is_empty() {
             return Err(Error::from(ErrorKind::EmptyLink));
         }
-        Ok(Self(uri.to_owned()))
+        Ok(Self::Uri(uri.to_owned()))
     }
 
-    /// The URI.
+    /// Builds an in-document anchor target.
+    ///
+    /// Spaces are kept (same emptiness rule as URI).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::EmptyAnchorId`] when `id` is empty.
+    pub fn anchor(id: &str) -> std::result::Result<Self, Error> {
+        if id.is_empty() {
+            return Err(Error::from(ErrorKind::EmptyAnchorId));
+        }
+        Ok(Self::Anchor(id.to_owned()))
+    }
+
+    pub(crate) fn xyz(page_index: usize, point: Point) -> Self {
+        Self::Xyz(LinkXyz::new(page_index, point))
+    }
+
+    /// The URI string when this target is [`Self::Uri`].
     #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn uri_str(&self) -> Option<&str> {
+        match self {
+            Self::Uri(uri) => Some(uri.as_str()),
+            Self::Anchor(_) | Self::Xyz(_) => None,
+        }
     }
 }
 
@@ -675,7 +740,7 @@ mod tests {
         assert_eq!(error.to_string(), "link URI is empty");
 
         let spaced = LinkTarget::uri(" ")?;
-        assert_eq!(spaced.as_str(), " ");
+        assert_eq!(spaced.uri_str(), Some(" "));
 
         let mut rec = RecordingCanvas::new();
         rec.start_page(A4)?;

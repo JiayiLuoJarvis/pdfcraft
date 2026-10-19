@@ -463,6 +463,7 @@ pub(crate) fn append_commands(
                     commands.push(FragmentCommand::Link {
                         rect: Rect::try_pt(dx + x0, dy, width, link_height)?,
                         target: target.clone(),
+                        at: crate::error::Location::default(),
                     });
                 }
             }

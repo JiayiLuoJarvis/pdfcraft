@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::canvas::{pt_near, CanvasCommand};
+use crate::canvas::{pt_near, CanvasCommand, LinkTarget};
 use crate::error::{ErrorKind, GeometryKind, Location, Region};
 use crate::fonts::fixture_bytes;
 use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect, Size};
@@ -71,7 +71,7 @@ fn targets(rendered: &crate::Rendered) -> Vec<String> {
         .iter()
         .flat_map(crate::canvas::RecordedPage::ops)
         .filter_map(|op| match op {
-            CanvasCommand::AnnotateLink { target, .. } => Some(target.as_str().to_owned()),
+            CanvasCommand::AnnotateLink { target, .. } => target.uri_str().map(str::to_owned),
             _ => None,
         })
         .collect()
@@ -281,7 +281,7 @@ fn nested_links_restore_the_outer_target() {
         body(vec![Block::Paragraph(ParagraphSpec {
             runs: vec![
                 InlineRun::Link {
-                    uri: "https://a".into(),
+                    target: LinkTarget::uri("https://a").unwrap(),
                     runs: vec![
                         InlineRun::Text {
                             text: "A".into(),
@@ -302,7 +302,7 @@ fn nested_links_restore_the_outer_target() {
                             },
                         },
                         InlineRun::Link {
-                            uri: "https://b".into(),
+                            target: LinkTarget::uri("https://b").unwrap(),
                             runs: vec![InlineRun::Text {
                                 text: "D".into(),
                                 font: (),
@@ -345,7 +345,7 @@ fn an_empty_uri_fails_before_any_page() {
                     style: RunStyle::default(),
                 },
                 InlineRun::Link {
-                    uri: String::new(),
+                    target: LinkTarget::Uri(String::new()),
                     runs: vec![InlineRun::Text {
                         text: "x".into(),
                         font: (),

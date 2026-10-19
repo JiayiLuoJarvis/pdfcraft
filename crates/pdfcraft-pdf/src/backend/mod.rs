@@ -11,7 +11,7 @@ pub(crate) mod krilla_canvas;
 use std::any::Any;
 use std::sync::Arc;
 
-use crate::canvas::{replay, Canvas, DocumentInfo, ImageRegistry, RecordingCanvas};
+use crate::canvas::{replay, Canvas, DocumentInfo, ImageRegistry, OutlineItem, RecordingCanvas};
 use crate::error::Fallible as Result;
 use crate::fonts::FontStore;
 
@@ -24,6 +24,7 @@ pub(crate) fn write_pdf(
     fonts: FontStore,
     images: Box<dyn ImageRegistry>,
     info: &DocumentInfo,
+    outline: &[OutlineItem],
 ) -> Result<Vec<u8>> {
     let images: Box<dyn Any> = images;
     // Any other registry rejects every image, so it holds none.
@@ -32,6 +33,7 @@ pub(crate) fn write_pdf(
         .map_or_else(|_| ImageTable::default(), |table| *table);
     let mut pdf = KrillaCanvas::new_with_resources(Arc::new(fonts), images);
     pdf.set_document_info(info)?;
+    pdf.set_outline(outline);
     replay(recording, &mut pdf)?;
     pdf.finish()
 }

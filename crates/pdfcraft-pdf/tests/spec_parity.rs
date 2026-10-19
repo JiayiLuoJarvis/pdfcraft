@@ -43,7 +43,7 @@ fn links(page: &pdfcraft_pdf::RecordedPage) -> Vec<&str> {
     page.ops()
         .iter()
         .filter_map(|command| match command {
-            CanvasCommand::AnnotateLink { target, .. } => Some(target.as_str()),
+            CanvasCommand::AnnotateLink { target, .. } => target.uri_str(),
             _ => None,
         })
         .collect()

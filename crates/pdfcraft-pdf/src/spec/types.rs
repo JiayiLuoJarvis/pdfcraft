@@ -1,6 +1,6 @@
 //! Public value types used by [`super::DocumentSpec`].
 
-use crate::canvas::{DocumentInfo, ImageRegistry, RecordedPage, RecordingCanvas};
+use crate::canvas::{DocumentInfo, ImageRegistry, OutlineItem, RecordedPage, RecordingCanvas};
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible};
 use crate::fonts::FontStore;
 use crate::geom::{Length, Positive};
@@ -118,6 +118,11 @@ pub struct Rendered {
         allow(dead_code, reason = "only to_pdf reads info when the backend is on")
     )]
     pub(crate) info: DocumentInfo,
+    #[cfg_attr(
+        not(feature = "backend-krilla"),
+        allow(dead_code, reason = "only to_pdf reads outline when the backend is on")
+    )]
+    pub(crate) outline: Vec<OutlineItem>,
 }
 
 impl Rendered {
@@ -125,5 +130,11 @@ impl Rendered {
     #[must_use]
     pub fn pages(&self) -> Vec<RecordedPage> {
         self.recording.pages()
+    }
+
+    /// Number of outline entries `to_pdf` will write. Zero means no outline dictionary.
+    #[must_use]
+    pub fn outline_len(&self) -> usize {
+        self.outline.len()
     }
 }

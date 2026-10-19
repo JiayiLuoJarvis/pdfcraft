@@ -345,6 +345,7 @@ fn fragment_from_lines(lines: &[LineBox], spacing_after: Length<NonNegative>) ->
         height: Length::from_trusted_pt(tops[lines.len()]),
         spacing_after,
         commands,
+        anchors: Vec::new(),
     })
 }
 

@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use crate::backend::emit;
 use crate::backend::images::{ImageTable, Raster};
-use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget};
+use crate::canvas::{
+    Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget, OutlineItem,
+};
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::fonts::FontStore;
 use crate::geom::{Affine, Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
@@ -102,6 +104,7 @@ pub(crate) struct KrillaCanvas {
     font_store: Arc<FontStore>,
     images: ImageTable,
     info: Option<DocumentInfo>,
+    outline: Vec<OutlineItem>,
     closed_pages: Vec<PagePlan>,
     open_page: Option<OpenPage>,
     failure: Option<Error>,
@@ -118,11 +121,16 @@ impl KrillaCanvas {
             font_store,
             images,
             info: None,
+            outline: Vec::new(),
             closed_pages: Vec::new(),
             open_page: None,
             failure: None,
             serialization,
         }
+    }
+
+    pub(crate) fn set_outline(&mut self, outline: &[OutlineItem]) {
+        self.outline = outline.to_vec();
     }
 
     /// Production serialize settings (compressed, not pretty).
@@ -170,6 +178,7 @@ impl KrillaCanvas {
             font_store,
             images,
             info,
+            outline,
             closed_pages,
             open_page,
             failure,
@@ -187,7 +196,7 @@ impl KrillaCanvas {
                 state: "a page is still open",
             }));
         }
-        emit::render(info.as_ref(), &closed_pages, serialization)
+        emit::render(info.as_ref(), &outline, &closed_pages, serialization)
     }
 
     fn fail<T>(&mut self, error: Error) -> Result<T> {

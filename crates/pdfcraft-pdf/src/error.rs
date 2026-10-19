@@ -210,6 +210,18 @@ pub enum ErrorKind {
     },
     /// A link URI was empty.
     EmptyLink,
+    /// An anchor id was empty.
+    EmptyAnchorId,
+    /// The same anchor id appears more than once. Location names the later one.
+    DuplicateAnchorId,
+    /// A link names an anchor id that was never registered.
+    UnknownAnchor,
+    /// An anchor's child produced no placed fragment.
+    AnchorWithoutFragment,
+    /// An outline entry title was empty.
+    EmptyOutlineTitle,
+    /// Outline level is 0, the first item is not 1, or a step deepens by more than one.
+    InvalidOutlineLevel,
     /// A canvas text mark was an empty string.
     EmptyCanvasText,
     /// A drawing call used an illegal page lifecycle state.
@@ -373,6 +385,12 @@ impl fmt::Display for ErrorKind {
             Self::NegativeLength { value } => write!(f, "{value} is a negative length"),
             Self::NonPositiveLength { value } => write!(f, "{value} is not a positive length"),
             Self::EmptyLink => f.write_str("link URI is empty"),
+            Self::EmptyAnchorId => f.write_str("anchor id is empty"),
+            Self::DuplicateAnchorId => f.write_str("anchor id is duplicated"),
+            Self::UnknownAnchor => f.write_str("link target anchor is unknown"),
+            Self::AnchorWithoutFragment => f.write_str("anchor child produced no placed fragment"),
+            Self::EmptyOutlineTitle => f.write_str("outline title is empty"),
+            Self::InvalidOutlineLevel => f.write_str("outline level is invalid"),
             Self::EmptyCanvasText => f.write_str("canvas text is empty"),
             Self::InvalidCanvasState { operation, state } => {
                 write!(f, "{operation} is invalid while {state}")
@@ -674,7 +692,7 @@ impl fmt::Display for CellSpanReason {
 ///
 /// An inner layer records first and outer layers do not overwrite it, so
 /// the `cell` field names the innermost table cell.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Location {
     /// Zero-based section index, in the order sections were added. A document

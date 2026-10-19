@@ -79,6 +79,7 @@ impl CanvasNode {
                     height,
                     spacing_after: NonNegative::ZERO,
                     commands: self.commands,
+                    anchors: Vec::new(),
                 };
                 let fragment = if x == 0.0 {
                     fragment

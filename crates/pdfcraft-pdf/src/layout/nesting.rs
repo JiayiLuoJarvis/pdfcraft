@@ -30,7 +30,7 @@ pub(crate) fn check_content<N: Flowable>(container: Container, nodes: &[N]) -> R
         let kind = node.kind();
         let allowed = match kind {
             NodeKind::Paragraph | NodeKind::Spacer | NodeKind::HLine => true,
-            NodeKind::Stack => {
+            NodeKind::Stack | NodeKind::Anchor => {
                 check_content(container, node.nested())?;
                 true
             }
@@ -71,6 +71,7 @@ fn kind_name(kind: NodeKind) -> &'static str {
         NodeKind::Spacer => "spacer",
         NodeKind::PageBreak => "page break",
         NodeKind::KeepTogether => "keep together",
+        NodeKind::Anchor => "anchor",
         NodeKind::Stack => "stack",
         NodeKind::Columns => "columns",
         NodeKind::Table => "table",

@@ -5,10 +5,12 @@
 use std::collections::VecDeque;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
-use crate::geom::{Finite, Length, NonNegative};
+use crate::geom::{Finite, Length, NonNegative, Point};
 use crate::layout::canvas::CanvasNode;
 use crate::layout::columns::ColumnsNode;
-use crate::layout::frame::{natural_height, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split};
+use crate::layout::frame::{
+    natural_height, AnchorMark, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split,
+};
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::ListNode;
@@ -35,12 +37,20 @@ pub(crate) enum KeepTogetherNode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AnchorNode {
+    pub(crate) id: String,
+    pub(crate) child: Box<FlowNode>,
+    pub(crate) marked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum FlowNode {
     Paragraph(ParagraphNode),
     Text(TextNode),
     Spacer(SpacerNode),
     PageBreak,
     KeepTogether(KeepTogetherNode),
+    Anchor(AnchorNode),
     Stack(Vec<FlowNode>),
     Columns(ColumnsNode<FlowNode>),
     Table(TableNode<FlowNode>),
@@ -58,6 +68,7 @@ impl Flowable for FlowNode {
             FlowNode::Text(node) => node.split(ctx, avail)?.map(FlowNode::Paragraph),
             FlowNode::Spacer(node) => node.split(avail)?.map(FlowNode::Spacer),
             FlowNode::KeepTogether(node) => split_keep_together(ctx, avail, node)?,
+            FlowNode::Anchor(node) => split_anchor(ctx, avail, node)?,
             FlowNode::Stack(kids) => split_stack(ctx, avail, kids)?,
             FlowNode::Columns(node) => node.split(ctx, avail)?.map(FlowNode::Columns),
             FlowNode::Table(node) => node.split(ctx, avail)?.map(FlowNode::Table),
@@ -78,6 +89,7 @@ impl Flowable for FlowNode {
             FlowNode::Spacer(_) => NodeKind::Spacer,
             FlowNode::PageBreak => NodeKind::PageBreak,
             FlowNode::KeepTogether(_) => NodeKind::KeepTogether,
+            FlowNode::Anchor(_) => NodeKind::Anchor,
             FlowNode::Stack(_) => NodeKind::Stack,
             FlowNode::Columns(_) => NodeKind::Columns,
             FlowNode::Table(_) => NodeKind::Table,
@@ -91,9 +103,71 @@ impl Flowable for FlowNode {
     fn nested(&self) -> &[Self] {
         match self {
             FlowNode::Stack(kids) | FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => kids,
+            FlowNode::Anchor(node) => std::slice::from_ref(node.child.as_ref()),
             FlowNode::Columns(columns) => columns.column_stacks(),
             _ => &[],
         }
+    }
+}
+
+fn fragment_is_effective(fragment: &Fragment) -> bool {
+    fragment.height > NonNegative::ZERO || !fragment.commands.is_empty()
+}
+
+fn stamp_anchor(id: &str, fragment: &mut Fragment) {
+    fragment.anchors.push(AnchorMark {
+        id: id.to_owned(),
+        relative: Point::ZERO,
+    });
+}
+
+fn split_anchor(
+    ctx: &mut LayoutCtx<'_>,
+    avail: Frame,
+    node: AnchorNode,
+) -> Result<Split<FlowNode>> {
+    let AnchorNode { id, child, marked } = node;
+    if matches!(child.as_ref(), FlowNode::PageBreak) {
+        return Ok(Split::Fit {
+            height: NonNegative::ZERO,
+            fragment: Fragment::empty(),
+        });
+    }
+    match (*child).split(ctx, avail)? {
+        Split::Fit {
+            height,
+            mut fragment,
+        } => {
+            if !marked && fragment_is_effective(&fragment) {
+                stamp_anchor(&id, &mut fragment);
+            }
+            Ok(Split::Fit { height, fragment })
+        }
+        Split::Partial {
+            head_height,
+            mut head,
+            tail,
+        } => {
+            let mut marked = marked;
+            if !marked && fragment_is_effective(&head) {
+                stamp_anchor(&id, &mut head);
+                marked = true;
+            }
+            Ok(Split::Partial {
+                head_height,
+                head,
+                tail: FlowNode::Anchor(AnchorNode {
+                    id,
+                    child: Box::new(tail),
+                    marked,
+                }),
+            })
+        }
+        Split::MoveToNextPage(child) => Ok(Split::MoveToNextPage(FlowNode::Anchor(AnchorNode {
+            id,
+            child: Box::new(child),
+            marked,
+        }))),
     }
 }
 
@@ -112,6 +186,7 @@ impl SpacerNode {
             height: take,
             spacing_after: NonNegative::ZERO,
             commands: Vec::new(),
+            anchors: Vec::new(),
         };
         if rest <= 0.0 {
             Ok(Split::Fit {
@@ -188,6 +263,7 @@ fn split_stack(
 
     let mut kids: VecDeque<FlowNode> = kids.into();
     let mut commands = Vec::new();
+    let mut anchors = Vec::new();
     let mut y = NonNegative::ZERO;
     let mut trailing_spacing = NonNegative::ZERO;
     let mut placed_any = false;
@@ -201,6 +277,7 @@ fn split_stack(
                 let spacing = child_frag.spacing_after;
                 let offset = child_frag.with_offset(Finite::ZERO, y.into())?;
                 commands.extend(offset.commands);
+                anchors.extend(offset.anchors);
                 y += height;
                 avail.height = avail.height.saturating_sub(height);
                 placed_any = true;
@@ -222,6 +299,7 @@ fn split_stack(
             } => {
                 let offset = head.with_offset(Finite::ZERO, y.into())?;
                 commands.extend(offset.commands);
+                anchors.extend(offset.anchors);
                 y += head_height;
                 let mut rest = Vec::with_capacity(kids.len() + 1);
                 rest.push(tail);
@@ -237,6 +315,7 @@ fn split_stack(
                             NonNegative::ZERO
                         },
                         commands,
+                        anchors,
                     },
                     tail: FlowNode::Stack(rest),
                 });
@@ -254,6 +333,7 @@ fn split_stack(
                         height: y,
                         spacing_after: NonNegative::ZERO,
                         commands,
+                        anchors,
                     },
                     tail: FlowNode::Stack(rest),
                 });
@@ -267,6 +347,7 @@ fn split_stack(
             height: y,
             spacing_after: trailing_spacing,
             commands,
+            anchors,
         },
     })
 }
@@ -324,6 +405,10 @@ fn census(roots: &[FlowNode]) -> Census {
             FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => {
                 census.blocks = census.blocks.saturating_add(1);
                 pending.extend(kids.iter().rev());
+            }
+            FlowNode::Anchor(node) => {
+                census.blocks = census.blocks.saturating_add(1);
+                pending.push(node.child.as_ref());
             }
             FlowNode::KeepTogether(KeepTogetherNode::Prepared(_))
             | FlowNode::Spacer(_)

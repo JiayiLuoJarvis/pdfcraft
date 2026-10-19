@@ -162,6 +162,18 @@ impl<K> Default for SectionSpec<K> {
     }
 }
 
+/// Outline bookmark contributed by a [`Block::Anchor`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct OutlineEntry {
+    /// Non-empty bookmark title (byte-non-empty; spaces allowed).
+    pub title: String,
+    /// Outline depth. First outline item in the document must be `1`.
+    /// Each following item may be at most one deeper than the previous (`level <= prev + 1`),
+    /// and may jump up by any number of levels (e.g. `3` → `1`).
+    pub level: u8,
+}
+
 /// A flow block in a section, column, list item, or keep-together group.
 #[derive(Debug)]
 #[must_use]
@@ -183,6 +195,15 @@ pub enum Block<K> {
         style: RunStyle,
         /// Styled blocks.
         children: Vec<Self>,
+    },
+    /// Marks a destination for in-document links and optional outline entries.
+    Anchor {
+        /// Document-unique, non-empty id (byte-non-empty; spaces allowed).
+        id: String,
+        /// When `Some`, contributes one outline item in document order.
+        outline: Option<OutlineEntry>,
+        /// Wrapped flow content. Destination is the first placed fragment of this child.
+        child: Box<Self>,
     },
     /// Side-by-side columns.
     Columns(ColumnsSpec<K>),
@@ -321,10 +342,10 @@ pub enum InlineRun<K> {
         /// Patch over the inherited style.
         style: RunStyle,
     },
-    /// Runs linked to a URI.
+    /// Runs linked to a URI or in-document anchor.
     Link {
-        /// Non-empty URI.
-        uri: String,
+        /// `Uri` or `Anchor` at the call site. Layout may replace `Anchor` with `Xyz` before paint.
+        target: crate::canvas::LinkTarget,
         /// Linked runs.
         runs: Vec<Self>,
     },
@@ -460,6 +481,15 @@ pub enum CellBlock<K> {
     Spacer(Length<NonNegative>),
     /// A nested list.
     List(ListSpec<K>),
+    /// Marks a destination inside a table cell.
+    Anchor {
+        /// Document-unique, non-empty id.
+        id: String,
+        /// Optional outline entry.
+        outline: Option<OutlineEntry>,
+        /// Wrapped cell content.
+        child: Box<Self>,
+    },
 }
 
 /// Bulleted or numbered list settings.

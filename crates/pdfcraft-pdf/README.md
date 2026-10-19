@@ -7,7 +7,9 @@ marks — then call `layout_spec` and `to_pdf`. The library measures text with
 [skrifa](https://crates.io/crates/skrifa), breaks lines and pages, places
 tables and lists, draws through an internal canvas, and serializes PDF with a
 private [krilla](https://crates.io/crates/krilla) adapter. krilla types are not
-part of the public API.
+part of the public API. Body links use `LinkTarget::Uri` or `LinkTarget::Anchor`
+(`Block::Anchor` + optional `OutlineEntry` bookmarks). Header/footer
+`BandSlot::Link` stays URI-only.
 
 | | |
 | --- | --- |

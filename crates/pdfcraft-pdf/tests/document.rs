@@ -13,9 +13,9 @@ use pdfcraft_pdf::spec::{
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
-    ErrorKind, GeometryKind, ImageFormat, Ink, Length, MarginPreset, Margins, NonNegative,
-    Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, Ratio, RecordedPage, Rect, Region,
-    Rendered, Result, Size, Stroke, Track, A4,
+    ErrorKind, GeometryKind, ImageFormat, Ink, Length, LinkTarget, MarginPreset, Margins,
+    NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, Ratio, RecordedPage,
+    Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::{to_pdf, Paper};
@@ -53,7 +53,7 @@ type Located = (
 );
 
 fn location(error: &Error) -> Located {
-    let at = error.at.clone().unwrap_or_default();
+    let at = error.at.unwrap_or_default();
     (
         at.section,
         at.page,
@@ -170,7 +170,11 @@ fn bold_run(text: impl Into<String>) -> InlineRun<()> {
 
 fn link_run(uri: &str, runs: Vec<InlineRun<()>>) -> InlineRun<()> {
     InlineRun::Link {
-        uri: uri.into(),
+        target: if uri.is_empty() {
+            LinkTarget::Uri(String::new())
+        } else {
+            LinkTarget::uri(uri).expect("test uri")
+        },
         runs,
     }
 }
@@ -2431,7 +2435,7 @@ fn links(page: &RecordedPage) -> Vec<LinkHit> {
                 y: rect.origin().y().as_pt(),
                 width: rect.size().width().as_pt(),
                 height: rect.size().height().as_pt(),
-                target: target.as_str().to_owned(),
+                target: target.uri_str().unwrap_or("").to_owned(),
             }),
             _ => None,
         })

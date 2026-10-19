@@ -64,12 +64,12 @@ fn hits(fragment: &Fragment) -> Vec<Hit> {
         .commands
         .iter()
         .filter_map(|command| match command {
-            FragmentCommand::Link { rect, target } => Some(Hit {
+            FragmentCommand::Link { rect, target, .. } => Some(Hit {
                 x: rect.origin().x().as_pt(),
                 y: rect.origin().y().as_pt(),
                 width: rect.size().width().as_pt(),
                 height: rect.size().height().as_pt(),
-                target: target.as_str().to_owned(),
+                target: target.uri_str().unwrap_or("").to_owned(),
             }),
             _ => None,
         })
@@ -506,7 +506,7 @@ fn offset_and_paint_move_the_link_rect() {
             CanvasCommand::AnnotateLink { rect, target } => Some((
                 rect.origin().x().as_pt(),
                 rect.origin().y().as_pt(),
-                target.as_str().to_owned(),
+                target.uri_str().unwrap_or("").to_owned(),
             )),
             _ => None,
         })

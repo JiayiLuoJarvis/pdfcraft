@@ -134,7 +134,7 @@ fn bold(value: impl Into<String>) -> InlineRun<()> {
 
 fn link(uri: &str, runs: Vec<InlineRun<()>>) -> InlineRun<()> {
     InlineRun::Link {
-        uri: uri.into(),
+        target: pdfcraft_pdf::LinkTarget::uri(uri).expect("example uri"),
         runs,
     }
 }

@@ -198,6 +198,7 @@ impl<N: Flowable> ListNode<N> {
         }
         let body_w = Length::<Positive>::from_trusted_pt(body);
         let mut commands = Vec::new();
+        let mut anchors = Vec::new();
         let mut y = NonNegative::ZERO;
         let mut trailing_spacing = NonNegative::ZERO;
         let mut placed_any = false;
@@ -223,7 +224,7 @@ impl<N: Flowable> ListNode<N> {
                     if !placed_any {
                         return Ok(Split::MoveToNextPage(self));
                     }
-                    return Ok(partial(commands, y, NonNegative::ZERO, self));
+                    return Ok(partial(commands, anchors, y, NonNegative::ZERO, self));
                 }
             };
 
@@ -240,7 +241,9 @@ impl<N: Flowable> ListNode<N> {
                 )?;
             }
             let spacing = fragment.spacing_after;
-            commands.extend(fragment.with_offset(self.indent.into(), y.into())?.commands);
+            let offset = fragment.with_offset(self.indent.into(), y.into())?;
+            commands.extend(offset.commands);
+            anchors.extend(offset.anchors);
             y += height;
             avail.height = avail.height.saturating_sub(height);
             placed_any = true;
@@ -250,7 +253,7 @@ impl<N: Flowable> ListNode<N> {
                     pending_marker: None,
                     body: node,
                 });
-                return Ok(partial(commands, y, spacing, self));
+                return Ok(partial(commands, anchors, y, spacing, self));
             }
             if self.items.is_empty() {
                 trailing_spacing = spacing;
@@ -270,6 +273,7 @@ impl<N: Flowable> ListNode<N> {
                 height: y,
                 spacing_after: trailing_spacing,
                 commands,
+                anchors,
             },
         })
     }
@@ -277,6 +281,7 @@ impl<N: Flowable> ListNode<N> {
 
 fn partial<N>(
     commands: Vec<FragmentCommand>,
+    anchors: Vec<crate::layout::frame::AnchorMark>,
     y: Length<NonNegative>,
     spacing_after: Length<NonNegative>,
     rest: ListNode<N>,
@@ -287,6 +292,7 @@ fn partial<N>(
             height: y,
             spacing_after,
             commands,
+            anchors,
         },
         tail: rest,
     }

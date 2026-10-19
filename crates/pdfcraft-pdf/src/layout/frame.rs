@@ -49,12 +49,20 @@ pub(crate) struct Frame {
     pub(crate) full_height: Length<Positive>,
 }
 
+/// Anchor id stamped onto a fragment's local origin for later page-space collect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnchorMark {
+    pub(crate) id: String,
+    pub(crate) relative: Point,
+}
+
 /// One placed piece of content. Coordinates are relative to the fragment origin.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Fragment {
     pub(crate) height: Length<NonNegative>,
     pub(crate) spacing_after: Length<NonNegative>,
     pub(crate) commands: Vec<FragmentCommand>,
+    pub(crate) anchors: Vec<AnchorMark>,
 }
 
 impl Fragment {
@@ -63,6 +71,7 @@ impl Fragment {
             height: NonNegative::ZERO,
             spacing_after: NonNegative::ZERO,
             commands: Vec::new(),
+            anchors: Vec::new(),
         }
     }
 
@@ -87,6 +96,12 @@ impl Fragment {
                 FragmentCommand::PopTransform => {}
             }
         }
+        for mark in &mut self.anchors {
+            mark.relative = Point::try_pt(
+                mark.relative.x().as_pt() + dx,
+                mark.relative.y().as_pt() + dy,
+            )?;
+        }
         Ok(self)
     }
 }
@@ -110,6 +125,7 @@ pub(crate) enum FragmentCommand {
     Link {
         rect: Rect,
         target: LinkTarget,
+        at: Location,
     },
     PushTransform {
         affine: Affine,
@@ -165,6 +181,7 @@ pub(crate) enum NodeKind {
     Spacer,
     PageBreak,
     KeepTogether,
+    Anchor,
     Stack,
     Columns,
     Table,
@@ -276,7 +293,7 @@ pub(crate) fn draw_fragment(
                 FragmentCommand::Image { image, rect } => {
                     canvas.draw_image(image, rect.translated(ox, oy)?)?;
                 }
-                FragmentCommand::Link { rect, target } => {
+                FragmentCommand::Link { rect, target, .. } => {
                     canvas.annotate_link(rect.translated(ox, oy)?, target.clone())?;
                 }
                 FragmentCommand::PushTransform { affine } => {

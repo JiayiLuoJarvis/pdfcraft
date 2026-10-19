@@ -63,9 +63,9 @@ enum PageCursor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct PagePlan {
-    size: Size,
-    placed: Vec<PlacedFragment>,
+pub(crate) struct PagePlan {
+    pub(crate) size: Size,
+    pub(crate) placed: Vec<PlacedFragment>,
 }
 
 /// One section's body, paper, and page decorations.
@@ -100,6 +100,16 @@ pub(crate) fn paginate_root(
 pub(crate) struct LaidDocument {
     pages: Vec<PagePlan>,
     bands: Vec<PageBands>,
+}
+
+impl LaidDocument {
+    pub(crate) fn pages(&self) -> &[PagePlan] {
+        &self.pages
+    }
+
+    pub(crate) fn pages_mut(&mut self) -> &mut [PagePlan] {
+        &mut self.pages
+    }
 }
 
 /// Plan every section and measure bands. Painting is separate so a dirty bag can skip it.

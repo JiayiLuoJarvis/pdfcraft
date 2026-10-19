@@ -252,6 +252,7 @@ fn measure_layer(
             height: NonNegative::ZERO,
             spacing_after: NonNegative::ZERO,
             commands,
+            anchors: Vec::new(),
         },
     }))
 }
