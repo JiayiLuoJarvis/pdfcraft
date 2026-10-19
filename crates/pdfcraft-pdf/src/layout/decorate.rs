@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use crate::error::{
     Error, ErrorBag, ErrorKind, Fallible as Result, GeometryKind, Location, Region,
 };
-use crate::geom::{Ink, Margins, NonNegative, Paint, Path, Point, Size, Stroke};
+use crate::geom::{Affine, Ink, Margins, NonNegative, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{
     stacked_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
@@ -65,10 +65,15 @@ pub(crate) enum LayerItem {
         image: crate::canvas::DecodedImage,
         rect: crate::geom::Rect,
     },
-    /// Final page-coordinate geometry. Ellipse arcs and rotation are already baked in.
+    /// Final page-coordinate geometry for unrotated marks.
     Shape {
         path: Path,
         ink: Ink,
+    },
+    /// Paint-time transform wrapping unrotated children.
+    Group {
+        affine: Affine,
+        items: Vec<LayerItem>,
     },
 }
 
@@ -236,43 +241,7 @@ fn measure_layer(
     };
     let mut commands = Vec::new();
     for item in content(page, ctx.errors)? {
-        match item {
-            LayerItem::Text(item) => {
-                let line = single_line_run(ctx, &item.text, &item.style, None)?;
-                append_commands(
-                    &mut commands,
-                    &line.pieces,
-                    item.at.x().as_pt(),
-                    item.at.y().as_pt() + line.baseline,
-                    0.0,
-                )?;
-            }
-            LayerItem::Image { image, rect } => {
-                commands.push(FragmentCommand::Image { image, rect });
-            }
-            LayerItem::Shape { path, ink } => match ink {
-                Ink::Fill(color) => commands.push(FragmentCommand::Fill {
-                    path,
-                    paint: Paint::solid(color),
-                }),
-                Ink::Stroke(pen) => commands.push(FragmentCommand::Stroke {
-                    path,
-                    paint: Paint::solid(pen.color()),
-                    stroke: Stroke::new(pen.width()),
-                }),
-                Ink::FillStroke(color, pen) => {
-                    commands.push(FragmentCommand::Fill {
-                        path: path.clone(),
-                        paint: Paint::solid(color),
-                    });
-                    commands.push(FragmentCommand::Stroke {
-                        path,
-                        paint: Paint::solid(pen.color()),
-                        stroke: Stroke::new(pen.width()),
-                    });
-                }
-            },
-        }
+        append_layer_item(&mut commands, ctx, item)?;
     }
     if commands.is_empty() {
         return Ok(None);
@@ -285,6 +254,64 @@ fn measure_layer(
             commands,
         },
     }))
+}
+
+fn append_layer_item(
+    commands: &mut Vec<FragmentCommand>,
+    ctx: &mut LayoutCtx<'_>,
+    item: LayerItem,
+) -> Result<()> {
+    match item {
+        LayerItem::Text(item) => {
+            let line = single_line_run(ctx, &item.text, &item.style, None)?;
+            append_commands(
+                commands,
+                &line.pieces,
+                item.at.x().as_pt(),
+                item.at.y().as_pt() + line.baseline,
+                0.0,
+            )?;
+        }
+        LayerItem::Image { image, rect } => {
+            commands.push(FragmentCommand::Image { image, rect });
+        }
+        LayerItem::Shape { path, ink } => match ink {
+            Ink::Fill(color) => commands.push(FragmentCommand::Fill {
+                path,
+                paint: Paint::solid(color),
+            }),
+            Ink::Stroke(pen) => commands.push(FragmentCommand::Stroke {
+                path,
+                paint: Paint::solid(pen.color()),
+                stroke: Stroke::new(pen.width()),
+            }),
+            Ink::FillStroke(color, pen) => {
+                commands.push(FragmentCommand::Fill {
+                    path: path.clone(),
+                    paint: Paint::solid(color),
+                });
+                commands.push(FragmentCommand::Stroke {
+                    path,
+                    paint: Paint::solid(pen.color()),
+                    stroke: Stroke::new(pen.width()),
+                });
+            }
+        },
+        LayerItem::Group { affine, items } => {
+            if affine.is_identity() {
+                for child in items {
+                    append_layer_item(commands, ctx, child)?;
+                }
+                return Ok(());
+            }
+            commands.push(FragmentCommand::PushTransform { affine });
+            for child in items {
+                append_layer_item(commands, ctx, child)?;
+            }
+            commands.push(FragmentCommand::PopTransform);
+        }
+    }
+    Ok(())
 }
 
 fn measure_band(

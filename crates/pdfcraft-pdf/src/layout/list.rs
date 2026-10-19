@@ -298,6 +298,8 @@ pub(crate) fn first_baseline(fragment: &Fragment) -> Option<f32> {
         FragmentCommand::Fill { .. }
         | FragmentCommand::Stroke { .. }
         | FragmentCommand::Image { .. }
-        | FragmentCommand::Link { .. } => None,
+        | FragmentCommand::Link { .. }
+        | FragmentCommand::PushTransform { .. }
+        | FragmentCommand::PopTransform => None,
     })
 }

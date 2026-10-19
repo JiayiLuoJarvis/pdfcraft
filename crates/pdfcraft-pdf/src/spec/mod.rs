@@ -772,15 +772,15 @@ pub enum LayerMark<K> {
         degrees: f32,
         /// Rotation pivot.
         pivot: Point,
-        /// Shapes in paint order.
-        shapes: Vec<LayerShape>,
+        /// Shapes in paint order. May mix path, text, and image.
+        shapes: Vec<LayerShape<K>>,
     },
 }
 
 /// One shape allowed in a rotated layer group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
-pub enum LayerShape {
+pub enum LayerShape<K> {
     /// A straight segment.
     Line {
         /// Start point.
@@ -803,5 +803,23 @@ pub enum LayerShape {
         rect: Rect,
         /// Fill and/or stroke.
         ink: Ink,
+    },
+    /// One unwrapped text line. Coordinates are pre-rotation page space.
+    Text {
+        /// Page-time text runs.
+        text: Vec<TextRun>,
+        /// Key in the document [`FontRegistry`].
+        font: K,
+        /// Line-box top-left before rotation.
+        at: Point,
+        /// Patch over the document seed.
+        style: RunStyle,
+    },
+    /// An image stretched into a pre-rotation page rectangle.
+    Image {
+        /// Image resource.
+        image: ImageRef,
+        /// Destination rectangle before rotation.
+        rect: Rect,
     },
 }

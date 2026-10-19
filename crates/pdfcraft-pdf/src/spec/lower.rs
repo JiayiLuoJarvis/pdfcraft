@@ -9,7 +9,8 @@ use crate::error::{
 };
 use crate::fonts::{EmOffset, FaceDecorations, FontFace, FontId, FontKey, FontSource, FontStore};
 use crate::geom::{
-    Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
+    Affine, Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive,
+    Rect,
 };
 use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
@@ -1192,6 +1193,31 @@ fn render_text(runs: &[TextRun], page: &PageFacts) -> String {
     text
 }
 
+enum OwnedShape {
+    Line {
+        from: Point,
+        to: Point,
+        pen: Pen,
+    },
+    Rect {
+        rect: Rect,
+        ink: Ink,
+    },
+    Ellipse {
+        rect: Rect,
+        ink: Ink,
+    },
+    Text {
+        text: Vec<TextRun>,
+        at: Point,
+        style: GlyphStyle,
+    },
+    Image {
+        image: ImageRef,
+        rect: Rect,
+    },
+}
+
 enum OwnedMark {
     Text {
         when: PageWhen,
@@ -1224,7 +1250,7 @@ enum OwnedMark {
         when: PageWhen,
         degrees: f32,
         pivot: Point,
-        shapes: Vec<LayerShape>,
+        shapes: Vec<OwnedShape>,
     },
 }
 
@@ -1279,12 +1305,52 @@ fn own_marks<K: FontKey>(
                 degrees,
                 pivot,
                 shapes,
-            } => owned.push(OwnedMark::Rotated {
-                when,
-                degrees,
-                pivot,
-                shapes,
-            }),
+            } => {
+                let shapes = own_shapes(shapes, fonts, errors);
+                owned.push(OwnedMark::Rotated {
+                    when,
+                    degrees,
+                    pivot,
+                    shapes,
+                });
+            }
+        }
+    }
+    owned
+}
+
+fn own_shapes<K: FontKey>(
+    shapes: Vec<LayerShape<K>>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Vec<OwnedShape> {
+    let mut owned = Vec::with_capacity(shapes.len());
+    for shape in shapes {
+        match shape {
+            LayerShape::Line { from, to, pen } => {
+                owned.push(OwnedShape::Line { from, to, pen });
+            }
+            LayerShape::Rect { rect, ink } => {
+                owned.push(OwnedShape::Rect { rect, ink });
+            }
+            LayerShape::Ellipse { rect, ink } => {
+                owned.push(OwnedShape::Ellipse { rect, ink });
+            }
+            LayerShape::Text {
+                text,
+                font,
+                at,
+                style,
+            } => {
+                let Some(family) = family_of(fonts, font, errors) else {
+                    continue;
+                };
+                let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
+                owned.push(OwnedShape::Text { text, at, style });
+            }
+            LayerShape::Image { image, rect } => {
+                owned.push(OwnedShape::Image { image, rect });
+            }
         }
     }
     owned
@@ -1354,14 +1420,13 @@ fn lower_layer_marks(
                     errors,
                     straight_path(*from, *to),
                     Ink::Stroke(*pen),
-                    None,
                 );
             }
             OwnedMark::Rect { rect, ink, .. } => {
-                push_shape(&mut items, errors, Path::rect(*rect), *ink, None);
+                push_shape(&mut items, errors, Path::rect(*rect), *ink);
             }
             OwnedMark::Ellipse { rect, ink, .. } => {
-                push_shape(&mut items, errors, Path::ellipse(*rect), *ink, None);
+                push_shape(&mut items, errors, Path::ellipse(*rect), *ink);
             }
             OwnedMark::Rotated {
                 degrees,
@@ -1369,34 +1434,30 @@ fn lower_layer_marks(
                 shapes,
                 ..
             } => {
+                if shapes.is_empty() {
+                    continue;
+                }
                 if !degrees.is_finite() {
                     errors.record(GeometryKind::NonFiniteRotation { degrees: *degrees });
                     continue;
                 }
+                let mut kids = Vec::with_capacity(shapes.len());
                 for shape in shapes {
-                    match shape {
-                        LayerShape::Line { from, to, pen } => push_shape(
-                            &mut items,
-                            errors,
-                            straight_path(*from, *to),
-                            Ink::Stroke(*pen),
-                            Some((*degrees, *pivot)),
-                        ),
-                        LayerShape::Rect { rect, ink } => push_shape(
-                            &mut items,
-                            errors,
-                            Path::rect(*rect),
-                            *ink,
-                            Some((*degrees, *pivot)),
-                        ),
-                        LayerShape::Ellipse { rect, ink } => push_shape(
-                            &mut items,
-                            errors,
-                            Path::ellipse(*rect),
-                            *ink,
-                            Some((*degrees, *pivot)),
-                        ),
-                    }
+                    push_owned_shape(&mut kids, &page, doc, images, errors, shape);
+                }
+                if kids.is_empty() {
+                    continue;
+                }
+                if is_zero_angle(*degrees) {
+                    items.extend(kids);
+                    continue;
+                }
+                match Affine::rotate_cw_about(*degrees, *pivot) {
+                    Ok(affine) => items.push(LayerItem::Group {
+                        affine,
+                        items: kids,
+                    }),
+                    Err(error) => errors.record(error),
                 }
             }
         }
@@ -1404,17 +1465,49 @@ fn lower_layer_marks(
     items
 }
 
-fn push_shape(
+fn push_owned_shape(
     items: &mut Vec<LayerItem>,
+    page: &PageFacts,
+    doc: DocToken,
+    images: &LoweredImages,
     errors: &mut ErrorBag,
-    path: Fallible<Path>,
-    ink: Ink,
-    turn: Option<(f32, Point)>,
+    shape: &OwnedShape,
 ) {
-    let path = path.and_then(|path| match turn {
-        Some((degrees, about)) if !is_zero_angle(degrees) => path.rotated(degrees, about),
-        _ => Ok(path),
-    });
+    match shape {
+        OwnedShape::Line { from, to, pen } => {
+            push_shape(items, errors, straight_path(*from, *to), Ink::Stroke(*pen));
+        }
+        OwnedShape::Rect { rect, ink } => {
+            push_shape(items, errors, Path::rect(*rect), *ink);
+        }
+        OwnedShape::Ellipse { rect, ink } => {
+            push_shape(items, errors, Path::ellipse(*rect), *ink);
+        }
+        OwnedShape::Text { text, at, style } => {
+            items.push(LayerItem::Text(LayerText {
+                text: render_text(text, page),
+                at: *at,
+                style: *style,
+            }));
+        }
+        OwnedShape::Image { image, rect } => {
+            if let Some(image) = image_for(*image, images) {
+                if image.doc == doc {
+                    items.push(LayerItem::Image {
+                        image: image.decoded,
+                        rect: *rect,
+                    });
+                } else {
+                    errors.record(Error::from(ErrorKind::UnknownImage {
+                        id: image.decoded.id.as_u32(),
+                    }));
+                }
+            }
+        }
+    }
+}
+
+fn push_shape(items: &mut Vec<LayerItem>, errors: &mut ErrorBag, path: Fallible<Path>, ink: Ink) {
     match path {
         Ok(path) => items.push(LayerItem::Shape { path, ink }),
         Err(error) => errors.record(error),
@@ -1505,8 +1598,19 @@ fn validate_cell_blocks<K>(blocks: &[CellBlock<K>], images: &LoweredImages, erro
 
 fn validate_marks<K>(marks: &[LayerMark<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for mark in marks {
-        if let LayerMark::Image { image, .. } = mark {
-            reject_image(*image, images, errors);
+        match mark {
+            LayerMark::Image { image, .. } => reject_image(*image, images, errors),
+            LayerMark::Rotated { shapes, .. } => {
+                for shape in shapes {
+                    if let LayerShape::Image { image, .. } = shape {
+                        reject_image(*image, images, errors);
+                    }
+                }
+            }
+            LayerMark::Text { .. }
+            | LayerMark::Line { .. }
+            | LayerMark::Rect { .. }
+            | LayerMark::Ellipse { .. } => {}
         }
     }
 }

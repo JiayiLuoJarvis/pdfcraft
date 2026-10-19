@@ -1795,7 +1795,7 @@ fn painted_layer_paths() -> Rendered {
 }
 
 #[test]
-fn layer_paths_keep_stack_order_and_bake_rotation() {
+fn layer_paths_keep_stack_order_and_rotate_via_transform() {
     if skip_without_font() {
         return;
     }
@@ -1809,8 +1809,10 @@ fn layer_paths_keep_stack_order_and_bake_rotation() {
     assert!(matches!(ops[4], CanvasCommand::DrawGlyphRun { .. }));
     assert!(matches!(ops[5], CanvasCommand::FillPath { .. }));
     assert!(matches!(ops[6], CanvasCommand::StrokePath { .. }));
-    assert!(matches!(ops[7], CanvasCommand::FillPath { .. }));
-    assert!(matches!(ops[8], CanvasCommand::StrokePath { .. }));
+    assert!(matches!(ops[7], CanvasCommand::PushTransform { .. }));
+    assert!(matches!(ops[8], CanvasCommand::FillPath { .. }));
+    assert!(matches!(ops[9], CanvasCommand::PopTransform));
+    assert!(matches!(ops[10], CanvasCommand::StrokePath { .. }));
     assert_eq!(texts(page), ["H", "A", "SEAL"]);
     assert_behind_paths(ops);
     assert_front_paths(page, ops);
@@ -1882,34 +1884,36 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
     assert_eq!(rx.to_bits(), 10.0f32.to_bits());
     assert_eq!(ry.to_bits(), 5.0f32.to_bits());
 
+    let CanvasCommand::PushTransform { affine } = &ops[7] else {
+        unreachable!();
+    };
+    assert!(pt_near(affine.a, 0.0));
+    assert!(pt_near(affine.b, -1.0));
+    assert!(pt_near(affine.c, 1.0));
+    assert!(pt_near(affine.d, 0.0));
+    assert!(pt_near(affine.tx, 22.0));
+    assert!(pt_near(affine.ty, 2.0));
     let CanvasCommand::FillPath {
-        path: turned,
+        path: unrotated,
         paint: turned_paint,
-    } = &ops[7]
+    } = &ops[8]
     else {
         unreachable!();
     };
     assert_eq!(turned_paint.color(), Color::rgba(0, 0, 255, 128));
-    let points: Vec<(f32, f32)> = turned
-        .verbs()
-        .iter()
-        .filter_map(|verb| match verb {
-            PathVerb::MoveTo(point) | PathVerb::LineTo(point) => {
-                Some((point.x().as_pt(), point.y().as_pt()))
-            }
-            PathVerb::Close => None,
-            PathVerb::CubicTo { .. } => panic!("rotated rect stays lines"),
-        })
-        .collect();
-    for (got, expected) in points
-        .iter()
-        .zip([(10.0, 12.0), (10.0, 32.0), (2.0, 32.0), (2.0, 12.0)])
-    {
-        assert!(pt_near(got.0, expected.0));
-        assert!(pt_near(got.1, expected.1));
-    }
+    assert_eq!(
+        unrotated.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(10.0, 12.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(30.0, 12.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(30.0, 20.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(10.0, 20.0).unwrap()),
+            PathVerb::Close,
+        ]
+    );
+    assert!(matches!(ops[9], CanvasCommand::PopTransform));
 
-    let CanvasCommand::StrokePath { path: flat, .. } = &ops[8] else {
+    let CanvasCommand::StrokePath { path: flat, .. } = &ops[10] else {
         unreachable!();
     };
     assert_eq!(
@@ -1948,6 +1952,209 @@ fn layer_paths_write_a_pdf() {
             ],
             ..SectionSpec::default()
         }],
+    )
+    .unwrap();
+    assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
+}
+
+#[test]
+fn rotated_layer_text_pushes_transform_on_every_page() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = font_pages(
+        PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
+        SectionSpec {
+            body: vec![para("one"), Block::PageBreak, para("two")],
+            behind: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: 45.0,
+                pivot: Point::try_pt(60.0, 40.0).unwrap(),
+                shapes: vec![LayerShape::Text {
+                    text: vec![TextRun::Literal("WM".into())],
+                    font: (),
+                    at: Point::try_pt(50.0, 35.0).unwrap(),
+                    style: RunStyle {
+                        font_size: Some(pos(12.0)),
+                        color: Some(Color::rgba(0, 0, 0, 64)),
+                        ..RunStyle::default()
+                    },
+                }],
+            }],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rendered.pages().len(), 2);
+    for page in rendered.pages() {
+        let ops = page.ops();
+        let push = ops
+            .iter()
+            .position(|op| matches!(op, CanvasCommand::PushTransform { .. }))
+            .expect("push");
+        assert!(matches!(ops[push + 1], CanvasCommand::DrawGlyphRun { .. }));
+        assert!(matches!(ops[push + 2], CanvasCommand::PopTransform));
+        let CanvasCommand::DrawGlyphRun { run } = &ops[push + 1] else {
+            unreachable!();
+        };
+        assert_eq!(run.text, "WM");
+        assert!(pt_near(run.origin.x().as_pt(), 50.0));
+        assert!(pt_near(run.origin.y().as_pt(), 35.0 + baseline()));
+    }
+}
+
+#[test]
+fn rotated_layer_image_keeps_pre_rotation_rect() {
+    if skip_without_font() {
+        return;
+    }
+    let mut resources = font_resources();
+    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = render(
+        PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
+        resources,
+        vec![SectionSpec {
+            front: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: 90.0,
+                pivot: Point::try_pt(20.0, 20.0).unwrap(),
+                shapes: vec![LayerShape::Image {
+                    image,
+                    rect: Rect::try_pt(10.0, 10.0, 20.0, 15.0).unwrap(),
+                }],
+            }],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+    let pages = rendered.pages();
+    let ops = pages[0].ops();
+    assert!(matches!(ops[0], CanvasCommand::PushTransform { .. }));
+    let CanvasCommand::DrawImage { rect, .. } = &ops[1] else {
+        panic!("expected image inside transform, got {:?}", ops[1]);
+    };
+    assert_eq!(rect, &Rect::try_pt(10.0, 10.0, 20.0, 15.0).unwrap());
+    assert!(matches!(ops[2], CanvasCommand::PopTransform));
+}
+
+#[test]
+fn rotated_mixed_path_and_text_keep_shapes_order() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = font_pages(
+        PageSize::custom(Size::try_pt(100.0, 80.0).unwrap()),
+        SectionSpec {
+            behind: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: 30.0,
+                pivot: Point::try_pt(40.0, 40.0).unwrap(),
+                shapes: vec![
+                    LayerShape::Line {
+                        from: Point::try_pt(0.0, 0.0).unwrap(),
+                        to: Point::try_pt(10.0, 0.0).unwrap(),
+                        pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                    },
+                    LayerShape::Text {
+                        text: vec![TextRun::Literal("T".into())],
+                        font: (),
+                        at: Point::try_pt(2.0, 4.0).unwrap(),
+                        style: RunStyle::default(),
+                    },
+                ],
+            }],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap();
+    let pages = rendered.pages();
+    let ops = pages[0].ops();
+    assert!(matches!(ops[0], CanvasCommand::PushTransform { .. }));
+    assert!(matches!(ops[1], CanvasCommand::StrokePath { .. }));
+    assert!(matches!(ops[2], CanvasCommand::DrawGlyphRun { .. }));
+    assert!(matches!(ops[3], CanvasCommand::PopTransform));
+    let CanvasCommand::StrokePath { path, .. } = &ops[1] else {
+        unreachable!();
+    };
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 0.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(10.0, 0.0).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn empty_rotated_shapes_emit_nothing() {
+    let rendered = render(
+        PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()),
+        Resources::default(),
+        vec![SectionSpec {
+            behind: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: 45.0,
+                pivot: Point::ZERO,
+                shapes: vec![],
+            }],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+    assert!(rendered.pages()[0].ops().is_empty());
+}
+
+#[test]
+fn rotated_nan_degrees_fails() {
+    let error = layout_spec(DocumentSpec {
+        page_size: PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()),
+        resources: Resources::<()>::default(),
+        limits: pdfcraft_pdf::Limits::default(),
+        info: pdfcraft_pdf::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            behind: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: f32::NAN,
+                pivot: Point::ZERO,
+                shapes: vec![LayerShape::Line {
+                    from: Point::try_pt(0.0, 0.0).unwrap(),
+                    to: Point::try_pt(1.0, 0.0).unwrap(),
+                    pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                }],
+            }],
+            ..SectionSpec::default()
+        }],
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(
+        error.first().kind,
+        ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees }) if degrees.is_nan()
+    ));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn rotated_text_writes_a_pdf() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = font_pages(
+        PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
+        SectionSpec {
+            behind: vec![LayerMark::Rotated {
+                when: PageWhen::All,
+                degrees: 45.0,
+                pivot: Point::try_pt(60.0, 40.0).unwrap(),
+                shapes: vec![LayerShape::Text {
+                    text: vec![TextRun::Literal("X".into())],
+                    font: (),
+                    at: Point::try_pt(50.0, 35.0).unwrap(),
+                    style: RunStyle::default(),
+                }],
+            }],
+            ..SectionSpec::default()
+        },
     )
     .unwrap();
     assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));

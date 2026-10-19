@@ -21,7 +21,8 @@ use krilla::text::{Font, GlyphId, KrillaGlyph};
 use krilla::{Data, Document, SerializeSettings};
 
 use crate::backend::convert::{
-    to_fill, to_krilla_path, to_krilla_point, to_krilla_rect, to_krilla_size, to_stroke,
+    to_fill, to_krilla_path, to_krilla_point, to_krilla_rect, to_krilla_size, to_krilla_transform,
+    to_stroke,
 };
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
 use crate::canvas::DocumentInfo;
@@ -104,9 +105,13 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
     {
         // Call surface() exactly once. A second call clears the page.
         let mut surface = page.surface();
-        for mark in &page_plan.marks {
-            draw_mark(&mut surface, mark)?;
+        let mut depth = 0usize;
+        let drawn = draw_marks(&mut surface, &page_plan.marks, &mut depth);
+        while depth > 0 {
+            surface.pop();
+            depth -= 1;
         }
+        drawn?;
         surface.finish();
     }
 
@@ -114,6 +119,23 @@ fn emit_page(document: &mut Document, page_plan: &PagePlan) -> Result<()> {
         page.add_annotation(to_annotation(link)?.into());
     }
     page.finish();
+    Ok(())
+}
+
+fn draw_marks(surface: &mut Surface<'_>, marks: &[Mark], depth: &mut usize) -> Result<()> {
+    for mark in marks {
+        match mark {
+            Mark::PushTransform(affine) => {
+                surface.push_transform(&to_krilla_transform(*affine));
+                *depth += 1;
+            }
+            Mark::PopTransform => {
+                surface.pop();
+                *depth = depth.saturating_sub(1);
+            }
+            mark => draw_mark(surface, mark)?,
+        }
+    }
     Ok(())
 }
 
@@ -188,6 +210,9 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             surface.push_transform(&shift);
             surface.draw_image(raster.krilla().clone(), size);
             surface.pop();
+        }
+        Mark::PushTransform(_) | Mark::PopTransform => {
+            unreachable!("group transforms are handled in draw_marks");
         }
     }
     Ok(())

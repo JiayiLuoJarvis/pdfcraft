@@ -456,7 +456,7 @@ Use `LayerMark` for page-anchored content (seals, watermarks, paths):
 | `Text` | One unwrapped line on a font key. Forced breaks error. |
 | `Image` | Stretched into a page `Rect` |
 | `Line` / `Rect` / `Ellipse` | Geometry + pen / ink |
-| `Rotated` | Group of `LayerShape` around a pivot |
+| `Rotated` | Group of `LayerShape<K>` around a pivot; may mix path, `Text`, and `Image` |
 
 `PageWhen::All` — every page of the section.  
 `PageWhen::Last` — only the last page of the **whole document**.

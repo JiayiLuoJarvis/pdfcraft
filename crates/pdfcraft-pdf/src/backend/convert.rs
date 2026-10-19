@@ -5,16 +5,23 @@
 //! because krilla applies `page_root_transform` when writing the PDF.
 
 use krilla::color::rgb;
-use krilla::geom::{PathBuilder, Point as KPoint, Rect as KRect, Size as KSize};
+use krilla::geom::{
+    PathBuilder, Point as KPoint, Rect as KRect, Size as KSize, Transform as KTransform,
+};
 use krilla::num::NormalizedF32;
 use krilla::paint::{Fill, FillRule, Stroke as KStroke};
 
 use crate::error::{Fallible as Result, GeometryKind};
-use crate::geom::{Paint, Path, PathVerb, Point, Rect, Size, Stroke};
+use crate::geom::{Affine, Paint, Path, PathVerb, Point, Rect, Size, Stroke};
 
 /// Identity point mapping.
 pub(crate) fn to_krilla_point(point: Point) -> KPoint {
     KPoint::from_xy(point.x().as_pt(), point.y().as_pt())
+}
+
+/// Maps crate affine coeffs onto krilla's `from_row(sx, ky, kx, sy, tx, ty)`.
+pub(crate) fn to_krilla_transform(affine: Affine) -> KTransform {
+    KTransform::from_row(affine.a, affine.c, affine.b, affine.d, affine.tx, affine.ty)
 }
 
 /// Identity size mapping. `None` only if krilla rejects a positive size.

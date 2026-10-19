@@ -29,7 +29,7 @@ use std::ops::Range;
 
 use crate::error::{Error, ErrorKind};
 use crate::fonts::FontId;
-use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
+use crate::geom::{Affine, Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 use crate::limits::Limits;
 
 /// Document metadata copied into a [`CanvasCommand::SetDocumentInfo`] record.
@@ -252,6 +252,13 @@ pub enum CanvasCommand {
         /// Non-empty URI.
         target: LinkTarget,
     },
+    /// Concatenate an affine onto the current transform stack.
+    PushTransform {
+        /// Transform applied to later draw commands until the matching pop.
+        affine: Affine,
+    },
+    /// Pop the transform pushed by the matching [`Self::PushTransform`].
+    PopTransform,
 }
 
 /// Draws output that layout has already positioned.
@@ -295,6 +302,31 @@ pub(crate) trait Canvas {
     ///
     /// `target` is already a non-empty URI.
     fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> std::result::Result<(), Error>;
+
+    /// Concatenate `affine` onto the current CTM. Must pair with [`Self::pop_transform`].
+    fn push_transform(&mut self, affine: &Affine) -> std::result::Result<(), Error>;
+
+    /// Pop the CTM pushed by the matching [`Self::push_transform`].
+    fn pop_transform(&mut self) -> std::result::Result<(), Error>;
+}
+
+/// Runs `draw` under `affine`, always popping when push succeeded.
+#[allow(
+    dead_code,
+    reason = "object-safe helper; draw_fragment uses depth unwind"
+)]
+pub(crate) fn with_transform(
+    canvas: &mut dyn Canvas,
+    affine: &Affine,
+    draw: impl FnOnce(&mut dyn Canvas) -> std::result::Result<(), Error>,
+) -> std::result::Result<(), Error> {
+    canvas.push_transform(affine)?;
+    let drawn = draw(canvas);
+    let popped = canvas.pop_transform();
+    match (drawn, popped) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), _) | (Ok(()), Err(error)) => Err(error),
+    }
 }
 
 /// One page copied out of a [`RecordingCanvas`] log.
@@ -349,7 +381,7 @@ impl RecordingCanvas {
     ///
     /// A page starts at [`CanvasCommand::StartPage`] and ends at the next
     /// [`CanvasCommand::FinishPage`]. The copy keeps fill, stroke, image,
-    /// glyph, and link commands. An unfinished `StartPage` is left out.
+    /// glyph, link, and transform commands. An unfinished `StartPage` is left out.
     #[must_use]
     pub fn pages(&self) -> Vec<RecordedPage> {
         let mut pages = Vec::new();
@@ -375,7 +407,9 @@ impl RecordingCanvas {
                     | CanvasCommand::StrokePath { .. }
                     | CanvasCommand::DrawImage { .. }
                     | CanvasCommand::DrawGlyphRun { .. }
-                    | CanvasCommand::AnnotateLink { .. }) => {
+                    | CanvasCommand::AnnotateLink { .. }
+                    | CanvasCommand::PushTransform { .. }
+                    | CanvasCommand::PopTransform) => {
                         ops.push(op.clone());
                         index += 1;
                     }
@@ -453,6 +487,20 @@ impl Canvas for RecordingCanvas {
             .push(CanvasCommand::AnnotateLink { rect, target });
         Ok(())
     }
+
+    fn push_transform(&mut self, affine: &Affine) -> std::result::Result<(), Error> {
+        if !affine.is_finite() {
+            return Err(Error::from(ErrorKind::NonFiniteLength { value: affine.a }));
+        }
+        self.commands
+            .push(CanvasCommand::PushTransform { affine: *affine });
+        Ok(())
+    }
+
+    fn pop_transform(&mut self) -> std::result::Result<(), Error> {
+        self.commands.push(CanvasCommand::PopTransform);
+        Ok(())
+    }
 }
 
 #[cfg_attr(
@@ -479,6 +527,8 @@ pub(crate) fn replay(
             CanvasCommand::AnnotateLink { rect, target } => {
                 canvas.annotate_link(*rect, target.clone())?;
             }
+            CanvasCommand::PushTransform { affine } => canvas.push_transform(affine)?,
+            CanvasCommand::PopTransform => canvas.pop_transform()?,
         }
     }
     Ok(())
@@ -500,12 +550,13 @@ pub fn pt_near(a: f32, b: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        pt_near, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun,
-        ImageFormat, ImageId, ImageRegistry, LinkTarget, RecordingCanvas, RejectingImageRegistry,
+        pt_near, with_transform, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement,
+        GlyphRun, ImageFormat, ImageId, ImageRegistry, LinkTarget, RecordingCanvas,
+        RejectingImageRegistry,
     };
     use crate::error::{Error, ErrorKind};
     use crate::fonts::FontId;
-    use crate::geom::{Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4};
+    use crate::geom::{Affine, Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4};
 
     #[test]
     fn rejecting_registry_refuses_every_image() {
@@ -696,6 +747,53 @@ mod tests {
             CanvasCommand::DrawImage { .. } => "image",
             CanvasCommand::DrawGlyphRun { .. } => "glyphs",
             CanvasCommand::AnnotateLink { .. } => "link",
+            CanvasCommand::PushTransform { .. } => "push_transform",
+            CanvasCommand::PopTransform => "pop_transform",
         }
+    }
+
+    #[test]
+    fn records_push_and_pop_transform() -> std::result::Result<(), Error> {
+        let mut rec = RecordingCanvas::new();
+        rec.start_page(A4)?;
+        let affine = Affine::rotate_cw_about(45.0, Point::try_pt(10.0, 20.0)?)?;
+        rec.push_transform(&affine)?;
+        rec.pop_transform()?;
+        rec.finish_page()?;
+        let pages = rec.pages();
+        assert!(matches!(
+            pages[0].ops(),
+            [
+                CanvasCommand::PushTransform { .. },
+                CanvasCommand::PopTransform
+            ]
+        ));
+        let CanvasCommand::PushTransform { affine: recorded } = &pages[0].ops()[0] else {
+            unreachable!();
+        };
+        assert!(pt_near(recorded.a, affine.a));
+        assert!(pt_near(recorded.b, affine.b));
+        assert!(pt_near(recorded.c, affine.c));
+        assert!(pt_near(recorded.d, affine.d));
+        assert!(pt_near(recorded.tx, affine.tx));
+        assert!(pt_near(recorded.ty, affine.ty));
+        Ok(())
+    }
+
+    #[test]
+    fn with_transform_pops_after_draw_error() {
+        let mut rec = RecordingCanvas::new();
+        let err = with_transform(&mut rec, &Affine::IDENTITY, |_| {
+            Err(Error::from(ErrorKind::EmptyLink))
+        })
+        .unwrap_err();
+        assert_eq!(err, Error::from(ErrorKind::EmptyLink));
+        assert!(matches!(
+            rec.commands(),
+            [
+                CanvasCommand::PushTransform { .. },
+                CanvasCommand::PopTransform
+            ]
+        ));
     }
 }

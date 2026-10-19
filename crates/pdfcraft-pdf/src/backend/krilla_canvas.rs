@@ -10,7 +10,7 @@ use crate::backend::images::{ImageTable, Raster};
 use crate::canvas::{Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget};
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::fonts::FontStore;
-use crate::geom::{Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
+use crate::geom::{Affine, Color, Length, Paint, Path, Point, Positive, Rect, Size, Stroke};
 
 /// Serialize profile. Converted to krilla settings only inside `emit`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +83,10 @@ pub(super) enum Mark {
     },
     /// Decoded image painted into `rect` (page coordinates, top-left, y down).
     Image { raster: Raster, rect: Rect },
+    /// Concatenate onto the surface CTM until the matching [`Self::PopTransform`].
+    PushTransform(Affine),
+    /// Pop the matching [`Self::PushTransform`].
+    PopTransform,
 }
 
 /// Link recorded while a surface would still be borrowed.
@@ -308,6 +312,21 @@ impl Canvas for KrillaCanvas {
     fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<()> {
         let page = self.open_page_mut("annotate_link")?;
         page.links.push(QueuedLink { rect, target });
+        Ok(())
+    }
+
+    fn push_transform(&mut self, affine: &Affine) -> Result<()> {
+        if !affine.is_finite() {
+            return self.fail(Error::from(ErrorKind::NonFiniteLength { value: affine.a }));
+        }
+        let page = self.open_page_mut("push_transform")?;
+        page.marks.push(Mark::PushTransform(*affine));
+        Ok(())
+    }
+
+    fn pop_transform(&mut self) -> Result<()> {
+        let page = self.open_page_mut("pop_transform")?;
+        page.marks.push(Mark::PopTransform);
         Ok(())
     }
 }
