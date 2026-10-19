@@ -251,6 +251,9 @@ pub enum Alignment {
     Center,
     /// Align to the end edge.
     End,
+    /// Two-sided alignment. Paragraph lines distribute remainder; Image / `HLine` /
+    /// Canvas treat this as [`Self::Start`].
+    Justify,
 }
 
 /// A paragraph and its inline runs.

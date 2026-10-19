@@ -10,6 +10,7 @@ while remaining `0.x`.
 
 ### Added
 
+- **Breaking.** `pdfcraft-pdf` `Alignment::Justify` (proposal §12.3). Paragraph lines distribute leftover width at placement time: phase 1 water-fills U+0020 spaces up to 0.5em of each space's run size, then phase 2 averages the rest into eligible grapheme-cluster gaps (Han / fullwidth Op·Cl sides; CJK–Latin boundaries yes; Latin word interiors no). The last paragraph line, a hard-break-ended line, a `BlankWidth::ToEndOfLine` line, a line with no stretch slots, and a non-positive remainder stay Start-shaped. `ImageSpec` / `HLineSpec` / `CanvasSpec` accept `Justify` and place as Start. Line breaking, tracking, and `LinePainter` are unchanged. Exhaustive `match` on `Alignment` needs a new arm.
 - `PathBuilder::cubic_to` on `pdfcraft-pdf`: append a cubic Bézier (`PathVerb::CubicTo`) so callers can build SVG-style curve paths for `CanvasMark::Fill` without approximating them as polylines.
 - `pdfcraft-post` `0.1.0`: `SetMetadata`, `Encrypt` (presets `EncryptionPreset::READ_ONLY`, `READ_ONLY_PRINTABLE`, `FULL_PERMISSIONS`), `StampAndEncrypt`, `merge_pdfs`, and `Pipeline`. AES-256 / revision 6 (lopdf V5). Owner password is required from the caller. Empty user password opens. Errors are `Error` + `ErrorKind`. Depends on workspace `lopdf =0.45.0` and `getrandom =0.4.3`. No edges to sibling crates. Examples: `encrypt`, `stamp`, `merge`.
 

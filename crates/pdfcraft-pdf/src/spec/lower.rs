@@ -638,6 +638,7 @@ fn lower_hline(spec: HLineSpec) -> FlowNode {
         Alignment::Start => TextAlign::Start,
         Alignment::Center => TextAlign::Center,
         Alignment::End => TextAlign::End,
+        Alignment::Justify => TextAlign::Justify,
     };
     FlowNode::HLine(HLineNode::new(
         spec.width,
@@ -666,6 +667,7 @@ fn lower_image(
         Alignment::Start => TextAlign::Start,
         Alignment::Center => TextAlign::Center,
         Alignment::End => TextAlign::End,
+        Alignment::Justify => TextAlign::Justify,
     };
     match ImageNode::new(image.decoded, spec.width, spec.height, align) {
         Ok(node) => Some(FlowNode::Image(node)),
@@ -681,6 +683,7 @@ fn text_align(align: Alignment) -> TextAlign {
         Alignment::Start => TextAlign::Start,
         Alignment::Center => TextAlign::Center,
         Alignment::End => TextAlign::End,
+        Alignment::Justify => TextAlign::Justify,
     }
 }
 

@@ -198,8 +198,7 @@ let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
 Each run names its face. The library does not pick a face from the script of the text. List markers use the first face that registered successfully.
 
 Text shaping scope: horizontal Chinese and Latin. No bidi, vertical writing,
-kerning, ligatures, or justified lines in v1 (`Alignment` is Start / Center /
-End only).
+kerning, or ligatures. `Alignment` is Start / Center / End / Justify.
 
 ---
 
@@ -308,6 +307,7 @@ let paragraph = ParagraphSpec {
 | Underline / strikethrough | Position scales with the run's size. Thickness is 1 pt. Adjacent runs on one line with the same size and color share one stroke, placed from the first segment. Spaces inside the line are covered. A blank keeps its own stroke. |
 | `tracking` | Extra space after each cluster followed by more text on the line. It counts toward line breaking. Negative values may not push a glyph's advance below zero (`ErrorKind::NegativeTracking`). |
 | Mixed sizes | Each face on a line is scaled by its own size. The line box takes the largest ascent, the deepest descent, and the largest leading, then the larger of that natural height and the largest size times the line-height factor. A line of only blanks uses the first text run's resolved face at the paragraph size. A paragraph with no text runs does not read a font. |
+| `Alignment::Justify` | Placement only; line breaking is unchanged. Phase 1 widens U+0020 spaces up to 0.5em of that space's run size. Phase 2 averages leftover into eligible cluster gaps (Han / fullwidth punctuation; CJK–Latin boundaries yes; Latin word interiors no). The last paragraph line, a hard-break line, a `BlankWidth::ToEndOfLine` line, a line with no stretch slots, and a non-positive remainder stay Start-shaped. `ImageSpec` / `HLineSpec` / `CanvasSpec` treat `Justify` as Start. |
 | `InlineRun::Link` | Writes PDF link annotations over the glyph boxes; does not fetch the URI. Empty URI fails layout |
 | `BlankWidth::Fixed` / `Em` / `ToEndOfLine` | Underline-style blanks in forms |
 | Band / layer copy | Uses `TextRun` (resolved at paint time), not `InlineRun` |
@@ -546,7 +546,7 @@ See [examples/README.md](../examples/README.md).
 ## What this crate does not do
 
 - Bidirectional text, vertical writing, kerning, ligatures, full UAX #14
-- Justified lines
+- Punctuation compression / hanging punctuation for Justify
 - TOC generation, QR encoding, SVG parsing, in-flow vector canvas, encryption
 - Fetching images over HTTP
 - Silent missing-glyph substitution

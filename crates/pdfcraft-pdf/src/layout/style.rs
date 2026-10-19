@@ -9,6 +9,8 @@ pub(crate) enum TextAlign {
     Start,
     Center,
     End,
+    /// Paragraph remainder stretch. Non-paragraph placers treat as Start.
+    Justify,
 }
 
 /// Paragraph frame. Glyphs read [`GlyphStyle`], not these fields.

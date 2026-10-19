@@ -165,7 +165,8 @@ errors, testing).
 
 ## Design constraints (v1)
 
-- Horizontal Chinese + Latin; no bidi, vertical text, kerning, ligatures, or justify
+- Horizontal Chinese + Latin; no bidi, vertical text, kerning, or ligatures
+- `Alignment::Justify` stretches paragraph lines (spaces then CJK gaps); last / hard-break / Fill lines stay Start; Image / HLine / Canvas `Justify` ≡ Start
 - No TOC / QR / SVG / in-flow canvas / encryption APIs
 - No HTTP image fetch; no fallback fonts
 - No second PDF backend inside this crate

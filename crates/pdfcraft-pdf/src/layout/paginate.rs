@@ -471,7 +471,12 @@ mod tests {
         let body_w = 200.0f32;
         let indent = 24.0f32;
         let page = Size::try_pt(body_w, 400.0).unwrap();
-        for align in [TextAlign::Start, TextAlign::Center, TextAlign::End] {
+        for align in [
+            TextAlign::Start,
+            TextAlign::Center,
+            TextAlign::End,
+            TextAlign::Justify,
+        ] {
             let Some((mut fonts, mut style)) = fonts_and_style(align, 0.0) else {
                 return;
             };
@@ -496,7 +501,7 @@ mod tests {
                     .sum::<f32>()
             };
             let expected_x = match align {
-                TextAlign::Start => indent,
+                TextAlign::Start | TextAlign::Justify => indent,
                 TextAlign::Center => indent + (body_w - indent - line_width) / 2.0,
                 TextAlign::End => body_w - line_width,
             };

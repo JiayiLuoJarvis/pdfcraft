@@ -545,7 +545,7 @@ pub(crate) fn align_x(
     align: TextAlign,
 ) -> Length<Finite> {
     match align {
-        TextAlign::Start => Finite::ZERO,
+        TextAlign::Start | TextAlign::Justify => Finite::ZERO,
         TextAlign::Center => Length::from_trusted_pt((frame_width - line_width).as_pt() / 2.0),
         TextAlign::End => frame_width - line_width,
     }

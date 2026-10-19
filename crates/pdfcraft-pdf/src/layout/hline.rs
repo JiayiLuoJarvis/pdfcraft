@@ -61,7 +61,7 @@ impl HLineNode {
             return Ok(Split::MoveToNextPage(self));
         }
         let x = match self.align {
-            TextAlign::Start => 0.0,
+            TextAlign::Start | TextAlign::Justify => 0.0,
             TextAlign::Center => (avail.width - width).as_pt() / 2.0,
             TextAlign::End => (avail.width - width).as_pt(),
         };

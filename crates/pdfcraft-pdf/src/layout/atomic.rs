@@ -41,7 +41,7 @@ pub(crate) fn place_atomic(size: Size, align: TextAlign, avail: &Frame) -> Resul
         return Ok(AtomicPlace::MoveToNextPage);
     }
     let x = match align {
-        TextAlign::Start => 0.0,
+        TextAlign::Start | TextAlign::Justify => 0.0,
         TextAlign::Center => (avail.width - width).as_pt() / 2.0,
         TextAlign::End => (avail.width - width).as_pt(),
     };

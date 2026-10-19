@@ -117,6 +117,16 @@ pub(crate) struct SpanLine<T> {
     segs: Vec<Seg<T>>,
     width: Length<NonNegative>,
     empty_at: Option<(usize, ClusterCursor)>,
+    /// Closed because the next atom was Hard (`\n`). Hard itself is not in segs.
+    ended_by_hard_break: bool,
+    /// Contained `Advance::Fill` before width resolve (even when remainder is 0).
+    has_fill: bool,
+}
+
+#[derive(Clone, Copy)]
+struct EmitFlags {
+    ended_by_hard_break: bool,
+    has_fill: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -266,6 +276,8 @@ fn project_atoms<T: Copy>(
     Ok(atoms)
 }
 
+// Every emit path stamps hard/fill flags; extracting arms would obscure the scan.
+#[allow(clippy::too_many_lines)]
 fn pack_lines<T: Copy>(
     groups: &[&ClusteredText],
     mut atoms: Vec<Atom<T>>,
@@ -277,6 +289,7 @@ fn pack_lines<T: Copy>(
     // Drawn widths of every line atom before `tail`. `tail`'s gap waits for the next atom.
     let mut settled = NonNegative::ZERO;
     let mut tail: Option<WidthPart> = None;
+    let mut line_has_fill = false;
 
     while i < atoms.len() {
         let avail = budget.for_line(records.len());
@@ -295,11 +308,22 @@ fn pack_lines<T: Copy>(
         match atoms[i] {
             Atom::Hard { .. } => {
                 let width = closed_width(settled, tail);
-                records.push(emit_line(groups, &atoms, line_start, i, width));
+                records.push(emit_line(
+                    groups,
+                    &atoms,
+                    line_start,
+                    i,
+                    width,
+                    EmitFlags {
+                        ended_by_hard_break: true,
+                        has_fill: line_has_fill,
+                    },
+                ));
                 i += 1;
                 line_start = i;
                 settled = NonNegative::ZERO;
                 tail = None;
+                line_has_fill = false;
             }
             Atom::Blank {
                 advance: Advance::Fill,
@@ -318,6 +342,7 @@ fn pack_lines<T: Copy>(
                 }
                 settled = avail.into();
                 tail = None;
+                line_has_fill = true;
                 i += 1;
             }
             Atom::Ink { .. } | Atom::Blank { .. } => {
@@ -332,11 +357,22 @@ fn pack_lines<T: Copy>(
                 match nearest_break(&atoms, line_start, i) {
                     Some(split) => {
                         let committed = line_width(&atoms[line_start..split]);
-                        records.push(emit_line(groups, &atoms, line_start, split, committed));
+                        records.push(emit_line(
+                            groups,
+                            &atoms,
+                            line_start,
+                            split,
+                            committed,
+                            EmitFlags {
+                                ended_by_hard_break: false,
+                                has_fill: line_has_fill,
+                            },
+                        ));
                         line_start = split;
                         i = split;
                         settled = NonNegative::ZERO;
                         tail = None;
+                        line_has_fill = false;
                     }
                     None => {
                         return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
@@ -350,6 +386,10 @@ fn pack_lines<T: Copy>(
         }
     }
 
+    let soft = EmitFlags {
+        ended_by_hard_break: false,
+        has_fill: line_has_fill,
+    };
     if line_start < atoms.len() {
         records.push(emit_line(
             groups,
@@ -357,14 +397,20 @@ fn pack_lines<T: Copy>(
             line_start,
             atoms.len(),
             closed_width(settled, tail),
+            soft,
         ));
     } else {
+        // Trailing empty after Hard is not itself hard-ended.
         records.push(emit_line(
             groups,
             &atoms,
             line_start,
             line_start,
             NonNegative::ZERO,
+            EmitFlags {
+                ended_by_hard_break: false,
+                has_fill: false,
+            },
         ));
     }
     Ok(records)
@@ -489,12 +535,15 @@ fn emit_line<T: Copy>(
     start: usize,
     end: usize,
     width: Length<NonNegative>,
+    flags: EmitFlags,
 ) -> SpanLine<T> {
     if start >= end {
         return SpanLine {
             segs: Vec::new(),
             width: NonNegative::ZERO,
             empty_at: Some(eof_cursor(groups, atoms, start)),
+            ended_by_hard_break: flags.ended_by_hard_break,
+            has_fill: flags.has_fill,
         };
     }
 
@@ -536,6 +585,8 @@ fn emit_line<T: Copy>(
         segs,
         width,
         empty_at: None,
+        ended_by_hard_break: flags.ended_by_hard_break,
+        has_fill: flags.has_fill,
     }
 }
 
@@ -616,6 +667,14 @@ impl<T> SpanLine<T> {
 
     pub(crate) fn width(&self) -> Length<NonNegative> {
         self.width
+    }
+
+    pub(crate) fn ended_by_hard_break(&self) -> bool {
+        self.ended_by_hard_break
+    }
+
+    pub(crate) fn has_fill(&self) -> bool {
+        self.has_fill
     }
 
     #[cfg(test)]
@@ -891,6 +950,85 @@ mod tests {
         assert_eq!(lines[0].0, "A");
         assert_eq!(lines[1].0, "");
         assert_eq!(lines[2].0, "B");
+    }
+
+    #[test]
+    fn hard_break_sets_ended_flag_but_trailing_empty_does_not() {
+        let text = ClusteredText::new("A\n");
+        let broken = break_lines(&text, LineBudget::uniform(pos(10.0)), |_| nn(1.0)).unwrap();
+        let groups = [&text];
+        let spans = [Span::<()>::Group(0)];
+        let full = break_spans(&groups, &spans, LineBudget::uniform(pos(10.0)), |_, _| {
+            Ok(InkWidth {
+                body: nn(1.0),
+                gap: Finite::ZERO,
+            })
+        })
+        .unwrap();
+        assert_eq!(full.len(), 2);
+        assert!(full.get(0).ended_by_hard_break());
+        assert!(!full.get(0).has_fill());
+        assert!(!full.get(1).ended_by_hard_break());
+        assert!(!full.get(1).has_fill());
+        assert_eq!(broken.iter().count(), 2);
+    }
+
+    #[test]
+    fn soft_wrap_does_not_set_hard_flag() {
+        let text = ClusteredText::new("你好");
+        let groups = [&text];
+        let spans = [Span::<()>::Group(0)];
+        let broken = break_spans(&groups, &spans, LineBudget::uniform(pos(1.0)), |_, _| {
+            Ok(InkWidth {
+                body: nn(1.0),
+                gap: Finite::ZERO,
+            })
+        })
+        .unwrap();
+        assert_eq!(broken.len(), 2);
+        assert!(!broken.get(0).ended_by_hard_break());
+        assert!(!broken.get(1).ended_by_hard_break());
+        assert!(!broken.get(0).has_fill());
+        assert!(!broken.get(1).has_fill());
+    }
+
+    #[test]
+    fn fill_sets_has_fill_even_when_remainder_is_zero() {
+        let groups = [ClusteredText::new("AB")];
+        let spans = [
+            Span::Group(0),
+            Span::Blank {
+                advance: Advance::Fill,
+                payload: (),
+            },
+        ];
+        let broken = break_groups(&groups, &spans, LineBudget::uniform(pos(2.0))).unwrap();
+        assert_eq!(broken.len(), 1);
+        assert!(broken.get(0).has_fill());
+        assert!(!broken.get(0).ended_by_hard_break());
+        assert!(matches!(
+            broken.get(0).segs()[1],
+            Seg::Blank { width, .. } if width.as_pt().to_bits() == 0.0f32.to_bits()
+        ));
+    }
+
+    #[test]
+    fn mid_hard_empty_line_is_hard_ended() {
+        let text = ClusteredText::new("A\n\nB");
+        let groups = [&text];
+        let spans = [Span::<()>::Group(0)];
+        let broken = break_spans(&groups, &spans, LineBudget::uniform(pos(10.0)), |_, _| {
+            Ok(InkWidth {
+                body: nn(1.0),
+                gap: Finite::ZERO,
+            })
+        })
+        .unwrap();
+        assert_eq!(broken.len(), 3);
+        assert!(broken.get(0).ended_by_hard_break());
+        assert!(broken.get(1).ended_by_hard_break());
+        assert!(broken.get(1).segs().is_empty());
+        assert!(!broken.get(2).ended_by_hard_break());
     }
 
     #[test]

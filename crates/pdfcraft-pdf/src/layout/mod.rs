@@ -11,6 +11,7 @@ pub mod flow;
 pub mod frame;
 pub mod hline;
 pub mod image;
+pub(crate) mod justify;
 pub mod line_run;
 pub mod list;
 pub mod nesting;

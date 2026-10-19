@@ -75,6 +75,7 @@ fn short_line_aligns_center_start_end() {
         (TextAlign::Center, 100.0f32),
         (TextAlign::Start, 0.0),
         (TextAlign::End, 200.0),
+        (TextAlign::Justify, 0.0),
     ] {
         let Split::Fit { fragment, .. } = node(Some(100.0), align, 1.0, 0.0, 0.0)
             .split(frame(300.0, 50.0, 50.0))

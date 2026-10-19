@@ -85,6 +85,19 @@ fn is_id(cp: u32) -> bool {
     )
 }
 
+/// Fullwidth opening/closing punctuation: in OP or CL and codepoint ≥ U+3000.
+/// ASCII `()[]{}` are in the tables but excluded by the floor.
+pub(crate) fn is_fullwidth_op_or_cl(scalar: char) -> bool {
+    u32::from(scalar) >= 0x3000 && (OP.contains(&scalar) || CL.contains(&scalar))
+}
+
+/// Stretchable cluster head for Justify phase 2 (Word-style inter-ideograph).
+/// Han Ext-A / Unified only, or fullwidth Op/Cl. Not [`is_id`] (kana/Hangul/U+3000).
+pub(crate) fn is_justify_cluster(scalar: char) -> bool {
+    let cp = u32::from(scalar);
+    matches!(cp, 0x3400..=0x4DBF | 0x4E00..=0x9FFF) || is_fullwidth_op_or_cl(scalar)
+}
+
 fn is_al(cp: u32) -> bool {
     matches!(
         cp,
@@ -135,5 +148,29 @@ mod tests {
         assert!(!allows(PairClass::Other, PairClass::Other));
         assert!(allows(PairClass::Id, PairClass::Other));
         assert!(!allows(PairClass::Op, PairClass::Cl));
+    }
+
+    #[test]
+    fn justify_cluster_is_han_or_fullwidth_op_cl_only() {
+        assert!(is_justify_cluster('好'));
+        assert!(is_justify_cluster('\u{3400}'));
+        assert!(is_justify_cluster('\u{4E00}'));
+        assert!(is_justify_cluster('\u{9FFF}'));
+        assert!(is_justify_cluster('（'));
+        assert!(is_justify_cluster('。'));
+        assert!(is_justify_cluster('，'));
+        assert!(!is_justify_cluster('A'));
+        assert!(!is_justify_cluster(' '));
+        assert!(!is_justify_cluster('('));
+        assert!(!is_justify_cluster(')'));
+        assert!(!is_justify_cluster('\u{3000}'));
+        assert!(!is_justify_cluster('あ'));
+        assert!(!is_justify_cluster('ア'));
+        assert!(!is_justify_cluster('한'));
+        assert!(!is_justify_cluster('\u{FF21}'));
+        assert!(!is_justify_cluster('\u{20000}'));
+        assert!(!is_justify_cluster('\u{F900}'));
+        assert!(is_id(u32::from('あ')));
+        assert!(!is_justify_cluster('あ'));
     }
 }

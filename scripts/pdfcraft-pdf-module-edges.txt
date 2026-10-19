@@ -68,6 +68,9 @@ layout/image geom
 layout/image layout/atomic
 layout/image layout/frame
 layout/image layout/style
+layout/justify geom
+layout/justify layout/line_run
+layout/justify text
 layout/line_run canvas
 layout/line_run error
 layout/line_run fonts
@@ -94,6 +97,7 @@ layout/paragraph canvas
 layout/paragraph error
 layout/paragraph geom
 layout/paragraph layout/frame
+layout/paragraph layout/justify
 layout/paragraph layout/line_run
 layout/paragraph layout/style
 layout/paragraph text

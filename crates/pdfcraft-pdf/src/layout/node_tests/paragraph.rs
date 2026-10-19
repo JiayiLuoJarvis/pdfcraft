@@ -588,3 +588,306 @@ fn merged_underline_uses_the_first_segment_and_draws_1pt() {
     assert!(!pt_near(drawn[0].0, baseline + 10.1));
     assert!(pt_near(drawn[0].1, 1.0));
 }
+
+#[test]
+fn justify_middle_line_stretches_last_line_matches_start() {
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
+    // Enough CJK to wrap. Frame 130 leaves remainder when glyphs are ~12pt wide
+    // (a 120pt frame packs exactly 10 fullwidth cells and would not stretch).
+    let text = "两端对齐的中文段落用来检查中间行拉开而末行保持靠左。";
+    let frame_w = 130.0;
+    style.align = TextAlign::Justify;
+    let justified = fit(
+        vec![InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        frame_w,
+        400.0,
+    );
+    style.align = TextAlign::Start;
+    let started = fit(
+        vec![InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        frame_w,
+        400.0,
+    );
+    let just_lines = glyph_spans(&justified);
+    let start_lines = glyph_spans(&started);
+    assert!(
+        just_lines.len() >= 2,
+        "need a wrapped paragraph, got {}",
+        just_lines.len()
+    );
+    assert_eq!(just_lines.len(), start_lines.len());
+    // Intermediate lines stretch: painted end closer to frame right than Start twin.
+    for index in 0..just_lines.len() - 1 {
+        let just_end = just_lines[index].1 + just_lines[index].2;
+        let start_end = start_lines[index].1 + start_lines[index].2;
+        assert!(
+            just_end > start_end + 0.5,
+            "line {index}: justify end {just_end} should exceed start end {start_end}"
+        );
+        assert!(
+            (just_end - frame_w).abs() < 0.05 || just_end <= frame_w + 0.05,
+            "line {index}: justify end {just_end} should meet the frame {frame_w}"
+        );
+    }
+    // Last line stays Start-shaped.
+    let last = just_lines.len() - 1;
+    assert!(pt_near(just_lines[last].1, start_lines[last].1));
+    assert!(pt_near(just_lines[last].2, start_lines[last].2));
+}
+
+#[test]
+fn justify_hard_break_line_matches_start() {
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
+    let text = "第一行内容足够短\n第二行";
+    style.align = TextAlign::Justify;
+    let justified = fit(
+        vec![InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        200.0,
+        200.0,
+    );
+    style.align = TextAlign::Start;
+    let started = fit(
+        vec![InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        200.0,
+        200.0,
+    );
+    let just = glyph_spans(&justified);
+    let start = glyph_spans(&started);
+    assert!(just.len() >= 2);
+    assert!(pt_near(just[0].1, start[0].1));
+    assert!(pt_near(just[0].2, start[0].2));
+}
+
+#[test]
+fn justify_fill_line_stays_start_and_fill_still_eats_width() {
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
+    style.align = TextAlign::Justify;
+    let fragment = fit(
+        vec![
+            InlineItem::Text(TextRun::new("好", GlyphStyle::plain(&style))),
+            InlineItem::Blank(InlineBlank::new(BlankWidth::ToEndOfLine)),
+        ],
+        &style,
+        &mut fonts,
+        120.0,
+        80.0,
+    );
+    let glyphs = glyph_spans(&fragment);
+    assert!(pt_near(glyphs[0].1, 0.0));
+    let end = fragment.commands.iter().find_map(|command| match command {
+        FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
+            crate::geom::PathVerb::LineTo(point) => point.x().as_pt(),
+            _ => f32::NAN,
+        }),
+        _ => None,
+    });
+    assert!(pt_near(end.unwrap_or(f32::NAN), 120.0));
+}
+
+#[test]
+fn justify_space_cap_is_half_em() {
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
+    // Two short Latin words with one space; wide frame → large remainder; only
+    // phase-1 slots. Cap is 0.5 * 12 = 6 pt.
+    style.align = TextAlign::Justify;
+    let text = "Hi there";
+    let justified = fit(
+        vec![InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    style.align = TextAlign::Start;
+    let started = fit(
+        vec![InlineItem::Text(TextRun::new(
+            text,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        200.0,
+        80.0,
+    );
+    // Single-line paragraph is last line → Start fallback; force two lines.
+    let long = "aa bb cc dd ee ff gg hh ii jj kk";
+    style.align = TextAlign::Justify;
+    style.font_size = Positive::pt(12.0).unwrap();
+    let wrapped = fit(
+        vec![InlineItem::Text(TextRun::new(
+            long,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        80.0,
+        200.0,
+    );
+    style.align = TextAlign::Start;
+    let wrapped_start = fit(
+        vec![InlineItem::Text(TextRun::new(
+            long,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        80.0,
+        200.0,
+    );
+    let just_lines = glyph_spans(&wrapped);
+    let start_lines = glyph_spans(&wrapped_start);
+    assert!(just_lines.len() >= 2, "need wrap for non-last stretch");
+    let mid = 0usize;
+    let growth = (just_lines[mid].2) - (start_lines[mid].2);
+    let space_count = start_lines[mid]
+        .0
+        .chars()
+        .filter(|ch| *ch == ' ')
+        .count()
+        .max(1);
+    #[allow(clippy::cast_precision_loss)]
+    let cap_total = 0.5 * style.font_size.as_pt() * space_count as f32;
+    assert!(
+        growth <= cap_total + 0.05,
+        "growth {growth} exceeds space caps {cap_total}"
+    );
+    // Single-line control stays Start (last line).
+    assert!(pt_near(
+        glyph_spans(&justified)[0].2,
+        glyph_spans(&started)[0].2
+    ));
+}
+
+#[test]
+fn justify_cjk_latin_boundary_stretches() {
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
+    style.align = TextAlign::Justify;
+    // Wraps on ideograph breaks; CJK–Latin gaps are phase-2 slots.
+    let mixed = "中A中B中C中D中E中F中G中H";
+    let mixed_just = fit(
+        vec![InlineItem::Text(TextRun::new(
+            mixed,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        72.0,
+        200.0,
+    );
+    style.align = TextAlign::Start;
+    let mixed_start = fit(
+        vec![InlineItem::Text(TextRun::new(
+            mixed,
+            GlyphStyle::plain(&style),
+        ))],
+        &style,
+        &mut fonts,
+        72.0,
+        200.0,
+    );
+    let mj = glyph_spans(&mixed_just);
+    let ms = glyph_spans(&mixed_start);
+    assert!(mj.len() >= 2);
+    assert!(mj[0].2 > ms[0].2 + 0.5);
+}
+
+#[test]
+fn justify_link_rect_follows_stretched_glyphs() {
+    let Some((mut fonts, mut style)) = fonts_and_style() else {
+        return;
+    };
+    let text = "两端对齐链接覆盖拉开后的整段文字内容。";
+    style.align = TextAlign::Justify;
+    let face = style.font.expect("test style has a face");
+    let justified = fit(
+        vec![text_item(text, &style, face, Some("https://example.com"))],
+        &style,
+        &mut fonts,
+        100.0,
+        200.0,
+    );
+    style.align = TextAlign::Start;
+    let started = fit(
+        vec![text_item(text, &style, face, Some("https://example.com"))],
+        &style,
+        &mut fonts,
+        100.0,
+        200.0,
+    );
+    let just_links = hits(&justified);
+    let start_links = hits(&started);
+    assert!(!just_links.is_empty());
+    assert_eq!(just_links.len(), start_links.len());
+    if just_links.len() >= 2 {
+        assert!(just_links[0].width > start_links[0].width + 0.5);
+    }
+}
+
+#[test]
+fn justify_with_tracking_stretches_after_tracking_width() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let face = style.font.expect("test style has a face");
+    let tracking = Finite::pt(1.0).unwrap();
+    let text = "你好世界你好世界你好世界";
+    // 100pt leaves remainder after tracking-inflated cluster widths.
+    let mut place = |align: TextAlign| {
+        let mut local = style.clone();
+        local.align = align;
+        fit(
+            vec![InlineItem::Text(TextRun::new(
+                text,
+                GlyphStyle {
+                    font: face,
+                    tracking,
+                    ..GlyphStyle::plain(&local)
+                },
+            ))],
+            &local,
+            &mut fonts,
+            100.0,
+            200.0,
+        )
+    };
+    let justified = place(TextAlign::Justify);
+    let started = place(TextAlign::Start);
+    let mj = glyph_spans(&justified);
+    let ms = glyph_spans(&started);
+    assert!(mj.len() >= 2);
+    // Start twin already includes tracking in line width; justify adds on top.
+    assert!(mj[0].2 > ms[0].2 + 0.5);
+}

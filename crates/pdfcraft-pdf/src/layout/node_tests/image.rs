@@ -74,6 +74,51 @@ fn size_rules_and_end_placement() {
 }
 
 #[test]
+fn justify_align_places_like_start() {
+    let start = ImageNode::new(
+        pixels(200, 100),
+        Some(Positive::pt(100.0).unwrap()),
+        None,
+        TextAlign::Start,
+    )
+    .unwrap();
+    let justify = ImageNode::new(
+        pixels(200, 100),
+        Some(Positive::pt(100.0).unwrap()),
+        None,
+        TextAlign::Justify,
+    )
+    .unwrap();
+    let Split::Fit {
+        fragment: start_frag,
+        ..
+    } = start.split(frame(300.0, 400.0, 400.0)).unwrap()
+    else {
+        panic!("expected fit");
+    };
+    let Split::Fit {
+        fragment: just_frag,
+        ..
+    } = justify.split(frame(300.0, 400.0, 400.0)).unwrap()
+    else {
+        panic!("expected fit");
+    };
+    let FragmentCommand::Image {
+        rect: start_rect, ..
+    } = &start_frag.commands[0]
+    else {
+        panic!("expected image");
+    };
+    let FragmentCommand::Image {
+        rect: just_rect, ..
+    } = &just_frag.commands[0]
+    else {
+        panic!("expected image");
+    };
+    assert_eq!(rect_bits(*start_rect), rect_bits(*just_rect));
+}
+
+#[test]
 fn recording_pins_the_placed_rect() {
     let node = ImageNode::new(
         pixels(200, 100),

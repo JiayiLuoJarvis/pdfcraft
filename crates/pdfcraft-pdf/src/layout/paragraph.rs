@@ -8,11 +8,12 @@ use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
 use crate::fonts::FontStore;
 use crate::geom::{Color, Length, NonNegative, Positive};
 use crate::layout::frame::{Fragment, Frame, LayoutCtx, Split};
+use crate::layout::justify::{build_roles, StretchPlan, StretchRequest};
 use crate::layout::line_run::{
     align_x, append_commands, face_extent, measure_inline, BlankStroke, LinePainter, LinePiece,
     MeasuredInline,
 };
-use crate::layout::style::{GlyphStyle, Style};
+use crate::layout::style::{GlyphStyle, Style, TextAlign};
 use crate::text::cluster::{ClusterCursor, ClusteredText};
 use crate::text::line_break::{
     break_spans, draw_widths, Advance, LineBudget, Seg, Span, SpanLine, WidthPart,
@@ -208,6 +209,7 @@ impl ParagraphNode {
         )?;
 
         let mut lines = Vec::with_capacity(broken.len());
+        let line_count = broken.len();
         for (index, line) in broken.iter().enumerate() {
             let frame_width = if index == 0 { first_width } else { width };
             let frame_x = if index == 0 {
@@ -223,6 +225,7 @@ impl ParagraphNode {
                 frame_width,
                 frame_x,
                 metrics.baseline.as_pt(),
+                index + 1 == line_count,
             )?;
             lines.push(LineBox {
                 pieces,
@@ -497,6 +500,7 @@ fn place_line(
     frame_width: Length<Positive>,
     frame_x: Length<NonNegative>,
     baseline: f32,
+    is_last_line: bool,
 ) -> Result<Vec<LinePiece>> {
     let mut parts = Vec::new();
     for seg in line.segs() {
@@ -509,7 +513,23 @@ fn place_line(
             Seg::Blank { width, .. } => parts.push(WidthPart::Blank(width)),
         }
     }
-    let draws: Vec<_> = draw_widths(&parts).collect();
+    let base: Vec<_> = draw_widths(&parts).collect();
+    let (draws, allocated) = if style.align == TextAlign::Justify {
+        let roles = build_roles(groups, line.segs());
+        debug_assert_eq!(roles.len(), base.len());
+        let plan = StretchPlan::for_line(StretchRequest {
+            roles: &roles,
+            frame_width,
+            line_width: line.width(),
+            is_last_line,
+            ended_by_hard_break: line.ended_by_hard_break(),
+            has_fill: line.has_fill(),
+        });
+        let allocated = plan.allocated();
+        (plan.apply(&base), allocated)
+    } else {
+        (base, NonNegative::ZERO)
+    };
 
     let line_x = frame_x.as_pt() + align_x(frame_width, line.width(), style.align).as_pt();
     let mut painter = LinePainter::new(line_x, baseline);
@@ -522,9 +542,9 @@ fn place_line(
                 painter.text(&groups[group], &clusters, &draws[at..at + count])?;
                 at += count;
             }
-            Seg::Blank { width, payload } => {
+            Seg::Blank { payload, .. } => {
                 painter.blank(
-                    width,
+                    draws[at],
                     BlankStroke {
                         offset: payload.baseline_offset.as_pt(),
                         color: payload.color.unwrap_or(style.color),
@@ -535,11 +555,11 @@ fn place_line(
             }
         }
     }
+    let target_width = line.width().as_pt() + allocated.as_pt();
     debug_assert!(
-        pt_near(painter.x() - line_x, line.width().as_pt()),
-        "placed {} from {line_x}, line width {}",
+        pt_near(painter.x() - line_x, target_width),
+        "placed {} from {line_x}, painted width {target_width}",
         painter.x(),
-        line.width().as_pt()
     );
     painter.finish(style.font, style.font_size, style.color)
 }
