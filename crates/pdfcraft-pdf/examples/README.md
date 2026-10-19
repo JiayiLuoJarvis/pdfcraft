@@ -26,3 +26,17 @@ Service-bill layout on the same API. Needs a full CJK face:
 
 Without a suitable face the example exits with `MissingGlyph` rather than
 emitting boxes.
+
+## anchors
+
+Visual check for §12.4: an external URI, in-document links onto `Block::Anchor`,
+a collapsed outline (`開篇` → `付款` → back up to `簽章`), and a repeating table
+header whose `CellBlock::Anchor` stays on the first placement.
+
+```bash
+cargo run -p pdfcraft-pdf --example anchors
+```
+
+Writes `out/anchors.pdf`. The program prints what to look for with `pdfinfo`,
+`pdftotext`, and a reader outline sidebar. Font: `PDFCRAFT_PDF_FONT`, else
+`PDFCRAFT_CJK_FONT`, else `.fonts/body.ttf`. The face must cover the CJK sample.

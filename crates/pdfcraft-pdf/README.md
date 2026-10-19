@@ -107,7 +107,8 @@ Runnable demos:
 
 ```bash
 cargo run -p pdfcraft-pdf --example hello
-cargo run -p pdfcraft-pdf --example bill   # needs a CJK face; see examples/README.md
+cargo run -p pdfcraft-pdf --example bill    # needs a CJK face; see examples/README.md
+cargo run -p pdfcraft-pdf --example anchors # §12.4 sample → out/anchors.pdf
 ```
 
 ---

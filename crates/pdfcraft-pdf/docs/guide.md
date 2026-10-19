@@ -539,6 +539,7 @@ rejects draws, and `to_pdf` is unavailable.
 ```bash
 cargo run -p pdfcraft-pdf --example hello   # writes out/hello.pdf
 cargo run -p pdfcraft-pdf --example bill    # CJK: set PDFCRAFT_CJK_FONT or use .fonts/
+cargo run -p pdfcraft-pdf --example anchors # §12.4 links and outline → out/anchors.pdf
 ```
 
 See [examples/README.md](../examples/README.md).

@@ -426,9 +426,10 @@ fn repeating_header_anchor_keeps_first_destination() {
             font: (),
         }])]
     };
-    // Enough body rows + small page to force the repeating header onto page 2.
+    // One A4 body is about 746 pt under 48 pt margins. Line height is at least
+    // 12 pt * 1.2, so 40 rows can still fit. 80 rows cannot, on any face.
     let mut body_rows = Vec::new();
-    for i in 0..40 {
+    for i in 0..80 {
         body_rows.push(row(&format!("row{i}")));
     }
     let table = Block::Table(TableSpec {
