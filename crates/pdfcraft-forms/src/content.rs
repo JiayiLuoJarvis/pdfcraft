@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{font_unusable, Error, ErrorKind, FlattenReason, FontReason, Result};
+use crate::error::{self, Error, ErrorKind, FlattenReason, FontReason, Result};
 use crate::fields::{HAlign, PAD_X};
 use crate::font::PreparedFont;
 use crate::inspect::{PdfDoc, PdfRect};
@@ -198,7 +198,7 @@ impl PdfDoc {
                 )
             });
             let font_name = if needs_font {
-                let font_id = font_id.ok_or_else(|| font_unusable(FontReason::Missing))?;
+                let font_id = font_id.ok_or_else(|| error::font_unusable(FontReason::Missing))?;
                 Some(self.attach_font(page_id, font_id)?)
             } else {
                 None

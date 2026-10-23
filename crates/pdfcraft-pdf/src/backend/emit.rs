@@ -22,10 +22,7 @@ use krilla::surface::Surface;
 use krilla::text::{Font, GlyphId, KrillaGlyph};
 use krilla::{Data, Document, SerializeSettings};
 
-use crate::backend::convert::{
-    to_fill, to_krilla_path, to_krilla_point, to_krilla_rect, to_krilla_size, to_krilla_transform,
-    to_stroke,
-};
+use crate::backend::convert;
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
 use crate::canvas::{DocumentInfo, LinkTarget, OutlineItem};
 use crate::error::{Error, ErrorKind, Fallible as Result};
@@ -65,7 +62,10 @@ fn to_outline(items: &[OutlineItem]) -> Option<Outline> {
     for item in items {
         let node = OutlineNode::new(
             item.title.clone(),
-            XyzDestination::new(item.xyz.page_index(), to_krilla_point(item.xyz.point())),
+            XyzDestination::new(
+                item.xyz.page_index(),
+                convert::to_krilla_point(item.xyz.point()),
+            ),
         );
         while stack.last().is_some_and(|(level, _)| item.level <= *level) {
             let (_, finished) = stack.pop().expect("stack non-empty");
@@ -171,7 +171,7 @@ fn draw_marks(surface: &mut Surface<'_>, marks: &[Mark], depth: &mut usize) -> R
     for mark in marks {
         match mark {
             Mark::PushTransform(affine) => {
-                surface.push_transform(&to_krilla_transform(*affine));
+                surface.push_transform(&convert::to_krilla_transform(*affine));
                 *depth += 1;
             }
             Mark::PopTransform => {
@@ -187,9 +187,9 @@ fn draw_marks(surface: &mut Surface<'_>, marks: &[Mark], depth: &mut usize) -> R
 fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
     match mark {
         Mark::Fill { path, paint } => {
-            surface.set_fill(Some(to_fill(*paint)));
+            surface.set_fill(Some(convert::to_fill(*paint)));
             surface.set_stroke(None);
-            surface.draw_path(&to_krilla_path(path)?);
+            surface.draw_path(&convert::to_krilla_path(path)?);
         }
         Mark::Stroke {
             path,
@@ -197,8 +197,8 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             stroke,
         } => {
             surface.set_fill(None);
-            surface.set_stroke(Some(to_stroke(*paint, *stroke)));
-            surface.draw_path(&to_krilla_path(path)?);
+            surface.set_stroke(Some(convert::to_stroke(*paint, *stroke)));
+            surface.draw_path(&convert::to_krilla_path(path)?);
         }
         Mark::Glyphs {
             font_bytes,
@@ -231,10 +231,10 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
                     )
                 })
                 .collect();
-            surface.set_fill(Some(to_fill(Paint::solid(*color))));
+            surface.set_fill(Some(convert::to_fill(Paint::solid(*color))));
             surface.set_stroke(None);
             surface.draw_glyphs(
-                to_krilla_point(*origin),
+                convert::to_krilla_point(*origin),
                 &drawn,
                 font,
                 text,
@@ -243,9 +243,10 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             );
         }
         Mark::Image { raster, rect } => {
-            let size = to_krilla_size(rect.size()).ok_or(Error::from(ErrorKind::Backend {
-                message: "Size::from_wh rejected a positive image Size".to_owned(),
-            }))?;
+            let size =
+                convert::to_krilla_size(rect.size()).ok_or(Error::from(ErrorKind::Backend {
+                    message: "Size::from_wh rejected a positive image Size".to_owned(),
+                }))?;
             // `draw_image` paints with the top edge at the current origin. Pair push and pop
             // with nothing fallible between them; an unbalanced transform panics inside krilla.
             let shift = krilla::geom::Transform::from_translate(
@@ -279,7 +280,7 @@ fn check_upem(skrifa_upem: f32, krilla_upem: f32) -> Result<()> {
 }
 
 fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
-    let rect = to_krilla_rect(link.rect).ok_or(Error::from(ErrorKind::Backend {
+    let rect = convert::to_krilla_rect(link.rect).ok_or(Error::from(ErrorKind::Backend {
         message: "Rect::from_xywh rejected a positive Rect".to_owned(),
     }))?;
     Ok(LinkAnnotation::new(
@@ -288,7 +289,7 @@ fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
             LinkTarget::Uri(uri) => Target::Action(LinkAction::new(uri.clone()).into()),
             LinkTarget::Xyz(xyz) => Target::Destination(Destination::Xyz(XyzDestination::new(
                 xyz.page_index(),
-                to_krilla_point(xyz.point()),
+                convert::to_krilla_point(xyz.point()),
             ))),
             LinkTarget::Anchor(_) => {
                 return Err(Error::from(ErrorKind::Backend {
@@ -341,7 +342,10 @@ mod tests {
         canvas.start_page(A4).unwrap();
         canvas.finish_page().unwrap();
         let bytes = canvas.finish().unwrap();
-        assert!(bytes.starts_with(b"%PDF"));
+        assert!(
+            bytes.starts_with(b"%PDF"),
+            "finished canvas must emit a PDF header"
+        );
     }
 
     #[test]
@@ -387,8 +391,14 @@ mod tests {
         canvas.finish_page().unwrap();
         let bytes = canvas.finish().unwrap();
         let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains('f') || text.contains('F') || text.contains("f*"));
-        assert!(text.contains('S') || text.contains('s'));
+        assert!(
+            text.contains('f') || text.contains('F') || text.contains("f*"),
+            "fill probe must emit a fill operator, got:\n{text}"
+        );
+        assert!(
+            text.contains('S') || text.contains('s'),
+            "stroke probe must emit a stroke operator, got:\n{text}"
+        );
     }
 
     #[test]
@@ -463,8 +473,14 @@ mod tests {
         };
         let err = canvas.draw_glyph_run(&run).unwrap_err();
         assert!(matches!(err.kind, ErrorKind::UnknownFont { id: 0 }));
-        assert!(canvas.finish_page().is_err());
-        assert!(canvas.finish().is_err());
+        assert!(
+            canvas.finish_page().is_err(),
+            "poisoned canvas must refuse finish_page"
+        );
+        assert!(
+            canvas.finish().is_err(),
+            "poisoned canvas must refuse finish"
+        );
     }
 
     #[test]

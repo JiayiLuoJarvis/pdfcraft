@@ -15,7 +15,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use skrifa::instance::{LocationRef, Size};
-use skrifa::{FontRef, MetadataProvider};
+use skrifa::FontRef;
 
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::limits::{LimitKind, Limits};
@@ -43,6 +43,9 @@ impl FontId {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FontSource {
+    // One file buffer shared by registry faces, stored faces, and resolved
+    // marks. Owners have independent lifetimes; copying per owner would
+    // duplicate multi-MB font data.
     pub(crate) bytes: Arc<Vec<u8>>,
     pub(crate) index: u32,
 }
@@ -69,6 +72,10 @@ pub(crate) struct LoadedFace {
 #[must_use]
 pub struct FontFace {
     /// Shared font file bytes.
+    ///
+    /// Faces cut from one file (regular, bold, italic, bold italic) hold
+    /// clones instead of copies. A borrow would thread lifetimes through the
+    /// public registry API for no runtime gain in this single-threaded pipeline.
     pub bytes: Arc<Vec<u8>>,
     /// Face index inside `bytes`. Zero is the first face.
     pub index: u32,
@@ -145,6 +152,11 @@ where
     K: Copy + Eq + Hash + Debug,
 {
     /// Inserts `family` under `key`. A repeated `key` replaces the previous family.
+    ///
+    /// Faces are parsed when [`crate::layout_spec`] runs, not here. An unusable
+    /// face is reported there as [`ErrorKind::Font`] or a
+    /// [`LimitKind::FontBytes`] cap, with the parser error on
+    /// [`std::error::Error::source`].
     pub fn register(&mut self, key: K, family: FontFamily) {
         if let Some((_, existing)) = self.entries.iter_mut().find(|(found, _)| *found == key) {
             *existing = family;
@@ -170,6 +182,8 @@ impl<T> FontKey for T where T: Copy + Eq + Hash + Debug {}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedFont {
+    // Clone of the stored face buffer, owned by one mark batch. Keeps the
+    // page plan lifetime-free after the canvas drops its store handle.
     pub(crate) bytes: Arc<Vec<u8>>,
     pub(crate) index: u32,
     pub(crate) skrifa_units_per_em: f32,
@@ -192,6 +206,7 @@ impl Default for FontStore {
 
 /// Ascent, descent, leading, and units per em, the same numbers [`FontStore::register`] stores.
 pub(crate) fn face_metrics(font_ref: &FontRef<'_>, index: u32) -> Result<FaceMetrics> {
+    use skrifa::MetadataProvider;
     let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
     if metrics.units_per_em == 0 {
         return Err(Error::from(ErrorKind::Font {
@@ -307,6 +322,8 @@ impl FontStore {
     }
 
     pub(crate) fn decorations(&self, id: FontId) -> Result<FaceDecorations> {
+        use skrifa::MetadataProvider;
+
         let face = self.face(id)?;
         let font_ref = parse_face(face.source.bytes.as_slice(), face.source.index)?;
         let metrics = font_ref.metrics(Size::unscaled(), LocationRef::default());
@@ -346,6 +363,7 @@ pub(crate) fn fixture_bytes() -> Option<Arc<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use skrifa::metrics::Decoration;
+    use skrifa::MetadataProvider;
 
     use super::*;
 

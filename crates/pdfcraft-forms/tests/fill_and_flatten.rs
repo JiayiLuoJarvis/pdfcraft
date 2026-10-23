@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use pdfcraft_forms::{
-    fill_and_flatten, list_fields, AbsoluteLine, ArgumentReason, ErrorKind, FieldValue,
-    FillOptions, FlattenReason, FontBytes, FontReason, HAlign, MissingName, VAlign,
+    fill_and_flatten, list_fields, AbsoluteLine, ArgumentReason, Error, ErrorKind, FieldInfo,
+    FieldType, FieldValue, FillOptions, FlattenReason, FontBytes, FontReason, HAlign, MissingName,
+    VAlign,
 };
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -41,7 +42,7 @@ fn basic_fields() -> HashMap<String, FieldValue> {
         "employee_name".to_string(),
         FieldValue::Text("Ada".to_string()),
     );
-    fields.insert("agree".to_string(), FieldValue::CheckBox(true));
+    fields.insert("agree".to_string(), FieldValue::CheckBox(true)); // checked
     fields.insert("level".to_string(), FieldValue::Text("Senior".to_string()));
     fields
 }
@@ -92,7 +93,7 @@ fn empty_map_strips_widgets() {
 #[test]
 fn checkbox_only_fill_does_not_embed_a_font() {
     let mut fields = HashMap::new();
-    fields.insert("agree".to_string(), FieldValue::CheckBox(true));
+    fields.insert("agree".to_string(), FieldValue::CheckBox(true)); // checked
     let pdf =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap();
     assert!(!pdf
@@ -106,7 +107,7 @@ fn unchecked_box_draws_no_mark() {
         return;
     };
     let mut fields = HashMap::new();
-    fields.insert("agree".to_string(), FieldValue::CheckBox(false));
+    fields.insert("agree".to_string(), FieldValue::CheckBox(false)); // unchecked
     let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options(&font_bytes)).unwrap();
     let doc = lopdf::Document::load_mem(&pdf).unwrap();
     assert!(!has_agree_mark(&doc), "{}", page_text(&doc));
@@ -140,7 +141,7 @@ fn rejects_illegal_choice() {
 #[test]
 fn rejects_a_checkbox_value_on_a_text_widget() {
     let mut fields = HashMap::new();
-    fields.insert("employee_name".to_string(), FieldValue::CheckBox(true));
+    fields.insert("employee_name".to_string(), FieldValue::CheckBox(true)); // checked
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
     assert_eq!(
@@ -156,7 +157,7 @@ fn rejects_a_checkbox_value_on_a_text_widget() {
 fn rejects_any_value_on_a_radio_widget() {
     let pdf = radio_widget_pdf();
     for value in [
-        FieldValue::CheckBox(true),
+        FieldValue::CheckBox(true), // checked
         FieldValue::Text("Ada".to_string()),
     ] {
         let mut fields = HashMap::new();
@@ -355,7 +356,7 @@ fn rejects_filling_a_signature() {
 #[test]
 fn rejects_an_unknown_name() {
     let mut fields = HashMap::new();
-    fields.insert("missing".to_string(), FieldValue::CheckBox(true));
+    fields.insert("missing".to_string(), FieldValue::CheckBox(true)); // checked
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
     assert_eq!(
@@ -825,6 +826,63 @@ fn page_text(doc: &lopdf::Document) -> String {
     let page_id = doc.page_iter().next().unwrap();
     let bytes = doc.get_page_content(page_id);
     String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[test]
+fn non_exhaustive_enums_match_with_a_wildcard() {
+    fn describe(value: &FieldValue) -> &'static str {
+        match value {
+            FieldValue::Text(_) => "text",
+            FieldValue::CheckBox(_) => "checkbox",
+            _ => "future",
+        }
+    }
+    fn kind_name(field_type: FieldType) -> &'static str {
+        match field_type {
+            FieldType::Text => "text",
+            FieldType::CheckBox => "checkbox",
+            FieldType::ListBox => "list",
+            FieldType::ComboBox => "combo",
+            FieldType::Signature => "signature",
+            FieldType::RadioButton => "radio",
+            FieldType::PushButton => "push",
+            _ => "future",
+        }
+    }
+    assert_eq!(describe(&FieldValue::Text("Ada".into())), "text");
+    assert_eq!(describe(&FieldValue::CheckBox(true)), "checkbox");
+    assert_eq!(kind_name(FieldType::Text), "text");
+    assert_eq!(kind_name(FieldType::PushButton), "push");
+}
+
+#[test]
+fn error_new_pairs_with_from() {
+    let err = Error::new(ErrorKind::NotAPdf);
+    assert_eq!(err, Error::from(ErrorKind::NotAPdf));
+    assert_eq!(err.to_string(), "not a PDF");
+}
+
+#[test]
+fn absolute_line_default_matches_new_at_origin() {
+    assert_eq!(
+        AbsoluteLine::default(),
+        AbsoluteLine::new(0.0, 0.0, 0.0, 0.0)
+    );
+    let placed = AbsoluteLine {
+        x1: 1.0,
+        y1: 2.0,
+        ..Default::default()
+    };
+    assert_eq!(placed.x1.to_bits(), 1.0_f32.to_bits());
+    assert_eq!(placed.stroke_width.to_bits(), 0.8_f32.to_bits());
+}
+
+#[test]
+fn field_info_reads_through_a_rest_pattern() {
+    let fields = list_fields(&fixture("basic_form.pdf")).expect("list fields");
+    let first = fields.first().expect("one widget");
+    let FieldInfo { name, .. } = first;
+    assert!(!name.is_empty());
 }
 
 #[test]

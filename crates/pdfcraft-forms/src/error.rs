@@ -1,3 +1,23 @@
+//! Failures from opening a PDF, reading `AcroForm` widgets, and drawing values
+//! into them.
+//!
+//! # Shape
+//!
+//! - [`Error`] — one failure: [`Error::kind`] plus an optional dependency error
+//!   behind [`std::error::Error::source`]
+//! - [`ErrorKind`] — what went wrong; [`ArgumentReason`], [`FlattenReason`], and
+//!   [`FontReason`] subdivide the three largest families
+//! - [`Result<T>`](crate::Result) — `Result<T, Error>`
+//!
+//! # Reporting model
+//!
+//! Every public forms operation reads caller-supplied PDF or font bytes, so its
+//! failures are recoverable: [`crate::list_fields`] and
+//! [`crate::fill_and_flatten`] return `Result` with a specific [`ErrorKind`].
+//! Parser and writer failures are not flattened into the message; they stay
+//! reachable through [`std::error::Error::source`]. No public forms API returns
+//! `Option` for a failure, and none panics on malformed input.
+
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
@@ -10,10 +30,30 @@ use std::sync::Arc;
 pub struct Error {
     /// What went wrong.
     pub kind: ErrorKind,
+    // `Arc` shares the dependency failure across `Error` clones. `Error` is
+    // `Clone` and `Box<dyn StdError>` is not; a borrow would tie every error
+    // to the dependency's lifetime.
     source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 impl Error {
+    /// The explicit constructor paired with `impl From<ErrorKind> for Error`.
+    ///
+    /// Prefer this over `.into()` at call sites that name the type.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pdfcraft_forms::{Error, ErrorKind};
+    ///
+    /// let err = Error::new(ErrorKind::NotAPdf);
+    /// assert_eq!(err.to_string(), "not a PDF");
+    /// ```
+    #[must_use]
+    pub fn new(kind: ErrorKind) -> Self {
+        Self { kind, source: None }
+    }
+
     pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
         self.source = Some(Arc::new(source));
         self
@@ -22,7 +62,7 @@ impl Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
-        Self { kind, source: None }
+        Self::new(kind)
     }
 }
 

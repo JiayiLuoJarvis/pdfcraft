@@ -180,8 +180,10 @@ impl WidgetSnap {
 ///
 /// # Errors
 ///
-/// Returns [`ErrorKind::NotAPdf`] when the bytes are not a PDF, [`ErrorKind::Encrypted`]
-/// when the file is encrypted, and [`ErrorKind::HasXfa`] when `/XFA` is present.
+/// Returns [`ErrorKind::NotAPdf`] when the bytes are not a PDF or the catalog
+/// cannot be read, [`ErrorKind::Encrypted`] when the file is encrypted, and
+/// [`ErrorKind::HasXfa`] when `/XFA` is present. The lopdf error behind a
+/// malformed PDF stays reachable through [`std::error::Error::source`].
 pub fn list_fields(pdf: &[u8]) -> Result<Vec<FieldInfo>> {
     let doc = PdfDoc::open(pdf)?;
     Ok(doc.widgets().iter().map(WidgetSnap::info).collect())

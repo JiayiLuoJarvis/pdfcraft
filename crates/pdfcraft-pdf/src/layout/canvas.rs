@@ -2,9 +2,9 @@
 
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::geom::{Color, Finite, Ink, NonNegative, Paint, Path, Pen, Point, Rect, Size, Stroke};
-use crate::layout::atomic::{place_atomic, AtomicPlace};
+use crate::layout::atomic::{self, AtomicPlace};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::line_run::{append_commands, single_line_run};
+use crate::layout::line_run;
 use crate::layout::style::{GlyphStyle, TextAlign};
 
 /// A mark after the font key has been resolved. Text style is concrete.
@@ -55,7 +55,12 @@ pub(crate) struct CanvasNode {
 
 impl CanvasNode {
     /// Stores marks unshaped. An empty text string is rejected here.
-    pub(crate) fn new(size: Size, align: TextAlign, marks: Vec<CanvasMarkNode>) -> Result<Self> {
+    pub(crate) fn new(
+        size: Size,
+        align: TextAlign,
+        marks: impl IntoIterator<Item = CanvasMarkNode>,
+    ) -> Result<Self> {
+        let marks: Vec<CanvasMarkNode> = marks.into_iter().collect();
         if marks
             .iter()
             .any(|mark| matches!(mark, CanvasMarkNode::Text { text, .. } if text.is_empty()))
@@ -72,7 +77,7 @@ impl CanvasNode {
 
     pub(crate) fn split(mut self, ctx: &mut LayoutCtx<'_>, avail: Frame) -> Result<Split<Self>> {
         self.ensure_shaped(ctx)?;
-        match place_atomic(self.size, self.align, &avail)? {
+        match atomic::place_atomic(self.size, self.align, &avail)? {
             AtomicPlace::MoveToNextPage => Ok(Split::MoveToNextPage(self)),
             AtomicPlace::Fit { x, height } => {
                 let fragment = Fragment {
@@ -125,8 +130,8 @@ fn push_mark(
             });
         }
         CanvasMarkNode::Text { text, at, style } => {
-            let line = single_line_run(ctx, &text, &style, None)?;
-            append_commands(commands, &line.pieces, at.x().as_pt(), at.y().as_pt(), 0.0)?;
+            let line = line_run::single_line_run(ctx, &text, &style, None)?;
+            line_run::append_commands(commands, &line.pieces, at.x().as_pt(), at.y().as_pt(), 0.0)?;
         }
     }
     Ok(())

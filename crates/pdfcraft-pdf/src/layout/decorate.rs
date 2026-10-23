@@ -8,10 +8,10 @@ use crate::error::{
 use crate::geom::{Affine, Ink, Margins, NonNegative, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{
-    stacked_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
+    self, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
 };
-use crate::layout::line_run::{append_commands, single_line_run};
-use crate::layout::nesting::{check_content, Container};
+use crate::layout::line_run;
+use crate::layout::nesting::{self, Container};
 use crate::layout::style::GlyphStyle;
 
 /// One-based page number across the whole document.
@@ -160,7 +160,7 @@ pub(crate) fn measure_bands(
             let bottom = margins.bottom().as_pt();
             let page_h = size.height().as_pt();
             let mut place = |region: Region,
-                             content: &Option<BandContent<'_>>,
+                             content: Option<&BandContent<'_>>,
                              y: f32,
                              margin: f32|
              -> Result<_> {
@@ -182,8 +182,13 @@ pub(crate) fn measure_bands(
                     })
                     .transpose()
             };
-            let header = place(Region::Header, &decorations.header, 0.0, top)?;
-            let footer = place(Region::Footer, &decorations.footer, page_h - bottom, bottom)?;
+            let header = place(Region::Header, decorations.header.as_ref(), 0.0, top)?;
+            let footer = place(
+                Region::Footer,
+                decorations.footer.as_ref(),
+                page_h - bottom,
+                bottom,
+            )?;
             let behind = {
                 let mut at = Location::page_index(index).with_region(Region::Behind);
                 at.section = Some(section);
@@ -264,8 +269,8 @@ fn append_layer_item(
 ) -> Result<()> {
     match item {
         LayerItem::Text(item) => {
-            let line = single_line_run(ctx, &item.text, &item.style, None)?;
-            append_commands(
+            let line = line_run::single_line_run(ctx, &item.text, &item.style, None)?;
+            line_run::append_commands(
                 commands,
                 &line.pieces,
                 item.at.x().as_pt(),
@@ -324,7 +329,7 @@ fn measure_band(
     if nodes.is_empty() {
         return Ok(None);
     }
-    check_content(Container::Band, &nodes)?;
+    nesting::check_content(Container::Band, &nodes)?;
     let frame = Frame {
         width: size.width(),
         height: size.height().into(),
@@ -338,7 +343,7 @@ fn measure_band(
             kind: ErrorKind::UnsplittableTallerThanFrame { height, .. },
             ..
         }) => Err(taller(height)),
-        Ok(split) => Err(taller(stacked_height(split, ctx, frame)?.as_pt())),
+        Ok(split) => Err(taller(frame::stacked_height(split, ctx, frame)?.as_pt())),
         Err(Error {
             kind: ErrorKind::UnbreakableWiderThanFrame { width, avail, .. },
             ..

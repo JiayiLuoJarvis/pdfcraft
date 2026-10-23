@@ -17,6 +17,7 @@ pub(crate) const PAD_TOP: f32 = 0.5;
 
 /// Kind of `AcroForm` widget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
 #[non_exhaustive]
 pub enum FieldType {
     /// `/Tx`, or a widget with no `/FT`.
@@ -38,7 +39,12 @@ pub enum FieldType {
 /// One widget from [`crate::list_fields`].
 ///
 /// Two widgets that share a name produce two values. The rectangle stays inside the crate.
+///
+/// The library constructs this value. Match with a wildcard arm so added
+/// fields do not break the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+#[non_exhaustive]
 pub struct FieldInfo {
     /// `/T`, inherited from the first parent that has the key.
     pub name: String,
@@ -54,14 +60,19 @@ pub struct FieldInfo {
 }
 
 /// A value to draw into widgets that share a name.
+///
+/// Match with a wildcard arm so added value kinds do not break the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+#[non_exhaustive]
 pub enum FieldValue {
     /// Text, list box, or combo box contents.
     ///
     /// A choice string must be one of the widget's export or display values.
     /// The library draws this string. It does not replace it with the display label.
     Text(String),
-    /// Checkbox mark. `true` draws a check. `false` draws nothing.
+    /// Checkbox mark: `true` means checked and draws the mark, `false` means
+    /// unchecked and draws nothing.
     CheckBox(bool),
 }
 
@@ -70,6 +81,7 @@ pub enum FieldValue {
 /// There is no process-wide default font. `index` selects a face. A collection
 /// is reduced to that face before it is embedded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
 pub struct FontBytes<'a> {
     /// Font file bytes.
     pub bytes: &'a [u8],
@@ -79,6 +91,7 @@ pub struct FontBytes<'a> {
 
 /// What to do with a name in `fields` that matches no widget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[must_use]
 pub enum MissingName {
     /// Fail with [`crate::ErrorKind::UnknownField`].
     #[default]
@@ -89,6 +102,7 @@ pub enum MissingName {
 
 /// Horizontal placement of a text line inside a widget rectangle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[must_use]
 pub enum HAlign {
     /// Line starts at the left padding.
     #[default]
@@ -103,6 +117,7 @@ pub enum HAlign {
 ///
 /// Placement uses each line's glyph ink `yMin` and `yMax`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[must_use]
 pub enum VAlign {
     /// Block sits on the bottom padding.
     #[default]
@@ -116,7 +131,11 @@ pub enum VAlign {
 /// A stroke in PDF user space. The origin is the page bottom-left.
 ///
 /// Defaults match the production decorative line: red, 0.8 pt.
+///
+/// [`Default`] is the same stroke as [`Self::new`] at the origin, so callers
+/// can write `AbsoluteLine { x1, y1, ..Default::default() }`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[must_use]
 pub struct AbsoluteLine {
     /// Start x, in points.
     pub x1: f32,
@@ -140,7 +159,6 @@ pub struct AbsoluteLine {
 
 impl AbsoluteLine {
     /// A red 0.8 pt stroke on page 0.
-    #[must_use]
     pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         Self {
             x1,
@@ -159,7 +177,12 @@ impl AbsoluteLine {
 /// Settings for one [`crate::fill_and_flatten`] call.
 ///
 /// Default text alignment is left and bottom.
+///
+/// The struct keeps functional record update working: `FillOptions { font_size,
+/// ..FillOptions::default() }`. It stays constructible, so it is not
+/// `#[non_exhaustive]`.
 #[derive(Debug, Clone, PartialEq)]
+#[must_use]
 pub struct FillOptions<'a> {
     /// Font used when a text or choice string is drawn.
     ///
@@ -187,6 +210,12 @@ pub struct FillOptions<'a> {
     pub line_below: Option<&'a HashMap<String, f32>>,
     /// Page-absolute strokes. Names here are not field names.
     pub absolute_lines: &'a [AbsoluteLine],
+}
+
+impl Default for AbsoluteLine {
+    fn default() -> Self {
+        Self::new(0.0, 0.0, 0.0, 0.0)
+    }
 }
 
 impl Default for FillOptions<'_> {

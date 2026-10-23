@@ -3,7 +3,7 @@
 use crate::canvas::DecodedImage;
 use crate::error::Fallible as Result;
 use crate::geom::{Length, NonNegative, Positive, Rect, Size};
-use crate::layout::atomic::{place_atomic, AtomicPlace};
+use crate::layout::atomic::{self, AtomicPlace};
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
 
@@ -30,7 +30,7 @@ impl ImageNode {
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
         let width = self.size.width().as_pt();
         let height = self.size.height().as_pt();
-        match place_atomic(self.size, self.align, &avail)? {
+        match atomic::place_atomic(self.size, self.align, &avail)? {
             AtomicPlace::MoveToNextPage => Ok(Split::MoveToNextPage(self)),
             AtomicPlace::Fit {
                 x,

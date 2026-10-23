@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
 use crate::geom::{Finite, Length, NonNegative, Positive};
-use crate::text::break_class::{allows, BreakClass, PairClass};
+use crate::text::break_class::{self, BreakClass, PairClass};
 use crate::text::cluster::{Cluster, ClusterCursor, ClusteredText};
 
 /// Width of one text cluster. `gap` is tracking that counts only before more text.
@@ -330,7 +330,10 @@ fn pack_lines<T: Copy>(
                 ..
             } => {
                 let line_width = closed_width(settled, tail);
-                debug_assert!(line_width.as_pt() <= avail.as_pt());
+                debug_assert!(
+                    line_width.as_pt() <= avail.as_pt(),
+                    "closed line {line_width:?} must fit in avail {avail:?}"
+                );
                 let remain = (avail - line_width).as_pt();
                 let width = if remain.is_finite() && remain > 0.0 {
                     Length::from_trusted_pt(remain)
@@ -477,7 +480,7 @@ fn nearest_break<T>(atoms: &[Atom<T>], line_start: usize, overflow_at: usize) ->
             continue;
         };
         match left_ink(atoms, line_start, k) {
-            LeftInk::Class(prev) if allows(prev, next) => return Some(k),
+            LeftInk::Class(prev) if break_class::allows(prev, next) => return Some(k),
             LeftInk::LineStart => return Some(k),
             LeftInk::Class(_) | LeftInk::Blocked => {}
         }
@@ -623,7 +626,10 @@ fn facade_record(line: &SpanLine<()>) -> LineRecord {
         Seg::Blank { .. } => None,
     });
     if let Some((start, end)) = glyphs.next() {
-        debug_assert!(glyphs.next().is_none());
+        debug_assert!(
+            glyphs.next().is_none(),
+            "facade line holds a single glyph span"
+        );
         return LineRecord {
             start,
             end,

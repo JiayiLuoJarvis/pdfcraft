@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 use crate::error::{Fallible as Result, GeometryKind};
 use crate::geom::{Length, NonNegative, Positive};
 use crate::layout::frame::{Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::line_run::{append_commands, single_line_run};
+use crate::layout::line_run;
 use crate::layout::nesting::ItemBody;
 use crate::layout::style::GlyphStyle;
 
@@ -105,14 +105,17 @@ pub(crate) struct ListItem<N> {
 }
 
 impl<N: Flowable> ListItem<N> {
-    pub(crate) fn new(content: Vec<N>) -> Result<Self> {
+    pub(crate) fn new(content: impl IntoIterator<Item = N>) -> Result<Self> {
         Ok(Self {
             marker: None,
             body: ItemBody::new(content)?,
         })
     }
 
-    pub(crate) fn custom(marker: impl Into<String>, content: Vec<N>) -> Result<Self> {
+    pub(crate) fn custom(
+        marker: impl Into<String>,
+        content: impl IntoIterator<Item = N>,
+    ) -> Result<Self> {
         let marker = marker.into();
         if marker.is_empty() {
             return Err(GeometryKind::EmptyListMarker.into());
@@ -229,10 +232,14 @@ impl<N: Flowable> ListNode<N> {
             };
 
             if let Some(label) = &item.pending_marker {
-                let marker =
-                    single_line_run(ctx, label, &self.marker_style, Some(self.marker_width))?;
+                let marker = line_run::single_line_run(
+                    ctx,
+                    label,
+                    &self.marker_style,
+                    Some(self.marker_width),
+                )?;
                 let baseline = first_baseline(&fragment).unwrap_or(marker.baseline);
-                append_commands(
+                line_run::append_commands(
                     &mut commands,
                     &marker.pieces,
                     0.0,

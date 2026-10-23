@@ -137,4 +137,10 @@ impl Rendered {
     pub fn outline_len(&self) -> usize {
         self.outline.len()
     }
+
+    /// Whether `to_pdf` will write no outline dictionary.
+    #[must_use]
+    pub fn outline_is_empty(&self) -> bool {
+        self.outline.is_empty()
+    }
 }

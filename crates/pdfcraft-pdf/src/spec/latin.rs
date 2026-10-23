@@ -2,8 +2,6 @@
 
 use std::ops::RangeInclusive;
 
-use unicode_segmentation::UnicodeSegmentation;
-
 use super::{InlineRun, RunStyle};
 
 /// Blocks where an alphabetic scalar is Latin class.
@@ -43,6 +41,8 @@ impl<K: Clone + PartialEq> InlineRun<K> {
     #[allow(clippy::needless_pass_by_value)]
     #[must_use]
     pub fn split_latin(text: impl AsRef<str>, cjk: K, latin: K) -> Vec<Self> {
+        use unicode_segmentation::UnicodeSegmentation;
+
         let text = text.as_ref();
         let mut runs = Vec::new();
         for (_, cluster) in text.grapheme_indices(true) {

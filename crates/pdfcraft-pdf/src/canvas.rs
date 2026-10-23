@@ -133,6 +133,9 @@ impl LinkTarget {
     }
 
     /// The URI string when this target is [`Self::Uri`].
+    ///
+    /// `None` for [`Self::Anchor`] and [`Self::Xyz`]. Absence is a property of
+    /// the variant, not a failure, so this accessor returns `Option`.
     #[must_use]
     pub fn uri_str(&self) -> Option<&str> {
         match self {
@@ -423,7 +426,7 @@ impl RecordedPage {
 /// log after layout. With feature `backend-krilla`, `to_pdf` replays it. This
 /// type is not a drawing surface you implement, and
 /// [`layout_spec`](crate::layout_spec) does not accept one.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[must_use]
 pub struct RecordingCanvas {
     commands: Vec<CanvasCommand>,
@@ -485,12 +488,6 @@ impl RecordingCanvas {
             }
         }
         pages
-    }
-}
-
-impl Default for RecordingCanvas {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

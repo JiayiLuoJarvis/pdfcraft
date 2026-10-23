@@ -1,4 +1,4 @@
-use crate::error::{font_unusable, Error, ErrorKind, FontReason, Result};
+use crate::error::{self, Error, ErrorKind, FontReason, Result};
 use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP, PAD_X};
 use crate::font::{Face, GlyphFault};
 use crate::inspect::PdfRect;
@@ -107,7 +107,7 @@ fn fail(field_name: &str, err: &FitError) -> Error {
             scalar: *scalar,
         }
         .into(),
-        FitError::NoAdvance => font_unusable(FontReason::NoAdvance),
+        FitError::NoAdvance => error::font_unusable(FontReason::NoAdvance),
     }
 }
 
@@ -432,7 +432,10 @@ mod tests {
                 lines,
                 vec![vec!['h', 'e', 'l', 'l', 'o'], vec!['w', 'o', 'r', 'l', 'd']]
             );
-            assert!(laid.glyphs().all(|glyph| glyph.scalar != ' '));
+            assert!(
+                laid.glyphs().all(|glyph| glyph.scalar != ' '),
+                "wrapped line must not carry the break space"
+            );
             assert_eq!(laid.size().to_bits(), 12.0_f32.to_bits());
         }) else {
             return;
@@ -579,7 +582,10 @@ mod tests {
     fn records_a_space_when_a_gap_is_drawn() {
         let Some(()) = with_face(|face| {
             let laid = fit(face, "a b", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
-            assert!(laid.glyphs().any(|glyph| glyph.scalar == ' '));
+            assert!(
+                laid.glyphs().any(|glyph| glyph.scalar == ' '),
+                "drawn gap must record its space glyph"
+            );
         }) else {
             return;
         };

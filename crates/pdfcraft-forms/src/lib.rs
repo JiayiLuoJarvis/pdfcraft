@@ -58,7 +58,7 @@
 //! let font = std::fs::read("face.ttf").expect("font");
 //! let mut fields = HashMap::new();
 //! fields.insert("employee_name".into(), FieldValue::Text("Ada".into()));
-//! fields.insert("agree".into(), FieldValue::CheckBox(true));
+//! fields.insert("agree".into(), FieldValue::CheckBox(true)); // checked
 //!
 //! let filled = fill_and_flatten(
 //!     &pdf,

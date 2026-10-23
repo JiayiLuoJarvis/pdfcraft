@@ -5,10 +5,9 @@
 use std::ops::Range;
 
 use skrifa::instance::{LocationRef, Size};
-use skrifa::MetadataProvider;
 
 use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
-use crate::fonts::{face_metrics, parse_face, FaceMetrics, FontFace, FontId, FontStore};
+use crate::fonts::{self, FaceMetrics, FontFace, FontId, FontStore};
 use crate::geom::{Finite, Length, Positive};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,6 +146,7 @@ pub(crate) fn measure_text(
     font: FontId,
     text: &str,
 ) -> Result<MeasuredText> {
+    use skrifa::MetadataProvider;
     let face = match fonts.face(font) {
         Ok(face) => face,
         Err(error) => {
@@ -160,7 +160,7 @@ pub(crate) fn measure_text(
     let bytes = std::sync::Arc::clone(&face.source.bytes);
     let index = face.source.index;
     let units_per_em = face.metrics.units_per_em;
-    let font_ref = parse_face(bytes.as_slice(), index)?;
+    let font_ref = fonts::parse_face(bytes.as_slice(), index)?;
     let charmap = font_ref.charmap();
     let glyph_metrics = font_ref.glyph_metrics(Size::unscaled(), LocationRef::default());
 
@@ -247,13 +247,16 @@ impl FontFace {
     ///
     /// [`ErrorKind::MissingGlyph`] when a scalar is not in the cmap. The `font`
     /// field is `0` because this face has no document font id yet.
-    /// [`ErrorKind::Font`] when the bytes cannot be parsed.
+    /// [`ErrorKind::Font`] when the bytes cannot be parsed, `index` is out of
+    /// range, or a mapped glyph has no unscaled advance. Parser failures stay on
+    /// [`std::error::Error::source`].
     pub fn text_width(&self, text: &str, size: Length<Positive>) -> Result<f32> {
+        use skrifa::MetadataProvider;
         if text.is_empty() {
             return Ok(0.0);
         }
-        let font_ref = parse_face(&self.bytes, self.index)?;
-        let metrics = face_metrics(&font_ref, self.index)?;
+        let font_ref = fonts::parse_face(&self.bytes, self.index)?;
+        let metrics = fonts::face_metrics(&font_ref, self.index)?;
         let charmap = font_ref.charmap();
         let glyph_metrics = font_ref.glyph_metrics(Size::unscaled(), LocationRef::default());
         let mut total = 0.0;
@@ -276,10 +279,12 @@ impl FontFace {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Font`] when the bytes cannot be parsed or the em square is 0.
+    /// [`ErrorKind::Font`] when the bytes cannot be parsed, `index` is out of
+    /// range, or the em square is 0. Parser failures stay on
+    /// [`std::error::Error::source`].
     pub fn line_height(&self, size: Length<Positive>) -> Result<f32> {
-        let font_ref = parse_face(&self.bytes, self.index)?;
-        let face = face_metrics(&font_ref, self.index)?;
+        let font_ref = fonts::parse_face(&self.bytes, self.index)?;
+        let face = fonts::face_metrics(&font_ref, self.index)?;
         Ok(
             LineMetrics::new(FaceExtent::scaled(&face, size).into(), 1.0)?
                 .line_height
