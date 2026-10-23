@@ -40,8 +40,10 @@ pub enum FieldType {
 ///
 /// Two widgets that share a name produce two values. The rectangle stays inside the crate.
 ///
-/// The library constructs this value. Match with a wildcard arm so added
-/// fields do not break the caller.
+/// The library constructs this value and returns it from
+/// [`crate::list_fields`]. External code cannot build it with a struct
+/// literal. In patterns, use `..` (for example,
+/// `FieldInfo { name, .. }`) so added fields do not break the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 #[non_exhaustive]

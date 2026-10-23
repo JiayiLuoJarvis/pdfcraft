@@ -16,7 +16,7 @@
 | Prefer small crates [chrome] | N/A | Cargo workspace 四包结构已定，见 `docs/workspace-crates-spec.md`；偏差理由见 `AGENTS.md` 裁决节第 1 条 |
 | flat file layout [chrome] | N/A | 同上；模块 DAG 由 `scripts/check_pdfcraft_pdf_modules.py` 锁定 |
 | 文件/模块按主项命名、不在非叶模块写 API | done (pdf+forms) | 既有布局保持，无新增违规 |
-| 不用 glob 导入 | done (pdf+forms) | 生产 src 零 glob；`tests/` 内 `use super::*` 保留。抽查基线：`crates/pdfcraft-pdf/src/error.rs` 旧 14 处 glob 全在 tests |
+| 不用 glob 导入 | done (pdf+forms) | 生产 src 零 glob；`tests/` 内 `use super::*` 保留。抽查基线：`crates/pdfcraft-pdf/src` 旧 13 处 glob 全在 tests |
 | `imports_granularity = Module` | N/A（stable 1.92 为 nightly-only，实测 `cargo fmt` 报 warning 且不生效，故 `rustfmt.toml` 不编码；单模块粒度靠评审 + grep 抽查门禁，见 `AGENTS.md` 裁决节第 2 条） | `decorate.rs:163` 附带把 `check_content`/`stacked_height` 改模块限定调用；生产 glob 抽查为空 |
 | trait 导入局部化、顶层函数模块限定、类型名非限定 | done (pdf+forms) | 同上，clippy 全绿 |
 | `chromium::import!()` [chrome] | N/A | 非 Chromium 构建 |
@@ -92,7 +92,7 @@
 | --- | --- | --- |
 | `///` + `Errors`/`Panics` + 示例 | done (pdf+forms) | `cargo doc` 零警告（`RUSTDOCFLAGS=-D warnings`）；`missing_docs` 保持 `warn`，spec 稳定后升 `deny` |
 | `#[must_use]`（函数与类型） | done + deferred | pdf spec/mod.rs 与 canvas 主要类型和方法已带，types.rs:103 起（`Rendered` 及方法）亦有；types.rs:13 `Numbering`、:38 `Ratio`、:59 `Track` 与 canvas.rs `ImageFormat` 四处未带，属冻结文档语言类型，随 Deferred t7 留后波；forms `fields.rs` 九个公共类型全 `#[must_use]`；`Errors::iter` 等经 `clippy::double_must_use` 确认无需重复标注 |
-| `#[non_exhaustive]` | done + deferred | forms `FieldType`/`FieldInfo`/`FieldValue` 已加（含通配臂迁移说明）；pdf error/canvas/geom 零新增，基线与本波同为 13 处（error 8、canvas 3、geom 2，属历史存量）。pdf 文档语言 enum 见下「Deferred」t7 |
+| `#[non_exhaustive]` | done + deferred | forms `FieldType` 既有 `#[non_exhaustive]`（本波补 `#[must_use]`）；`FieldInfo`/`FieldValue` 本波新增 `#[non_exhaustive]`。`FieldValue` 用通配臂迁移；`FieldInfo` 是 struct，外部不可 struct literal（E0639），pattern 用 `..`（如 `FieldInfo { name, .. }`）。pdf error/canvas/geom 零新增，基线与本波同为 13 处（error 8、canvas 3、geom 2，属历史存量）。pdf 文档语言 enum 见下「Deferred」t7 |
 
 ## 12. 其他语言特性（Other Rust features）
 
@@ -107,6 +107,14 @@
 | --- | --- | --- |
 | `expect` 带上下文（不用裸 `unwrap`） | done (pdf+forms) | 生产 src（`#[cfg(test)]`/`tests/` 除外）零 `.unwrap()`；断言补上下文字符串；`missing_panics_doc`（pdf warn）无新增 |
 | 模式匹配优先于 check-then-unwrap、直白 for 循环、`format!`/`write!`、零 `catch_unwind`/`todo!` | done | clippy + 测试全过 |
+
+## Known gate gaps（基线同现，不掩盖）
+
+以下组合不是本分支引入；它们是 `AGENTS.md` 默认 `fmt`/`clippy`/`test`/`doc` 门禁之外的已知红项。本文中的“全绿”只指默认组合，不含本节。
+
+- **no-default-features**：`cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings` 与 `cargo test -p pdfcraft-pdf --no-default-features --features test-utils` 在本分支与 pristine `f3c23b2` 都是 exit 101。两者同样报 3 个 dead-code errors（`from_raw`、`ResolvedFont`、`resolve`）；test 另因 examples/tests 的 `to_pdf` 未解析而失败。CI 仍运行该组合（`.github/workflows/ci.yml:138,147,153`），在基座即红。
+- **字体/CJK**：未设 `PDFCRAFT_*` 时字体相关用例提前返回，默认 447 passed 不是完整字体覆盖。设 `PDFCRAFT_PDF_FONT=DejaVuSans` 后 pdf 为 269 passed / 9 failed / 1 ignored，9 个失败名与基座一致。`pdfcraft-forms` 的 CJK 条件测试在 DejaVu 下跳过，用 `wqy-zenhei.ttc` 时在 `fill_and_flatten.rs:597` 报 `FontFile2 is 813408 bytes`；`fills_chinese_text` 仍为 `#[ignore]`（`:603`）。CI 的 NotoSansCJK 才能覆盖；本机没有该字体。
+- 上述 gap 的修复（no-default gating、字体夹具/CI 字体）不在本波范围；本波只记录，避免把默认组合的绿误报为全矩阵绿。
 
 ## Deferred（延后项，有理由）
 
