@@ -14,9 +14,13 @@ const MAX_DEPTH: usize = 64;
 /// An empty `parts` list fails with [`ErrorKind::MergeEmpty`]. One part is
 /// returned unchanged. Two or more parts append pages in list order.
 ///
-/// Attachments and structure trees are not kept. `preserve_outlines: false`
-/// drops outlines. `preserve_outlines: true` keeps the first part's outlines
-/// and does not import outlines from later parts.
+/// Attachments and structure trees are not kept.
+///
+/// `preserve_outlines` stays a plain `bool` on purpose (no `OutlinePolicy`
+/// enum): `true` keeps the first part's outlines and does not import outlines
+/// from later parts, `false` drops all outlines. Name the argument at call
+/// sites (`merge_pdfs(parts, preserve_outlines)` or a `/* preserve_outlines */`
+/// comment) so `true`/`false` read unambiguously.
 ///
 /// # Errors
 ///

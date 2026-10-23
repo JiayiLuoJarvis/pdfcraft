@@ -182,10 +182,15 @@ impl ChartRequest {
 /// Title for the caller to store as PDF document info.
 ///
 /// Looks up `request.subject_id` in `request.nodes` and does no other check.
-/// The first node with that id wins. A missing id is [`ErrorCode::SubjectNotFound`].
+/// The first node with that id wins.
 ///
 /// `options.title == None` becomes `{name}股权架构图`. `Some("")` stays empty.
 /// The name is copied as stored.
+///
+/// # Errors
+///
+/// Returns [`Error`] with [`ErrorCode::SubjectNotFound`] when `subject_id`
+/// is not a node id.
 pub fn document_title(request: &ChartRequest) -> Result<String, Error> {
     let Some(node) = request
         .nodes
