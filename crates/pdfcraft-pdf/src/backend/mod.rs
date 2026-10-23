@@ -11,7 +11,7 @@ pub(crate) mod krilla_canvas;
 use std::any::Any;
 use std::sync::Arc;
 
-use crate::canvas::{replay, Canvas, DocumentInfo, ImageRegistry, OutlineItem, RecordingCanvas};
+use crate::canvas::{self, Canvas, DocumentInfo, ImageRegistry, OutlineItem, RecordingCanvas};
 use crate::error::Fallible as Result;
 use crate::fonts::FontStore;
 
@@ -34,6 +34,6 @@ pub(crate) fn write_pdf(
     let mut pdf = KrillaCanvas::new_with_resources(Arc::new(fonts), images);
     pdf.set_document_info(info)?;
     pdf.set_outline(outline);
-    replay(recording, &mut pdf)?;
+    canvas::replay(recording, &mut pdf)?;
     pdf.finish()
 }

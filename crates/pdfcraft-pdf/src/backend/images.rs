@@ -202,7 +202,10 @@ mod tests {
         assert_eq!(decoded.id.as_u32(), 0);
         assert_eq!(decoded.pixel_width, 1);
         assert_eq!(decoded.pixel_height, 1);
-        assert!(table.get(decoded.id).is_some());
+        assert!(
+            table.get(decoded.id).is_some(),
+            "registered image must be retrievable by id"
+        );
     }
 
     #[test]

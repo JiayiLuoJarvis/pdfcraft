@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::content::{Mark, Stamp, Stroke};
-use crate::error::{font_unusable, ArgumentReason, Error, ErrorKind, FontReason, Result};
+use crate::error::{self, ArgumentReason, Error, ErrorKind, FontReason, Result};
 use crate::fields::{AbsoluteLine, FieldValue, FillOptions, HAlign, MissingName, VAlign};
 use crate::font::{FontFile, PreparedFont};
 use crate::inspect::{Draw, PdfDoc, WidgetSnap};
@@ -16,14 +16,28 @@ use crate::layout::{self, LaidText};
 ///
 /// # Errors
 ///
-/// Returns the same open failures as [`crate::list_fields`]. A name that is not
-/// in the file is [`ErrorKind::UnknownField`] unless [`MissingName::Ignore`] is set.
-/// Unknown names in alignment override maps follow the same rule. Signature
-/// fields are [`ErrorKind::SignatureNotWritable`]. Radio and push buttons are
-/// [`ErrorKind::WidgetUnsupported`]. A checkbox given text is
-/// [`ErrorKind::InvalidCheckbox`]. A choice outside `/Opt` is
-/// [`ErrorKind::IllegalChoice`]. Missing glyphs and text that cannot fit are
-/// [`ErrorKind::MissingGlyph`] and [`ErrorKind::BoxOverflow`].
+/// Returns the first failure as one [`Error`].
+///
+/// - Opening `pdf` reports the same kinds as [`crate::list_fields`]:
+///   [`ErrorKind::NotAPdf`], [`ErrorKind::Encrypted`], or [`ErrorKind::HasXfa`].
+/// - Names and arguments: [`ErrorKind::UnknownField`] for a name that is not in
+///   the file unless [`MissingName::Ignore`] is set (alignment override maps
+///   follow the same rule); [`ErrorKind::InvalidArgument`] for a bad `font_size`,
+///   a non-finite [`AbsoluteLine`] or `line_below` offset, or a
+///   [`FieldValue::CheckBox`] sent to a text or choice widget. A checkbox widget
+///   given text is [`ErrorKind::InvalidCheckbox`], and a choice outside `/Opt`
+///   is [`ErrorKind::IllegalChoice`]. Signature fields are
+///   [`ErrorKind::SignatureNotWritable`]; radio and push buttons are
+///   [`ErrorKind::WidgetUnsupported`].
+/// - Fonts and text: [`ErrorKind::FontNotConfigured`] when text needs a face that
+///   is missing or unusable ([`FontReason`] names the reason),
+///   [`ErrorKind::MissingGlyph`] when the face has no glyph, and
+///   [`ErrorKind::BoxOverflow`] when the text cannot fit at the minimum size.
+/// - Writing: [`ErrorKind::FlattenFailed`] when the overlay or PDF write fails;
+///   [`FlattenReason`](crate::FlattenReason) names the step.
+///
+/// A parser, font, or lopdf error behind a failure stays reachable through
+/// [`std::error::Error::source`].
 pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     pdf: &[u8],
     fields: &HashMap<String, FieldValue, S>,
@@ -38,7 +52,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
         let font = options
             .font
             .as_ref()
-            .ok_or_else(|| font_unusable(FontReason::Missing))?;
+            .ok_or_else(|| error::font_unusable(FontReason::Missing))?;
         Some(FontFile::from_source(font.bytes, font.index)?)
     } else {
         None
@@ -63,7 +77,7 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
                 Draw::Check => Mark::Check,
                 Draw::Text(text) => {
                     let Some(font) = prepared.as_mut() else {
-                        return Err(font_unusable(FontReason::Missing));
+                        return Err(error::font_unusable(FontReason::Missing));
                     };
                     let v_align = v_align_for(options, snap.name.as_str());
                     let laid = LaidText::fit(

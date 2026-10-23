@@ -1426,7 +1426,10 @@ mod tests {
             Positive::mm(-3.0).map_err(|error| error.kind),
             Err(ErrorKind::NonPositiveLength { .. })
         ));
-        assert!(Positive::pt(f32::MIN_POSITIVE).is_ok());
+        assert!(
+            Positive::pt(f32::MIN_POSITIVE).is_ok(),
+            "smallest positive f32 must be a valid positive length"
+        );
     }
 
     #[test]

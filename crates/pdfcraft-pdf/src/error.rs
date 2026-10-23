@@ -10,6 +10,27 @@
 //! Dependency failures from skrifa or krilla are exposed through
 //! [`std::error::Error::source`]. Equality compares `kind` and `at` only.
 //!
+//! # Reporting model
+//!
+//! The three-way choice follows Google's error guidance:
+//!
+//! - **`Option`** means "no value", not "a failure".
+//!   [`LinkTarget::uri_str`](crate::LinkTarget::uri_str) returns `None` for an
+//!   anchor or resolved-page target; the variant already answers the question,
+//!   so no diagnostic is owed.
+//! - **`Result`** reports recoverable failures. Input constructors return
+//!   [`Error`] with one [`ErrorKind`]; [`crate::layout_spec`] and `to_pdf` return [`Errors`] so a batch caller sees every failure in
+//!   discovery order, each with its [`Location`]. Dependency failures stay on
+//!   [`std::error::Error::source`] instead of being flattened into the message.
+//! - **`panic!`** is reserved for a violated invariant. The only public panic is
+//!   [`Errors::first`], documented under `# Panics`; construction never creates
+//!   an empty list.
+//!
+//! Predictable constructor failures (an empty URI, a negative length) still use
+//! `Result`: their [`ErrorKind`] is part of the frozen public taxonomy and the
+//! same kinds are collected by [`Errors`] during lowering, so one surface serves
+//! both single-value checks and document builds.
+//!
 //! Match on [`ErrorKind`] for recovery or tests; use [`Location`] / [`Region`] /
 //! [`CellIndex`] when the failure is tied to a section, page, band, or cell.
 //! [`LimitKind`] names the cap in [`ErrorKind::LimitExceeded`].
@@ -30,10 +51,38 @@ pub struct Error {
     /// Where layout was when it went wrong. `None` when the failure is not tied to
     /// a section, page, band, or table cell.
     pub at: Option<Location>,
+    // `Arc` shares the dependency failure across `Error` clones. `Error` is
+    // `Clone` and `Box<dyn StdError>` is not; a borrow would tie every error
+    // to the dependency's lifetime.
     source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 impl Error {
+    /// The explicit constructor paired with `impl From<ErrorKind> for Error`.
+    ///
+    /// Prefer this over `.into()` at call sites that name the type.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pdfcraft_pdf::{Error, ErrorKind, LimitKind};
+    ///
+    /// let err = Error::new(ErrorKind::LimitExceeded {
+    ///     kind: LimitKind::Pages,
+    ///     value: 65_537,
+    ///     max: 1024,
+    /// });
+    /// assert_eq!(err.to_string(), "pages 65537 exceeds maximum 1024");
+    /// ```
+    #[must_use]
+    pub fn new(kind: ErrorKind) -> Self {
+        Self {
+            kind,
+            at: None,
+            source: None,
+        }
+    }
+
     /// Keeps `source` as the dependency failure behind this error.
     pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
         self.source = Some(Arc::new(source));
@@ -90,11 +139,7 @@ impl Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
-        Self {
-            kind,
-            at: None,
-            source: None,
-        }
+        Self::new(kind)
     }
 }
 
@@ -831,6 +876,19 @@ impl Errors {
         &self.items
     }
 
+    /// Number of kept failures.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Whether any failure was kept. Always false: construction keeps at
+    /// least one failure.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
     /// Same as [`as_slice`](Self::as_slice)`.iter()`.
     pub fn iter(&self) -> std::slice::Iter<'_, Error> {
         self.items.iter()
@@ -843,12 +901,33 @@ impl Errors {
     }
 }
 
-impl From<Error> for Errors {
-    fn from(error: Error) -> Self {
+impl Errors {
+    /// The explicit constructor paired with `impl From<Error> for Errors`.
+    ///
+    /// A single failure becomes a one-item list. Prefer this over `.into()`
+    /// at call sites that name the type.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pdfcraft_pdf::{Error, ErrorKind, Errors};
+    ///
+    /// let errors = Errors::from_error(Error::new(ErrorKind::ContentOutsideSection));
+    /// assert!(!errors.truncated());
+    /// assert_eq!(errors.as_slice().len(), 1);
+    /// ```
+    #[must_use]
+    pub fn from_error(error: Error) -> Self {
         Self {
             items: vec![error],
             truncated: false,
         }
+    }
+}
+
+impl From<Error> for Errors {
+    fn from(error: Error) -> Self {
+        Self::from_error(error)
     }
 }
 
@@ -1000,7 +1079,10 @@ impl ErrorBag {
     /// `Ok(value)` when nothing was recorded.
     pub(crate) fn finish<T>(self, value: T) -> Result<T> {
         if self.is_empty() {
-            debug_assert!(self.as_slice().is_empty());
+            debug_assert!(
+                self.as_slice().is_empty(),
+                "is_empty must agree with as_slice"
+            );
             Ok(value)
         } else {
             Err(self.into_errors())
@@ -1072,6 +1154,22 @@ pub(crate) fn text_snippet(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_constructors_pair_with_from() {
+        assert_eq!(
+            Error::new(ErrorKind::ContentOutsideSection),
+            Error::from(ErrorKind::ContentOutsideSection)
+        );
+        let single = Errors::from_error(Error::new(ErrorKind::ContentOutsideSection));
+        assert_eq!(
+            single,
+            Errors::from(Error::new(ErrorKind::ContentOutsideSection))
+        );
+        assert!(!single.truncated());
+        assert_eq!(single.as_slice().len(), 1);
+        assert_eq!(single.iter().len(), 1);
+    }
 
     #[test]
     fn display_names_the_missing_scalar_and_the_text_fragment() {
@@ -1166,6 +1264,20 @@ mod tests {
         assert_eq!(errors.first(), &kind(0));
         assert_eq!(errors.as_slice()[63], kind(63));
         assert!(errors.as_slice().iter().all(|error| error != &kind(64)));
+    }
+
+    #[test]
+    fn len_and_is_empty_match_slice() {
+        let mut bag = ErrorBag::default();
+        bag.record(kind(1));
+        bag.record(kind(2));
+        let errors = bag.finish(()).unwrap_err();
+        assert_eq!(errors.len(), errors.as_slice().len());
+        assert_eq!(errors.len(), 2);
+        assert!(!errors.is_empty());
+        let single = Errors::from(kind(3));
+        assert_eq!(single.len(), 1);
+        assert!(!single.is_empty());
     }
 
     #[test]

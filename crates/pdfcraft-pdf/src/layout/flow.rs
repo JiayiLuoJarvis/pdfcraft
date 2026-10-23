@@ -9,7 +9,7 @@ use crate::geom::{Finite, Length, NonNegative, Point};
 use crate::layout::canvas::CanvasNode;
 use crate::layout::columns::ColumnsNode;
 use crate::layout::frame::{
-    natural_height, AnchorMark, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split,
+    self, AnchorMark, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split,
 };
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
@@ -218,7 +218,7 @@ fn split_keep_together(
                 height: avail.full_height.into(),
                 full_height: avail.full_height,
             };
-            let (height, mut fragment) = natural_height(FlowNode::Stack(kids), ctx, full)?;
+            let (height, mut fragment) = frame::natural_height(FlowNode::Stack(kids), ctx, full)?;
             let spacing_after = fragment.spacing_after;
             fragment.spacing_after = NonNegative::ZERO;
             PreparedGroup {

@@ -8,10 +8,8 @@ use crate::error::{
     CellSpanReason, ColumnWidthsReason, Error, ErrorKind, Fallible as Result, GeometryKind,
 };
 use crate::geom::{Color, Finite, Length, NonNegative, Paint, Path, Point, Positive, Stroke};
-use crate::layout::column_width::{resolve_column_widths, ColumnWidth};
-use crate::layout::frame::{
-    natural_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split,
-};
+use crate::layout::column_width::{self, ColumnWidth};
+use crate::layout::frame::{self, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::nesting::CellBody;
 
 /// Grid-line stroke centered on cell edges. Width zero draws nothing.
@@ -56,7 +54,7 @@ pub(crate) struct Cell<N> {
 }
 
 impl<N: Flowable> Cell<N> {
-    pub(crate) fn new(content: Vec<N>) -> Result<Self> {
+    pub(crate) fn new(content: impl IntoIterator<Item = N>) -> Result<Self> {
         Ok(Self {
             body: CellBody::new(content)?,
             col_span: NonZeroU16::MIN,
@@ -241,7 +239,7 @@ fn measure<N: Flowable>(
     ctx: &mut LayoutCtx<'_>,
     avail: Frame,
 ) -> Result<MeasuredTable> {
-    let widths = resolve_column_widths(&grid.widths, avail.width)?;
+    let widths = column_width::resolve_column_widths(&grid.widths, avail.width)?;
     let xs = column_edges(&widths);
 
     let border = grid.border.width.as_pt();
@@ -278,7 +276,7 @@ fn measure<N: Flowable>(
         };
         let (h, content) = ctx.located(
             &crate::error::Location::at_cell(cell.row, cell.col),
-            |ctx| natural_height(body.into_node(), ctx, frame),
+            |ctx| frame::natural_height(body.into_node(), ctx, frame),
         )?;
         let cell_h = Length::<NonNegative>::from_trusted_pt(h.as_pt() + 2.0 * inset);
         if cell.rows == 1 {

@@ -1,6 +1,6 @@
 //! Paragraph wrapping, per-line boxes, and fragment drawing.
 
-use crate::canvas::{pt_near, LinkTarget};
+use crate::canvas::{self, LinkTarget};
 #[cfg(test)]
 use crate::error::ErrorBag;
 use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
@@ -8,16 +8,11 @@ use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
 use crate::fonts::FontStore;
 use crate::geom::{Color, Length, NonNegative, Positive};
 use crate::layout::frame::{Fragment, Frame, LayoutCtx, Split};
-use crate::layout::justify::{build_roles, StretchPlan, StretchRequest};
-use crate::layout::line_run::{
-    align_x, append_commands, face_extent, measure_inline, BlankStroke, LinePainter, LinePiece,
-    MeasuredInline,
-};
+use crate::layout::justify::{self, StretchPlan, StretchRequest};
+use crate::layout::line_run::{self, BlankStroke, LinePainter, LinePiece, MeasuredInline};
 use crate::layout::style::{GlyphStyle, Style, TextAlign};
 use crate::text::cluster::{ClusterCursor, ClusteredText};
-use crate::text::line_break::{
-    break_spans, draw_widths, Advance, LineBudget, Seg, Span, SpanLine, WidthPart,
-};
+use crate::text::line_break::{self, Advance, LineBudget, Seg, Span, SpanLine, WidthPart};
 use crate::text::measure::{LineExtent, LineMetrics};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,7 +193,7 @@ impl ParagraphNode {
             .iter()
             .map(|group| group.text.clustered())
             .collect();
-        let broken = break_spans(
+        let broken = line_break::break_spans(
             &group_refs,
             &prepared.spans,
             LineBudget {
@@ -339,7 +334,7 @@ fn fragment_from_lines(lines: &[LineBox], spacing_after: Length<NonNegative>) ->
     let tops = line_tops(lines);
     let mut commands = Vec::new();
     for (line, top) in lines.iter().zip(&tops) {
-        append_commands(&mut commands, &line.pieces, 0.0, *top, line.height.as_pt())?;
+        line_run::append_commands(&mut commands, &line.pieces, 0.0, *top, line.height.as_pt())?;
     }
     Ok(Fragment {
         height: Length::from_trusted_pt(tops[lines.len()]),
@@ -408,7 +403,7 @@ fn flush_text(
         pending.iter().all(|run| run.link == link),
         "one measured group must share one link"
     );
-    let measured = measure_inline(
+    let measured = line_run::measure_inline(
         ctx,
         pending.iter().map(|run| (run.style, run.text.as_str())),
         link,
@@ -466,7 +461,7 @@ fn glyph_extent(
                 continue;
             }
             seen.push(key);
-            let face = face_extent(ctx, style.font, style.font_size)?;
+            let face = line_run::face_extent(ctx, style.font, style.font_size)?;
             extent = Some(match extent {
                 Some(folded) => folded.include(face),
                 None => face.into(),
@@ -486,7 +481,7 @@ fn line_box(
         Some(extent) => LineMetrics::new(extent, style.line_height_factor),
         None => match style.font {
             Some(face) => LineMetrics::new(
-                face_extent(ctx, face, style.font_size)?.into(),
+                line_run::face_extent(ctx, face, style.font_size)?.into(),
                 style.line_height_factor,
             ),
             None => LineMetrics::fontless(style.font_size, style.line_height_factor),
@@ -514,10 +509,14 @@ fn place_line(
             Seg::Blank { width, .. } => parts.push(WidthPart::Blank(width)),
         }
     }
-    let base: Vec<_> = draw_widths(&parts).collect();
+    let base: Vec<_> = line_break::draw_widths(&parts).collect();
     let (draws, allocated) = if style.align == TextAlign::Justify {
-        let roles = build_roles(groups, line.segs());
-        debug_assert_eq!(roles.len(), base.len());
+        let roles = justify::build_roles(groups, line.segs());
+        debug_assert_eq!(
+            roles.len(),
+            base.len(),
+            "every base width needs exactly one stretch role"
+        );
         let plan = StretchPlan::for_line(StretchRequest {
             roles: &roles,
             frame_width,
@@ -532,7 +531,8 @@ fn place_line(
         (base, NonNegative::ZERO)
     };
 
-    let line_x = frame_x.as_pt() + align_x(frame_width, line.width(), style.align).as_pt();
+    let line_x =
+        frame_x.as_pt() + line_run::align_x(frame_width, line.width(), style.align).as_pt();
     let mut painter = LinePainter::new(line_x, baseline);
     let mut at = 0usize;
     for seg in line.segs() {
@@ -558,7 +558,7 @@ fn place_line(
     }
     let target_width = line.width().as_pt() + allocated.as_pt();
     debug_assert!(
-        pt_near(painter.x() - line_x, target_width),
+        canvas::pt_near(painter.x() - line_x, target_width),
         "placed {} from {line_x}, painted width {target_width}",
         painter.x(),
     );

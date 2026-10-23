@@ -1,10 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{font_unusable, FontReason, Result};
+use crate::error::{self, FontReason, Result};
 use crate::font::checksum;
 
-type TableTag = [u8; 4];
+/// A four-byte SFNT table tag, such as `head` or `glyf`.
+///
+/// The scaler version in the file header is also four bytes but is not a table
+/// tag. Keeping tags in this newtype stops the two from being swapped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct TableTag([u8; 4]);
+
 type Tables = BTreeMap<TableTag, Vec<u8>>;
+
+const HEAD: TableTag = TableTag(*b"head");
+const MAXP: TableTag = TableTag(*b"maxp");
+const LOCA: TableTag = TableTag(*b"loca");
+const GLYF: TableTag = TableTag(*b"glyf");
+const HHEA: TableTag = TableTag(*b"hhea");
+const HMTX: TableTag = TableTag(*b"hmtx");
+const CMAP: TableTag = TableTag(*b"cmap");
 
 const ARG_1_AND_2_ARE_WORDS: u16 = 1 << 0;
 const WE_HAVE_A_SCALE: u16 = 1 << 3;
@@ -28,12 +42,12 @@ struct CmapGroup {
 
 pub(crate) fn subset_sfnt(sfnt: &[u8], used: &BTreeMap<u16, (char, f32)>) -> Result<Vec<u8>> {
     let (scaler, tables) = parse_sfnt(sfnt)?;
-    let head = required_table(&tables, *b"head")?;
-    let maxp = required_table(&tables, *b"maxp")?;
-    let loca = required_table(&tables, *b"loca")?;
-    let glyf = required_table(&tables, *b"glyf")?;
-    required_table(&tables, *b"hhea")?;
-    required_table(&tables, *b"hmtx")?;
+    let head = required_table(&tables, HEAD)?;
+    let maxp = required_table(&tables, MAXP)?;
+    let loca = required_table(&tables, LOCA)?;
+    let glyf = required_table(&tables, GLYF)?;
+    required_table(&tables, HHEA)?;
+    required_table(&tables, HMTX)?;
 
     let num_glyphs = usize::from(read_u16(maxp, 4)?);
     if num_glyphs == 0 || head.len() < 54 {
@@ -69,15 +83,15 @@ pub(crate) fn subset_sfnt(sfnt: &[u8], used: &BTreeMap<u16, (char, f32)>) -> Res
             output.insert(*tag, data.clone());
         }
     }
-    output.insert(*b"head", subset_head);
-    output.insert(*b"loca", subset_loca);
-    output.insert(*b"glyf", subset_glyf);
-    output.insert(*b"cmap", subset_cmap);
+    output.insert(HEAD, subset_head);
+    output.insert(LOCA, subset_loca);
+    output.insert(GLYF, subset_glyf);
+    output.insert(CMAP, subset_cmap);
     write_sfnt(scaler, &output)
 }
 
 fn table_policy(tag: TableTag) -> TablePolicy {
-    match &tag {
+    match &tag.0 {
         b"head" | b"loca" | b"glyf" | b"cmap" => TablePolicy::Rewrite,
         b"maxp" | b"hhea" | b"hmtx" | b"name" | b"OS/2" | b"post" | b"cvt " | b"fpgm" | b"prep"
         | b"gasp" => TablePolicy::Copy,
@@ -85,7 +99,7 @@ fn table_policy(tag: TableTag) -> TablePolicy {
     }
 }
 
-fn parse_sfnt(sfnt: &[u8]) -> Result<(TableTag, Tables)> {
+fn parse_sfnt(sfnt: &[u8]) -> Result<([u8; 4], Tables)> {
     if sfnt.len() < 12 {
         return Err(head_error());
     }
@@ -105,6 +119,7 @@ fn parse_sfnt(sfnt: &[u8]) -> Result<(TableTag, Tables)> {
         let record = 12 + index * 16;
         let mut tag = [0; 4];
         tag.copy_from_slice(&sfnt[record..record + 4]);
+        let tag = TableTag(tag);
         let offset = usize::try_from(read_u32(sfnt, record + 8)?).map_err(|_| head_error())?;
         let length = usize::try_from(read_u32(sfnt, record + 12)?).map_err(|_| head_error())?;
         let end = offset.checked_add(length).ok_or_else(head_error)?;
@@ -430,7 +445,7 @@ fn format4_search(segment_count: u16) -> Result<(u16, u16, u16)> {
     Ok((search_range, entry_selector, range_shift))
 }
 
-fn write_sfnt(scaler: TableTag, tables: &Tables) -> Result<Vec<u8>> {
+fn write_sfnt(scaler: [u8; 4], tables: &Tables) -> Result<Vec<u8>> {
     let count = u16::try_from(tables.len()).map_err(|_| head_error())?;
     if count == 0 {
         return Err(head_error());
@@ -455,7 +470,7 @@ fn write_sfnt(scaler: TableTag, tables: &Tables) -> Result<Vec<u8>> {
         let offset = u32::try_from(output.len()).map_err(|_| head_error())?;
         let length = u32::try_from(data.len()).map_err(|_| head_error())?;
         let record = 12 + index * 16;
-        output[record..record + 4].copy_from_slice(tag);
+        output[record..record + 4].copy_from_slice(&tag.0);
         output[record + 4..record + 8].copy_from_slice(&checksum(data).to_be_bytes());
         output[record + 8..record + 12].copy_from_slice(&offset.to_be_bytes());
         output[record + 12..record + 16].copy_from_slice(&length.to_be_bytes());
@@ -514,7 +529,7 @@ fn push_u32(output: &mut Vec<u8>, value: u32) {
 }
 
 fn head_error() -> crate::error::Error {
-    font_unusable(FontReason::Head)
+    error::font_unusable(FontReason::Head)
 }
 
 #[cfg(test)]
@@ -522,6 +537,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{build_cmap, parse_sfnt, subset_sfnt, write_sfnt};
+    use super::{CMAP, GLYF, HEAD, HHEA, HMTX, LOCA, MAXP};
     use crate::error::{ErrorKind, FontReason};
     use crate::font::{Face, FontFile, GlyphFault};
 
@@ -574,7 +590,7 @@ mod tests {
 
         let stamped = FontFile::from_source(&first, 0).unwrap();
         let (_, tables) = parse_sfnt(stamped.bytes()).unwrap();
-        assert_eq!(&tables[b"head"][20..36], &[0; 16]);
+        assert_eq!(&tables[&HEAD][20..36], &[0; 16]);
     }
 
     #[test]
@@ -589,7 +605,7 @@ mod tests {
     fn rejects_a_composite_that_runs_past_its_glyph() {
         let mut source = test_font();
         let (_, tables) = parse_sfnt(&source).unwrap();
-        let loca = &tables[b"loca"];
+        let loca = &tables[&LOCA];
         let short = u16::from_be_bytes([loca[6], loca[7]]);
         let truncated = short.checked_add(6).unwrap();
         let record = table_record(&source, *b"loca");
@@ -664,15 +680,15 @@ mod tests {
         }
         let mut tables = BTreeMap::new();
         tables.insert(
-            *b"cmap",
+            CMAP,
             build_cmap(&used([(1, 'A'), (2, 'B'), (3, 'C')])).unwrap(),
         );
-        tables.insert(*b"glyf", glyf);
-        tables.insert(*b"head", head);
-        tables.insert(*b"hhea", hhea);
-        tables.insert(*b"hmtx", hmtx);
-        tables.insert(*b"loca", loca);
-        tables.insert(*b"maxp", maxp);
+        tables.insert(GLYF, glyf);
+        tables.insert(HEAD, head);
+        tables.insert(HHEA, hhea);
+        tables.insert(HMTX, hmtx);
+        tables.insert(LOCA, loca);
+        tables.insert(MAXP, maxp);
         write_sfnt([0, 1, 0, 0], &tables).unwrap()
     }
 
@@ -698,10 +714,10 @@ mod tests {
 
     fn loca_spans(sfnt: &[u8]) -> Vec<usize> {
         let (_, tables) = parse_sfnt(sfnt).unwrap();
-        let maxp = &tables[b"maxp"];
+        let maxp = &tables[&MAXP];
         let count = usize::from(u16::from_be_bytes([maxp[4], maxp[5]]));
-        let head = &tables[b"head"];
-        let loca = &tables[b"loca"];
+        let head = &tables[&HEAD];
+        let loca = &tables[&LOCA];
         let long = i16::from_be_bytes([head[50], head[51]]) == 1;
         let mut offsets = Vec::new();
         for index in 0..=count {

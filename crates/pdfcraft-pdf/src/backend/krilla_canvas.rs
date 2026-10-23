@@ -74,6 +74,8 @@ pub(super) enum Mark {
         stroke: Stroke,
     },
     Glyphs {
+        // Clone of the stored face buffer. Marks outlive the canvas's store
+        // handle (`finish` drops it before render), so the bytes must be owned.
         font_bytes: Arc<Vec<u8>>,
         font_index: u32,
         skrifa_units_per_em: f32,
@@ -101,6 +103,9 @@ pub(super) struct QueuedLink {
 /// Private krilla-backed canvas. Holds no live krilla document.
 #[derive(Debug)]
 pub(crate) struct KrillaCanvas {
+    // One parsed font table shared by every canvas built from the same store.
+    // Lifetime-free on purpose: borrowing would thread lifetimes through the
+    // canvas, the page plans, and `write_pdf`.
     font_store: Arc<FontStore>,
     images: ImageTable,
     info: Option<DocumentInfo>,

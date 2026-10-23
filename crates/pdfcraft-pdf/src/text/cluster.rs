@@ -2,9 +2,7 @@
 
 use std::ops::Range;
 
-use unicode_segmentation::UnicodeSegmentation;
-
-use crate::text::break_class::{classify, BreakClass};
+use crate::text::break_class::{self, BreakClass};
 
 /// Immutable cluster tape over normalized text and BK-free glyph text.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +49,7 @@ impl ClusteredText {
     }
 
     fn from_normalized(normalized: String) -> Self {
+        use unicode_segmentation::UnicodeSegmentation;
         let mut glyph_text = String::new();
         let mut clusters = Vec::new();
         let mut glyph = 0usize;
@@ -59,7 +58,7 @@ impl ClusteredText {
         for (byte_start, grapheme) in normalized.grapheme_indices(true) {
             let byte_end = byte_start + grapheme.len();
             let first = grapheme.chars().next().expect("grapheme non-empty");
-            let class = classify(first);
+            let class = break_class::classify(first);
             let start = ClusterCursor {
                 cluster: clusters.len(),
                 glyph,
@@ -146,8 +145,16 @@ pub(crate) fn cluster_tagged<T: Copy, S: AsRef<str>>(
         }
         tag_cursor += count;
     }
-    debug_assert_eq!(tag_cursor, normalized_tags.len());
-    debug_assert_eq!(glyph_tags.len(), clustered.glyph_text().chars().count());
+    debug_assert_eq!(
+        tag_cursor,
+        normalized_tags.len(),
+        "every normalized tag must be consumed by clusters"
+    );
+    debug_assert_eq!(
+        glyph_tags.len(),
+        clustered.glyph_text().chars().count(),
+        "every glyph char must carry exactly one tag"
+    );
     TaggedClusteredText {
         clustered,
         glyph_tags: glyph_tags.into_boxed_slice(),

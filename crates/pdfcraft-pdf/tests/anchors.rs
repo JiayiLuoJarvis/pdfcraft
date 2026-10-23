@@ -325,6 +325,7 @@ fn outline_level_may_jump_up() {
     ])
     .unwrap();
     assert_eq!(rendered.outline_len(), 4);
+    assert!(!rendered.outline_is_empty());
 }
 
 #[test]
@@ -334,6 +335,7 @@ fn no_outline_entries_leave_outline_empty() {
     }
     let rendered = lay(vec![anchor("only", None, para("x"))]).unwrap();
     assert_eq!(rendered.outline_len(), 0);
+    assert!(rendered.outline_is_empty());
 }
 
 #[test]

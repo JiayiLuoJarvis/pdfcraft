@@ -46,7 +46,7 @@ fn fill_employee(pdf: &[u8], font: &[u8]) -> Result<Vec<u8>> {
 
     let mut fields = HashMap::new();
     fields.insert("employee_name".into(), FieldValue::Text("Ada".into()));
-    fields.insert("agree".into(), FieldValue::CheckBox(true));
+    fields.insert("agree".into(), FieldValue::CheckBox(true)); // checked
 
     fill_and_flatten(
         pdf,

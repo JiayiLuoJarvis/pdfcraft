@@ -2,9 +2,9 @@
 
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible as Result};
 use crate::geom::{Finite, Length, NonNegative};
-use crate::layout::column_width::{resolve_column_widths, ColumnWidth};
+use crate::layout::column_width::{self, ColumnWidth};
 use crate::layout::frame::{Flowable, Fragment, Frame, LayoutCtx, Split};
-use crate::layout::nesting::{check_content, Container};
+use crate::layout::nesting::{self, Container};
 
 pub(crate) const MIN_COLUMN_COUNT: usize = 2;
 #[cfg(test)]
@@ -35,7 +35,7 @@ impl<N: Flowable> ColumnsNode<N> {
         let mut widths = Vec::with_capacity(columns.len());
         let mut stacks = Vec::with_capacity(columns.len());
         for (width, kids) in columns {
-            check_content(Container::Column, &kids)?;
+            nesting::check_content(Container::Column, &kids)?;
             widths.push(width);
             stacks.push(N::stack(kids));
         }
@@ -57,7 +57,7 @@ impl<N: Flowable> ColumnsNode<N> {
                 reason: ColumnWidthsReason::Gap,
             }));
         };
-        let widths = resolve_column_widths(&self.widths, inner)?;
+        let widths = column_width::resolve_column_widths(&self.widths, inner)?;
 
         let mut x = NonNegative::ZERO;
         let mut height = NonNegative::ZERO;

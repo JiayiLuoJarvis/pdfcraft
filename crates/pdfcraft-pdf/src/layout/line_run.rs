@@ -3,15 +3,15 @@
 use std::ops::Range;
 
 use crate::canvas::{GlyphPlacement, GlyphRun, LinkTarget};
-use crate::error::{text_snippet, Error, ErrorKind, Fallible as Result, FontFault};
+use crate::error::{self, Error, ErrorKind, Fallible as Result, FontFault};
 use crate::fonts::FontId;
 use crate::geom::{Color, Finite, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
 use crate::layout::frame::{FragmentCommand, LayoutCtx};
 use crate::layout::style::{Decoration, GlyphStyle, TextAlign};
 use crate::text::break_class::BreakClass;
-use crate::text::cluster::{cluster_tagged, ClusteredText, TaggedClusteredText};
-use crate::text::line_break::{draw_widths, InkWidth, WidthPart};
-use crate::text::measure::{measure_text, FaceExtent, LineMetrics};
+use crate::text::cluster::{self, ClusteredText, TaggedClusteredText};
+use crate::text::line_break::{self, InkWidth, WidthPart};
+use crate::text::measure::{self, FaceExtent, LineMetrics};
 
 /// Text of one link target, measured glyph by glyph.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,7 +36,7 @@ pub(crate) fn measure_inline<'a>(
     runs: impl IntoIterator<Item = (GlyphStyle, &'a str)>,
     link: Option<LinkTarget>,
 ) -> Result<MeasuredInline> {
-    let text = cluster_tagged(runs);
+    let text = cluster::cluster_tagged(runs);
     let styles = cluster_styles(&text);
     let glyph_text = text.clustered().glyph_text();
     let mut byte_boundaries: Vec<_> = glyph_text.char_indices().map(|(byte, _)| byte).collect();
@@ -51,13 +51,17 @@ pub(crate) fn measure_inline<'a>(
             end += 1;
         }
         let byte_start = byte_boundaries[start];
-        let measured = measure_text(
+        let measured = measure::measure_text(
             ctx.fonts,
             ctx.errors,
             font,
             &glyph_text[byte_start..byte_boundaries[end]],
         )?;
-        debug_assert_eq!(measured.glyphs.len(), end - start);
+        debug_assert_eq!(
+            measured.glyphs.len(),
+            end - start,
+            "measured run must return one glyph per cluster"
+        );
         glyphs.extend(measured.glyphs.into_iter().zip(&styles[start..end]).map(
             |(glyph, style)| InlineGlyph {
                 style: *style,
@@ -206,7 +210,11 @@ impl LinePainter {
         clusters: &[Range<usize>],
         draws: &[Length<NonNegative>],
     ) -> Result<()> {
-        debug_assert_eq!(clusters.len(), draws.len());
+        debug_assert_eq!(
+            clusters.len(),
+            draws.len(),
+            "each cluster needs exactly one draw width"
+        );
         let seg_x = self.x;
         let mut run: Option<RunBuilder> = None;
         let mut cluster_x = seg_x;
@@ -489,7 +497,7 @@ pub(crate) fn single_line_run(
     let clustered = ClusteredText::new(text);
     if (0..clustered.len()).any(|index| clustered.cluster(index).class() == BreakClass::Hard) {
         return Err(Error::from(ErrorKind::UnexpectedLineBreakInSingleLine {
-            text: text_snippet(clustered.normalized_text()),
+            text: error::text_snippet(clustered.normalized_text()),
         }));
     }
     let measured = measure_inline(ctx, [(*style, text)], None)?;
@@ -502,12 +510,12 @@ pub(crate) fn single_line_run(
         .iter()
         .map(|range| measured.ink_width(range.clone()).map(WidthPart::Ink))
         .collect::<Result<Vec<_>>>()?;
-    let draws: Vec<_> = draw_widths(&parts).collect();
+    let draws: Vec<_> = line_break::draw_widths(&parts).collect();
     let width: Length<NonNegative> = draws.iter().copied().sum();
     if let Some(max_width) = max_width {
         if width.as_pt() > max_width.as_pt() {
             return Err(Error::from(ErrorKind::UnbreakableWiderThanFrame {
-                text: Some(text_snippet(text)),
+                text: Some(error::text_snippet(text)),
                 width: width.as_pt(),
                 avail: max_width.as_pt(),
             }));

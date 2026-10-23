@@ -12,21 +12,19 @@ use crate::geom::{
     Affine, Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive,
     Rect,
 };
-use crate::layout::anchor::{
-    collect_anchors, finish_anchors, resolve_link_commands, ExpectedAnchor, ExpectedOutline,
-};
+use crate::layout::anchor::{self, ExpectedAnchor, ExpectedOutline};
 use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::{Decorations, LayerContent, LayerItem, LayerText, PageInfo};
-use crate::layout::flow::{check_limits, AnchorNode, FlowNode, KeepTogetherNode, SpacerNode};
+use crate::layout::flow::{self, AnchorNode, FlowNode, KeepTogetherNode, SpacerNode};
 use crate::layout::frame::LayoutCtx;
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::list::{
     ListItem, ListKind as LayoutListKind, ListNode, ListSpec as LayoutListSpec,
 };
-use crate::layout::paginate::{layout_pages, paint_laid, PaginateConfig, SectionJob};
+use crate::layout::paginate::{self, PaginateConfig, SectionJob};
 use crate::layout::paragraph::{
     BlankWidth, InlineBlank, InlineItem, TextNode, TextRun as LayoutTextRun,
 };
@@ -35,7 +33,7 @@ use crate::layout::table::{self as layout_table, TableNode, TableSpec as LayoutT
 use crate::limits::Limits;
 
 use super::token::DocToken;
-use super::types::{default_style, numbering_kind, reject_auto_with_ratio, Rendered, Track};
+use super::types::{self, Rendered, Track};
 use super::{
     Alignment, BandInset, BandSlot, BandSpec, BlankWidth as SpecBlankWidth, Block, CanvasMark,
     CanvasSpec, CellBlock, CellSpec, ColumnsSpec, DocumentSpec, HLineSpec, ImageRef, ImageSpec,
@@ -55,7 +53,11 @@ use super::{
 ///
 /// # Errors
 ///
-/// Returns resource, construction, layout, or drawing failures collected for the document.
+/// Returns resource, construction, layout, or drawing failures as [`Errors`](crate::Errors),
+/// in discovery order, with at most 64 items
+/// ([`truncated`](crate::Errors::truncated) reports that more were found). Each
+/// item carries a specific [`ErrorKind`] and, where known, a [`Location`]. Font
+/// parser failures stay reachable through [`std::error::Error::source`].
 pub fn layout_spec<K>(spec: DocumentSpec<K>) -> Result<Rendered>
 where
     K: Copy + Eq + std::hash::Hash + std::fmt::Debug,
@@ -99,7 +101,7 @@ where
         decorations.push(decoration);
     }
 
-    if let Err(hard) = check_limits(&roots, &limits) {
+    if let Err(hard) = flow::check_limits(&roots, &limits) {
         return Err(errors.fail(hard));
     }
     let jobs = configs
@@ -118,23 +120,23 @@ where
             fonts: &mut fonts,
             errors: &mut errors,
         };
-        layout_pages(jobs, &mut ctx, limits.max_pages())
+        paginate::layout_pages(jobs, &mut ctx, limits.max_pages())
     };
     let laid = match laid {
         Ok(laid) => laid,
         Err(hard) => return Err(errors.fail(hard)),
     };
     let mut laid = errors.finish(laid)?;
-    let table = collect_anchors(&laid);
-    let outline = match finish_anchors(&anchors.expected, &table) {
+    let table = anchor::collect_anchors(&laid);
+    let outline = match anchor::finish_anchors(&anchors.expected, &table) {
         Ok(outline) => outline,
         Err(hard) => return Err(crate::error::Errors::from(hard)),
     };
-    if let Err(hard) = resolve_link_commands(&mut laid, &table) {
+    if let Err(hard) = anchor::resolve_link_commands(&mut laid, &table) {
         return Err(crate::error::Errors::from(hard));
     }
     let mut recording = RecordingCanvas::new();
-    paint_laid(&laid, &mut recording).map_err(crate::error::Errors::from)?;
+    paginate::paint_laid(&laid, &mut recording).map_err(crate::error::Errors::from)?;
     Ok(Rendered {
         recording,
         fonts,
@@ -246,7 +248,7 @@ impl InheritedPaint {
         Style {
             font_size: self.font_size,
             color: self.color,
-            ..default_style()
+            ..types::default_style()
         }
     }
 }
@@ -887,7 +889,7 @@ fn lower_columns<K: FontKey>(
         }
     }
     let widths: Vec<_> = cols.iter().map(|(width, _)| *width).collect();
-    if let Err(error) = reject_auto_with_ratio(&widths) {
+    if let Err(error) = types::reject_auto_with_ratio(&widths) {
         bag.record(error);
     }
     let failed = !bag.is_empty();
@@ -943,7 +945,7 @@ fn lower_table<K: FontKey>(
         ]),
     };
     if let Some(widths) = widths.as_ref() {
-        if let Err(error) = reject_auto_with_ratio(widths) {
+        if let Err(error) = types::reject_auto_with_ratio(widths) {
             bag.record(error);
             blocked = true;
         }
@@ -1218,7 +1220,7 @@ fn lower_list<K: FontKey>(
     let kind = match spec.kind {
         ListKind::Bullet => LayoutListKind::Bullet,
         ListKind::Ordered(numbering) => LayoutListKind::Ordered {
-            style: numbering_kind(numbering),
+            style: types::numbering_kind(numbering),
             start: spec.start,
         },
     };
@@ -1341,7 +1343,7 @@ fn lower_band(spec: &OwnedBand, info: &PageInfo, errors: &mut ErrorBag) -> Vec<F
             font_size: slot.style.font_size,
             color: slot.style.color,
             align,
-            ..default_style()
+            ..types::default_style()
         };
         let node = if slot.text.is_empty() {
             TextNode::from_items(Vec::new(), style)

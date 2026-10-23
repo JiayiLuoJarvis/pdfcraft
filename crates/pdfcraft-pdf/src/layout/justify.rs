@@ -243,7 +243,11 @@ impl StretchPlan {
     }
 
     pub(crate) fn apply(&self, base: &[Length<NonNegative>]) -> Vec<Length<NonNegative>> {
-        debug_assert_eq!(self.adds.len(), base.len());
+        debug_assert_eq!(
+            self.adds.len(),
+            base.len(),
+            "stretch plan must hold one adjustment per base width"
+        );
         base.iter()
             .zip(self.adds.iter())
             .map(|(width, add)| *width + *add)
@@ -361,10 +365,10 @@ mod tests {
     #[test]
     fn water_fill_equal_caps_match_one_shot() {
         let (adds, r2) = water_fill(&[5.0, 5.0, 5.0], 6.0);
-        assert!(pt_near(adds[0], 2.0));
-        assert!(pt_near(adds[1], 2.0));
-        assert!(pt_near(adds[2], 2.0));
-        assert!(pt_near(r2, 0.0));
+        assert!(pt_near(adds[0], 2.0), "equal caps split 6.0 into 2.0 each");
+        assert!(pt_near(adds[1], 2.0), "equal caps split 6.0 into 2.0 each");
+        assert!(pt_near(adds[2], 2.0), "equal caps split 6.0 into 2.0 each");
+        assert!(pt_near(r2, 0.0), "exact fill leaves no remainder");
     }
 
     #[test]

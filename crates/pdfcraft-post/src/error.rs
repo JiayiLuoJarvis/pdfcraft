@@ -10,10 +10,30 @@ use std::sync::Arc;
 pub struct Error {
     /// What went wrong.
     pub kind: ErrorKind,
+    // `Arc` shares the dependency failure across `Error` clones. `Error` is
+    // `Clone` and `Box<dyn StdError>` is not; a borrow would tie every error
+    // to the dependency's lifetime.
     source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 impl Error {
+    /// The explicit constructor paired with `impl From<ErrorKind> for Error`.
+    ///
+    /// Prefer this over `.into()` at call sites that name the type.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pdfcraft_post::{Error, ErrorKind};
+    ///
+    /// let err = Error::new(ErrorKind::NotAPdf);
+    /// assert_eq!(err.kind, ErrorKind::NotAPdf);
+    /// ```
+    #[must_use]
+    pub fn new(kind: ErrorKind) -> Self {
+        Self { kind, source: None }
+    }
+
     pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
         self.source = Some(Arc::new(source));
         self
@@ -22,7 +42,7 @@ impl Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
-        Self { kind, source: None }
+        Self::new(kind)
     }
 }
 

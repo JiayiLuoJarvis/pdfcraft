@@ -35,8 +35,8 @@ impl AnchorTable {
         self.by_id.get(id).copied()
     }
 
-    fn insert_first(&mut self, id: String, xyz: LinkXyz) {
-        self.by_id.entry(id).or_insert(xyz);
+    fn insert_first(&mut self, id: &str, xyz: LinkXyz) {
+        self.by_id.entry(id.to_owned()).or_insert(xyz);
     }
 }
 
@@ -51,7 +51,7 @@ pub(crate) fn collect_anchors(laid: &LaidDocument) -> AnchorTable {
                     placed.origin.y().as_pt() + mark.relative.y().as_pt(),
                 )
                 .unwrap_or(placed.origin);
-                table.insert_first(mark.id.clone(), LinkXyz::new(page_index, point));
+                table.insert_first(mark.id.as_str(), LinkXyz::new(page_index, point));
             }
         }
     }

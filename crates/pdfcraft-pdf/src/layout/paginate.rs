@@ -6,9 +6,9 @@ use std::num::NonZeroU32;
 use crate::canvas::Canvas;
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind, Location, Region};
 use crate::geom::{Length, Margins, NonNegative, Point, Positive, Size};
-use crate::layout::decorate::{measure_bands, Decorations, PageBands, SectionSpan};
+use crate::layout::decorate::{self, Decorations, PageBands, SectionSpan};
 use crate::layout::flow::FlowNode;
-use crate::layout::frame::{draw_fragment, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
+use crate::layout::frame::{self, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
 use crate::limits::LimitKind;
 #[cfg(test)]
 use crate::limits::Limits;
@@ -141,7 +141,7 @@ pub(crate) fn layout_pages(
         });
     }
     let sizes: Vec<Size> = pages.iter().map(|page| page.size).collect();
-    let bands = measure_bands(&sizes, &spans, ctx)?;
+    let bands = decorate::measure_bands(&sizes, &spans, ctx)?;
     Ok(LaidDocument { pages, bands })
 }
 
@@ -400,7 +400,7 @@ fn paint_page(page: &PagePlan, bands: &PageBands, canvas: &mut dyn Canvas) -> Re
         .chain(&bands.footer)
         .chain(&bands.front);
     for placed in stacked {
-        draw_fragment(&placed.fragment, canvas, placed.origin)?;
+        frame::draw_fragment(&placed.fragment, canvas, placed.origin)?;
     }
     canvas.finish_page()
 }

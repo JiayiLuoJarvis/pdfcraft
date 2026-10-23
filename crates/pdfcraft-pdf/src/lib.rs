@@ -146,7 +146,9 @@ pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
 ///
 /// # Errors
 ///
-/// Returns backend serialization failures as [`Errors`].
+/// Returns backend serialization failures as [`Errors`] with one
+/// [`ErrorKind::Backend`] item. The krilla error stays reachable through
+/// [`std::error::Error::source`].
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
     backend::write_pdf(

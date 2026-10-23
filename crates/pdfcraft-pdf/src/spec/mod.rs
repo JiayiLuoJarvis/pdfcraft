@@ -104,6 +104,11 @@ impl<K> Resources<K> {
     }
 
     /// Stores an encoded image and returns its specification-local handle.
+    ///
+    /// The bytes are not decoded here. A malformed image, an unsupported format,
+    /// or a [`Limits`] cap is reported by [`layout_spec`] as
+    /// [`ErrorKind::Image`](crate::ErrorKind::Image) or
+    /// [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded).
     pub fn add_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> ImageRef {
         let index = u32::try_from(self.images.len()).unwrap_or(u32::MAX);
         self.images.push(ImageResource { bytes, format });

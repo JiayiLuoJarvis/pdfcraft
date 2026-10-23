@@ -87,7 +87,8 @@ fn kind_name(kind: NodeKind) -> &'static str {
 pub(crate) struct CellBody<N>(Vec<N>);
 
 impl<N: Flowable> CellBody<N> {
-    pub(crate) fn new(nodes: Vec<N>) -> Result<Self> {
+    pub(crate) fn new(nodes: impl IntoIterator<Item = N>) -> Result<Self> {
+        let nodes: Vec<N> = nodes.into_iter().collect();
         check_content(Container::TableCell, &nodes)?;
         Ok(Self(nodes))
     }
@@ -106,7 +107,8 @@ impl<N: Flowable> CellBody<N> {
 pub(crate) struct ItemBody<N>(Vec<N>);
 
 impl<N: Flowable> ItemBody<N> {
-    pub(crate) fn new(nodes: Vec<N>) -> Result<Self> {
+    pub(crate) fn new(nodes: impl IntoIterator<Item = N>) -> Result<Self> {
+        let nodes: Vec<N> = nodes.into_iter().collect();
         check_content(Container::ListItem, &nodes)?;
         Ok(Self(nodes))
     }

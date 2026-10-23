@@ -22,7 +22,7 @@ fn main() {
         "employee_name".to_string(),
         FieldValue::Text("Ada".to_string()),
     );
-    fields.insert("agree".to_string(), FieldValue::CheckBox(true));
+    fields.insert("agree".to_string(), FieldValue::CheckBox(true)); // checked
     fields.insert("level".to_string(), FieldValue::Text("Senior".to_string()));
     let options = FillOptions {
         font: Some(FontBytes {
