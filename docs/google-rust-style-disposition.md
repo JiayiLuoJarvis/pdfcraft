@@ -33,7 +33,7 @@
 
 | 指南条 | disposition | 证据 |
 | --- | --- | --- |
-| 不用 `Rc`/`Arc`，例外须论证 | done | `crates/pdfcraft-pdf/src/error.rs:52-56`（`Error.source` 论证注释）；`FontFace.bytes` / orgchart `FontBytes.data` 用 `Arc<Vec<u8>>` 使 `Clone` 不复制字体内容 |
+| 不用 `Rc`/`Arc`，例外须论证 | done | `crates/pdfcraft-pdf/src/error.rs:52-56`（`Error.source` 论证注释）；`FontFace.bytes` / orgchart `FontBytes.data` 用 `Arc<Vec<u8>>` 使 `Clone` 不复制字体内容；post `Error.source` 论证注释已补（`crates/pdfcraft-post/src/error.rs:12-15`，`Error: Clone` 而 `Box<dyn StdError>` 不可 `Clone`） |
 | 借用优先于深拷贝 | done | 无新增 `clone` 代借用；clippy pedantic 全绿 |
 
 ## 4. 函数出入参（Function inputs/outputs）
@@ -43,14 +43,14 @@
 | 灵活引用（`&[T]`/`&str`/`Option<&T>`） | done (pdf+forms) | `decorate.rs:163`：`content: &Option<BandContent>` 改 `Option<&BandContent>`，调用点 `decorations.header.as_ref()`；生产 src 零 `&Vec<`/`&String`/`&Box<`/`&Option<` |
 | 返回 `impl Iterator` vs `Vec` | done | 按调用分布选择并记录理由（见任务 6 记录） |
 | 参数 `impl Into<T>`（调用点人体工学） | done | 关键调用点采用，应用层代码从简 |
-| bool 改 enum | 部分 done，1 项 deferred | 含糊 bool 已改 enum；`FieldValue::CheckBox(bool)`（`crates/pdfcraft-forms/src/fields.rs:76`）保持 bool：调用点自解释且文档已澄清（true=checked）。见下「Deferred」t5 |
+| bool 改 enum | done + deferred | 含糊 bool 已改 enum；`FieldValue::CheckBox(bool)`（`crates/pdfcraft-forms/src/fields.rs:76`）保持 bool：调用点自解释且文档已澄清（true=checked）。见下「Deferred」t5。post（Q1 决议：保持 bool）：`merge_pdfs(parts, preserve_outlines: bool)` 不提 `OutlinePolicy` enum，`merge.rs` 文档已写明取舍并要求调用点具名实参/注释；`EncryptionConfig` 8 bool 保留（镜像 PDF 安全位，`struct_excessive_bools` allow 保留）。orgchart（Q3 确认：deferred）：`measure.rs:341/349/357 is_subject` + `captions.rs:60 has_investments` 保持 bool，全私有、同一文件内调用点自解释、无调用方收益 |
 
 ## 5. 错误报告（Reporting errors）
 
 | 指南条 | disposition | 证据 |
 | --- | --- | --- |
 | Option / Result / panic 三选 | done (pdf+forms) | `crates/pdfcraft-pdf/src/error.rs` 模块文档「Reporting model」节：`LinkTarget::uri_str` 回 `None`、`Error`/`Errors` 走 `Result`、`Errors::first` 是唯一公共 panic（`# Panics` 有档）；依赖失败走 `source()`。`crates/pdfcraft-forms/src/error.rs` 同模型。行为零变化，错误单测语义无漂移 |
-| orgchart `ErrorCode` 模型 | 后续波 | 本计划不动，见下 |
+| orgchart `ErrorCode` 模型 / post `Error` | done（orgchart：N/A-独立模型；post：`Error::new` 已补） | orgchart：`ErrorCode` 8 值稳定码（`as_str`，`const fn` + `#[must_use]`）+ `message` 只给日志，匹配 Python `EquityErrorCode.value` 穷尽匹配；`Error::new` 保持 `pub(crate)`，不加 `#[non_exhaustive]`（加了会破坏穷尽匹配，IS-2）。post（Q2 落地）：`Error::new(kind)` + `#[must_use]` + rustdoc Example 已补（`error.rs`），`From<ErrorKind>` 转发给它，行为不变；`ErrorKind` 6 变体 `#[non_exhaustive]` 未改动 |
 
 ## 6. 类型（Types）
 
@@ -63,7 +63,7 @@
 
 | 指南条 | disposition | 证据 |
 | --- | --- | --- |
-| `From` 配显式构造 | done | `Error::new(kind)` 配 `From<ErrorKind>`、`Errors::from_error(error)` 配 `From<Error>`（pdf）；forms `Error::new(kind)` 配 `From<ErrorKind>`。各有 rustdoc Example |
+| `From` 配显式构造 | done | `Error::new(kind)` 配 `From<ErrorKind>`、`Errors::from_error(error)` 配 `From<Error>`（pdf）；forms `Error::new(kind)` 配 `From<ErrorKind>`；post `Error::new(kind)` 配 `From<ErrorKind>`（`error.rs`，各有 rustdoc Example；post 的 `From` 转发给 `new`，行为不变） |
 | Options struct 实现 `Default` | done | forms `AbsoluteLine` 得 `Default`（与 `new(0,0,0,0)` 同笔触）；`FillOptions` 本就支持 `..Default::default()` |
 
 ## 8. 并发（Concurrency）
@@ -91,8 +91,8 @@
 | 指南条 | disposition | 证据 |
 | --- | --- | --- |
 | `///` + `Errors`/`Panics` + 示例 | done (pdf+forms) | `cargo doc` 零警告（`RUSTDOCFLAGS=-D warnings`）；`missing_docs` 保持 `warn`，spec 稳定后升 `deny` |
-| `#[must_use]`（函数与类型） | done + deferred | pdf spec/mod.rs 与 canvas 主要类型和方法已带，types.rs:103 起（`Rendered` 及方法）亦有；types.rs:13 `Numbering`、:38 `Ratio`、:59 `Track` 与 canvas.rs `ImageFormat` 四处未带，属冻结文档语言类型，随 Deferred t7 留后波；forms `fields.rs` 九个公共类型全 `#[must_use]`；`Errors::iter` 等经 `clippy::double_must_use` 确认无需重复标注 |
-| `#[non_exhaustive]` | done + deferred | forms `FieldType` 既有 `#[non_exhaustive]`（本波补 `#[must_use]`）；`FieldInfo`/`FieldValue` 本波新增 `#[non_exhaustive]`。`FieldValue` 用通配臂迁移；`FieldInfo` 是 struct，外部不可 struct literal（E0639），pattern 用 `..`（如 `FieldInfo { name, .. }`）。pdf error/canvas/geom 零新增，基线与本波同为 13 处（error 8、canvas 3、geom 2，属历史存量）。pdf 文档语言 enum 见下「Deferred」t7 |
+| `#[must_use]`（函数与类型） | done + deferred | pdf spec/mod.rs 与 canvas 主要类型和方法已带，types.rs:103 起（`Rendered` 及方法）亦有；types.rs:13 `Numbering`、:38 `Ratio`、:59 `Track` 与 canvas.rs `ImageFormat` 四处未带，属冻结文档语言类型，随 Deferred t7 留后波；forms `fields.rs` 九个公共类型全 `#[must_use]`；`Errors::iter` 等经 `clippy::double_must_use` 确认无需重复标注；post（Q2 落地）：`Error::new` 加 `#[must_use]`，`Pipeline::run` 补 `#[must_use]` + `# Errors`；其余 `run/apply` 类此前已带；`Step` 不加 `Default`（N/A：无空操作语义，中性元是空 `Pipeline`，`pipeline.rs` 已注）；orgchart 查漏结论：公共 `pub fn` 已全覆盖（`model.rs` 6 处 + `error.rs` `as_str`），无漏项，`document_title` 补 `# Errors`（`SubjectNotFound`） |
+| `#[non_exhaustive]` | done + deferred | forms `FieldType` 既有 `#[non_exhaustive]`（本波补 `#[must_use]`）；`FieldInfo`/`FieldValue` 本波新增 `#[non_exhaustive]`。`FieldValue` 用通配臂迁移；`FieldInfo` 是 struct，外部不可 struct literal（E0639），pattern 用 `..`（如 `FieldInfo { name, .. }`）。pdf error/canvas/geom 零新增，基线与本波同为 13 处（error 8、canvas 3、geom 2，属历史存量）。pdf 文档语言 enum 见下「Deferred」t7。post `ErrorKind` 的 `#[non_exhaustive]` 未改动（6 变体，新增变体非 breaking）；orgchart `ErrorCode` 刻意不加（8 值稳定码 + Python `EquityErrorCode.value` 穷尽匹配是特性，IS-2） |
 
 ## 12. 其他语言特性（Other Rust features）
 
@@ -105,7 +105,7 @@
 
 | 指南条 | disposition | 证据 |
 | --- | --- | --- |
-| `expect` 带上下文（不用裸 `unwrap`） | done (pdf+forms) | 生产 src（`#[cfg(test)]`/`tests/` 除外）零 `.unwrap()`；断言补上下文字符串；`missing_panics_doc`（pdf warn）无新增 |
+| `expect` 带上下文（不用裸 `unwrap`） | done (pdf+forms+post+orgchart) | 生产 src（`#[cfg(test)]`/`tests/` 除外）零 `.unwrap()`；断言补上下文字符串；`missing_panics_doc`（pdf warn）无新增。orgchart 生产零 `.expect`/`.unwrap()` 复核通过：`prepare.rs`/`graph.rs`/`display.rs` 的 `.expect` 命中全在 `#[cfg(test)] mod tests` 内，`lib.rs:51` 系 rustdoc 注释行；post 生产零 `.expect`（grep 空） |
 | 模式匹配优先于 check-then-unwrap、直白 for 循环、`format!`/`write!`、零 `catch_unwind`/`todo!` | done | clippy + 测试全过 |
 
 ## Known gate gaps（基线同现，不掩盖）
@@ -115,6 +115,7 @@
 - **no-default-features**：`cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings` 与 `cargo test -p pdfcraft-pdf --no-default-features --features test-utils` 在本分支与 pristine `f3c23b2` 都是 exit 101。两者同样报 3 个 dead-code errors（`from_raw`、`ResolvedFont`、`resolve`）；test 另因 examples/tests 的 `to_pdf` 未解析而失败。CI 仍运行该组合（`.github/workflows/ci.yml:138,147,153`），在基座即红。
 - **字体/CJK**：未设 `PDFCRAFT_*` 时字体相关用例提前返回，默认 447 passed 不是完整字体覆盖。设 `PDFCRAFT_PDF_FONT=DejaVuSans` 后 pdf 为 269 passed / 9 failed / 1 ignored，9 个失败名与基座一致。`pdfcraft-forms` 的 CJK 条件测试在 DejaVu 下跳过，用 `wqy-zenhei.ttc` 时在 `fill_and_flatten.rs:597` 报 `FontFile2 is 813408 bytes`；`fills_chinese_text` 仍为 `#[ignore]`（`:603`）。CI 的 NotoSansCJK 才能覆盖；本机没有该字体。
 - 上述 gap 的修复（no-default gating、字体夹具/CI 字体）不在本波范围；本波只记录，避免把默认组合的绿误报为全矩阵绿。
+- orgchart/post Wave 3（分支 `review/google-style-orgchart-post`）重跑同口径矩阵：8 命令门禁 exit 0，doc 零 warning；`--no-default-features` clippy 仍 exit 101（同 3 个 dead-code errors：`from_raw`、`ResolvedFont`、`resolve`），环境仍无 `PDFCRAFT_*` 变量，字体/CJK 覆盖仍以基线为准——均记 base-identical，非回归。证据见 `.omo/evidence/task-6-gates/`（`SUMMARY.md` + 各命令 `.log`/`.exit`）。
 
 ## Deferred（延后项，有理由）
 
@@ -128,5 +129,4 @@
   若后波要 enum，须先向提案书 §10 提修正案（`CheckboxState::Checked/Unchecked`），再改签名与迁移说明。
 - **t9：文档小项。** `emit.rs:271` `check_upem` 的 upem==0 路径说明、`Positive::pt` 的零值错误注记，
   随 spec 文档稳定化（`missing_docs` 升 `deny`）时补。
-- **orgchart / post 后续波。** orgchart：私有 bool（`measure.rs:341,349,357`）、`ErrorCode` 模型、
-  生产路径 expect/unwind 旧规；post：全量风格对齐。本波只跑二者门禁（只读），源码零改动。
+- **orgchart / post 后续波（已收口，零 breaking）。** Q1（post `merge_pdfs` bool）：保持 bool，`merge.rs` 文档写明取舍 + 调用点具名要求；`EncryptionConfig` 8 bool 保留（镜像 PDF 安全位）。Q2（post `must_use`）：`Error::new` 加 `#[must_use]` + Example，`Pipeline::run` 补 `#[must_use]` + `# Errors`；`Default` 均已有，`Step` 记 N/A（无空操作语义）。Q3（orgchart 私有 bool）：deferred，`measure.rs:341/349/357` + `captions.rs:60` 保持 bool。`ErrorCode` 8 值 + 无 `non_exhaustive`（Python 穷尽匹配是特性）、`Error::new` 保持 `pub(crate)`（调用方不可构造，无迁移）；post `ErrorKind non_exhaustive` 未改动。证据：`.omo/evidence/task-6-gates/`（8 命令门禁 + 抽查 grep + T1-T6，缺口记 base-identical）。

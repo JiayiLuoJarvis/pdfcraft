@@ -10,9 +10,10 @@ while remaining `0.x`.
 
 ### Scope
 
-- This release's Google style alignment covers `pdfcraft-pdf` and `pdfcraft-forms` only.
-  `pdfcraft-orgchart` and `pdfcraft-post` sources are untouched (gates run read-only);
-  their alignment, the pdf doc-language enum `non_exhaustive` question, the
+- This release's Google style alignment covers `pdfcraft-pdf` and `pdfcraft-forms`, plus a
+  zero-breaking pass over `pdfcraft-orgchart` and `pdfcraft-post` (added `Error::new` on post,
+  `#[must_use]` / `# Errors` gap-fill, bool and `Default` dispositions; no public signature
+  changed). The pdf doc-language enum `non_exhaustive` question, the
   `CheckBox(bool)`-to-enum amendment, and the `upem == 0` / `Positive::pt` doc nits
   are tracked in `docs/google-rust-style-disposition.md` under Deferred. The known
   pre-existing gate gaps (no-default-features, font/CJK) are recorded there under
@@ -26,6 +27,17 @@ while remaining `0.x`.
 - **Breaking.** `pdfcraft-forms` output types follow the Google style attribute rules. `FieldValue` and `FieldInfo` are now `#[non_exhaustive]`. Match `FieldValue` with a wildcard arm (`_ => ...`) instead of an exhaustive list. `FieldInfo` is a struct: external code can no longer construct it with a struct literal; obtain values from `list_fields`, and in patterns add `..` (for example, `FieldInfo { name, .. }`) so added fields do not break the caller. All nine public types in `fields.rs` are `#[must_use]`; bind or use a value if you previously constructed one as a statement. `AbsoluteLine` gains `Default` (same stroke as `AbsoluteLine::new(0.0, 0.0, 0.0, 0.0)`), so `AbsoluteLine { x1, y1, ..Default::default() }` works. `Error::new(kind)` is the explicit constructor paired with `From<ErrorKind>`. `FontBytes`, `AbsoluteLine`, and `FillOptions` stay literal-constructible (no `#[non_exhaustive]`); `FillOptions` keeps `..FillOptions::default()` support.
 - `pdfcraft-pdf` error constructors follow the Google `From`-pairing rule. `Error::new(kind)` is the explicit constructor paired with `From<ErrorKind>`, and `Errors::from_error(error)` is paired with `From<Error>`. `Errors::len` / `Errors::is_empty` pair with the existing slice accessors, and `Rendered::outline_is_empty` reports whether `to_pdf` will write an outline. Audited `#[must_use]` fn coverage: `Errors::iter` returns `std::slice::Iter`. `RecordedPage::ops` and `RecordingCanvas::commands` return `&[CanvasCommand]`; Clippy's `double_must_use` treats the must_use element type as covering the return, while rustc does not warn when a caller ignores a slice return. No layout, coordinate, or output change.
 - `pdfcraft-post` `0.1.0`: `SetMetadata`, `Encrypt` (presets `EncryptionPreset::READ_ONLY`, `READ_ONLY_PRINTABLE`, `FULL_PERMISSIONS`), `StampAndEncrypt`, `merge_pdfs`, and `Pipeline`. AES-256 / revision 6 (lopdf V5). Owner password is required from the caller. Empty user password opens. Errors are `Error` + `ErrorKind`. Depends on workspace `lopdf =0.45.0` and `getrandom =0.4.3`. No edges to sibling crates. Examples: `encrypt`, `stamp`, `merge`.
+- `pdfcraft-orgchart` / `pdfcraft-post` Google style alignment with zero breaking. `pdfcraft-post`
+  gains `Error::new(kind)`, the explicit constructor paired with `From<ErrorKind>` (with rustdoc
+  Example; `From` now forwards to it, behavior unchanged), `#[must_use]` plus an `# Errors`
+  section on `Pipeline::run`, an `Arc`-sharing rationale comment on `Error.source`, and a
+  documented decision to keep `merge_pdfs` on `preserve_outlines: bool` (no `OutlinePolicy`
+  enum; name the argument at call sites). `Step` stays without `Default` (an empty `Pipeline`
+  is the neutral element). `pdfcraft-orgchart` `document_title` gains an `# Errors` section
+  (`SubjectNotFound`); `ErrorCode` keeps its 8 values with no `#[non_exhaustive]`, so exhaustive
+  matching (including Python `EquityErrorCode.value`) still compiles, and the private
+  `is_subject` / `has_investments` bools stay. `ErrorKind`'s `#[non_exhaustive]` is unchanged.
+  No public signature changed.
 
 ### Documentation
 
