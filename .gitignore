@@ -19,3 +19,6 @@
 *.ttf
 *.otf
 *.ttc
+
+# Agent orchestration runtime (plans, ledger, evidence logs)
+.omo/
