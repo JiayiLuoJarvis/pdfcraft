@@ -637,13 +637,15 @@ fn one_value_path_paints_a_paragraph_and_a_cell() {
         body(vec![
             Block::paragraph((), "Risk"),
             Block::Table(crate::spec::TableSpec {
-                body: vec![vec![crate::spec::CellSpec {
-                    content: vec![crate::spec::CellBlock::Text {
-                        text: "cell".into(),
-                        font: (),
+                body: vec![crate::spec::TableRow {
+                    cells: vec![crate::spec::CellSpec {
+                        content: vec![crate::spec::CellBlock::Text {
+                            text: "cell".into(),
+                            font: (),
+                        }],
+                        ..crate::spec::CellSpec::default()
                     }],
-                    ..crate::spec::CellSpec::default()
-                }]],
+                }],
                 ..crate::spec::TableSpec::default()
             }),
         ]),

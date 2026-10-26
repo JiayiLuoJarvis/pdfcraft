@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableSpec, TextRun,
+    ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize, Positive,
@@ -84,22 +84,24 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
         body.push(Block::paragraph((), BODY_2));
         body.push(Block::paragraph((), MIXED));
         body.push(Block::Table(TableSpec {
-            header: vec![vec![
-                text_cell("项目"),
-                text_cell("金额"),
-                text_cell("交货日"),
-            ]],
+            header: vec![TableRow {
+                cells: vec![text_cell("项目"), text_cell("金额"), text_cell("交货日")],
+            }],
             body: vec![
-                vec![
-                    text_cell("设备"),
-                    text_cell("12000"),
-                    text_cell("2026-10-31"),
-                ],
-                vec![
-                    text_cell("服务"),
-                    text_cell("8000"),
-                    text_cell("2026-11-15"),
-                ],
+                TableRow {
+                    cells: vec![
+                        text_cell("设备"),
+                        text_cell("12000"),
+                        text_cell("2026-10-31"),
+                    ],
+                },
+                TableRow {
+                    cells: vec![
+                        text_cell("服务"),
+                        text_cell("8000"),
+                        text_cell("2026-11-15"),
+                    ],
+                },
             ],
             ..TableSpec::default()
         }));
@@ -152,11 +154,11 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
     let tracks = (0..cols)
         .map(|_| Track::Ratio(Ratio::new(1.0).expect("1 is positive")))
         .collect();
-    let header = (0..cols).map(|c| text_cell(&format!("C{c}"))).collect();
+    let header: Vec<CellSpec<()>> = (0..cols).map(|c| text_cell(&format!("C{c}"))).collect();
     let mut body = Vec::with_capacity(rows);
     for r in 0..rows {
-        let cells = (0..cols).map(|c| text_cell(&format!("r{r}c{c}"))).collect();
-        body.push(cells);
+        let cells: Vec<CellSpec<()>> = (0..cols).map(|c| text_cell(&format!("r{r}c{c}"))).collect();
+        body.push(TableRow { cells });
     }
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -174,7 +176,7 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
         sections: vec![SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0)?),
             body: vec![Block::Table(TableSpec {
-                header: vec![header],
+                header: vec![TableRow { cells: header }],
                 body,
                 tracks: Some(tracks),
                 ..TableSpec::default()

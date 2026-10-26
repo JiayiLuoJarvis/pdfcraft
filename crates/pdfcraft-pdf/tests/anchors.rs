@@ -3,10 +3,11 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry, InlineRun,
-    OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableSpec, TextRun,
+    OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow,
+    TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, Color, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
+    layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
     PageSize, Region, Rendered, Result, Track,
 };
 
@@ -422,11 +423,11 @@ fn repeating_header_anchor_keeps_first_destination() {
             font: (),
         }),
     };
-    let row = |text: &str| {
-        vec![cell(vec![CellBlock::Text {
+    let row = |text: &str| TableRow {
+        cells: vec![cell(vec![CellBlock::Text {
             text: text.into(),
             font: (),
-        }])]
+        }])],
     };
     // One A4 body is about 746 pt under 48 pt margins. Line height is at least
     // 12 pt * 1.2, so 40 rows can still fit. 80 rows cannot, on any face.
@@ -436,12 +437,13 @@ fn repeating_header_anchor_keeps_first_destination() {
     }
     let table = Block::Table(TableSpec {
         tracks: Some(vec![Track::Auto]),
-        header: vec![vec![cell(vec![header_anchor])]],
+        header: vec![TableRow {
+            cells: vec![cell(vec![header_anchor])],
+        }],
         body: body_rows,
         repeat_header: true,
         cell_padding: NonNegative::ZERO,
-        border_width: NonNegative::ZERO,
-        border_color: Color::rgb(0, 0, 0),
+        border: TableBorder::default(),
     });
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,

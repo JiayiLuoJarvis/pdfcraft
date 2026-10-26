@@ -5,7 +5,7 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableSpec, TextRun,
+    ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
@@ -78,22 +78,24 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
                 Block::paragraph((), BODY_2),
                 Block::paragraph((), MIXED),
                 Block::Table(TableSpec {
-                    header: vec![vec![
-                        text_cell("项目"),
-                        text_cell("金额"),
-                        text_cell("交货日"),
-                    ]],
+                    header: vec![TableRow {
+                        cells: vec![text_cell("项目"), text_cell("金额"), text_cell("交货日")],
+                    }],
                     body: vec![
-                        vec![
-                            text_cell("设备"),
-                            text_cell("12000"),
-                            text_cell("2026-10-31"),
-                        ],
-                        vec![
-                            text_cell("服务"),
-                            text_cell("8000"),
-                            text_cell("2026-11-15"),
-                        ],
+                        TableRow {
+                            cells: vec![
+                                text_cell("设备"),
+                                text_cell("12000"),
+                                text_cell("2026-10-31"),
+                            ],
+                        },
+                        TableRow {
+                            cells: vec![
+                                text_cell("服务"),
+                                text_cell("8000"),
+                                text_cell("2026-11-15"),
+                            ],
+                        },
                     ],
                     ..TableSpec::default()
                 }),

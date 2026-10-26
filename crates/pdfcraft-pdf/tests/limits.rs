@@ -2,7 +2,7 @@
 
 use pdfcraft_pdf::spec::{
     Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry, Resources, SectionSpec,
-    TableSpec,
+    TableRow, TableSpec,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::ImageFormat;
@@ -173,22 +173,24 @@ fn table_cell_limit_counts_cells() {
     let Some(err) = fonted(
         tighten(|limits| limits.set_max_table_cells(1).unwrap()),
         vec![Block::Table(TableSpec {
-            body: vec![vec![
-                CellSpec {
-                    content: vec![CellBlock::Text {
-                        text: "a".into(),
-                        font: (),
-                    }],
-                    ..CellSpec::default()
-                },
-                CellSpec {
-                    content: vec![CellBlock::Text {
-                        text: "b".into(),
-                        font: (),
-                    }],
-                    ..CellSpec::default()
-                },
-            ]],
+            body: vec![TableRow {
+                cells: vec![
+                    CellSpec {
+                        content: vec![CellBlock::Text {
+                            text: "a".into(),
+                            font: (),
+                        }],
+                        ..CellSpec::default()
+                    },
+                    CellSpec {
+                        content: vec![CellBlock::Text {
+                            text: "b".into(),
+                            font: (),
+                        }],
+                        ..CellSpec::default()
+                    },
+                ],
+            }],
             ..TableSpec::default()
         })],
     ) else {
