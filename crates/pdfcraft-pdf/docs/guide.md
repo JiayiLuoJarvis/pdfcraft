@@ -8,6 +8,7 @@ errors, limits, and testing.
 | [crate README](../README.md) | Install and quick start |
 | This guide | How-to for real documents |
 | [migrate-inline.md](migrate-inline.md) | Required edits from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
+| [migrate-table-row.md](migrate-table-row.md) | Required edits from `header: Vec<Vec<CellSpec>>` / `border_width` + `border_color` |
 | [rustdoc](https://docs.rs/pdfcraft-pdf) | Every public signature (`cargo doc -p pdfcraft-pdf --open`) |
 
 Related crates (separate packages, separate docs):
@@ -37,7 +38,7 @@ Two moments matter:
 ```rust
 use pdfcraft_pdf::spec::{
     Block, CellBlock, CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources,
-    SectionSpec, TableSpec,
+    SectionSpec, TableRow, TableSpec,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, PageSize, Result};
 
@@ -61,41 +62,45 @@ fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
                 .items
                 .iter()
                 .map(|item| {
-                    vec![
-                        CellSpec {
-                            content: vec![CellBlock::Text {
-                                text: item.name.clone(),
-                                font: (),
-                            }],
-                            ..CellSpec::default()
-                        },
-                        CellSpec {
-                            content: vec![CellBlock::Text {
-                                text: item.amount.clone(),
-                                font: (),
-                            }],
-                            ..CellSpec::default()
-                        },
-                    ]
+                    TableRow {
+                        cells: vec![
+                            CellSpec {
+                                content: vec![CellBlock::Text {
+                                    text: item.name.clone(),
+                                    font: (),
+                                }],
+                                ..CellSpec::default()
+                            },
+                            CellSpec {
+                                content: vec![CellBlock::Text {
+                                    text: item.amount.clone(),
+                                    font: (),
+                                }],
+                                ..CellSpec::default()
+                            },
+                        ],
+                    }
                 })
                 .collect();
             body.push(Block::Table(TableSpec {
-                header: vec![vec![
-                    CellSpec {
-                        content: vec![CellBlock::Text {
-                            text: "Item".into(),
-                            font: (),
-                        }],
-                        ..CellSpec::default()
-                    },
-                    CellSpec {
-                        content: vec![CellBlock::Text {
-                            text: "Amount".into(),
-                            font: (),
-                        }],
-                        ..CellSpec::default()
-                    },
-                ]],
+                header: vec![TableRow {
+                    cells: vec![
+                        CellSpec {
+                            content: vec![CellBlock::Text {
+                                text: "Item".into(),
+                                font: (),
+                            }],
+                            ..CellSpec::default()
+                        },
+                        CellSpec {
+                            content: vec![CellBlock::Text {
+                                text: "Amount".into(),
+                                font: (),
+                            }],
+                            ..CellSpec::default()
+                        },
+                    ],
+                }],
                 body: rows,
                 ..TableSpec::default()
             }));
@@ -349,27 +354,31 @@ ColumnsSpec {
 
 ```rust
 use std::num::NonZeroU16;
-use pdfcraft_pdf::spec::{CellBlock, CellSpec, TableSpec};
+use pdfcraft_pdf::spec::{CellBlock, CellSpec, TableBorder, TableRow, TableSpec};
 use pdfcraft_pdf::{Color, NonNegative, Track};
 
 TableSpec {
-    header: vec![vec![
-        CellSpec {
-            content: vec![CellBlock::Text { text: "Name".into(), font: () }],
-            ..CellSpec::default()
-        },
-        CellSpec {
-            content: vec![CellBlock::Text { text: "Qty".into(), font: () }],
-            col_span: NonZeroU16::new(2).unwrap(),
-            ..CellSpec::default()
-        },
-    ]],
-    body: vec![/* rows of CellSpec */],
+    header: vec![TableRow {
+        cells: vec![
+            CellSpec {
+                content: vec![CellBlock::Text { text: "Name".into(), font: () }],
+                ..CellSpec::default()
+            },
+            CellSpec {
+                content: vec![CellBlock::Text { text: "Qty".into(), font: () }],
+                col_span: NonZeroU16::new(2).unwrap(),
+                ..CellSpec::default()
+            },
+        ],
+    }],
+    body: vec![/* rows of TableRow */],
     repeat_header: true, // default
     tracks: Some(vec![Track::Auto, Track::Ratio(pdfcraft_pdf::Ratio::new(1.0).unwrap())]),
     cell_padding: NonNegative::pt(4.0).unwrap(),
-    border_width: NonNegative::pt(0.5).unwrap(),
-    border_color: Color::rgb(0, 0, 0),
+    border: TableBorder {
+        width: NonNegative::pt(0.5).unwrap(),
+        color: Color::rgb(0, 0, 0),
+    },
 }
 ```
 
