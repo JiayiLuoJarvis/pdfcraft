@@ -55,6 +55,7 @@ while remaining `0.x`.
 - Test and example fonts are no longer vendored in git. Set `PDFCRAFT_PDF_FONT` / `PDFCRAFT_CJK_FONT` (`pdfcraft-pdf`), `PDFCRAFT_FORMS_FONT` (`pdfcraft-forms`), and `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (`pdfcraft-orgchart`). Font-dependent tests skip when the variable is unset.
 - Renamed crates from `quire-*` to `pdfcraft-*` (`pdfcraft-pdf`, `pdfcraft-forms`, `pdfcraft-orgchart`). Rust imports use `pdfcraft_pdf` / `pdfcraft_forms` / `pdfcraft_orgchart`. Env vars are `PDFCRAFT_FORMS_FONT`, `PDFCRAFT_CJK_FONT`, and `PDFCRAFT_CJK_BOLD_FONT`. PDF `/Creator` is `pdfcraft`.
 - `pdfcraft-orgchart` docs describe both equity (shareholders above) and outbound investment (below the subject).
+- **Breaking.** `pdfcraft-pdf` table rows and borders are typed. `TableSpec::header` and `TableSpec::body` are now `Vec<TableRow<K>>`, so wrap each row as `TableRow { cells: ... }`. `TableSpec::border_width` and `TableSpec::border_color` are replaced by one `border: TableBorder { width, color }` field (`TableBorder::default()` draws nothing). See `crates/pdfcraft-pdf/docs/migrate-table-row.md` for the old-to-new mapping.
 
 ## [0.1.0] - 2026-10-14
 
