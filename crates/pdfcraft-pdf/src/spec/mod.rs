@@ -409,19 +409,17 @@ pub struct ColumnsSpec<K> {
 #[must_use]
 pub struct TableSpec<K> {
     /// Header rows, repeated when [`Self::repeat_header`] is true.
-    pub header: Vec<Vec<CellSpec<K>>>,
+    pub header: Vec<TableRow<K>>,
     /// Body rows.
-    pub body: Vec<Vec<CellSpec<K>>>,
+    pub body: Vec<TableRow<K>>,
     /// Whether header rows repeat after a page break.
     pub repeat_header: bool,
     /// Optional per-column tracks.
     pub tracks: Option<Vec<Track>>,
     /// Padding on every side of every cell.
     pub cell_padding: Length<NonNegative>,
-    /// Grid-line width. Zero omits the border.
-    pub border_width: Length<NonNegative>,
-    /// Grid-line color.
-    pub border_color: Color,
+    /// Grid-line border. Zero width omits the border.
+    pub border: TableBorder,
 }
 
 impl<K> Default for TableSpec<K> {
@@ -432,8 +430,34 @@ impl<K> Default for TableSpec<K> {
             repeat_header: true,
             tracks: None,
             cell_padding: NonNegative::ZERO,
-            border_width: NonNegative::ZERO,
-            border_color: Color::rgb(0, 0, 0),
+            border: TableBorder::default(),
+        }
+    }
+}
+
+/// One table row.
+#[derive(Debug, Default)]
+#[must_use]
+pub struct TableRow<K> {
+    /// Cells in the row, from left to right.
+    pub cells: Vec<CellSpec<K>>,
+}
+
+/// Grid-line stroke centered on cell edges. Width zero draws nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[must_use]
+pub struct TableBorder {
+    /// Grid-line width. Zero omits the border.
+    pub width: Length<NonNegative>,
+    /// Grid-line color.
+    pub color: Color,
+}
+
+impl Default for TableBorder {
+    fn default() -> Self {
+        Self {
+            width: NonNegative::ZERO,
+            color: Color::rgb(0, 0, 0),
         }
     }
 }
