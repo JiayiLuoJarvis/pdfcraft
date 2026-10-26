@@ -18,8 +18,8 @@ use std::sync::Arc;
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
     ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec, InlineRun,
-    ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, RunStyle, SectionSpec, TableSpec,
-    TextRun,
+    ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
+    TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
@@ -304,91 +304,101 @@ fn span_text(value: &str, cols: u16) -> CellSpec<()> {
     }
 }
 
-fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Vec<CellSpec<()>>>> {
+fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>> {
     let mut rows = vec![
-        vec![
-            CellSpec {
-                content: vec![CellBlock::Text {
-                    text: "A1".into(),
-                    font: (),
-                }],
-                row_span: NonZeroU16::new(2).unwrap(),
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![text("Pen "), bold("set")],
-                    ..ParagraphSpec::default()
-                })],
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::List(ListSpec {
-                    items: vec![
-                        item(paragraph(vec![text("black")], Alignment::Start, 0.0)?),
-                        item(paragraph(vec![text("blue")], Alignment::Start, 0.0)?),
-                    ],
-                    ..ListSpec::default()
-                })],
-                ..CellSpec::default()
-            },
-            text_cell("12"),
-        ],
-        vec![
-            CellSpec {
-                content: vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![link("https://example.test/ink", vec![text("Ink")])],
-                    ..ParagraphSpec::default()
-                })],
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::List(ListSpec {
-                    kind: ListKind::Ordered(Numbering::Decimal),
-                    items: vec![
-                        item(paragraph(vec![text("bottle")], Alignment::Start, 0.0)?),
-                        marked("+", paragraph(vec![text("refill")], Alignment::Start, 0.0)?),
-                    ],
-                    ..ListSpec::default()
-                })],
-                ..CellSpec::default()
-            },
-            text_cell("3"),
-        ],
-        vec![
-            text_cell("B2"),
-            CellSpec {
-                content: vec![CellBlock::Image(ImageSpec {
-                    image: logo,
-                    width: Some(pos(18.0)?),
-                    height: None,
-                    align: Alignment::Center,
-                })],
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::HLine(HLineSpec {
-                    thickness: pos(0.75)?,
-                    color: Color::rgb(120, 0, 0),
-                    ..HLineSpec::default()
-                })],
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::Spacer(nn(8.0)?)],
-                ..CellSpec::default()
-            },
-        ],
+        TableRow {
+            cells: vec![
+                CellSpec {
+                    content: vec![CellBlock::Text {
+                        text: "A1".into(),
+                        font: (),
+                    }],
+                    row_span: NonZeroU16::new(2).unwrap(),
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::Paragraph(ParagraphSpec {
+                        runs: vec![text("Pen "), bold("set")],
+                        ..ParagraphSpec::default()
+                    })],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::List(ListSpec {
+                        items: vec![
+                            item(paragraph(vec![text("black")], Alignment::Start, 0.0)?),
+                            item(paragraph(vec![text("blue")], Alignment::Start, 0.0)?),
+                        ],
+                        ..ListSpec::default()
+                    })],
+                    ..CellSpec::default()
+                },
+                text_cell("12"),
+            ],
+        },
+        TableRow {
+            cells: vec![
+                CellSpec {
+                    content: vec![CellBlock::Paragraph(ParagraphSpec {
+                        runs: vec![link("https://example.test/ink", vec![text("Ink")])],
+                        ..ParagraphSpec::default()
+                    })],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::List(ListSpec {
+                        kind: ListKind::Ordered(Numbering::Decimal),
+                        items: vec![
+                            item(paragraph(vec![text("bottle")], Alignment::Start, 0.0)?),
+                            marked("+", paragraph(vec![text("refill")], Alignment::Start, 0.0)?),
+                        ],
+                        ..ListSpec::default()
+                    })],
+                    ..CellSpec::default()
+                },
+                text_cell("3"),
+            ],
+        },
+        TableRow {
+            cells: vec![
+                text_cell("B2"),
+                CellSpec {
+                    content: vec![CellBlock::Image(ImageSpec {
+                        image: logo,
+                        width: Some(pos(18.0)?),
+                        height: None,
+                        align: Alignment::Center,
+                    })],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::HLine(HLineSpec {
+                        thickness: pos(0.75)?,
+                        color: Color::rgb(120, 0, 0),
+                        ..HLineSpec::default()
+                    })],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::Spacer(nn(8.0)?)],
+                    ..CellSpec::default()
+                },
+            ],
+        },
     ];
     for n in 0..36 {
-        rows.push(vec![
-            text_cell(format!("R{n}")),
-            text_cell(format!("part {n}")),
-            text_cell("stock"),
-            text_cell(format!("{}", (n % 9) + 1)),
-        ]);
+        rows.push(TableRow {
+            cells: vec![
+                text_cell(format!("R{n}")),
+                text_cell(format!("part {n}")),
+                text_cell("stock"),
+                text_cell(format!("{}", (n % 9) + 1)),
+            ],
+        });
     }
-    rows.push(vec![span_text("Total rows above", 4)]);
+    rows.push(TableRow {
+        cells: vec![span_text("Total rows above", 4)],
+    });
     Ok(rows)
 }
 
@@ -483,13 +493,17 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
 fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block<()>> {
     Ok(Block::Table(TableSpec {
         header: vec![
-            vec![
-                head_cell("Code"),
-                head_cell("Item"),
-                head_cell("Notes"),
-                head_cell("Qty"),
-            ],
-            vec![span_text("group A", 4)],
+            TableRow {
+                cells: vec![
+                    head_cell("Code"),
+                    head_cell("Item"),
+                    head_cell("Notes"),
+                    head_cell("Qty"),
+                ],
+            },
+            TableRow {
+                cells: vec![span_text("group A", 4)],
+            },
         ],
         body: shipment_rows(logo)?,
         tracks: Some(vec![
@@ -499,8 +513,10 @@ fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block<()>> {
             Track::Fixed(pos(48.0)?),
         ]),
         cell_padding: nn(4.0)?,
-        border_width: nn(0.5)?,
-        border_color: Color::rgb(30, 30, 30),
+        border: TableBorder {
+            width: nn(0.5)?,
+            color: Color::rgb(30, 30, 30),
+        },
         ..TableSpec::default()
     }))
 }
@@ -554,13 +570,22 @@ fn closing_blocks() -> Result<Vec<Block<()>>> {
                     blocks: vec![
                         paragraph(vec![bold("Auto column")], Alignment::Start, 0.0)?,
                         Block::Table(TableSpec {
-                            header: vec![vec![text_cell("Side"), text_cell("Val")]],
+                            header: vec![TableRow {
+                                cells: vec![text_cell("Side"), text_cell("Val")],
+                            }],
                             body: vec![
-                                vec![text_cell("L"), text_cell("1")],
-                                vec![text_cell("R"), text_cell("2")],
+                                TableRow {
+                                    cells: vec![text_cell("L"), text_cell("1")],
+                                },
+                                TableRow {
+                                    cells: vec![text_cell("R"), text_cell("2")],
+                                },
                             ],
                             cell_padding: nn(3.0)?,
-                            border_width: nn(0.4)?,
+                            border: TableBorder {
+                                width: nn(0.4)?,
+                                color: Color::rgb(0, 0, 0),
+                            },
                             ..TableSpec::default()
                         }),
                         paragraph(vec![text("end-aligned note")], Alignment::End, 0.0)?,

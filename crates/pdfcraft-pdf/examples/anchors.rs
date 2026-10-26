@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
     BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableSpec, TextRun,
+    InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
+    TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
@@ -177,26 +178,30 @@ fn sample_body() -> Result<Vec<Block<()>>> {
 }
 
 fn sample_table() -> Result<Block<()>> {
-    let header = vec![cell(
-        vec![CellBlock::Anchor {
-            id: "table-head".into(),
-            outline: None,
-            child: Box::new(CellBlock::Text {
-                text: "表頭錨點（只登記第一次）".into(),
-                font: (),
-            }),
-        }],
-        Some(HEADER_FILL),
-    )];
+    let header = TableRow {
+        cells: vec![cell(
+            vec![CellBlock::Anchor {
+                id: "table-head".into(),
+                outline: None,
+                child: Box::new(CellBlock::Text {
+                    text: "表頭錨點（只登記第一次）".into(),
+                    font: (),
+                }),
+            }],
+            Some(HEADER_FILL),
+        )],
+    };
     let mut rows = Vec::with_capacity(BODY_ROWS);
     for index in 1..=BODY_ROWS {
-        rows.push(vec![cell(
-            vec![CellBlock::Text {
-                text: format!("第 {index} 行。跨頁後的表頭不是連結目標。"),
-                font: (),
-            }],
-            None,
-        )]);
+        rows.push(TableRow {
+            cells: vec![cell(
+                vec![CellBlock::Text {
+                    text: format!("第 {index} 行。跨頁後的表頭不是連結目標。"),
+                    font: (),
+                }],
+                None,
+            )],
+        });
     }
     Ok(Block::Table(TableSpec {
         tracks: Some(vec![Track::Ratio(Ratio::new(1.0).expect("weight"))]),
@@ -204,8 +209,10 @@ fn sample_table() -> Result<Block<()>> {
         body: rows,
         repeat_header: true,
         cell_padding: nn(4.0)?,
-        border_width: nn(0.5)?,
-        border_color: Color::rgb(0x99, 0x99, 0x99),
+        border: TableBorder {
+            width: nn(0.5)?,
+            color: Color::rgb(0x99, 0x99, 0x99),
+        },
     }))
 }
 

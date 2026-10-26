@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use pdfcraft_pdf::spec::{
     Alignment, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec, ColumnsSpec,
     FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, InlineRun, ParagraphSpec,
-    Resources, RunStyle, SectionSpec, TableSpec, TextRun,
+    Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -250,21 +250,25 @@ fn bill_to() -> Result<Vec<Block<()>>> {
 }
 
 fn service_table() -> Result<Vec<Block<()>>> {
-    let mut body = vec![vec![
-        para_cell("綜合服務費用（含代支）", 11.0, BLACK)?,
-        para_cell("505.00 HKD", 10.5, BLACK)?,
-    ]];
+    let mut body = vec![TableRow {
+        cells: vec![
+            para_cell("綜合服務費用（含代支）", 11.0, BLACK)?,
+            para_cell("505.00 HKD", 10.5, BLACK)?,
+        ],
+    }];
     for _ in 0..3 {
-        body.push(vec![
-            CellSpec {
-                content: vec![CellBlock::Spacer(nn(18.0)?)],
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::Spacer(nn(18.0)?)],
-                ..CellSpec::default()
-            },
-        ]);
+        body.push(TableRow {
+            cells: vec![
+                CellSpec {
+                    content: vec![CellBlock::Spacer(nn(18.0)?)],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    content: vec![CellBlock::Spacer(nn(18.0)?)],
+                    ..CellSpec::default()
+                },
+            ],
+        });
     }
     Ok(vec![
         Block::Columns(ColumnsSpec {
@@ -286,42 +290,46 @@ fn service_table() -> Result<Vec<Block<()>>> {
         }),
         Block::Spacer(nn(8.0)?),
         Block::Table(TableSpec {
-            header: vec![vec![
-                filled(
-                    vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![InlineRun::Text {
-                            text: "Key item (s) / outlay (s) 主要項目/代支".into(),
-                            font: (),
-                            style: RunStyle::default(),
-                        }],
-                        color: Some(WHITE),
-                        font_size: Some(pos(11.0)?),
-                        ..ParagraphSpec::default()
-                    })],
-                    NAVY,
-                ),
-                filled(
-                    vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![InlineRun::Text {
-                            text: "Amt. 金額".into(),
-                            font: (),
-                            style: RunStyle::default(),
-                        }],
-                        color: Some(WHITE),
-                        font_size: Some(pos(10.5)?),
-                        ..ParagraphSpec::default()
-                    })],
-                    NAVY,
-                ),
-            ]],
+            header: vec![TableRow {
+                cells: vec![
+                    filled(
+                        vec![CellBlock::Paragraph(ParagraphSpec {
+                            runs: vec![InlineRun::Text {
+                                text: "Key item (s) / outlay (s) 主要項目/代支".into(),
+                                font: (),
+                                style: RunStyle::default(),
+                            }],
+                            color: Some(WHITE),
+                            font_size: Some(pos(11.0)?),
+                            ..ParagraphSpec::default()
+                        })],
+                        NAVY,
+                    ),
+                    filled(
+                        vec![CellBlock::Paragraph(ParagraphSpec {
+                            runs: vec![InlineRun::Text {
+                                text: "Amt. 金額".into(),
+                                font: (),
+                                style: RunStyle::default(),
+                            }],
+                            color: Some(WHITE),
+                            font_size: Some(pos(10.5)?),
+                            ..ParagraphSpec::default()
+                        })],
+                        NAVY,
+                    ),
+                ],
+            }],
             body,
             tracks: Some(vec![
                 Track::Ratio(Ratio::new(2.2).unwrap()),
                 Track::Ratio(Ratio::new(1.0).unwrap()),
             ]),
             cell_padding: nn(8.0)?,
-            border_width: nn(0.66)?,
-            border_color: GRAY,
+            border: TableBorder {
+                width: nn(0.66)?,
+                color: GRAY,
+            },
             ..TableSpec::default()
         }),
         Block::Spacer(nn(8.0)?),
@@ -354,50 +362,54 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
     ];
     let mut body = Vec::new();
     for (en, zh) in rows {
-        body.push(vec![
-            CellSpec {
-                content: vec![CellBlock::Image(ImageSpec {
-                    image: diamond,
-                    width: Some(pos(8.0)?),
-                    height: None,
-                    align: Alignment::Start,
-                })],
-                ..CellSpec::default()
-            },
-            para_cell(en, 8.0, NAVY)?,
-            para_cell(zh, 8.0, NAVY)?,
-        ]);
+        body.push(TableRow {
+            cells: vec![
+                CellSpec {
+                    content: vec![CellBlock::Image(ImageSpec {
+                        image: diamond,
+                        width: Some(pos(8.0)?),
+                        height: None,
+                        align: Alignment::Start,
+                    })],
+                    ..CellSpec::default()
+                },
+                para_cell(en, 8.0, NAVY)?,
+                para_cell(zh, 8.0, NAVY)?,
+            ],
+        });
     }
     Ok(Block::Table(TableSpec {
-        header: vec![vec![
-            filled(vec![CellBlock::Spacer(nn(1.0)?)], NAVY),
-            filled(
-                vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![InlineRun::Text {
-                        text: "Payment by bank transfer (T/T) and other info".into(),
-                        font: (),
-                        style: RunStyle::default(),
-                    }],
-                    color: Some(WHITE),
-                    font_size: Some(pos(8.0)?),
-                    ..ParagraphSpec::default()
-                })],
-                NAVY,
-            ),
-            filled(
-                vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![InlineRun::Text {
-                        text: "以電匯付款及其他注意事項".into(),
-                        font: (),
-                        style: RunStyle::default(),
-                    }],
-                    color: Some(WHITE),
-                    font_size: Some(pos(8.0)?),
-                    ..ParagraphSpec::default()
-                })],
-                NAVY,
-            ),
-        ]],
+        header: vec![TableRow {
+            cells: vec![
+                filled(vec![CellBlock::Spacer(nn(1.0)?)], NAVY),
+                filled(
+                    vec![CellBlock::Paragraph(ParagraphSpec {
+                        runs: vec![InlineRun::Text {
+                            text: "Payment by bank transfer (T/T) and other info".into(),
+                            font: (),
+                            style: RunStyle::default(),
+                        }],
+                        color: Some(WHITE),
+                        font_size: Some(pos(8.0)?),
+                        ..ParagraphSpec::default()
+                    })],
+                    NAVY,
+                ),
+                filled(
+                    vec![CellBlock::Paragraph(ParagraphSpec {
+                        runs: vec![InlineRun::Text {
+                            text: "以電匯付款及其他注意事項".into(),
+                            font: (),
+                            style: RunStyle::default(),
+                        }],
+                        color: Some(WHITE),
+                        font_size: Some(pos(8.0)?),
+                        ..ParagraphSpec::default()
+                    })],
+                    NAVY,
+                ),
+            ],
+        }],
         body,
         tracks: Some(vec![
             Track::Fixed(pos(22.0)?),
@@ -405,8 +417,10 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
             Track::Ratio(Ratio::new(1.0).unwrap()),
         ]),
         cell_padding: nn(4.0)?,
-        border_width: nn(0.66)?,
-        border_color: GRAY,
+        border: TableBorder {
+            width: nn(0.66)?,
+            color: GRAY,
+        },
         ..TableSpec::default()
     }))
 }
