@@ -919,7 +919,8 @@ fn lower_table<K: FontKey>(
     let mut bag = ErrorBag::default();
     let first = spec.header.first().or(spec.body.first());
     let cols: usize = first.map_or(0, |row| {
-        row.iter()
+        row.cells
+            .iter()
             .map(|cell| usize::from(cell.col_span.get()))
             .sum()
     });
@@ -965,8 +966,8 @@ fn lower_table<K: FontKey>(
         repeat_header: spec.repeat_header,
         padding: spec.cell_padding,
         border: layout_table::Border {
-            width: spec.border_width,
-            color: spec.border_color,
+            width: spec.border.width,
+            color: spec.border.color,
         },
         ..LayoutTableSpec::new(widths)
     };
@@ -1010,7 +1011,7 @@ fn table_widths(
 }
 
 fn lower_table_rows<K: FontKey>(
-    rows: Vec<Vec<CellSpec<K>>>,
+    rows: Vec<super::TableRow<K>>,
     paint: &InheritedPaint,
     fonts: &FontTable<K>,
     doc: DocToken,
@@ -1022,8 +1023,8 @@ fn lower_table_rows<K: FontKey>(
     let mut out = Vec::with_capacity(rows.len());
     let mut ok = true;
     for row in rows {
-        let mut stored = Vec::with_capacity(row.len());
-        for cell in row {
+        let mut stored = Vec::with_capacity(row.cells.len());
+        for cell in row.cells {
             match lower_cell(cell, paint, fonts, doc, images, at, anchors, errors) {
                 Some(built) => stored.push(built),
                 None => ok = false,
@@ -1803,7 +1804,7 @@ fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut 
             }
             Block::Table(spec) => {
                 for row in spec.header.iter().chain(spec.body.iter()) {
-                    for cell in row {
+                    for cell in &row.cells {
                         validate_cell_blocks(&cell.content, images, errors);
                     }
                 }
