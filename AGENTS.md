@@ -152,7 +152,7 @@ cargo doc -p pdfcraft-post --no-deps
 
 ### 语言与依赖
 
-- **Edition** `2021`，**MSRV** `1.92`（跟 krilla 0.8.2）；CI 用同一 toolchain。
+- **Edition** `2021`，**MSRV** `1.92`（跟 krilla 0.8.2）；CI 用同一 toolchain。政策见 [`docs/msrv.md`](docs/msrv.md)。
 - **禁止** `unsafe`（`Cargo.toml` / `#![forbid(unsafe_code)]`）。
 - 依赖**按需引入、精确钉版本**（`=x.y.z`），写在根 `Cargo.toml` 的 `[workspace.dependencies]`。成员 crate 用 `workspace = true`，各自的 feature 留在使用处。当前直依是 `krilla =0.8.2`（`default-features = false`，`pdfcraft-pdf` 再开 `raster-images`）、`skrifa =0.48.0`（workspace 关闭 default。`pdfcraft-pdf` 与 `pdfcraft-forms` 打开 `std` 和 `autohint_shaping`。`pdfcraft-orgchart` 只打开 `std`）、`unicode-segmentation =1.13.3`、`png =0.18.1`、`read-fonts =0.45.0`（`default-features = false`，`pdfcraft-orgchart` 再开 `std`）、`lopdf =0.45.0`（`default-features = false`）。未用到的依赖不要写进清单。
 - 不启用 krilla 的 `simple-text` / `rayon`；禁止 `Surface::draw_text`。

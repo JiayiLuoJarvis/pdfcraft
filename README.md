@@ -17,6 +17,7 @@ its own README, usage guide, and rustdoc.
 | [`crates/pdfcraft-pdf/README.md`](crates/pdfcraft-pdf/README.md) | Install, quick start, features |
 | [`crates/pdfcraft-pdf/docs/guide.md`](crates/pdfcraft-pdf/docs/guide.md) | Full usage guide |
 | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) | API reference |
+| [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md) | Per-crate changelog |
 
 ```bash
 cargo test -p pdfcraft-pdf --features test-utils
@@ -32,6 +33,7 @@ cargo run -p pdfcraft-pdf --example hello
 | [`crates/pdfcraft-forms/README.md`](crates/pdfcraft-forms/README.md) | Install, quick start |
 | [`crates/pdfcraft-forms/docs/guide.md`](crates/pdfcraft-forms/docs/guide.md) | Full usage guide |
 | [docs.rs/pdfcraft-forms](https://docs.rs/pdfcraft-forms) | API reference |
+| [`crates/pdfcraft-forms/CHANGELOG.md`](crates/pdfcraft-forms/CHANGELOG.md) | Per-crate changelog |
 
 ```bash
 cargo test -p pdfcraft-forms
@@ -50,6 +52,7 @@ subsetting in v1.
 | [`crates/pdfcraft-orgchart/README.md`](crates/pdfcraft-orgchart/README.md) | Install, quick start |
 | [`crates/pdfcraft-orgchart/docs/guide.md`](crates/pdfcraft-orgchart/docs/guide.md) | Full usage guide |
 | [docs.rs/pdfcraft-orgchart](https://docs.rs/pdfcraft-orgchart) | API reference |
+| [`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md) | Per-crate changelog |
 
 ```bash
 cargo test -p pdfcraft-orgchart
@@ -67,6 +70,7 @@ Needs `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (single-face).
 | [`crates/pdfcraft-post/README.md`](crates/pdfcraft-post/README.md) | Install, quick start |
 | [`crates/pdfcraft-post/docs/guide.md`](crates/pdfcraft-post/docs/guide.md) | Full usage guide |
 | [docs.rs/pdfcraft-post](https://docs.rs/pdfcraft-post) | API reference |
+| [`crates/pdfcraft-post/CHANGELOG.md`](crates/pdfcraft-post/CHANGELOG.md) | Per-crate changelog |
 
 ```bash
 cargo test -p pdfcraft-post
@@ -79,6 +83,8 @@ No Watermark or input limits in this stack.
 **Status:** `0.1.0`. The API can break before `1.0`.
 
 ## Contributing
+
+MSRV is **1.92** (follows krilla 0.8.2). Policy: [`docs/msrv.md`](docs/msrv.md).
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
 Internal product decisions for maintainers: [`docs/提案书.md`](docs/提案书.md).

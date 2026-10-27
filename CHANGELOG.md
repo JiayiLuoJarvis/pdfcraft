@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 while remaining `0.x`.
 
+Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md),
+[`crates/pdfcraft-forms/CHANGELOG.md`](crates/pdfcraft-forms/CHANGELOG.md),
+[`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md),
+[`crates/pdfcraft-post/CHANGELOG.md`](crates/pdfcraft-post/CHANGELOG.md).
+
 ## [Unreleased]
 
 ### Scope
@@ -57,6 +62,7 @@ while remaining `0.x`.
 - Renamed crates from `quire-*` to `pdfcraft-*` (`pdfcraft-pdf`, `pdfcraft-forms`, `pdfcraft-orgchart`). Rust imports use `pdfcraft_pdf` / `pdfcraft_forms` / `pdfcraft_orgchart`. Env vars are `PDFCRAFT_FORMS_FONT`, `PDFCRAFT_CJK_FONT`, and `PDFCRAFT_CJK_BOLD_FONT`. PDF `/Creator` is `pdfcraft`.
 - `pdfcraft-orgchart` docs describe both equity (shareholders above) and outbound investment (below the subject).
 - **Breaking.** `pdfcraft-pdf` table rows and borders are typed. `TableSpec::header` and `TableSpec::body` are now `Vec<TableRow<K>>`, so wrap each row as `TableRow { cells: ... }`. `TableSpec::border_width` and `TableSpec::border_color` are replaced by one `border: TableBorder { width, color }` field (`TableBorder::default()` draws nothing). See `crates/pdfcraft-pdf/docs/migrate-table-row.md` for the old-to-new mapping.
+- **Breaking.** `pdfcraft-pdf` `CellIndex` is now `#[non_exhaustive]`. External code can no longer construct it with a struct literal; obtain values from `Error::at` (`Location.cell`), and in patterns add `..` (for example, `CellIndex { row, col, .. }`) so added fields do not break the caller.
 
 ## [0.1.0] - 2026-10-14
 
