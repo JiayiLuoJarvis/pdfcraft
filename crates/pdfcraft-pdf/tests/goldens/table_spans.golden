@@ -1,0 +1,15 @@
+pdfcraft-golden v1
+skrifa 0.48.0
+doc title=Some("Golden Table Spans") author=None subject=None keywords=["golden"] language=Some("en")
+page 0 595.276 841.890
+stroke path="M 52.250 53.000 L 323.750 53.000" paint=#000000ff width=1.500
+stroke path="M 48.000 48.000 L 328.000 48.000 L 328.000 72.500 L 48.000 72.500 Z" paint=#505050ff width=0.500
+fill path="M 332.250 52.250 L 372.250 52.250 L 372.250 68.250 L 332.250 68.250 Z" paint=#008000ff
+stroke path="M 328.000 48.000 L 547.276 48.000 L 547.276 72.500 L 328.000 72.500 Z" paint=#505050ff width=0.500
+fill path="M 52.250 76.750 L 252.250 76.750 L 252.250 100.750 L 52.250 100.750 Z" paint=#0000c8ff
+stroke path="M 48.000 72.500 L 328.000 72.500 L 328.000 105.000 L 48.000 105.000 Z" paint=#505050ff width=0.500
+fill path="M 328.000 72.500 L 547.276 72.500 L 547.276 129.000 L 328.000 129.000 Z" paint=#f0f0f0ff
+stroke path="M 332.250 76.750 L 372.250 124.750" paint=#000000ff width=1.000
+stroke path="M 328.000 72.500 L 547.276 72.500 L 547.276 129.000 L 328.000 129.000 Z" paint=#505050ff width=0.500
+fill path="M 88.000 115.250 L 288.000 115.250" paint=#a000a0ff
+stroke path="M 48.000 105.000 L 328.000 105.000 L 328.000 129.000 L 48.000 129.000 Z" paint=#505050ff width=0.500
