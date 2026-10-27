@@ -13,10 +13,11 @@ rust-version = "1.92"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+# Pin policy: the font/PDF stack (krilla, skrifa, read-fonts, lopdf, png) stays `=`-pinned because measurement (skrifa 0.48) and drawing (krilla's bundled skrifa 0.42) share one glyph pipeline: `emit::check_upem` rejects faces whose units-per-em disagree, and the fixture `TJ` adjustment test locks both sides' hmtx, so any silent move of that stack would shift coordinates or glyphs. Only leaf utilities with no effect on metrics (`getrandom`, `unicode-segmentation`) use caret requirements so `cargo update` can freshen them.
 krilla = { version = "=0.8.2", default-features = false }
 lopdf = { version = "=0.45.0", default-features = false }
-getrandom = { version = "=0.4.3" }
+getrandom = { version = "0.4.3" }
 png = { version = "=0.18.1" }
 read-fonts = { version = "=0.45.0", default-features = false }
 skrifa = { version = "=0.48.0", default-features = false }
-unicode-segmentation = { version = "=1.13.3" }
+unicode-segmentation = { version = "1.13.3" }

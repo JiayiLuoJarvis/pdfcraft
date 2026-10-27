@@ -13,9 +13,46 @@ env:
   RUSTDOCFLAGS: -D warnings
 
 jobs:
+  basics:
+    name: basics (fmt / module-dag / clippy)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: module dag
+        run: python3 scripts/check_pdfcraft_pdf_modules.py
+
+      # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
+      # Later moves of that tag do not change this pin.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: "1.92"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: readme identity
+        run: python3 scripts/check_readme_identity.py
+
+      - name: clippy forms, orgchart, and post
+        run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --all-targets -- -D warnings
+
+      - name: clippy pdfcraft-pdf (no default features)
+        run: cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings
+
+      - name: clippy pdfcraft-pdf (backend-krilla)
+        run: cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
+    needs: basics
     steps:
       - uses: actions/checkout@v7
 
@@ -48,20 +85,18 @@ jobs:
       - name: cargo-deny
         run: |
           cargo deny --version
-          cargo deny check advisories licenses
+          cargo deny check advisories licenses bans sources
 
-  check:
-    name: fmt / clippy / test / doc (${{ matrix.os }})
+  test:
+    name: test / doc (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: basics
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
-
-      - name: module dag
-        run: python3 scripts/check_pdfcraft_pdf_modules.py
 
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
@@ -73,8 +108,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: fmt
-        run: cargo fmt --all -- --check
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
 
       - name: Install poppler
         run: |
@@ -125,29 +160,38 @@ jobs:
             fi
           } >> "${GITHUB_ENV}"
 
-      - name: clippy forms, orgchart, and post
-        run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --all-targets -- -D warnings
-
+      # Unit + integration tests run under nextest. Doctests are not
+      # runnable by nextest, so each suite below has a matching
+      # `cargo test --doc` step further down.
       - name: test pdfcraft-forms
-        run: cargo test -p pdfcraft-forms
+        run: cargo nextest run -p pdfcraft-forms
 
       - name: test pdfcraft-post
-        run: cargo test -p pdfcraft-post
-
-      - name: clippy pdfcraft-pdf (no default features)
-        run: cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings
-
-      - name: clippy pdfcraft-pdf (backend-krilla)
-        run: cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
+        run: cargo nextest run -p pdfcraft-post
 
       - name: test pdfcraft-orgchart
-        run: cargo test -p pdfcraft-orgchart
+        run: cargo nextest run -p pdfcraft-orgchart
 
       - name: test pdfcraft-pdf (no default features)
-        run: cargo test -p pdfcraft-pdf --no-default-features --features test-utils
+        run: cargo nextest run -p pdfcraft-pdf --no-default-features --features test-utils
 
       - name: test pdfcraft-pdf (backend-krilla)
-        run: cargo test -p pdfcraft-pdf --features backend-krilla,test-utils
+        run: cargo nextest run -p pdfcraft-pdf --features backend-krilla,test-utils
+
+      - name: doc-test pdfcraft-forms
+        run: cargo test --doc -p pdfcraft-forms
+
+      - name: doc-test pdfcraft-post
+        run: cargo test --doc -p pdfcraft-post
+
+      - name: doc-test pdfcraft-orgchart
+        run: cargo test --doc -p pdfcraft-orgchart
+
+      - name: doc-test pdfcraft-pdf (no default features)
+        run: cargo test --doc -p pdfcraft-pdf --no-default-features --features test-utils
+
+      - name: doc-test pdfcraft-pdf (backend-krilla)
+        run: cargo test --doc -p pdfcraft-pdf --features backend-krilla,test-utils
 
       - name: doc pdfcraft-pdf (no default features)
         run: cargo doc -p pdfcraft-pdf --no-deps --no-default-features
@@ -157,3 +201,94 @@ jobs:
 
       - name: doc shells
         run: cargo doc -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --no-deps
+
+  minrust:
+    name: minrust (1.92 cargo check)
+    runs-on: ubuntu-latest
+    needs: basics
+    steps:
+      - uses: actions/checkout@v7
+
+      # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
+      # Later moves of that tag do not change this pin.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: "1.92"
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Pinned floor: the workspace must check on exactly rust-version 1.92
+      # with the committed lockfile.
+      - name: minrust check
+        run: cargo check --workspace --locked
+
+  minimal-versions:
+    name: minimal-versions (nightly)
+    runs-on: ubuntu-latest
+    needs: basics
+    # Nightly-only and slow: keep the PR path fast, run on main + manual.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v7
+
+      # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
+      # Later moves of that tag do not change this pin.
+      - name: Install Rust (nightly)
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Resolve the lowest versions Cargo allows, then check the workspace
+      # against that floor. The lockfile rewrite stays on the runner.
+      - name: minimal-versions check
+        run: |
+          set -euo pipefail
+          cargo update -Z minimal-versions
+          cargo check --workspace -Z minimal-versions
+
+  semver-checks:
+    name: semver-checks
+    runs-on: ubuntu-latest
+    needs: basics
+    steps:
+      - uses: actions/checkout@v7
+
+      # pdfcraft-pdf has explicit features; check them exactly instead of
+      # the heuristic set, so feature-gated public API is covered.
+      - name: semver pdfcraft-pdf (explicit features)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: pdfcraft-pdf
+          feature-group: only-explicit-features
+          features: backend-krilla,test-utils
+
+      # The remaining workspace crates take the default feature heuristic.
+      - name: semver rest of workspace
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          exclude: pdfcraft-pdf
+
+  feature-matrix:
+    name: feature matrix (cargo hack)
+    runs-on: ubuntu-latest
+    needs: basics
+    steps:
+      - uses: actions/checkout@v7
+
+      # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
+      # Later moves of that tag do not change this pin.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: "1.92"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+
+      - name: feature matrix
+        run: cargo hack check --each-feature -p pdfcraft-pdf

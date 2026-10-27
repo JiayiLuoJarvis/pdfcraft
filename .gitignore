@@ -11,6 +11,7 @@
 *.pdf
 !tests/fixtures/**/*.pdf
 !crates/**/tests/fixtures/**/*.pdf
+!crates/**/tests/seeds/**/*.pdf
 *.deb
 .fonts/
 /out/
@@ -22,3 +23,7 @@
 
 # Agent orchestration runtime (plans, ledger, evidence logs)
 .omo/
+.senpi/
+
+# Python bytecode
+__pycache__/

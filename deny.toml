@@ -16,3 +16,23 @@ allow = [
     "MIT",
     "Unicode-3.0",
 ]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+skip = [
+    # Direct skrifa 0.48 (measurement) vs krilla 0.8.2's bundled skrifa 0.42 (drawing); emit::check_upem guards upem drift.
+    { name = "skrifa", reason = "intentional: direct 0.48 for measurement alongside krilla 0.8.2 bundled 0.42; emit::check_upem rejects upem mismatch" },
+    # Direct read-fonts 0.45 vs the 0.39 pulled in via krilla's skrifa 0.42; same dual-pipeline cause as skrifa.
+    { name = "read-fonts", reason = "intentional: direct 0.45 alongside krilla-bundled 0.39 (via skrifa 0.42); same dual font pipeline as skrifa" },
+    # font-types 0.12 vs 0.11: transitive companions of the two read-fonts copies above.
+    { name = "font-types", reason = "intentional: transitive of the two read-fonts copies (0.45 direct, 0.39 via krilla)" },
+    # miniz_oxide duplicates arrive transitively via the png/flate dependency closure; not on the glyph path.
+    { name = "miniz_oxide", reason = "intentional: transitive duplicate via the png/flate closure; unrelated to font metrics" },
+    # weezl duplicates arrive transitively via the png closure; not on the glyph path.
+    { name = "weezl", reason = "intentional: transitive duplicate via the png closure; unrelated to font metrics" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
