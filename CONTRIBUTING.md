@@ -10,7 +10,8 @@ Thank you for considering a contribution.
    [`crates/pdfcraft-pdf/README.md`](crates/pdfcraft-pdf/README.md) and
    [`crates/pdfcraft-pdf/docs/guide.md`](crates/pdfcraft-pdf/docs/guide.md).
 2. Follow [`AGENTS.md`](AGENTS.md) for modules, layering, coding standards, and
-   what not to touch.
+   what not to touch. For style layers, see
+   [`docs/ms-rust-guidelines-disposition.md`](docs/ms-rust-guidelines-disposition.md).
 
 ## Standards we follow
 
@@ -25,12 +26,24 @@ Thank you for considering a contribution.
 ## Before opening a PR
 
 ```bash
+python3 scripts/check_pdfcraft_pdf_modules.py
 cargo fmt --all -- --check
 cargo clippy -p pdfcraft-pdf --all-targets --features test-utils -- -D warnings
 cargo test -p pdfcraft-pdf --features test-utils
-RUSTDOCFLAGS='-D warnings' cargo doc -p pdfcraft-pdf --no-deps
+cargo doc -p pdfcraft-pdf --no-deps
 cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings
+cargo test -p pdfcraft-forms
+cargo doc -p pdfcraft-forms --no-deps
+cargo test -p pdfcraft-orgchart
+cargo doc -p pdfcraft-orgchart --no-deps
+cargo clippy -p pdfcraft-post --all-targets -- -D warnings
+cargo test -p pdfcraft-post
+cargo doc -p pdfcraft-post --no-deps
 ```
+
+CI also sets `RUSTFLAGS=-D warnings` and `RUSTDOCFLAGS=-D warnings`.
+Forms fill tests call `pdftotext`, so have it installed before running
+`cargo test -p pdfcraft-forms`.
 
 MSRV is **1.92** (driven by krilla 0.8.2). CI uses the same toolchain and
 treats Rust/rustdoc warnings as errors. Package layout:

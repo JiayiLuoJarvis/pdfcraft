@@ -214,6 +214,19 @@ Google Rust 风格指南只在本文件这一层生效，不能推翻提案书�
    已知 std trait 优先于自定义方法；扩展 trait 加 `Ext` 后缀；`const fn` 只用于语义 const 处；
    运算符重载只做数学语义；零 `catch_unwind`，`unsafe` 整仓 forbid；不断言压缩 PDF 字节。
 
+### Microsoft 增量（增量层，不复述 lint 表）
+
+优先级不变：提案书 > workspace 规格（包边界）> 本文件（含 Google 节加本节）> 设计稿未确认部分。
+写法冲突仍 Google-wins，本节只加增量，不推翻提案书与 Google 裁决。完整 M-ID 表见
+`docs/ms-rust-guidelines-disposition.md`，lint 级别变更先记 disposition 行再改 `Cargo.toml`。
+
+硬 N/A：`Error` 上不加 `Backtrace`，现有 `Error`/`ErrorKind`/`ErrorCode` 形状保持；不拆 crate，
+四包边界锁定；保持 edition 2021 与 MSRV 1.92，升级须单独 PR；不引入 tracing/log，纯库无日志面。
+
+增量采用：allow 转 expect（`M-LINT-OVERRIDE` 口径，toolchain 升级重跑 deny probe）；
+crate 内 `pub use` 补 `#[doc(inline)]`，不做 glob 重导出；公共类型补 `Debug`；
+cargo-audit/deny 按 fail closed 接入门禁。
+
 ### PR 纪律
 
 - **一 PR 一件事**：不顺手重构无关模块；不把未确认功能「顺便」做进当前 PR。主题内为夯实基础的必要大改可以做（见「现阶段姿态」）。
