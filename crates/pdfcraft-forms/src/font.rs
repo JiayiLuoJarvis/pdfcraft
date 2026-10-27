@@ -1,3 +1,5 @@
+//! TrueType face loading, measurement, and `glyf` embedding.
+
 use std::collections::BTreeMap;
 
 use lopdf::{Dictionary, Object, Stream};
@@ -263,7 +265,10 @@ fn cid_font(
     Ok(dict)
 }
 
-#[allow(clippy::format_push_string)] // 规格要求 push_str / format!，不用丢弃 write! 的 Result
+#[allow(
+    clippy::format_push_string,
+    reason = "规格要求 push_str / format!，不用丢弃 write! 的 Result"
+)]
 fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     let mut body = String::from(
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /QuireForms def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
@@ -283,7 +288,10 @@ fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     body
 }
 
-#[allow(clippy::format_push_string)] // 规格要求 push_str / format!，不用丢弃 write! 的 Result
+#[allow(
+    clippy::format_push_string,
+    reason = "规格要求 push_str / format!，不用丢弃 write! 的 Result"
+)]
 fn utf16_hex(scalar: char) -> String {
     let mut buf = [0_u16; 2];
     let mut hex = String::new();
@@ -302,7 +310,10 @@ fn em1000(units: f32, upem: f32) -> Result<i64> {
     if !rounded.is_finite() || rounded < f64::from(i32::MIN) || rounded > f64::from(i32::MAX) {
         return Err(error::font_unusable(FontReason::Width));
     }
-    #[allow(clippy::cast_possible_truncation)] // 已限制在 i32 范围内；Integer 是 i64
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "已限制在 i32 范围内；Integer 是 i64"
+    )]
     Ok(rounded as i64)
 }
 

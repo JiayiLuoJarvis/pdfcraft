@@ -319,7 +319,10 @@ fn hug_for(role: DisplayRole) -> Result<LabelHug, Error> {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[allow(
+    clippy::float_cmp,
+    reason = "exact-value assertions on deterministic ratios"
+)]
 mod tests {
     use super::{build_display, company_fill, ratio_facts, LabelHug, LineKind};
     use crate::model::{ChartRequest, Edge, Node, NodeType};

@@ -55,7 +55,7 @@ impl ImageNode {
 ///
 /// Both sides are used as given. One side derives the other from the pixel aspect.
 /// Neither side means 1 px = 1 pt.
-#[allow(
+#[expect(
     clippy::cast_precision_loss,
     reason = "display size is f32 points, so a pixel edge above 2^24 cannot stay exact"
 )]

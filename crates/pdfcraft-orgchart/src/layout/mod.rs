@@ -25,7 +25,10 @@ use crate::units::{within, FAMILY_GAP_MM, LAYER_SPACING_MM, NODE_SPACING_MM, ROW
 
 /// Row counts a pager uses to decide whether a page may keep its deeper families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(clippy::struct_field_names)] // `rows` is the unit these counts share
+#[allow(
+    clippy::struct_field_names,
+    reason = "rows is the unit these counts share"
+)]
 pub(crate) struct FamilyRowMetrics {
     /// Widest band, in rows, including the subject's own children.
     pub max_family_rows: usize,

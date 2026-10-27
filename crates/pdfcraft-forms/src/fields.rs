@@ -1,3 +1,5 @@
+//! Fill inputs: field snapshots, values, options, and placement.
+
 use std::collections::HashMap;
 
 /// Starting font size in points.

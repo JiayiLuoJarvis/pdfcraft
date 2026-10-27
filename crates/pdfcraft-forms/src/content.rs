@@ -1,3 +1,5 @@
+//! Marks, stamps, and strokes painted into page content streams.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{self, Error, ErrorKind, FlattenReason, FontReason, Result};

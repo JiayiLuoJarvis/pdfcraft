@@ -1,3 +1,5 @@
+//! Draws field values onto pages and strips the form.
+
 use std::collections::{BTreeMap, HashMap};
 
 use crate::content::{Mark, Stamp, Stroke};
@@ -279,11 +281,14 @@ fn check_font_size_named(size: f32, field_name: Option<String>) -> Result<()> {
         return Err(bad_font_size_named(size, field_name));
     }
     let mp = (f64::from(size) * 1000.0).round();
-    #[allow(clippy::cast_precision_loss)] // 比较的是毫点能否放进 i64，不是字号精度
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "比较的是毫点能否放进 i64，不是字号精度"
+    )]
     if !mp.is_finite() || mp > i64::MAX as f64 {
         return Err(bad_font_size_named(size, field_name));
     }
-    #[allow(clippy::cast_precision_loss)] // 256_000 在 f64 里是精确值
+    #[expect(clippy::cast_precision_loss, reason = "256_000 在 f64 里是精确值")]
     if mp > layout::MAX_START_MP as f64 {
         return Err(bad_font_size_named(size, field_name.clone()));
     }

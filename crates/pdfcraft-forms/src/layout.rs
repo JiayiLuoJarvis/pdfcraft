@@ -1,3 +1,5 @@
+//! Fits text into widget rectangles, shrinking the size as needed.
+
 use crate::error::{self, Error, ErrorKind, FontReason, Result};
 use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP, PAD_X};
 use crate::font::{Face, GlyphFault};
@@ -57,11 +59,16 @@ impl LaidText {
                 .map(|laid| shrink_orphan(face, text, rect, v_align, 0, laid))
                 .map_err(|err| fail(field_name, &err));
         }
-        #[allow(clippy::cast_possible_truncation)] // 第 2 步已拒绝放不进 i64 的值
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "第 2 步已拒绝放不进 i64 的值"
+        )]
         let mut mp = rounded as i64;
         loop {
-            #[allow(clippy::cast_precision_loss)]
-            // 上限 256_000，f32 能精确表示；不要改除法来躲 lint
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "上限 256_000，f32 能精确表示；不要改除法来躲 lint"
+            )]
             let size = mp as f32 / 1000.0;
             match lay_at(face, text, rect, size, v_align) {
                 Ok(laid) => return Ok(shrink_orphan(face, text, rect, v_align, mp, laid)),
@@ -323,7 +330,10 @@ fn shrink_orphan(
     let floor = (chosen_mp - 2_000).max(MIN_MP);
     let mut probe = chosen_mp - STEP_MP;
     while probe >= floor {
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "试探字号上限 256_000，f32 能精确表示"
+        )]
         let size = probe as f32 / 1000.0;
         if let Ok(candidate) = lay_at(face, text, rect, size, v_align) {
             if candidate.lines.len() < laid.lines.len() {
@@ -613,7 +623,7 @@ mod tests {
 
             let short = PdfRect::new(0.0, 0.0, 200.0, 11.0);
             let laid = fit(face, "a", short, 10.25).unwrap();
-            #[allow(clippy::cast_possible_truncation)] // 选中的字号不超过 10.25 pt
+            #[expect(clippy::cast_possible_truncation, reason = "选中的字号不超过 10.25 pt")]
             let mp = (f64::from(laid.size()) * 1000.0).round() as i64;
             assert!(mp <= 10_250);
             assert!(mp >= 7_000);

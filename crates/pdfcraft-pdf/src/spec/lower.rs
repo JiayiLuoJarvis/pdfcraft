@@ -624,7 +624,10 @@ fn lower_paragraph<K: FontKey>(
     Some(FlowNode::Text(TextNode::from_items(items, style)))
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors lower_blocks; id/outline are Anchor-only
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors lower_blocks; id/outline are Anchor-only"
+)]
 fn lower_anchor_block<K: FontKey>(
     id: String,
     outline: Option<OutlineEntry>,
@@ -1079,7 +1082,10 @@ fn lower_cell<K: FontKey>(
 }
 
 // Cell path threads AnchorRegistry plus a content bag.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "cell path threads AnchorRegistry plus a content bag"
+)]
 fn lower_cell_anchor<K: FontKey>(
     id: String,
     outline: Option<OutlineEntry>,
@@ -1124,7 +1130,10 @@ fn lower_cell_anchor<K: FontKey>(
 }
 
 // Cell path threads AnchorRegistry plus a content bag.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "cell path threads AnchorRegistry plus a content bag"
+)]
 fn push_cell_block<K: FontKey>(
     block: CellBlock<K>,
     paint: &InheritedPaint,

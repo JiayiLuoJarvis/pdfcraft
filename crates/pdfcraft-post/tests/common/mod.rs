@@ -1,6 +1,9 @@
 //! Shared fixture helpers for integration tests.
 
-#![allow(clippy::similar_names)]
+#![allow(
+    clippy::similar_names,
+    reason = "fixture helpers use short similar names"
+)]
 
 use lopdf::content::{Content, Operation};
 use lopdf::{dictionary, Document, LoadOptions, Object, Stream};

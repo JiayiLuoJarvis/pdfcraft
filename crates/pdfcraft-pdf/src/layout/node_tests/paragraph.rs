@@ -776,7 +776,10 @@ fn justify_space_cap_is_half_em() {
         .filter(|ch| *ch == ' ')
         .count()
         .max(1);
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "space count on one line stays within f32 exact integer range"
+    )]
     let cap_total = 0.5 * style.font_size.as_pt() * space_count as f32;
     assert!(
         growth <= cap_total + 0.05,

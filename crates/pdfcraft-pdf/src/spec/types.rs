@@ -100,6 +100,7 @@ pub(crate) fn default_style() -> Style {
 }
 
 /// A laid-out document.
+#[derive(Debug)]
 #[must_use]
 pub struct Rendered {
     pub(crate) recording: RecordingCanvas,

@@ -204,7 +204,10 @@ impl StretchPlan {
         if !inventory.gaps.is_empty() && r > 0.0 {
             let m = inventory.gaps.len();
             // Slot counts on one line stay well inside f32's exact integer range.
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "slot counts on one line stay well inside f32 exact integer range"
+            )]
             let equal = r / m as f32;
             let mut allocated = 0.0f32;
             for gap in inventory.gaps.iter().take(m - 1) {
@@ -292,7 +295,10 @@ pub(crate) fn water_fill(caps: &[f32], mut remainder: f32) -> (Vec<f32>, f32) {
             break;
         }
         // Open space count on one line stays well inside f32's exact integer range.
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "open space count on one line stays well inside f32 exact integer range"
+        )]
         let share = remainder / open.len() as f32;
         let mut progressed = false;
         for index in open {

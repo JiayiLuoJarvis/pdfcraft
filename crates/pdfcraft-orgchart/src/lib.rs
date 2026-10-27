@@ -88,7 +88,9 @@ mod render;
 mod test_font;
 mod units;
 
+#[doc(inline)]
 pub use error::{Error, ErrorCode};
+#[doc(inline)]
 pub use model::{
     document_title, ChartOptions, ChartRequest, Edge, FontBytes, Node, NodeType, MAX_MARGIN_MM,
     MAX_NODES, MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,

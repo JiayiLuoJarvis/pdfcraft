@@ -96,7 +96,7 @@ impl FontFace {
     }
 }
 
-/// A regular face and optional bold, italic, and bold italic faces, all supplied by the caller.
+/// One regular face plus optional bold, italic, and bold italic faces.
 ///
 /// A run picks one face from its resolved [`crate::spec::RunStyle`] bold and italic flags.
 /// Underline and strikethrough positions come from `regular`. The stroke is 1 pt.

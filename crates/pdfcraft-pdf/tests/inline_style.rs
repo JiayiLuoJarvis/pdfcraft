@@ -182,8 +182,7 @@ fn underline_at(size: f32) -> (f32, f32) {
 
 fn kinds(result: Result<Rendered>) -> Vec<ErrorKind> {
     result
-        .err()
-        .expect("layout fails")
+        .expect_err("layout fails")
         .iter()
         .map(|error| error.kind.clone())
         .collect()

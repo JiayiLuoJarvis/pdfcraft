@@ -1,3 +1,5 @@
+//! Builds the `glyf` subset embedded for used glyphs.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{self, FontReason, Result};

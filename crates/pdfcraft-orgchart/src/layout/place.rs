@@ -40,7 +40,10 @@ pub(crate) struct LayerPlan {
 }
 
 #[derive(Clone, Copy)]
-#[allow(clippy::struct_field_names)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "mm-suffixed fields share the spacing unit"
+)]
 pub(crate) struct Spacing {
     pub(crate) node_width_mm: f64,
     pub(crate) node_spacing_mm: f64,
@@ -51,7 +54,10 @@ pub(crate) struct Spacing {
 }
 
 struct ParentSlot {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "slot keeps its parent id; layout reads offsets only"
+    )]
     node_id: NodeId,
     offset_x_mm: f64,
     slot_width_mm: f64,

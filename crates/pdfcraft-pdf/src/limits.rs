@@ -9,6 +9,7 @@
 
 use crate::error::{Error, ErrorKind};
 
+#[doc(inline)]
 pub use crate::error::LimitKind;
 
 const DEFAULT_FONT_BYTES: usize = 32 * 1024 * 1024;
@@ -100,6 +101,8 @@ impl Limits {
         self.paragraph_bytes
     }
 
+    /// Sets the font-bytes cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::FontBytes`] when `bytes` is 0
@@ -109,6 +112,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the per-image bytes cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::ImageBytes`] when `bytes` is 0
@@ -118,6 +123,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the per-image pixels cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::ImagePixels`] when `pixels` is 0
@@ -127,6 +134,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the per-image edge cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::ImageEdge`] when `edge` is 0
@@ -140,6 +149,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the page-count cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::Pages`] when `pages` is 0
@@ -153,6 +164,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the body-block cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::Blocks`] when `blocks` is 0
@@ -166,6 +179,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the table-cell cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::TableCells`] when `cells` is 0
@@ -179,6 +194,8 @@ impl Limits {
         Ok(())
     }
 
+    /// Sets the paragraph-bytes cap.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::ParagraphBytes`] when `bytes` is 0

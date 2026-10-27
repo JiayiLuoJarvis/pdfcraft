@@ -232,7 +232,10 @@ fn multi_in_candidate_y(max_src_bottom: f64, gap: f64, y_limit: f64) -> f64 {
     candidate.max(full_stub_floor)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "multi-in bus routing stays in one function"
+)]
 fn route_multi_in(
     edge: &EdgeRef,
     src: &PlacedNode,

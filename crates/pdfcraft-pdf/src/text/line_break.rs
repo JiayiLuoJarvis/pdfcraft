@@ -277,7 +277,10 @@ fn project_atoms<T: Copy>(
 }
 
 // Every emit path stamps hard/fill flags; extracting arms would obscure the scan.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "every emit path stamps hard/fill flags; extracting arms would obscure the scan"
+)]
 fn pack_lines<T: Copy>(
     groups: &[&ClusteredText],
     mut atoms: Vec<Atom<T>>,

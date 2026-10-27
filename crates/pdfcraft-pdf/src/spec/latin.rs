@@ -38,7 +38,10 @@ impl<K: Clone + PartialEq> InlineRun<K> {
     /// under that run's key. A key that is not in the registry does not fail here.
     ///
     /// Each run stores a clone of its key. The keys are taken by value so a caller can pass temporaries.
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "keys are taken by value so a caller can pass temporaries"
+    )]
     #[must_use]
     pub fn split_latin(text: impl AsRef<str>, cjk: K, latin: K) -> Vec<Self> {
         use unicode_segmentation::UnicodeSegmentation;

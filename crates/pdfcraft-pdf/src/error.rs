@@ -265,7 +265,7 @@ pub enum ErrorKind {
     AnchorWithoutFragment,
     /// An outline entry title was empty.
     EmptyOutlineTitle,
-    /// Outline level is 0, the first item is not 1, or a step deepens by more than one.
+    /// Bad outline level: 0, first item not 1, or a jump deeper than one.
     InvalidOutlineLevel,
     /// A canvas text mark was an empty string.
     EmptyCanvasText,

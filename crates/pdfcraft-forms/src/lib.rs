@@ -89,12 +89,16 @@ mod inspect;
 mod layout;
 mod subset;
 
+#[doc(inline)]
 pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason, FontReason};
+#[doc(inline)]
 pub use fields::{
     AbsoluteLine, FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, HAlign, MissingName,
     VAlign,
 };
+#[doc(inline)]
 pub use fill::fill_and_flatten;
+#[doc(inline)]
 pub use inspect::list_fields;
 
 /// A forms result.

@@ -167,7 +167,10 @@ fn pt(mm: f64) -> f32 {
 }
 
 fn pt_f32(value: f64) -> f32 {
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "A4 mm-to-pt values fit in f32"
+    )]
     {
         value as f32
     }
@@ -557,7 +560,10 @@ fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {
     surface.draw_path(&path);
 }
 
-#[allow(clippy::many_single_char_names)]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "x/y/w/h are rectangle geometry params"
+)]
 fn round_path(x_mm: f64, y_mm: f64, width_mm: f64, height_mm: f64) -> Option<krilla::geom::Path> {
     let radius_mm = NODE_CORNER_RADIUS_MM
         .min(width_mm / 2.0)

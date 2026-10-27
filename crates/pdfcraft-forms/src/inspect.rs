@@ -1,3 +1,5 @@
+//! Reads `AcroForm` widgets and PDF structure helpers.
+
 use std::collections::BTreeSet;
 
 use lopdf::{Dictionary, Document, Object, ObjectId};

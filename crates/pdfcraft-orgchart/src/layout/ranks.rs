@@ -88,7 +88,6 @@ fn assign_hop_ranks(
         .collect())
 }
 
-#[allow(clippy::too_many_lines)]
 fn compute_hops(
     ordered_ids: &[NodeId],
     edges: &[EdgeRef],

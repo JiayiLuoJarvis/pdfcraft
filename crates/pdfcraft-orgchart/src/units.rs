@@ -42,7 +42,6 @@ pub(crate) const CONT_CUE_MIN_WIDTH_MM: f64 = 18.0;
 pub(crate) const CONT_CUE_LINE_COUNT: f64 = 2.0;
 pub(crate) const CONT_CUE_LINE_GAP_MM: f64 = 0.4;
 pub(crate) const CONT_CUE_PAGE_DIGITS: f64 = 3.0;
-#[allow(dead_code)] // cue leaders use this gap when slots are drawn
 pub(crate) const CONT_CUE_GAP_MM: f64 = 3.0;
 pub(crate) const CONT_CUE_DASH_ON_PT: f64 = 4.0;
 pub(crate) const CONT_CUE_DASH_OFF_PT: f64 = 3.0;
@@ -76,7 +75,10 @@ pub(crate) fn node_height_limit_mm(printable_height_mm: f64) -> f64 {
 
 /// A4 page. Landscape swaps the page edges and keeps the margin and bands.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(clippy::struct_field_names)] // `mm` keeps page lengths distinct from points
+#[allow(
+    clippy::struct_field_names,
+    reason = "mm keeps page lengths distinct from points"
+)]
 pub(crate) struct PageGeometry {
     /// Page width in mm.
     pub page_width_mm: f64,

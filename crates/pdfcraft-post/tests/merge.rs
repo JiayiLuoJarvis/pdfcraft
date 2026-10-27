@@ -1,6 +1,9 @@
 //! Integration tests for pdfcraft-post.
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared helpers may be unused in some test targets"
+)]
 mod common;
 
 use lopdf::Document;

@@ -33,11 +33,17 @@ mod merge;
 mod metadata;
 mod pipeline;
 
+#[doc(inline)]
 pub use combo::StampAndEncrypt;
+#[doc(inline)]
 pub use encryption::{Encrypt, EncryptionConfig, EncryptionPreset};
+#[doc(inline)]
 pub use error::{Error, ErrorKind};
+#[doc(inline)]
 pub use merge::merge_pdfs;
+#[doc(inline)]
 pub use metadata::SetMetadata;
+#[doc(inline)]
 pub use pipeline::{Pipeline, Step};
 
 /// Crate result alias.

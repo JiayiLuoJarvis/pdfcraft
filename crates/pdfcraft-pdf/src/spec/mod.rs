@@ -25,9 +25,13 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+#[doc(inline)]
 pub use crate::canvas::DocumentInfo;
+#[doc(inline)]
 pub use crate::fonts::{FontFace, FontFamily, FontRegistry};
+#[doc(inline)]
 pub use lower::layout_spec;
+#[doc(inline)]
 pub use types::{Numbering, Ratio, Rendered, Track};
 
 use std::num::{NonZeroU16, NonZeroU32};

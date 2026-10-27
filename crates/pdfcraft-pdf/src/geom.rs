@@ -35,10 +35,6 @@ pub struct Length<C> {
 
 impl<C> PartialEq for Length<C> {
     fn eq(&self, other: &Self) -> bool {
-        #[allow(
-            clippy::float_cmp,
-            reason = "NaN never reaches a length, so IEEE equality is an equivalence"
-        )]
         {
             self.pt == other.pt
         }

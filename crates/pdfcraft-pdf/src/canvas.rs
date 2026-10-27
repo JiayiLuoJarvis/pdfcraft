@@ -25,6 +25,7 @@
 //! downward, and lengths are PDF points.
 
 use std::any::Any;
+use std::fmt;
 use std::ops::Range;
 
 use crate::error::{Error, ErrorKind};
@@ -195,7 +196,7 @@ pub struct DecodedImage {
 }
 
 /// Decodes one document's images and keeps whatever the PDF writer needs later.
-pub(crate) trait ImageRegistry: Any + Send + Sync {
+pub(crate) trait ImageRegistry: Any + Send + Sync + fmt::Debug {
     /// Copies resource caps used by [`Self::register`].
     fn set_limits(&mut self, limits: &Limits);
 
@@ -217,6 +218,7 @@ pub(crate) trait ImageRegistry: Any + Send + Sync {
         reason = "only constructed when feature backend-krilla is off"
     )
 )]
+#[derive(Debug)]
 pub(crate) struct RejectingImageRegistry;
 
 impl ImageRegistry for RejectingImageRegistry {
@@ -345,12 +347,18 @@ pub(crate) trait Canvas {
 
     /// Fills `path` with `paint`.
     // `Path` is borrowed. `Paint` stays a reference beside it.
-    #[allow(clippy::trivially_copy_pass_by_ref)]
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "Paint stays a reference beside Path for a symmetric Canvas API"
+    )]
     fn fill_path(&mut self, path: &Path, paint: &Paint) -> std::result::Result<(), Error>;
 
     /// Strokes `path` with `paint` and `stroke`.
     // `Path` is borrowed. `Paint` and `Stroke` stay references beside it.
-    #[allow(clippy::trivially_copy_pass_by_ref)]
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "Paint and Stroke stay references beside Path for a symmetric Canvas API"
+    )]
     fn stroke_path(
         &mut self,
         path: &Path,

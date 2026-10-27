@@ -91,29 +91,36 @@ pub mod error;
 pub mod geom;
 pub mod limits;
 
+#[doc(inline)]
 pub use error::{
     CellIndex, CellSpanReason, ColumnWidthsReason, DecorationKind, Error, ErrorKind, Errors,
     GeometryKind, Location, Region, Result,
 };
+#[doc(inline)]
 pub use geom::{
     Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length,
     MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path, PathBuilder,
     PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER, MM_TO_PT,
 };
+#[doc(inline)]
 pub use limits::{LimitKind, Limits};
 
 pub mod canvas;
 pub mod fonts;
 pub mod spec;
 
+#[doc(inline)]
 pub use spec::{layout_spec, DocumentSpec, Numbering, OutlineEntry, Ratio, Rendered, Track};
 
 #[cfg(feature = "test-utils")]
+#[doc(inline)]
 pub use canvas::{pt_near, PT_ABS_TOLERANCE};
+#[doc(inline)]
 pub use canvas::{
     CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId, LinkTarget,
     LinkXyz, RecordedPage, RecordingCanvas,
 };
+#[doc(inline)]
 pub use fonts::{FontFace, FontFamily, FontId, FontRegistry};
 
 pub(crate) mod text;
