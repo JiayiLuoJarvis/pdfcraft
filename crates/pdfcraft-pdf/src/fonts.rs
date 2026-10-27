@@ -180,6 +180,8 @@ pub(crate) trait FontKey: Copy + Eq + Hash + Debug {}
 
 impl<T> FontKey for T where T: Copy + Eq + Hash + Debug {}
 
+/// Only the krilla backend resolves faces for drawing.
+#[cfg(feature = "backend-krilla")]
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedFont {
     // Clone of the stored face buffer, owned by one mark batch. Keeps the
@@ -334,6 +336,8 @@ impl FontStore {
         })
     }
 
+    /// Only the krilla backend resolves faces for drawing.
+    #[cfg(feature = "backend-krilla")]
     pub(crate) fn resolve(&self, id: FontId) -> Result<ResolvedFont> {
         let face = self.face(id)?;
         Ok(ResolvedFont {

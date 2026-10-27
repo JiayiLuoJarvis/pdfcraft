@@ -172,6 +172,9 @@ pub struct ImageId(pub(crate) u32);
 
 impl ImageId {
     /// Wraps a raw identifier allocated for an image.
+    ///
+    /// Only the krilla backend and tests build ids from raw integers.
+    #[cfg(any(feature = "backend-krilla", test))]
     pub(crate) const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }

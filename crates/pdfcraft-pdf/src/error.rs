@@ -828,6 +828,7 @@ impl fmt::Display for Region {
 
 /// Zero-based table grid slot. Rows count header rows first, then body rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CellIndex {
     /// Grid row.
     pub row: usize,
