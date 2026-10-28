@@ -86,6 +86,40 @@ fn v5_stdcf_declares_length_32() {
         window.windows(18).any(|w| w == b"/AuthEvent/DocOpen"),
         "StdCF carries /AuthEvent /DocOpen for qpdf parity"
     );
+    // Top-level `/Length 256` (bits) mirrors qpdf output; strict readers
+    // key off the entry even though it is deprecated for V5. Scope the
+    // search to the `/Encrypt` object so stream `/Length` entries elsewhere
+    // cannot false-positive.
+    let enc_start = out
+        .windows(8)
+        .position(|window| window == b"/Encrypt")
+        .expect("Encrypt present");
+    let enc_end = out[enc_start..]
+        .windows(7)
+        .position(|window| window == b"endobj")
+        .map_or(out.len(), |offset| enc_start + offset);
+    let enc_dict = &out[enc_start..enc_end];
+    assert!(
+        enc_dict.windows(11).any(|w| w == b"/Length 256"),
+        "Encrypt dict must declare top-level /Length 256"
+    );
+    // A trailer `/ID` is standard producer output; assert presence only
+    // (writer emits `/ID [` with a space; allow either spacing).
+    let id_pos = out
+        .windows(3)
+        .position(|window| window == b"/ID")
+        .expect("trailer must carry /ID");
+    let after_id = &out[id_pos + 3..];
+    let bracket = after_id
+        .iter()
+        .take(4)
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(usize::MAX);
+    assert_eq!(
+        after_id.get(bracket),
+        Some(&b'['),
+        "trailer /ID must open an array"
+    );
 }
 
 #[test]

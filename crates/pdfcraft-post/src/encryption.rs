@@ -168,6 +168,9 @@ pub(crate) fn encrypt_document(doc: &mut lopdf::Document, encrypt: &Encrypt) -> 
     // (qpdf, browsers) tolerate the omission. Patch the emitted dictionary
     // in place; no password, key, or permission bytes change.
     // `/AuthEvent /DocOpen` mirrors qpdf output for parity.
+    // Top-level `/Length 256` (bits) likewise mirrors qpdf: deprecated
+    // for V5 but still emitted by conforming producers, and strict
+    // readers key off it.
     let encrypt_id = doc
         .trailer
         .get(b"Encrypt")
@@ -186,6 +189,20 @@ pub(crate) fn encrypt_document(doc: &mut lopdf::Document, encrypt: &Encrypt) -> 
         .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
     std_cf.set(b"Length", lopdf::Object::Integer(32));
     std_cf.set(b"AuthEvent", lopdf::Object::Name(b"DocOpen".to_vec()));
+    encrypt_dict.set(b"Length", lopdf::Object::Integer(256));
+    // A trailer `/ID` is standard producer output (qpdf always emits one)
+    // and some strict readers expect the entry to exist. Keep an existing
+    // source-document ID; only mint one when absent.
+    if doc.trailer.get(b"ID").is_err() {
+        let mut id_bytes = [0u8; 16];
+        getrandom::fill(&mut id_bytes)
+            .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
+        let id_pair = vec![
+            lopdf::Object::String(id_bytes.to_vec(), lopdf::StringFormat::Hexadecimal),
+            lopdf::Object::String(id_bytes.to_vec(), lopdf::StringFormat::Hexadecimal),
+        ];
+        doc.trailer.set("ID", lopdf::Object::Array(id_pair));
+    }
     Ok(())
 }
 

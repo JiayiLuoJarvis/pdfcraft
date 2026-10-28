@@ -31,6 +31,7 @@ cross-crate history.
 ### Fixed
 
 - V5/R6 encryption now declares `StdCF` `/Length 32` (plus `/AuthEvent /DocOpen`
-  for qpdf parity) so strict readers (Adobe Acrobat, poppler) accept the
-  output. Only the crypt-filter dictionary framing changed; passwords, keys,
-  and permissions are untouched.
+  for qpdf parity), top-level `/Length 256`, and a trailer `/ID` when absent,
+  so strict readers (Adobe Acrobat, poppler) accept the output. Only the
+  emitted framing dictionaries changed; passwords, keys, and permissions
+  are untouched.
