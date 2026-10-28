@@ -162,6 +162,30 @@ pub(crate) fn encrypt_document(doc: &mut lopdf::Document, encrypt: &Encrypt) -> 
     }
     doc.encrypt(&state)
         .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
+    // Strict readers (Adobe Acrobat, poppler) require the crypt-filter key
+    // length. AESV3 uses a 32-byte key, so `StdCF` must declare
+    // `/Length 32`; lopdf's `encode` omits it and lenient readers
+    // (qpdf, browsers) tolerate the omission. Patch the emitted dictionary
+    // in place; no password, key, or permission bytes change.
+    // `/AuthEvent /DocOpen` mirrors qpdf output for parity.
+    let encrypt_id = doc
+        .trailer
+        .get(b"Encrypt")
+        .and_then(lopdf::Object::as_reference)
+        .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
+    let encrypt_dict = doc
+        .get_dictionary_mut(encrypt_id)
+        .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
+    let crypt_filters = encrypt_dict
+        .get_mut(b"CF")
+        .and_then(lopdf::Object::as_dict_mut)
+        .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
+    let std_cf = crypt_filters
+        .get_mut(b"StdCF")
+        .and_then(lopdf::Object::as_dict_mut)
+        .map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))?;
+    std_cf.set(b"Length", lopdf::Object::Integer(32));
+    std_cf.set(b"AuthEvent", lopdf::Object::Name(b"DocOpen".to_vec()));
     Ok(())
 }
 

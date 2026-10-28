@@ -56,6 +56,39 @@ fn read_only_printable_opens_with_empty_user() {
 }
 
 #[test]
+fn v5_stdcf_declares_length_32() {
+    // Strict readers (Adobe Acrobat, poppler 24.02) reject R6 output whose
+    // `StdCF` lacks `/Length 32`; lenient readers (qpdf, browsers) open it.
+    // The password envelope (U/O/UE/Perms/content chain) was verified
+    // separately, so this test pins only the framing dictionary on the raw
+    // bytes. `Document::load_mem` drops `/Encrypt` from the trailer for
+    // xref-stream files, so a reload round-trip alone cannot prove this.
+    let pdf = common::sample_pdf(None, None);
+    let out = encrypt_with_owner(EncryptionPreset::READ_ONLY_PRINTABLE)
+        .apply(&pdf)
+        .expect("encrypt");
+    assert!(out.windows(4).any(|window| window == b"/V 5"), "V5");
+    assert!(out.windows(4).any(|window| window == b"/R 6"), "R6");
+    let stdcf = out
+        .windows(6)
+        .position(|window| window == b"/StdCF")
+        .expect("StdCF present");
+    let window = &out[stdcf..stdcf.saturating_add(400).min(out.len())];
+    assert!(
+        window.windows(10).any(|w| w == b"/CFM/AESV3"),
+        "StdCF keeps /CFM /AESV3"
+    );
+    assert!(
+        window.windows(10).any(|w| w == b"/Length 32"),
+        "StdCF must declare /Length 32 (AESV3 = 32 bytes)"
+    );
+    assert!(
+        window.windows(18).any(|w| w == b"/AuthEvent/DocOpen"),
+        "StdCF carries /AuthEvent /DocOpen for qpdf parity"
+    );
+}
+
+#[test]
 fn read_only_encrypts() {
     let pdf = common::sample_pdf(None, None);
     let out = encrypt_with_owner(EncryptionPreset::READ_ONLY)
