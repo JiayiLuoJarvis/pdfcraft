@@ -85,6 +85,8 @@ pub enum ErrorKind {
     MergeEmpty,
     /// Merging PDFs failed.
     MergeFailed,
+    /// Splitting a PDF into per-page PDFs failed.
+    SplitFailed,
 }
 
 impl fmt::Display for ErrorKind {
@@ -99,6 +101,7 @@ impl fmt::Display for ErrorKind {
             Self::MetadataFailed => write!(f, "metadata failed"),
             Self::MergeEmpty => write!(f, "merge_pdfs requires at least one part"),
             Self::MergeFailed => write!(f, "merge_pdfs failed"),
+            Self::SplitFailed => write!(f, "split_pdfs failed"),
         }
     }
 }

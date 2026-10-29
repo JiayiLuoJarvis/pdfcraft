@@ -33,6 +33,7 @@ mod merge;
 mod metadata;
 mod pages;
 mod pipeline;
+mod split;
 
 #[doc(inline)]
 pub use combo::StampAndEncrypt;
@@ -46,6 +47,8 @@ pub use merge::merge_pdfs;
 pub use metadata::SetMetadata;
 #[doc(inline)]
 pub use pipeline::{Pipeline, Step};
+#[doc(inline)]
+pub use split::split_pdfs;
 
 /// Crate result alias.
 pub type Result<T> = std::result::Result<T, Error>;
