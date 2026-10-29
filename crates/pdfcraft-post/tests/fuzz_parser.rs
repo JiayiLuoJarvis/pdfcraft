@@ -1,6 +1,7 @@
 //! Bounded deterministic replay fuzz for the post untrusted-byte parsers.
 //!
-//! Scope: `merge_pdfs` part inputs and `SetMetadata::apply` document inputs.
+//! Scope: `merge_pdfs` part inputs, `SetMetadata::apply` document inputs,
+//! and `split_pdfs` document inputs.
 //! Encryption-config validation is out of scope (no key material in seeds).
 //!
 //! Determinism: every case derives from the checked-in `tests/seeds` corpus
@@ -17,7 +18,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use pdfcraft_post::{merge_pdfs, ErrorKind, SetMetadata};
+use pdfcraft_post::{merge_pdfs, split_pdfs, ErrorKind, SetMetadata};
 
 /// Exact corpus. Removing or adding a seed fails the replay test with a
 /// corpus-mismatch message instead of silently shrinking coverage.
@@ -171,6 +172,28 @@ fn replay_seed_corpus() {
                 ),
                 Err(error) => eprintln!("fuzz case {case}: metadata -> {:?}", error.kind),
             }
+            let split = split_pdfs(&input);
+            match split {
+                Ok(pages) => {
+                    for (index, page) in pages.iter().enumerate() {
+                        assert!(
+                            page.starts_with(b"%PDF"),
+                            "fuzz case {case}: split page {index} must start with %PDF"
+                        );
+                    }
+                }
+                Err(error) => {
+                    assert!(
+                        matches!(
+                            error.kind,
+                            ErrorKind::NotAPdf | ErrorKind::Encrypted | ErrorKind::SplitFailed
+                        ),
+                        "fuzz case {case}: unexpected split error {:?}",
+                        error.kind
+                    );
+                    eprintln!("fuzz case {case}: split -> {:?}", error.kind);
+                }
+            }
             cases += 1;
             check_budget(&started, &case);
         }
@@ -195,4 +218,7 @@ fn mutated_seed_is_rejected() {
         .apply(&corrupted)
         .expect_err("p01-valid.pdf with zeroed header must fail metadata");
     assert_eq!(err.kind, ErrorKind::NotAPdf, "zeroed header metadata input");
+
+    let err = split_pdfs(&corrupted).expect_err("p01-valid.pdf with zeroed header must fail split");
+    assert_eq!(err.kind, ErrorKind::NotAPdf, "zeroed header split input");
 }
