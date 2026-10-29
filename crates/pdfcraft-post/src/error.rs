@@ -72,6 +72,9 @@ impl StdError for Error {
 pub enum ErrorKind {
     /// The bytes are not a PDF this crate can open.
     NotAPdf,
+    /// The input PDF is encrypted. This crate never unlocks input;
+    /// re-run the processor on the unencrypted source instead.
+    Encrypted,
     /// [`crate::Encrypt`] or [`crate::StampAndEncrypt`] was missing a config or owner password.
     ConfigMissing,
     /// Encryption failed while preparing or writing the PDF.
@@ -88,6 +91,7 @@ impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotAPdf => write!(f, "not a PDF"),
+            Self::Encrypted => write!(f, "encrypted pdf: password required"),
             Self::ConfigMissing => {
                 write!(f, "encryption config or owner password is missing")
             }

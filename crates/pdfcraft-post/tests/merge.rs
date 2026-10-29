@@ -73,6 +73,31 @@ fn preserve_outlines_keeps_only_the_first() {
 }
 
 #[test]
+fn encrypted_part_is_rejected_not_silently_merged() {
+    // Before the gate, `merge_pdfs([encrypted, plain])` returned an
+    // unencrypted 2-page PDF built from auto-decrypted bytes. Anchor the
+    // fixture on the `was_encrypted` branch, then require `Encrypted` on
+    // both the `pages_only` and `preserve_first` paths.
+    let plain = common::sample_pdf(None, None);
+    let enc = common::encrypted_with_empty_user(&plain);
+    let direct = Document::load_mem(&enc).expect("fixture auto-decrypts");
+    assert!(
+        !direct.is_encrypted(),
+        "load_mem auto-decrypts empty-user input"
+    );
+    assert!(
+        direct.was_encrypted(),
+        "fixture must exercise the was_encrypted branch"
+    );
+    let err =
+        merge_pdfs([enc.as_slice(), plain.as_slice()], false).expect_err("encrypted first part");
+    assert_eq!(err.kind, ErrorKind::Encrypted);
+    let err =
+        merge_pdfs([plain.as_slice(), enc.as_slice()], true).expect_err("encrypted later part");
+    assert_eq!(err.kind, ErrorKind::Encrypted);
+}
+
+#[test]
 fn bad_part_is_not_a_pdf() {
     let a = common::sample_pdf(None, None);
     let err = merge_pdfs([a.as_slice(), b"not-a-pdf".as_slice()], false).expect_err("bad");

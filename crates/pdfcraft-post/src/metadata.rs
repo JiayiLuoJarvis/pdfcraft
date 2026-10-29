@@ -37,12 +37,15 @@ impl SetMetadata {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::NotAPdf`] when `pdf` is not a PDF, [`ErrorKind::MetadataFailed`]
-    /// when the file is encrypted, a date is not `D:` syntax, or the `/Info`
-    /// dictionary cannot be written.
+    /// [`ErrorKind::NotAPdf`] when `pdf` is not a PDF,
+    /// [`ErrorKind::Encrypted`] when `pdf` is encrypted (including files
+    /// whose empty user password `load_mem` auto-decrypts; those are still
+    /// rejected so no processor re-saves auto-decrypted bytes), and
+    /// [`ErrorKind::MetadataFailed`] when a date is not `D:` syntax or the
+    /// `/Info` dictionary cannot be written.
     #[must_use = "dropping the PDF discards the only copy"]
     pub fn apply(&self, pdf: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut doc = open_pdf(pdf, ErrorKind::MetadataFailed)?;
+        let mut doc = open_pdf(pdf, ErrorKind::Encrypted)?;
         write_docinfo(&mut doc, self)?;
         save_pdf(&mut doc).map_err(|err| Error::from(ErrorKind::MetadataFailed).with_source(err))
     }
@@ -56,7 +59,12 @@ pub(crate) fn open_pdf(pdf: &[u8], encrypted: ErrorKind) -> Result<Document, Err
         }
         Err(err) => return Err(Error::from(ErrorKind::NotAPdf).with_source(err)),
     };
-    if doc.is_encrypted() {
+    // `load_mem` auto-decrypts files whose user password is empty: it
+    // decrypts in memory, drops trailer `/Encrypt`, and records the state.
+    // `is_encrypted` alone would pass those through, so reject every trace:
+    // still-encrypted, auto-decrypted (`was_encrypted`), or a leftover
+    // trailer `/Encrypt` entry. No processor re-saves auto-decrypted bytes.
+    if doc.is_encrypted() || doc.was_encrypted() || doc.trailer.get(b"Encrypt").is_ok() {
         return Err(Error::from(encrypted));
     }
     Ok(doc)

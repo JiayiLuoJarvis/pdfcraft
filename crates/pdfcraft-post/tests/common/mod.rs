@@ -87,6 +87,22 @@ pub fn open_with_password(pdf: &[u8], password: &str) -> Result<Document, lopdf:
     Document::load_mem_with_options(pdf, LoadOptions::with_password(password))
 }
 
+/// Encrypt `pdf` with an owner password and an empty user password.
+///
+/// Anyone can open the output, so `Document::load_mem` auto-decrypts it:
+/// `is_encrypted()` is false while `was_encrypted()` is true. Fixtures from
+/// here anchor the `was_encrypted` gate branch instead of the `Decryption`
+/// error path.
+pub fn encrypted_with_empty_user(pdf: &[u8]) -> Vec<u8> {
+    pdfcraft_post::Encrypt {
+        config: Some(pdfcraft_post::EncryptionPreset::READ_ONLY),
+        owner_password: Some("owner-secret".into()),
+        user_password: None,
+    }
+    .apply(pdf)
+    .expect("encrypt fixture")
+}
+
 /// True when the trailer declares `/Encrypt`.
 pub fn is_encrypted_pdf(pdf: &[u8]) -> bool {
     Document::load_metadata_mem(pdf).is_ok_and(|meta| meta.encrypted)

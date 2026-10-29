@@ -6,6 +6,7 @@
 )]
 mod common;
 
+use lopdf::Document;
 use pdfcraft_post::{Encrypt, EncryptionPreset, ErrorKind};
 
 fn encrypt_with_owner(config: pdfcraft_post::EncryptionConfig) -> Encrypt {
@@ -172,9 +173,46 @@ fn user_password_override_rejects_empty_open() {
 }
 
 #[test]
+fn encrypted_input_is_rejected_without_unlocking() {
+    // Empty-user-password output is the trap: `load_mem` auto-decrypts it,
+    // so the old `is_encrypted`-only gate let it through and re-saved the
+    // auto-decrypted bytes. Anchor that the fixture really takes the
+    // `was_encrypted` branch, then require `Encrypted`.
+    let pdf = common::sample_pdf(None, None);
+    let enc = common::encrypted_with_empty_user(&pdf);
+    let direct = Document::load_mem(&enc).expect("fixture auto-decrypts");
+    assert!(
+        !direct.is_encrypted(),
+        "load_mem auto-decrypts empty-user input"
+    );
+    assert!(
+        direct.was_encrypted(),
+        "fixture must exercise the was_encrypted branch"
+    );
+    let err = encrypt_with_owner(EncryptionPreset::READ_ONLY)
+        .apply(&enc)
+        .expect_err("encrypted input");
+    assert_eq!(err.kind, ErrorKind::Encrypted);
+    assert_eq!(
+        format!("{}", ErrorKind::Encrypted),
+        "encrypted pdf: password required"
+    );
+}
+
+#[test]
 fn invalid_bytes_are_not_a_pdf() {
     let err = encrypt_with_owner(EncryptionPreset::READ_ONLY)
         .apply(b"not-a-pdf")
         .expect_err("bad bytes");
+    assert_eq!(err.kind, ErrorKind::NotAPdf);
+}
+
+#[test]
+fn truncated_bytes_are_not_a_pdf() {
+    let pdf = common::sample_pdf(None, None);
+    let cut = pdf.len() / 2;
+    let err = encrypt_with_owner(EncryptionPreset::READ_ONLY)
+        .apply(&pdf[..cut])
+        .expect_err("truncated");
     assert_eq!(err.kind, ErrorKind::NotAPdf);
 }

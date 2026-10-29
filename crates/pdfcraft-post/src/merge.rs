@@ -22,8 +22,11 @@ use crate::pages::import_pages;
 /// # Errors
 ///
 /// [`ErrorKind::MergeEmpty`] when `parts` is empty, [`ErrorKind::NotAPdf`] when
-/// a part is not a PDF, and [`ErrorKind::MergeFailed`] when a part is encrypted
-/// or its pages cannot be copied.
+/// a part is not a PDF, [`ErrorKind::Encrypted`] when a part is encrypted
+/// (including files whose empty user password `load_mem` auto-decrypts;
+/// those are still rejected so a merge never re-saves auto-decrypted
+/// bytes), and [`ErrorKind::MergeFailed`] when a part's pages cannot be
+/// copied.
 #[must_use = "dropping the merged PDF discards the only copy"]
 pub fn merge_pdfs<I, B>(parts: I, preserve_outlines: bool) -> Result<Vec<u8>, Error>
 where
@@ -56,7 +59,7 @@ fn pages_only(parts: &[Vec<u8>]) -> Result<Vec<u8>, Error> {
 
     let mut kids = Vec::new();
     for part in parts {
-        let src = open_pdf(part, ErrorKind::MergeFailed)?;
+        let src = open_pdf(part, ErrorKind::Encrypted)?;
         kids.extend(import_pages(&mut dest, &src, pages_id)?);
     }
 
@@ -80,11 +83,11 @@ fn pages_only(parts: &[Vec<u8>]) -> Result<Vec<u8>, Error> {
 }
 
 fn preserve_first(parts: &[Vec<u8>]) -> Result<Vec<u8>, Error> {
-    let mut dest = open_pdf(&parts[0], ErrorKind::MergeFailed)?;
+    let mut dest = open_pdf(&parts[0], ErrorKind::Encrypted)?;
     let pages_id = root_pages_id(&dest)?;
     let mut extra = Vec::new();
     for part in &parts[1..] {
-        let src = open_pdf(part, ErrorKind::MergeFailed)?;
+        let src = open_pdf(part, ErrorKind::Encrypted)?;
         extra.extend(import_pages(&mut dest, &src, pages_id)?);
     }
     append_kids(&mut dest, pages_id, &extra)?;

@@ -123,12 +123,17 @@ impl Encrypt {
     /// # Errors
     ///
     /// [`ErrorKind::NotAPdf`] when `pdf` is not a PDF,
+    /// [`ErrorKind::Encrypted`] when `pdf` is already encrypted (including
+    /// files whose empty user password `load_mem` auto-decrypts; those are
+    /// still rejected so encryption never re-saves auto-decrypted bytes),
     /// [`ErrorKind::ConfigMissing`] when `config` is missing or the owner
-    /// password is empty, and [`ErrorKind::EncryptFailed`] when the file is
-    /// already encrypted or lopdf cannot write the security handler.
+    /// password is empty, and [`ErrorKind::EncryptFailed`] when lopdf cannot
+    /// write the security handler. The pre-encrypt `is_encrypted` check in
+    /// `encrypt_document` is unreachable through this path: `open_pdf`
+    /// rejects encrypted input first, so it stays as defense in depth only.
     #[must_use = "dropping the encrypted PDF discards the only copy"]
     pub fn apply(&self, pdf: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut doc = open_pdf(pdf, ErrorKind::EncryptFailed)?;
+        let mut doc = open_pdf(pdf, ErrorKind::Encrypted)?;
         encrypt_document(&mut doc, self)?;
         save_pdf(&mut doc).map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))
     }

@@ -6,7 +6,7 @@
 )]
 mod common;
 
-use lopdf::Object;
+use lopdf::{Document, Object};
 use pdfcraft_post::{
     Encrypt, EncryptionPreset, ErrorKind, Pipeline, SetMetadata, StampAndEncrypt, Step,
 };
@@ -37,6 +37,44 @@ fn stamp_and_encrypt_sets_title_and_encrypts() {
         panic!("title not string");
     };
     assert_eq!(String::from_utf8_lossy(bytes), "Stamped");
+}
+
+#[test]
+fn encrypted_input_is_rejected_for_stamp_and_metadata() {
+    // `tests/metadata.rs` is owned by another todo, so the `SetMetadata`
+    // half of this regression lives here next to `StampAndEncrypt`.
+    let pdf = common::sample_pdf(None, None);
+    let enc = common::encrypted_with_empty_user(&pdf);
+    let direct = Document::load_mem(&enc).expect("fixture auto-decrypts");
+    assert!(
+        !direct.is_encrypted(),
+        "load_mem auto-decrypts empty-user input"
+    );
+    assert!(
+        direct.was_encrypted(),
+        "fixture must exercise the was_encrypted branch"
+    );
+    let err = StampAndEncrypt {
+        metadata: SetMetadata {
+            title: Some("Stamped".into()),
+            ..SetMetadata::default()
+        },
+        encrypt: Encrypt {
+            config: Some(EncryptionPreset::READ_ONLY),
+            owner_password: Some("owner-secret".into()),
+            user_password: None,
+        },
+    }
+    .apply(&enc)
+    .expect_err("encrypted combo input");
+    assert_eq!(err.kind, ErrorKind::Encrypted);
+    let err = SetMetadata {
+        title: Some("Stamped".into()),
+        ..SetMetadata::default()
+    }
+    .apply(&enc)
+    .expect_err("encrypted metadata input");
+    assert_eq!(err.kind, ErrorKind::Encrypted);
 }
 
 #[test]
