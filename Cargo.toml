@@ -22,3 +22,8 @@ png = { version = "=0.18.1" }
 read-fonts = { version = "=0.45.0", default-features = false }
 skrifa = { version = "=0.48.0", default-features = false }
 unicode-segmentation = { version = "1.13.3" }
+# Render isolation: `hayro` + `image` serve only the opt-in `thumbnail` feature of
+# `pdfcraft-post` (PDF rasterization to JPEG). They never touch measurement or drawing,
+# so they have no metrics/coordinate impact; still `=`-pinned to keep the render closure reproducible.
+hayro = { version = "=0.8.0" }
+image = { version = "=0.25.10", default-features = false }

@@ -23,9 +23,15 @@ include = [
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+thumbnail = ["dep:hayro", "dep:image"]
+
 [dependencies]
 getrandom = { workspace = true }
 lopdf = { workspace = true }
+hayro = { workspace = true, optional = true }
+image = { workspace = true, optional = true, features = ["jpeg"] }
 
 [dev-dependencies]
 lopdf = { workspace = true }
