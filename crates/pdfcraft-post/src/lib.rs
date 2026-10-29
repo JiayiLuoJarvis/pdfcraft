@@ -31,6 +31,7 @@ mod encryption;
 mod error;
 mod merge;
 mod metadata;
+mod pages;
 mod pipeline;
 
 #[doc(inline)]
