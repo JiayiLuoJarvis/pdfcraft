@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Post-process existing PDF bytes: metadata, encrypt, merge, and pipelines"
 license.workspace = true
+repository.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/pdfcraft-post"
 keywords = ["pdf", "encrypt", "metadata", "merge"]

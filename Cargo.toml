@@ -11,6 +11,7 @@ members = [
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/JiayiLuoJarvis/pdfcraft"
 
 [workspace.dependencies]
 # Pin policy: the font/PDF stack (krilla, skrifa, read-fonts, lopdf, png) stays `=`-pinned because measurement (skrifa 0.48) and drawing (krilla's bundled skrifa 0.42) share one glyph pipeline: `emit::check_upem` rejects faces whose units-per-em disagree, and the fixture `TJ` adjustment test locks both sides' hmtx, so any silent move of that stack would shift coordinates or glyphs. Only leaf utilities with no effect on metrics (`getrandom`, `unicode-segmentation`) use caret requirements so `cargo update` can freshen them.

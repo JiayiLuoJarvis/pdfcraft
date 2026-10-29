@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Fill AcroForm fields in an existing PDF and flatten the result"
 license.workspace = true
+repository.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/pdfcraft-forms"
 keywords = ["pdf", "acroform", "forms"]

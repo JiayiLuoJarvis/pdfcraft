@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Equity and outbound-investment charts. Callers pass FontBytes. Measurement uses skrifa; drawing uses krilla."
 license.workspace = true
+repository.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/pdfcraft-orgchart"
 keywords = ["pdf", "org-chart", "ownership"]
