@@ -16,7 +16,7 @@ krilla.
 | API | [docs.rs/pdfcraft-post](https://docs.rs/pdfcraft-post) |
 | MSRV | 1.92 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.1.0`. The API can break before `1.0` |
+| Status | `0.2.0`. The API can break before `1.0` |
 
 ---
 
@@ -24,7 +24,7 @@ krilla.
 
 ```toml
 [dependencies]
-pdfcraft-post = "0.1.0"
+pdfcraft-post = "0.2.0"
 ```
 
 ---

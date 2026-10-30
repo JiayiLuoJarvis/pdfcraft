@@ -7,7 +7,31 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 while remaining `0.x`. See the [workspace changelog](../../CHANGELOG.md) for
 cross-crate history.
 
-## [Unreleased] - 2026-10-27
+## [0.2.0] - 2026-10-30
+
+### Breaking
+
+- Encrypted-input gate: every processor now rejects PDFs that arrive
+  encrypted, including files whose empty user password `load_mem`
+  auto-decrypts, with `ErrorKind::Encrypted` before touching any bytes.
+  `merge_pdfs` no longer silently decrypts a mixed `[encrypted, plain]`
+  input into an unencrypted document; `SetMetadata`, `Encrypt`,
+  `StampAndEncrypt`, `split_pdfs`, and `first_page_jpeg` fail the same
+  inputs the same way. Non-PDF bytes still report `NotAPdf`.
+
+### Added
+
+- `split_pdfs`: split one PDF into one single-page PDF per page. Pages stay
+  in reading order, each output is self-contained, and a PDF with no pages
+  splits to `Ok(vec![])`. Encrypted input fails with `Encrypted`, non-PDF
+  bytes with `NotAPdf`, uncopyable pages with `SplitFailed`.
+- `first_page_jpeg` plus `ThumbnailOptions` behind the opt-in `thumbnail`
+  feature (hayro plus image). Renders page 1 to JPEG bytes scaled to
+  `max_longest_side` (default 320, never upscaled, `0` fails) at `quality`
+  (default 75, clamped to `1..=100`). A PDF with no pages yields `Ok(None)`.
+  Without the feature, renderable inputs report `ThumbnailFailed`.
+
+## [0.1.0] - 2026-10-29
 
 ### Breaking
 
@@ -27,15 +51,6 @@ cross-crate history.
 ### Added
 
 - MSRV policy written down in `docs/msrv.md` (MSRV 1.92, follows krilla).
-- `split_pdfs`: split one PDF into one single-page PDF per page. Pages stay
-  in reading order, each output is self-contained, and a PDF with no pages
-  splits to `Ok(vec![])`. Encrypted input fails with `Encrypted`, non-PDF
-  bytes with `NotAPdf`, uncopyable pages with `SplitFailed`.
-- `first_page_jpeg` plus `ThumbnailOptions` behind the opt-in `thumbnail`
-  feature (hayro plus image). Renders page 1 to JPEG bytes scaled to
-  `max_longest_side` (default 320, never upscaled, `0` fails) at `quality`
-  (default 75, clamped to `1..=100`). A PDF with no pages yields `Ok(None)`.
-  Without the feature, renderable inputs report `ThumbnailFailed`.
 
 ### Fixed
 
