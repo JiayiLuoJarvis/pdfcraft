@@ -87,6 +87,11 @@ pub enum ErrorKind {
     MergeFailed,
     /// Splitting a PDF into per-page PDFs failed.
     SplitFailed,
+    /// Rendering or encoding the first-page thumbnail failed.
+    ///
+    /// Without the `thumbnail` feature this is also returned for any input
+    /// that would otherwise render: enable the feature to get JPEG bytes.
+    ThumbnailFailed,
 }
 
 impl fmt::Display for ErrorKind {
@@ -102,6 +107,7 @@ impl fmt::Display for ErrorKind {
             Self::MergeEmpty => write!(f, "merge_pdfs requires at least one part"),
             Self::MergeFailed => write!(f, "merge_pdfs failed"),
             Self::SplitFailed => write!(f, "split_pdfs failed"),
+            Self::ThumbnailFailed => write!(f, "thumbnail failed"),
         }
     }
 }

@@ -34,6 +34,7 @@ mod metadata;
 mod pages;
 mod pipeline;
 mod split;
+mod thumbnail;
 
 #[doc(inline)]
 pub use combo::StampAndEncrypt;
@@ -49,6 +50,8 @@ pub use metadata::SetMetadata;
 pub use pipeline::{Pipeline, Step};
 #[doc(inline)]
 pub use split::split_pdfs;
+#[doc(inline)]
+pub use thumbnail::{first_page_jpeg, ThumbnailOptions};
 
 /// Crate result alias.
 pub type Result<T> = std::result::Result<T, Error>;
