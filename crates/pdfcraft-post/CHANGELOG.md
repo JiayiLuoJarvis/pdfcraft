@@ -27,6 +27,15 @@ cross-crate history.
 ### Added
 
 - MSRV policy written down in `docs/msrv.md` (MSRV 1.92, follows krilla).
+- `split_pdfs`: split one PDF into one single-page PDF per page. Pages stay
+  in reading order, each output is self-contained, and a PDF with no pages
+  splits to `Ok(vec![])`. Encrypted input fails with `Encrypted`, non-PDF
+  bytes with `NotAPdf`, uncopyable pages with `SplitFailed`.
+- `first_page_jpeg` plus `ThumbnailOptions` behind the opt-in `thumbnail`
+  feature (hayro plus image). Renders page 1 to JPEG bytes scaled to
+  `max_longest_side` (default 320, never upscaled, `0` fails) at `quality`
+  (default 75, clamped to `1..=100`). A PDF with no pages yields `Ok(None)`.
+  Without the feature, renderable inputs report `ThumbnailFailed`.
 
 ### Fixed
 

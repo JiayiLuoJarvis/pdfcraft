@@ -1,10 +1,11 @@
 # pdfcraft-post
 
-**Post-process existing PDF bytes: `/Info`, encrypt, merge, and pipelines.**
+**Post-process existing PDF bytes: `/Info`, encrypt, merge, split, pipelines, plus optional first-page JPEG thumbnails.**
 
 Pass PDF bytes in and get PDF bytes out. Write or overwrite selected document
 info fields, encrypt with AES-256 (Standard Security Handler revision 6),
-concatenate page lists, or run ordered steps in a `Pipeline`. Reading and
+concatenate page lists, split one PDF per page, or run ordered steps in a
+`Pipeline`. An opt-in `thumbnail` feature renders page 1 to JPEG bytes. Reading and
 writing use [lopdf](https://crates.io/crates/lopdf). This crate does not depend
 on `pdfcraft-pdf`, `pdfcraft-forms`, or `pdfcraft-orgchart`, and does not use
 krilla.
@@ -66,6 +67,8 @@ Runnable demos:
 cargo run -p pdfcraft-post --example encrypt -- in.pdf out.pdf owner-secret
 cargo run -p pdfcraft-post --example stamp -- in.pdf out.pdf owner-secret "Title"
 cargo run -p pdfcraft-post --example merge -- out.pdf a.pdf b.pdf
+cargo run -p pdfcraft-post --example split -- in.pdf out_dir
+cargo run -p pdfcraft-post --features thumbnail --example thumbnail -- in.pdf out.jpg
 ```
 
 ---
@@ -77,6 +80,8 @@ PDF bytes ──SetMetadata.apply──► PDF bytes
 PDF bytes ──Encrypt.apply──────► PDF bytes
 PDF bytes ──StampAndEncrypt────► PDF bytes   (Info then encrypt, one open/save)
 PDF bytes… ──merge_pdfs────────► PDF bytes
+PDF bytes ──split_pdfs─────────► one single-page PDF per page
+PDF bytes ──first_page_jpeg──► JPEG bytes  (needs `--features thumbnail`)
 PDF bytes ──Pipeline.run───────► PDF bytes   (ordered steps on one buffer)
 ```
 
@@ -103,6 +108,8 @@ errors, testing).
 | `EncryptionConfig` | Full permission bits and default passwords |
 | `StampAndEncrypt` | Metadata then encrypt in one open/save |
 | `merge_pdfs` | Concatenate pages; optional first-part outlines |
+| `split_pdfs` | One single-page PDF per page; empty splits to `Ok(vec![])` |
+| `first_page_jpeg` / `ThumbnailOptions` | Page-1 JPEG; opt-in `thumbnail` feature; empty yields `None` |
 | `Pipeline` / `Step` | Ordered steps on one buffer |
 | `Error` / `ErrorKind` | Open, config, encrypt, metadata, and merge failures |
 
@@ -110,7 +117,7 @@ errors, testing).
 
 ## Design constraints (v1)
 
-- No Watermark and no input byte/page limits (deferred)
+- No Watermark and no input byte/page limits (deferred); first-page JPEGs render out of the PDF and are not watermarks
 - No HTTP / `to_dict` adapters and no Web finalize orchestration
 - Owner passwords are caller-supplied; the library never invents one
 - Empty user password is a supported "anyone can open" setup

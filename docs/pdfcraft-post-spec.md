@@ -23,6 +23,8 @@
 - `Encrypt`。AES-256（Standard Security Handler revision 6 / lopdf `EncryptionVersion::V5`）。权限配置与预设见 §3.3。
 - `StampAndEncrypt`。同一次打开中先写 `/Info` 再加密（相对 `SetMetadata` 再 `Encrypt` 少一轮完整保存）。
 - `merge_pdfs`。按顺序拼接页面；见 §3.5。
+- `split_pdfs`。把一份 PDF 按页拆成多个单页 PDF；见 §3.7。
+- 首页缩略图（可选 `thumbnail` feature）。把第 1 页渲染为 JPEG 字节；见 §3.8。缩略图渲染在 PDF 之外，不画进 PDF；与延后的 Watermark（往 PDF 里叠字）不是一回事。
 - `Pipeline`。按顺序对同一串字节应用多个后处理步骤。
 - 错误面与 `pdfcraft-forms` / `pdfcraft-pdf` 同骨架（`Error` + `ErrorKind`，见 §5）。
 - 版本 `0.1.0`，可发布（与 forms / orgchart 同姿态）。
@@ -115,6 +117,39 @@ merge_pdfs(parts: &[Vec<u8>] | impl IntoIterator, preserve_outlines: bool) -> Re
 
 有序步骤列表。空 pipeline 原样返回输入字节。步骤为已实现的后处理器（metadata / encrypt / stamp-and-encrypt 等）；`merge_pdfs` 因多输入，通常在 pipeline 外先合并再 `run`。
 
+### 3.7 `split_pdfs`
+
+```text
+split_pdfs(pdf: &[u8]) -> Result<Vec<Vec<u8>>, Error>
+```
+
+（具体签名实现时按 Rust 习惯微调。）
+
+- 无页面 → `Ok(vec![])`（输入是一份文档，没有空列表可拒绝；与 `MergeEmpty` 不同）。
+- N 页 → N 个输出，输出 `i` 放第 `i` 页，阅读顺序不变。
+- 每个输出是自包含单页 PDF：自己的 `Pages` 父节点（`Count` 1）、物化后的 `MediaBox` / `Resources` / `CropBox` / `Rotate`、页级 `Annots`。文档级大纲、附件、结构树不保留（与 `merge_pdfs` 不保留大纲同规则）。
+- 拆分后喂回 `merge_pdfs` 可按序拼回（往返；`tests/split.rs` 的 `split_then_merge_round_trip` 覆盖）。
+- 加密输入 → `Encrypted`（含空 user 密码能被自动解密的文件，一律拒绝，不重存自动解密后的字节）。非 PDF → `NotAPdf`。页复制失败 → `SplitFailed`（显示 `split_pdfs failed`）。
+
+`split` 不设输入限额；输入限额仍延后（见 §2.2）。
+
+### 3.8 首页缩略图（可选 `thumbnail` feature）
+
+```text
+first_page_jpeg(pdf: &[u8], opts: &ThumbnailOptions) -> Result<Option<Vec<u8>>, Error>
+```
+
+（具体签名实现时按 Rust 习惯微调。）
+
+- 只渲染第 1 页；多页输入也只出一张 JPEG。Alpha 压成白色，输出永不带透明。
+- 开启方式：`--features thumbnail`（`hayro` + `image`，纯 Rust 实现，无系统依赖，无需 Docker 服务）。未开 feature 时，能渲染的输入一律报 `ThumbnailFailed`；但输入门先跑，所以空输入仍得 `Ok(None)`，非 PDF 仍是 `NotAPdf`，加密输入仍是 `Encrypted`。
+- `ThumbnailOptions`（`non_exhaustive`，从 `Default` 起改字段）：
+  - `max_longest_side`（默认 320）：最长边像素上限；已更小的页保持原生尺寸，绝不放大；`0` 恒失败（`ThumbnailFailed`）。
+  - `quality`（默认 75）：钳制到 `1..=100`；`0` 与超 100 不报错，按 `1` / `100` 处理。
+- 无页面 → `Ok(None)`，不是错误。
+- 非 PDF → `NotAPdf`；加密输入 → `Encrypted`（含空 user 密码能被自动解密的文件）。其余失败（页尺寸不可解、未开 feature、渲染或编码失败）→ `ThumbnailFailed`（显示 `thumbnail failed`）。
+- 与 Watermark 的区别：缩略图渲染在 PDF 之外（得到 JPEG 字节），Watermark 是往 PDF 里叠字（本栈延后）。
+
 ## 4. 依赖与仓库规则
 
 ```text
@@ -135,7 +170,7 @@ pdfcraft-post  ──X──→  pdfcraft-orgchart
 
 - `Error { kind: ErrorKind, … }`，可选 `source` 挂依赖错误。
 - `From<ErrorKind>`；`Display` 走 kind；相等性比 kind（及约定字段）。
-- kind 覆盖本栈失败（至少）：非 PDF、缺加密配置、加密失败、元数据失败、合并空输入、合并失败等。具体变体名实现时按 forms 风格命名，可用 `#[non_exhaustive]`。
+- kind 覆盖本栈失败（至少）：非 PDF（`NotAPdf`，显示 `not a PDF`）、加密输入（`Encrypted`，显示 `encrypted pdf: password required`）、缺加密配置（`ConfigMissing`）、加密失败（`EncryptFailed`）、元数据失败（`MetadataFailed`）、合并空输入（`MergeEmpty`）、合并失败（`MergeFailed`）、拆分失败（`SplitFailed`，显示 `split_pdfs failed`）、缩略图失败（`ThumbnailFailed`，显示 `thumbnail failed`）等。具体变体名实现时按 forms 风格命名，可用 `#[non_exhaustive]`。显示字符串以 `src/error.rs` 的 `Display` 实现为准。
 
 不提供 HTTP 序列化辅助。
 

@@ -24,8 +24,14 @@ PDF bytes  →  SetMetadata.apply       →  PDF bytes
 PDF bytes  →  Encrypt.apply           →  PDF bytes
 PDF bytes  →  StampAndEncrypt.apply   →  PDF bytes
 PDF bytes… →  merge_pdfs              →  PDF bytes
+PDF bytes  →  split_pdfs              →  one single-page PDF per page
+PDF bytes  →  first_page_jpeg (*)     →  JPEG bytes (feature-gated)
 PDF bytes  →  Pipeline::run           →  PDF bytes
 ```
+
+(`*`) `first_page_jpeg` needs the opt-in `thumbnail` feature. Without it
+every input that would otherwise render reports `ThumbnailFailed`; empty input
+still yields `None`, and `NotAPdf` / `Encrypted` still apply.
 
 This crate is not `pdfcraft-pdf` layout and not `pdfcraft-forms` fill. It does
 not depend on either, and does not use krilla.
@@ -230,6 +236,94 @@ let out = Pipeline::new([Step::Encrypt(Encrypt {
 
 ---
 
+## split_pdfs
+
+Split one PDF into one single-page PDF per page.
+
+```rust
+use pdfcraft_post::split_pdfs;
+
+let parts: Vec<Vec<u8>> = split_pdfs(pdf)?;
+```
+
+| Input | Result |
+| --- | --- |
+| No pages | `Ok(vec![])`; splitting takes one document, so there is no empty-list error |
+| N pages | N outputs; output `i` holds page `i` |
+
+Each output is a self-contained single-page PDF: its own `Pages` parent
+(`Count` 1), the page's materialized `MediaBox` / `Resources` / `CropBox` /
+`Rotate`, and the page-level `Annots`. Document-level outlines, attachments,
+and structure trees are not kept (same rule as `merge_pdfs` without outline
+preservation).
+
+Outputs stay in reading order, so a split round-trips through merge: feeding
+the parts back into `merge_pdfs` keeps page count and order (covered by
+`split_then_merge_round_trip` in `tests/split.rs`).
+
+Encrypted input fails with `Encrypted`, including files whose empty user
+password `load_mem` would auto-decrypt; a split never re-saves auto-decrypted
+bytes. Non-PDF bytes fail with `NotAPdf`. A page that cannot be copied fails
+with `SplitFailed`.
+
+```bash
+cargo run -p pdfcraft-post --example split -- in.pdf out_dir
+```
+
+---
+
+## first-page thumbnail (optional thumbnail feature)
+
+Render page 1 of a PDF to JPEG bytes. Only the first page renders: a
+multi-page input still yields exactly one JPEG.
+
+The renderer lives behind the opt-in `thumbnail` feature (hayro plus image),
+so enable it explicitly:
+
+```bash
+cargo run -p pdfcraft-post --features thumbnail --example thumbnail -- in.pdf out.jpg
+cargo test -p pdfcraft-post --features thumbnail
+```
+
+```rust
+use pdfcraft_post::{first_page_jpeg, ThumbnailOptions};
+
+let mut opts = ThumbnailOptions::default();
+opts.max_longest_side = 320;
+if let Some(jpeg) = first_page_jpeg(pdf, &opts)? {
+    std::fs::write("thumb.jpg", jpeg).expect("write");
+}
+```
+
+(`ThumbnailOptions` is `non_exhaustive`: start from `default()` and assign
+the fields to change.)
+
+| Option | Default | Rules |
+| --- | --- | --- |
+| `max_longest_side` | `320` | Longest output side in pixels. A page that already fits keeps its native size; output is never upscaled. `0` cannot fit any page, so rendering fails with `ThumbnailFailed`. |
+| `quality` | `75` | JPEG quality, clamped to `1..=100`. `0` and values above `100` do not error; they behave as `1` and `100`. |
+
+A PDF with no pages yields `Ok(None)`; that is not an error. Alpha flattens
+to white, so the output never carries transparency.
+
+Encrypted input fails with `Encrypted`, including files whose empty user
+password `load_mem` would auto-decrypt; the input gate runs before any
+renderer call, so an encrypted input never reaches the renderer. Non-PDF
+bytes fail with `NotAPdf`. Everything else fails with `ThumbnailFailed`:
+unresolvable page size, disabled `thumbnail` feature, or a render/encode
+failure. Without the feature, inputs that would otherwise render report
+`ThumbnailFailed`; empty input still yields `None`, and `NotAPdf` /
+`Encrypted` still apply because the input gate runs first.
+
+No system packages, fonts, or Docker services needed: hayro renders
+in-process from the PDF bytes.
+
+A thumbnail renders **out of** the PDF (you get JPEG bytes). That is not a
+watermark, which would draw **into** the PDF; Watermark stays deferred (see
+below).
+
+---
+
 ## Pipeline
 
 Ordered list of `Step` values applied to one buffer.
@@ -263,11 +357,14 @@ Match on `Error::kind` (`ErrorKind`). Equality compares kind only. Use
 | Kind | When |
 | --- | --- |
 | `NotAPdf` | Bytes are not an openable PDF |
+| `Encrypted` | Input PDF is encrypted; the crate never unlocks input |
 | `ConfigMissing` | Encrypt config missing, or owner password empty after overrides |
 | `EncryptFailed` | Already encrypted, random key failure, or security handler write failed |
 | `MetadataFailed` | Encrypted input, bad `D:` date, or `/Info` write failed |
 | `MergeEmpty` | `merge_pdfs` received an empty part list |
 | `MergeFailed` | Encrypted part, page copy failure, or merge serialize failure |
+| `SplitFailed` | Page copy or single-page save failed in `split_pdfs` |
+| `ThumbnailFailed` | Page size unresolvable, `thumbnail` feature off, or render/encode failed |
 
 `ErrorKind` is `#[non_exhaustive]`. Map kinds in your application layer.
 
@@ -279,7 +376,10 @@ Match on `Error::kind` (`ErrorKind`). Equality compares kind only. Use
 cargo run -p pdfcraft-post --example encrypt -- in.pdf out.pdf owner-secret
 cargo run -p pdfcraft-post --example stamp -- in.pdf out.pdf owner-secret "Title"
 cargo run -p pdfcraft-post --example merge -- out.pdf a.pdf b.pdf
+cargo run -p pdfcraft-post --example split -- in.pdf out_dir
+cargo run -p pdfcraft-post --features thumbnail --example thumbnail -- in.pdf out.jpg
 cargo test -p pdfcraft-post
+cargo test -p pdfcraft-post --features thumbnail
 cargo doc -p pdfcraft-post --no-deps
 ```
 
@@ -289,14 +389,16 @@ Prefer assertions on:
 - Empty user password opens after encrypt
 - Permission presets match expected bits
 - `merge_pdfs` empty → `MergeEmpty`; one part → same bytes
-- Error kinds for illegal inputs (`NotAPdf`, `ConfigMissing`, …)
+- `split_pdfs` empty → `Ok(vec![])`; N pages → N single-page outputs; split-then-merge keeps order
+- `first_page_jpeg` empty → `Ok(None)`; longest side capped; quality clamped; feature off → `ThumbnailFailed`
+- Error kinds for illegal inputs (`NotAPdf`, `Encrypted`, `ConfigMissing`, …)
 
 ---
 
 ## What this crate does not do
 
-- Watermark (deferred)
-- Input byte/page limits / `configure_limits` (deferred)
+- Watermark (deferred); a first-page JPEG renders out of the PDF and is not a watermark
+- Input byte/page limits / `configure_limits` (deferred); `split_pdfs` takes page count as-is
 - HTTP adapters, `to_dict`, or Web finalize orchestration
 - Auto-generate owner passwords inside the library
 - Depend on `pdfcraft-pdf`, `pdfcraft-forms`, or `pdfcraft-orgchart`
@@ -314,9 +416,11 @@ crate.
 | --- | --- |
 | `SetMetadata` / `Encrypt` / `StampAndEncrypt` | Public processors |
 | `merge_pdfs` | Multi-PDF page concatenate |
+| `split_pdfs` | One single-page PDF per page |
+| `first_page_jpeg` / `ThumbnailOptions` | Page-1 JPEG (`thumbnail` feature) |
 | `Pipeline` / `Step` | Ordered single-buffer steps |
 | `EncryptionConfig` / `EncryptionPreset` | Permissions and presets |
 | `Error` / `ErrorKind` | Failures |
-| `examples/` | Runnable demos (`encrypt`, `stamp`, `merge`) |
+| `examples/` | Runnable demos (`encrypt`, `stamp`, `merge`, `split`, `thumbnail`) |
 | `docs/guide.md` | This guide |
 | Workspace `docs/pdfcraft-post-spec.md` | Maintainer reference |
