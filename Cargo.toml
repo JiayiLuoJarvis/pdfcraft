@@ -20,7 +20,7 @@ lopdf = { version = "=0.45.0", default-features = false }
 getrandom = { version = "0.4.3" }
 png = { version = "=0.18.1" }
 read-fonts = { version = "=0.45.0", default-features = false }
-skrifa = { version = "=0.48.0", default-features = false }
+skrifa = { version = "=0.49.0", default-features = false }
 unicode-segmentation = { version = "1.13.3" }
 # Render isolation: `hayro` + `image` serve only the opt-in `thumbnail` feature of
 # `pdfcraft-post` (PDF rasterization to JPEG). They never touch measurement or drawing,
