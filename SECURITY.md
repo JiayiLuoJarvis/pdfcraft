@@ -8,4 +8,4 @@ If the advisory form is unavailable, email security@pdfcraft.invalid. That addre
 
 ## Supported versions
 
-`pdfcraft-pdf`, `pdfcraft-forms`, and `pdfcraft-orgchart` are version `0.1.0`. That is the first publishable release. A fix lands on the default branch. There is no separate support branch.
+`pdfcraft-pdf` and `pdfcraft-forms` are `0.1.0`. `pdfcraft-orgchart` is `0.1.1`. `pdfcraft-post` is `0.2.0`. A fix lands on the default branch. There is no separate support branch.

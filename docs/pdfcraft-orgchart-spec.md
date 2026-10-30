@@ -203,7 +203,7 @@ pub enum ErrorCode {
 
 ## 5. prepare 合同（`top_n`）
 
-只折叠股东锥。`None` / `0` 恒等。`>= 1` 时每个股东子都要有展示比例。按比例降序、同比例按 `nodes` 序，保留前 N，其余合成 `__other__:{parent}`，名 `其他股东(k家)`。存活股东重算后删不可达节点。幂等。投资侧不动。
+只折叠股东锥。`None` / `0` 恒等。`>= 1` 时每个股东子都要有展示比例。按比例降序、同比例按 `nodes` 序，保留前 N，其余合成 `__other__:{parent}`，名 `其他股东(k家)`。被折掉的比例用与 CPython `math.fsum` 相同的有限和，结果须落在 `0..=100`，否则 `INVALID_PROTOCOL`。六笔 `100/6` 的和是 100，可以折叠。存活股东重算后删不可达节点。幂等。投资侧不动。
 
 折叠后再 `validate` 计入 `max_nodes`（可出现校验过、生成挂）。
 
@@ -260,11 +260,12 @@ ChartRequest
 
 非主体且解析出展示比例时，文案 `xx.xx%`（两位小数）。
 
-- 股东。`LabelHug::Bottom`（框下沿外）。
-- 投资。`LabelHug::Top`（框上沿外）。
-- 贴 stub 右侧 `RATIO_LABEL_OFFSET_X_MM`（1.2 mm）。
+- 同一节点只留第一条 fact。
+- 股东。`LabelHug::Bottom`（框下沿外）。基线是 `node.y + height + ascent(9 pt) + RATIO_LABEL_GAP_Y_MM`。
+- 投资。`LabelHug::Top`（框上沿外）。基线是 `node.y - descent(9 pt) - RATIO_LABEL_GAP_Y_MM`。这里的 descent 是基线以下的正距离，不含 `LINE_GAP_PT`。禁止用整段行高。
+- 贴 stub 右侧 `RATIO_LABEL_OFFSET_X_MM`（1.2 mm）。先找竖向 stub。股东再找侧向 stub。投资没有侧向 stub。贴边容差 0.05 mm。
 - 主体与升格后的页主体不画。
-- 无贴节点 stub 则不画。标签不进布局包围盒，不参与 fits。
+- 无贴节点 stub 则不画。节点不在本页放置结果里也不画。标签不进布局包围盒，不参与 fits。
 
 ### 8.4 公司底色
 
@@ -291,6 +292,8 @@ ChartRequest
 | 切开附页 | `{根}持有{上一层} 10.00%` 或 `{上一层}投资{根} 10.00%`。无比例则无百分号。无父边则只写根名 |
 
 页脚。`第 {i} / {n} 頁`（「頁」保持与 Python 相同）。
+
+主标题槽顶在页边距（`MAIN_TITLE_TOP_GAP_MM` 为 0）。主标题行与副标题槽顶之间是 `TITLE_LINE_GAP_MM`（1.5 mm）。页眉超出可印宽度时按 Unicode 标量二分截断，并在末尾加 U+2026。省略号本身宽于可印宽度时，该行为空字符串。
 
 续页虚框两行。股东侧 `股东详见` + `附件{N}`。投资侧 `对外投资详见` + `附件{N}`。
 
@@ -346,14 +349,14 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 - 虚线描边。整框可点到续页。不是 ContCue。
 - 若「主体 + 一个真实孩子 + 合成位」两朝向弹性都放不下，该页退回只要求物理 fits。
 
-overflow 链择优（页数、降级、续页利用率 0.35、留下孩子数等）对照源包。
+overflow 链择优（页数、降级、续页利用率 0.35、留下孩子数等）对照源包。稀疏分桶取 `gap = 0.35 - utilization`。`gap <= 0` 得 0。否则对 `gap / 0.05` 向零截断。`0.35 / 0.05` 的截断结果是 6。禁止按 0.05 逐次累加。
 
 ### 10.5 续页 ContCue
 
 - 仅在有锚点时占虚框。锚点是大族 stub，以及附页上仍被切开的 stub。
 - 股东优先锚点上方。投资优先下方。
 - 虚框与节点、边一并进包围盒与 fits。不得与节点/其它虚框/边折线相交。上下各留 `CONT_CUE_GAP_MM`。
-- 上下因挡道放不下时先撑行距，再排。仍放不下则左右放置并画指向锚点的虚线箭头。
+- 上下因挡道放不下时先撑行距，再排。仍放不下则左右放置并画指向锚点的虚线箭头。引线两端是相对边的中点。颜色与边线相同（0.2 灰）。线宽 1.0 pt。虚线节距 4 和 3。箭头长 4.5 pt，两侧各 30 度，填充同色，不描边。
 - overflow 节点不挂 ContCue。
 - 股东侧与投资侧都有页时，股东第 1 页主体下方额外画「对外投资详见 / 附件{N}」（N = 投资侧首页）。整图一页不画。股东续页不重复。
 
@@ -369,10 +372,11 @@ overflow 链择优（页数、降级、续页利用率 0.35、留下孩子数等
 
 ### 11.2 节点外观
 
-- 圆角半径 `NODE_CORNER_RADIUS_MM`（2.2 mm）。填充与描边各画一次。虚线只包描边（overflow）。
+- 圆角半径 `NODE_CORNER_RADIUS_MM`（2.2 mm）。填充与描边各画一次。虚线只包描边（overflow 与续页框、续页引线）。
+- 节点框与续页框描边是黑色。边线、边箭头填充、续页引线和引线箭头填充是 0.2 灰（字节 51）。框内文字是黑色。公司填充是 `COMPANY_SHADE`（247/255）。个人填充是白色。
 - 文字裁切用同一圆角。链接命中区用外接矩形。
-- 框内每一行在框宽内**水平居中**（折行宽仍按 `内容宽 = 框宽 − 2 * PADDING_X_MM` 测量）。
-- 主体描边更粗（`SUBJECT_BORDER_PT` 1.5 vs `NORMAL_BORDER_PT` 0.8）。
+- 框内每一行在框宽内**水平居中**（折行宽仍按 `内容宽 = 框宽 − 2 * PADDING_X_MM` 测量）。续页框文字在槽内水平居中。
+- 主体描边更粗（`SUBJECT_BORDER_PT` 1.5 vs `NORMAL_BORDER_PT` 0.8）。续页框另用 `CONT_CUE_LINE_WIDTH_PT` 1.0 与 `CONT_CUE_CORNER_MM` 1.0，虚线节距 `CONT_CUE_DASH_ON_PT` / `CONT_CUE_DASH_OFF_PT`（4 / 3）。
 
 ### 11.3 坐标
 
@@ -422,6 +426,16 @@ Python/reportlab 与 krilla 坐标约定可能不同。Rust 侧在适配层做�
 | `ARROW_SIZE_PT` | 6 |
 | `SUBJECT_BORDER_PT` / `NORMAL_BORDER_PT` | 1.5 / 0.8 |
 | `MAIN_TITLE_PT` / `SUB_TITLE_PT` | 16 / 8 |
+| `MAIN_TITLE_TOP_GAP_MM` | 0 |
+| `TITLE_LINE_GAP_MM` | 1.5 |
+| `EDGE_GRAY` | 0.2（通道字节 51） |
+| `INK_BYTE` | 0 |
+| `COMPANY_SHADE` | 247/255 |
+| `CONT_CUE_LINE_WIDTH_PT` | 1.0 |
+| `CONT_CUE_CORNER_MM` | 1.0 |
+| `CONT_CUE_DASH_ON_PT` / `CONT_CUE_DASH_OFF_PT` | 4 / 3 |
+| `LEADER_ARROW_LENGTH_FACTOR` | 0.75（箭头长 4.5 pt） |
+| `LEADER_ARROW_HALF_ANGLE_DEG` | 30 |
 | `FOOTER_TEXT_PT` | 9 |
 | `CONT_CUE_TEXT_PT` | 6 |
 | `CONT_CUE_GAP_MM` | 3 |

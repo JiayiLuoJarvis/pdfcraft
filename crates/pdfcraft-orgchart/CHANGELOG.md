@@ -7,12 +7,12 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 while remaining `0.x`. See the [workspace changelog](../../CHANGELOG.md) for
 cross-crate history.
 
-## [Unreleased] - 2026-10-27
+## [Unreleased]
 
-### Breaking
+## [0.1.1] - 2026-10-30
 
-- No breaking change in this cycle. (`CellIndex` `non_exhaustive` and the pin
-  split touch other crates; listed here only to keep the record complete.)
+Public entry points are unchanged. `validate_request`, `generate_pdf`,
+`document_title`, and `ErrorCode::as_str` keep their signatures.
 
 ### Changed
 

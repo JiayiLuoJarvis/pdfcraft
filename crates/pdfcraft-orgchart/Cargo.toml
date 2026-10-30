@@ -1,6 +1,6 @@
 [package]
 name = "pdfcraft-orgchart"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Equity and outbound-investment charts. Callers pass FontBytes. Measurement uses skrifa; drawing uses krilla."

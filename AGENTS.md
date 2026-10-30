@@ -13,7 +13,7 @@
 
 提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/pdfcraft-forms`，含对齐、按字段字号、`line_below`、`absolute_lines`、TTC 拆面与 TrueType `glyf` 子集。OTF 仍未做。不要把填表写进 `pdfcraft-pdf`。§11 确认 `pdfcraft-post`：对已有 PDF 字节做 `SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`Pipeline`。Watermark 与输入限额延后。不要把加密、合并、后处理写 Info 写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走、某页关 header/footer）不要提前做进公共 API。§2.12 已确认 `LayerMark::Rotated` 可包 path / Text / Image（`LayerShape<K>`，斜向水印）；流内 canvas 与具名 images 字典为不做。
 
-仍须遵守：未确认功能不「顺便」做。四包版本是 `0.1.0`，可以发布。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
+仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 与 `pdfcraft-forms` 是 `0.1.0`，`pdfcraft-orgchart` 是 `0.1.1`，`pdfcraft-post` 是 `0.2.0`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
 
 ## 现阶段姿态（无生产包袱）
 
@@ -35,7 +35,7 @@
 - 直依 `skrifa =0.48.0` 与 `krilla =0.8.2` 传递的 `skrifa ^0.42.0` 是两份库。2026-10-14 的解析结果是 `0.42.1`。当天 crates.io 上 krilla 最新仍是 0.8.2，升 krilla 消不掉这两份。上游 `main` 钉 `skrifa 0.44.0`，尚未发布，也不是 0.48.0。不要 fork krilla，不要改成 git 依赖。`emit` 的 `check_upem` 拒绝 units per em 不一致，夹具字形的 `TJ` 调整量锁住两边的 hmtx。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
 - 排版坐标：**左上原点，y 向下**；与 krilla 0.8.2 Surface 一致，适配器里对几何做恒等映射，不预翻转。
-- 版本保持 `0.x`。四包当前是 `0.1.0`，可以发布。
+- 版本保持 `0.x`。`pdfcraft-pdf` 与 `pdfcraft-forms` 当前是 `0.1.0`，`pdfcraft-orgchart` 是 `0.1.1`，`pdfcraft-post` 是 `0.2.0`。都可以发布。
 
 调用方式（提案书 §1，已定）：`DocumentSpec` 值，经 `layout_spec` 排版。正文流式。页眉、页脚、`behind` / `front` 在每一页绘制时由库填页码。调用方不提供闭包。`Flowable` 只在库内部，不向调用方暴露。
 

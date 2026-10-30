@@ -96,7 +96,7 @@ fn chart(font_data: Vec<u8>) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
 | `margin_mm` | Unset → `8` mm. Legal set range `(0, 40]` |
 | `title` | Used by `document_title` only. Does **not** override page headers |
 | `max_nodes` | Unset → `MAX_NODES` (`100`). Set values must be in `1..=100` |
-| `top_n` | `None` / `Some(0)` do not fold. `Some(n)` for `n >= 1` keeps at most `n` direct holders per shareholder parent |
+| `top_n` | `None` / `Some(0)` do not fold. `Some(n)` for `n >= 1` keeps at most `n` direct holders per shareholder parent. Dropped ratios are summed like CPython `math.fsum` |
 
 Constants: `MAX_NODES`, `MIN_NODE_WIDTH_MM`, `MAX_NODE_WIDTH_MM`, `MAX_MARGIN_MM`.
 
@@ -170,7 +170,9 @@ ChartRequest
   → render → PDF bytes
 ```
 
-Paper is A4. Shareholders above the subject, investments below. Chinese page
+Paper is A4. Shareholders above the subject, investments below. The main
+title starts at the page margin. The subtitle sits 1.5 mm below that line. A
+header line that does not fit the printable width ends with `…`. Chinese page
 headers and footers follow the behavior contract in the workspace spec.
 
 ---
@@ -182,12 +184,25 @@ headers and footers follow the behavior contract in the workspace spec.
 - **Box lines.** Ratios do **not** appear inside boxes. Shareholder / subject
   boxes show name and optional legal person. Investment boxes show name,
   paid-in amount, location, and approval date when present.
-- **Ratio labels.** Drawn beside stubs as `xx.xx%` when a display ratio
-  resolves. Shareholders hug below the box. Investments hug above.
+- **Ratio labels.** Text is `xx.xx%`. The label sits 1.2 mm to the right of a
+  stub that hugs the box. A node with no hugging stub is unlabeled, and so is
+  the page subject (including a promoted annex subject). Shareholders sit just
+  below the box: baseline is the box bottom plus the 9 pt ascent plus 0.4 mm.
+  Investments sit just above the box: baseline is the box top minus the 9 pt
+  descent minus 0.4 mm. That gap is not a full line height. The first fact for
+  a node is the one that is drawn.
+- **Strokes.** Node boxes and continuation boxes are black. The subject border
+  is 1.5 pt. An ordinary node border is 0.8 pt. Edges, edge-arrow fills,
+  continuation leaders, and leader-arrow fills are 0.2 gray.
+- **Continuation marks.** The dashed box uses a 1.0 pt stroke, a 1.0 mm corner,
+  and a 4 on / 3 off dash. Its text is centered in the slot. A mark placed
+  beside its anchor draws a 4.5 pt leader at 30 degrees to that anchor.
 - **Company fill.** Gray fill when `node_type == Company`, or when `node_type`
   is unset and `legal_person` is non-blank. `Person` is always white.
 - **`top_n` fold.** Excess direct shareholders become a synthetic
-  `其他股东(k家)` node. Investments are not folded by `top_n`.
+  `其他股东(k家)` node. Investments are not folded by `top_n`. The dropped
+  ratios use the same finite sum as CPython `math.fsum`, so six copies of
+  `100/6` fold to 100. A sum outside `0..=100` is `InvalidProtocol`.
 
 ---
 

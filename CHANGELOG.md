@@ -13,6 +13,15 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+### Fixed
+
+- `pdfcraft-orgchart` `0.1.1`. Public signatures stay. Drawn charts follow the
+  layout contract: ratio labels hug stubs, investment baselines use the
+  descender, node strokes are black, edges are 0.2 gray, header titles start at
+  the margin with a 1.5 mm gap and an ellipsis when they do not fit, and
+  continuation boxes use a 1.0 pt stroke and a 4/3 dash. A `top_n` fold sums
+  like CPython `math.fsum`. Column count still caps at 64.
+
 ### Scope
 
 - This release's Google style alignment covers `pdfcraft-pdf` and `pdfcraft-forms`, plus a

@@ -19,6 +19,16 @@
 //! paginates, and draws with krilla. It does **not** write a document info
 //! dictionary. Use [`document_title`] yourself if you need `/Title`.
 //!
+//! # Drawing
+//!
+//! Ratio labels sit 1.2 mm to the right of a stub that hugs the box. A node
+//! with no hugging stub is unlabeled, and so is the page subject. Shareholder
+//! labels sit just below the box. Investment labels sit just above it, using
+//! the descender plus 0.4 mm rather than a full line height. Node and
+//! continuation-box strokes are black. Edges and continuation leaders are
+//! 0.2 gray. The main title starts at the page margin. The subtitle is 1.5 mm
+//! below that line. A header line that does not fit ends with `…`.
+//!
 //! # Fonts
 //!
 //! Pass face bytes as [`FontBytes`]. [`FontBytes::new`] wraps owned bytes.

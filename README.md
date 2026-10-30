@@ -61,7 +61,7 @@ cargo run -p pdfcraft-orgchart --example equity_chart
 
 Needs `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (single-face).
 
-**Status:** `0.1.0`. The API can break before `1.0`.
+**Status:** `0.1.1`. The API can break before `1.0`.
 
 ## pdfcraft-post
 
@@ -80,7 +80,7 @@ cargo run -p pdfcraft-post --example encrypt -- in.pdf out.pdf owner-secret
 Processors: `SetMetadata`, `Encrypt`, `StampAndEncrypt`, `merge_pdfs`, `Pipeline`.
 No Watermark or input limits in this stack.
 
-**Status:** `0.1.0`. The API can break before `1.0`.
+**Status:** `0.2.0`. The API can break before `1.0`.
 
 ## Contributing
 

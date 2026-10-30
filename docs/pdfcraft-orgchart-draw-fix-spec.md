@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-30 |
-| 状态 | 待实现。本文只定合同，不含实现 |
+| 状态 | 已实现，随 `pdfcraft-orgchart` `0.1.1` 发布。本文仍是该次绘制合同，不含实现步骤 |
 | 对照 | Python `pdfcraft-equity`，提交 `50852663e2e03c8636400a75505ea0af838ca647` |
 | 上位 | [`pdfcraft-orgchart-spec.md`](pdfcraft-orgchart-spec.md) 的协议、页角色、文案、错误码。[`pdfcraft-orgchart-structure-spec.md`](pdfcraft-orgchart-structure-spec.md) 的模块方向和 `count_units` 上限 |
 
