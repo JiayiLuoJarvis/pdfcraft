@@ -30,6 +30,9 @@ read-fonts = { workspace = true, features = ["std"] }
 skrifa = { workspace = true, default-features = false, features = ["std"] }
 krilla = { workspace = true }
 
+[dev-dependencies]
+lopdf = { workspace = true }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "deny"

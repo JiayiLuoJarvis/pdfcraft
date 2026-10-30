@@ -183,6 +183,14 @@ impl FontMetrics {
         pt_to_mm(self.ascent / self.upem * size_pt)
     }
 
+    /// Distance from the baseline down to the descender, in mm.
+    ///
+    /// The value is positive. It does not include the 2 pt line gap.
+    #[must_use]
+    pub fn descent_mm(&self, size_pt: f64) -> f64 {
+        pt_to_mm(self.descent / self.upem * size_pt)
+    }
+
     /// Face bytes passed to krilla. The same buffer skrifa measured.
     #[must_use]
     pub(crate) fn bytes(&self) -> &Arc<Vec<u8>> {

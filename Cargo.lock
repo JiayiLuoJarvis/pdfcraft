@@ -751,6 +751,7 @@ name = "pdfcraft-orgchart"
 version = "0.1.0"
 dependencies = [
  "krilla",
+ "lopdf",
  "read-fonts 0.45.0",
  "skrifa 0.48.0",
 ]

@@ -1198,10 +1198,15 @@ fn sparse_buckets(utilization: f64) -> usize {
     if gap <= 0.0 {
         return 0;
     }
+    let quot = gap / UTILIZATION_BUCKET;
+    if !quot.is_finite() || quot <= 0.0 {
+        return 0;
+    }
+    let whole = quot.trunc();
     let mut count = 0_usize;
     let mut cursor = 0.0;
-    while cursor + UTILIZATION_BUCKET <= gap && count < 64 {
-        cursor += UTILIZATION_BUCKET;
+    while cursor + 1.0 <= whole {
+        cursor += 1.0;
         count += 1;
     }
     count
@@ -1232,5 +1237,22 @@ impl Clone for ChainPage {
             degraded: self.degraded,
             node_ids: self.node_ids.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sparse_buckets;
+
+    #[test]
+    fn a_utilization_gap_of_0_35_counts_six_buckets() {
+        assert_eq!(sparse_buckets(0.0), 6);
+        assert_eq!(sparse_buckets(0.05), 5);
+    }
+
+    #[test]
+    fn a_non_positive_utilization_gap_counts_zero_buckets() {
+        assert_eq!(sparse_buckets(0.35), 0);
+        assert_eq!(sparse_buckets(0.5), 0);
     }
 }

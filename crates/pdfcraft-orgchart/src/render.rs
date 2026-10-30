@@ -16,17 +16,18 @@ use krilla::text::{Font, GlyphId, KrillaGlyph};
 use krilla::{Data, Document, SerializeSettings};
 
 use crate::captions::{cont_cue_lines, footer};
-use crate::display::LabelHug;
 use crate::error::{Error, ErrorCode};
 use crate::ids::NodeId;
 use crate::measure::{FontMetrics, GlyphUse, NodeBox};
-use crate::page::{PageSpec, PlacedNode};
+use crate::page::{CueSlot, PageSpec, PlacedNode, PointMm};
+use crate::ratios::{place_ratio_labels, RatioMetrics};
 use crate::units::{
-    mm_to_pt, ARROW_SIZE_PT, COMPANY_SHADE, CONT_CUE_DASH_OFF_PT, CONT_CUE_DASH_ON_PT,
-    CONT_CUE_LINE_GAP_MM, CONT_CUE_PAD_MM, CONT_CUE_TEXT_PT, EDGE_WIDTH_PT, FOOTER_TEXT_PT,
-    MAIN_TITLE_PT, NODE_CORNER_RADIUS_MM, NORMAL_BORDER_PT, PADDING_Y_MM, PAGE_NUMBER_INSET_MM,
-    RATIO_FONT_PT, RATIO_LABEL_GAP_Y_MM, RATIO_LABEL_OFFSET_X_MM, SUBJECT_BORDER_PT,
-    SUBJECT_PADDING_Y_MM, SUB_TITLE_PT,
+    mm_to_pt, PageGeometry, ARROW_SIZE_PT, COMPANY_SHADE, CONT_CUE_CORNER_MM, CONT_CUE_DASH_OFF_PT,
+    CONT_CUE_DASH_ON_PT, CONT_CUE_LINE_GAP_MM, CONT_CUE_LINE_WIDTH_PT, CONT_CUE_PAD_MM,
+    CONT_CUE_TEXT_PT, EDGE_GRAY, EDGE_WIDTH_PT, FOOTER_TEXT_PT, INK_BYTE,
+    LEADER_ARROW_HALF_ANGLE_DEG, LEADER_ARROW_LENGTH_FACTOR, MAIN_TITLE_PT, MAIN_TITLE_TOP_GAP_MM,
+    NODE_CORNER_RADIUS_MM, NORMAL_BORDER_PT, PADDING_Y_MM, PAGE_NUMBER_INSET_MM, RATIO_FONT_PT,
+    SUBJECT_BORDER_PT, SUBJECT_PADDING_Y_MM, SUB_TITLE_PT, TITLE_LINE_GAP_MM,
 };
 
 /// Paint `pages` into PDF bytes. Does not write document info.
@@ -34,7 +35,7 @@ use crate::units::{
 /// # Errors
 ///
 /// Returns [`ErrorCode::FontError`] when krilla rejects the face, and glyph errors.
-/// A placed node or ratio label with no measured box is [`ErrorCode::LayoutFailed`].
+/// A placed node with no measured box is [`ErrorCode::LayoutFailed`].
 pub(crate) fn render(pages: &[PageSpec], font: &mut FontMetrics) -> Result<Vec<u8>, Error> {
     let mut document = Document::new_with(SerializeSettings {
         enable_tagging: false,
@@ -76,7 +77,7 @@ fn draw_page(
                 .iter()
                 .map(|point| (point.x + origin_x, point.y + origin_y))
                 .collect();
-            stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, false, edge.draw_arrow);
+            stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, edge.draw_arrow);
         }
         let box_by_id: HashMap<NodeId, &NodeBox> =
             page.boxes.iter().map(|box_| (box_.id, box_)).collect();
@@ -89,15 +90,7 @@ fn draw_page(
             })?;
             draw_node(&mut surface, node, box_, origin_x, origin_y, font, face)?;
         }
-        draw_ratios(
-            &mut surface,
-            page,
-            &box_by_id,
-            origin_x,
-            origin_y,
-            font,
-            face,
-        )?;
+        draw_ratios(&mut surface, page, origin_x, origin_y, font, face)?;
         draw_cues(&mut surface, page, origin_x, origin_y, font, face)?;
         draw_footer(&mut surface, page, page_count, index, font, face)?;
         surface.finish();
@@ -182,30 +175,89 @@ fn draw_titles(
     font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
-    let width = page.geometry.page_width_mm;
-    let y = page.geometry.margin_mm + 1.0;
+    let header = header_slots(page.geometry, &page.main_title, &page.sub_title, font)?;
     center_text(
         surface,
-        &page.main_title,
+        &header.main_text,
         font,
         face,
         MAIN_TITLE_PT,
-        0.0,
-        width,
-        y,
+        header.left_mm,
+        header.width_mm,
+        header.main_top_mm,
     )?;
-    let sub_y = y + font.line_height_mm(MAIN_TITLE_PT);
     center_text(
         surface,
-        &page.sub_title,
+        &header.sub_text,
         font,
         face,
         SUB_TITLE_PT,
-        0.0,
-        width,
-        sub_y,
+        header.left_mm,
+        header.width_mm,
+        header.sub_top_mm,
     )?;
     Ok(())
+}
+
+struct HeaderSlots {
+    left_mm: f64,
+    width_mm: f64,
+    main_top_mm: f64,
+    sub_top_mm: f64,
+    main_text: String,
+    sub_text: String,
+}
+
+fn header_slots(
+    geometry: PageGeometry,
+    main_title: &str,
+    sub_title: &str,
+    measurer: &mut impl crate::measure::Measurer,
+) -> Result<HeaderSlots, Error> {
+    let width_mm = geometry.printable_width_mm();
+    let main_top_mm = geometry.margin_mm + MAIN_TITLE_TOP_GAP_MM;
+    let sub_top_mm = main_top_mm + measurer.line_height_mm(MAIN_TITLE_PT) + TITLE_LINE_GAP_MM;
+    let main_text = fit_header_line(measurer, main_title, MAIN_TITLE_PT, width_mm)?;
+    let sub_text = fit_header_line(measurer, sub_title, SUB_TITLE_PT, width_mm)?;
+    Ok(HeaderSlots {
+        left_mm: geometry.margin_mm,
+        width_mm,
+        main_top_mm,
+        sub_top_mm,
+        main_text,
+        sub_text,
+    })
+}
+
+fn fit_header_line(
+    measurer: &mut impl crate::measure::Measurer,
+    text: &str,
+    size_pt: f64,
+    max_width_mm: f64,
+) -> Result<String, Error> {
+    if measurer.string_width_mm(text, size_pt)? <= max_width_mm {
+        return Ok(text.to_owned());
+    }
+    let ellipsis = "…";
+    if measurer.string_width_mm(ellipsis, size_pt)? > max_width_mm {
+        return Ok(String::new());
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut lo = 0_usize;
+    let mut hi = chars.len();
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        let mut candidate: String = chars[..mid].iter().collect();
+        candidate.push('…');
+        if measurer.string_width_mm(&candidate, size_pt)? <= max_width_mm {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    let mut fitted: String = chars[..lo].iter().collect();
+    fitted.push('…');
+    Ok(fitted)
 }
 
 fn draw_cues(
@@ -227,34 +279,44 @@ fn draw_cues(
         };
         let x = slot.x + origin_x;
         let y = slot.y + origin_y;
-        stroke_round(
-            surface,
-            x,
-            y,
-            slot.width,
-            slot.height,
-            pt_f32(NORMAL_BORDER_PT),
-            true,
-        );
+        stroke_cue_box(surface, x, y, slot.width, slot.height);
+        if slot.needs_leader {
+            if let Some(anchor) = page
+                .layout
+                .nodes
+                .iter()
+                .find(|node| node.protocol_id == slot.anchor_id)
+            {
+                let (from, to) = leader_segment(slot, anchor);
+                stroke_leader(
+                    surface,
+                    (from.x + origin_x, from.y + origin_y),
+                    (to.x + origin_x, to.y + origin_y),
+                );
+            }
+        }
         let (first, second) = cont_cue_lines(cue.target_page, cue.side);
         let text_y = y + CONT_CUE_PAD_MM;
-        draw_text(
+        let next_y = text_y + font.line_height_mm(CONT_CUE_TEXT_PT) + CONT_CUE_LINE_GAP_MM;
+        center_text(
             surface,
             &first,
             font,
             face,
             CONT_CUE_TEXT_PT,
-            x + CONT_CUE_PAD_MM,
+            x,
+            slot.width,
             text_y,
         )?;
-        draw_text(
+        center_text(
             surface,
             &second,
             font,
             face,
             CONT_CUE_TEXT_PT,
-            x + CONT_CUE_PAD_MM,
-            text_y + font.line_height_mm(CONT_CUE_TEXT_PT) + CONT_CUE_LINE_GAP_MM,
+            x,
+            slot.width,
+            next_y,
         )?;
     }
     Ok(())
@@ -297,6 +359,7 @@ fn draw_node(
         node.width_mm,
         node.height_mm,
         rgb::Color::new(byte, byte, byte),
+        NODE_CORNER_RADIUS_MM,
     );
     let width = if node.is_subject {
         SUBJECT_BORDER_PT
@@ -311,13 +374,14 @@ fn draw_node(
         node.height_mm,
         pt_f32(width),
         dashed,
+        NODE_CORNER_RADIUS_MM,
     );
     let pad_y = if node.is_subject {
         SUBJECT_PADDING_Y_MM
     } else {
         PADDING_Y_MM
     };
-    if let Some(path) = round_path(x, y0, node.width_mm, node.height_mm) {
+    if let Some(path) = round_path(x, y0, node.width_mm, node.height_mm, NODE_CORNER_RADIUS_MM) {
         surface.push_clip_path(&path, &FillRule::NonZero);
         let drawn = paint_node_lines(surface, node, x, y0 + pad_y, font, face);
         surface.pop();
@@ -373,38 +437,145 @@ fn gray_byte(shade: f64) -> u8 {
 fn draw_ratios(
     surface: &mut Surface<'_>,
     page: &PageSpec,
-    box_by_id: &HashMap<NodeId, &NodeBox>,
     origin_x: f64,
     origin_y: f64,
     font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
-    let node_by_id: HashMap<NodeId, &PlacedNode> = page
-        .layout
-        .nodes
-        .iter()
-        .map(|node| (node.id, node))
-        .collect();
-    for fact in &page.ratio_facts {
-        let node = node_by_id.get(&fact.node_id).copied().ok_or_else(|| {
-            Error::new(
-                ErrorCode::LayoutFailed,
-                format!("ratio label {} is not placed on the page", fact.protocol_id),
-            )
-        })?;
-        if box_by_id.get(&node.id).is_some_and(|box_| box_.is_subject) {
-            continue;
-        }
-        let x = node.x + origin_x + node.width / 2.0 + RATIO_LABEL_OFFSET_X_MM;
-        let y = match fact.hug {
-            LabelHug::Bottom => node.y + origin_y + node.height + RATIO_LABEL_GAP_Y_MM,
-            LabelHug::Top => {
-                node.y + origin_y - RATIO_LABEL_GAP_Y_MM - font.line_height_mm(RATIO_FONT_PT)
-            }
-        };
-        draw_text(surface, &fact.text, font, face, RATIO_FONT_PT, x, y)?;
+    let metrics = RatioMetrics {
+        ascent_mm: font.ascent_mm(RATIO_FONT_PT),
+        descent_mm: font.descent_mm(RATIO_FONT_PT),
+    };
+    for label in place_ratio_labels(page, metrics) {
+        let ascent = font.ascent_mm(RATIO_FONT_PT);
+        draw_text(
+            surface,
+            &label.text,
+            font,
+            face,
+            RATIO_FONT_PT,
+            label.x_mm + origin_x,
+            label.baseline_y_mm - ascent + origin_y,
+        )?;
     }
     Ok(())
+}
+
+fn centered_x(left_mm: f64, width_mm: f64, text_width_mm: f64) -> f64 {
+    left_mm + (width_mm - text_width_mm) / 2.0
+}
+
+fn leader_segment(slot: &CueSlot, anchor: &PlacedNode) -> (PointMm, PointMm) {
+    let slot_center = PointMm {
+        x: slot.x + slot.width / 2.0,
+        y: slot.y + slot.height / 2.0,
+    };
+    let anchor_center = PointMm {
+        x: anchor.x + anchor.width / 2.0,
+        y: anchor.y + anchor.height / 2.0,
+    };
+    let dx = anchor_center.x - slot_center.x;
+    let dy = anchor_center.y - slot_center.y;
+    if dx.abs() >= dy.abs() {
+        if dx >= 0.0 {
+            (
+                PointMm {
+                    x: slot.x + slot.width,
+                    y: slot_center.y,
+                },
+                PointMm {
+                    x: anchor.x,
+                    y: anchor_center.y,
+                },
+            )
+        } else {
+            (
+                PointMm {
+                    x: slot.x,
+                    y: slot_center.y,
+                },
+                PointMm {
+                    x: anchor.x + anchor.width,
+                    y: anchor_center.y,
+                },
+            )
+        }
+    } else if dy >= 0.0 {
+        (
+            PointMm {
+                x: slot_center.x,
+                y: slot.y + slot.height,
+            },
+            PointMm {
+                x: anchor_center.x,
+                y: anchor.y,
+            },
+        )
+    } else {
+        (
+            PointMm {
+                x: slot_center.x,
+                y: slot.y,
+            },
+            PointMm {
+                x: anchor_center.x,
+                y: anchor.y + anchor.height,
+            },
+        )
+    }
+}
+
+fn leader_arrow_length_pt() -> f64 {
+    ARROW_SIZE_PT * LEADER_ARROW_LENGTH_FACTOR
+}
+
+fn stroke_leader(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)) {
+    let mut path = PathBuilder::new();
+    path.move_to(pt(from.0), pt(from.1));
+    path.line_to(pt(to.0), pt(to.1));
+    let Some(path) = path.finish() else {
+        return;
+    };
+    surface.set_fill(None);
+    surface.set_stroke(Some(paint_stroke(
+        pt_f32(CONT_CUE_LINE_WIDTH_PT),
+        true,
+        edge_color(),
+    )));
+    surface.draw_path(&path);
+    fill_leader_arrow(surface, from, to);
+}
+
+fn fill_leader_arrow(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)) {
+    let dx = mm_to_pt(to.0 - from.0);
+    let dy = mm_to_pt(to.1 - from.1);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.01 {
+        return;
+    }
+    let ux = dx / len;
+    let uy = dy / len;
+    let length = pt_f32(leader_arrow_length_pt());
+    let wing = pt_f32(leader_arrow_length_pt() * LEADER_ARROW_HALF_ANGLE_DEG.to_radians().tan());
+    let tip_x = pt(to.0);
+    let tip_y = pt(to.1);
+    let unit_x = pt_f32(ux);
+    let unit_y = pt_f32(uy);
+    let base_x = tip_x - unit_x * length;
+    let base_y = tip_y - unit_y * length;
+    let px = -unit_y * wing;
+    let py = unit_x * wing;
+    let mut path = PathBuilder::new();
+    path.move_to(tip_x, tip_y);
+    path.line_to(base_x + px, base_y + py);
+    path.line_to(base_x - px, base_y - py);
+    path.close();
+    let Some(path) = path.finish() else {
+        return;
+    };
+    surface.set_fill(Some(solid(edge_color())));
+    surface.set_stroke(None);
+    surface.draw_path(&path);
 }
 
 fn center_text(
@@ -421,7 +592,7 @@ fn center_text(
         return Ok(());
     }
     let text_width = font.string_width_mm(text, size_pt)?;
-    let x = left_mm + (width_mm - text_width) / 2.0;
+    let x = centered_x(left_mm, width_mm, text_width);
     draw_text(surface, text, font, face, size_pt, x, y_mm)
 }
 
@@ -473,12 +644,29 @@ fn krilla_glyphs(glyphs: &[GlyphUse], text: &str, upem: f64) -> Vec<KrillaGlyph>
     out
 }
 
-fn fill_round(surface: &mut Surface<'_>, x: f64, y: f64, w: f64, h: f64, color: rgb::Color) {
-    let Some(path) = round_path(x, y, w, h) else {
+fn fill_round(
+    surface: &mut Surface<'_>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    color: rgb::Color,
+    radius_mm: f64,
+) {
+    let Some(path) = round_path(x, y, w, h, radius_mm) else {
         return;
     };
     surface.set_fill(Some(solid(color)));
     surface.set_stroke(None);
+    surface.draw_path(&path);
+}
+
+fn stroke_cue_box(surface: &mut Surface<'_>, x: f64, y: f64, w: f64, h: f64) {
+    let Some(path) = round_path(x, y, w, h, CONT_CUE_CORNER_MM) else {
+        return;
+    };
+    surface.set_fill(None);
+    surface.set_stroke(Some(ink_stroke(pt_f32(CONT_CUE_LINE_WIDTH_PT), true)));
     surface.draw_path(&path);
 }
 
@@ -490,22 +678,17 @@ fn stroke_round(
     h: f64,
     width_pt: f32,
     dashed: bool,
+    radius_mm: f64,
 ) {
-    let Some(path) = round_path(x, y, w, h) else {
+    let Some(path) = round_path(x, y, w, h, radius_mm) else {
         return;
     };
     surface.set_fill(None);
-    surface.set_stroke(Some(stroke(width_pt, dashed)));
+    surface.set_stroke(Some(ink_stroke(width_pt, dashed)));
     surface.draw_path(&path);
 }
 
-fn stroke_poly(
-    surface: &mut Surface<'_>,
-    points: &[(f64, f64)],
-    width_pt: f64,
-    dashed: bool,
-    draw_arrow: bool,
-) {
+fn stroke_poly(surface: &mut Surface<'_>, points: &[(f64, f64)], width_pt: f64, draw_arrow: bool) {
     if points.len() < 2 {
         return;
     }
@@ -519,7 +702,7 @@ fn stroke_poly(
         return;
     };
     surface.set_fill(None);
-    surface.set_stroke(Some(stroke(pt_f32(width_pt), dashed)));
+    surface.set_stroke(Some(edge_stroke(pt_f32(width_pt))));
     surface.draw_path(&path);
     if draw_arrow {
         arrow(surface, points);
@@ -555,7 +738,7 @@ fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {
     let Some(path) = path.finish() else {
         return;
     };
-    surface.set_fill(Some(solid(rgb::Color::new(51, 51, 51))));
+    surface.set_fill(Some(solid(edge_color())));
     surface.set_stroke(None);
     surface.draw_path(&path);
 }
@@ -564,10 +747,14 @@ fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {
     clippy::many_single_char_names,
     reason = "x/y/w/h are rectangle geometry params"
 )]
-fn round_path(x_mm: f64, y_mm: f64, width_mm: f64, height_mm: f64) -> Option<krilla::geom::Path> {
-    let radius_mm = NODE_CORNER_RADIUS_MM
-        .min(width_mm / 2.0)
-        .min(height_mm / 2.0);
+fn round_path(
+    x_mm: f64,
+    y_mm: f64,
+    width_mm: f64,
+    height_mm: f64,
+    radius_mm: f64,
+) -> Option<krilla::geom::Path> {
+    let radius_mm = radius_mm.min(width_mm / 2.0).min(height_mm / 2.0);
     let left = pt(x_mm);
     let top = pt(y_mm);
     let width = pt(width_mm);
@@ -624,9 +811,26 @@ fn solid(color: rgb::Color) -> Fill {
     }
 }
 
-fn stroke(width_pt: f32, dashed: bool) -> Stroke {
+fn ink_color() -> rgb::Color {
+    rgb::Color::new(INK_BYTE, INK_BYTE, INK_BYTE)
+}
+
+fn edge_color() -> rgb::Color {
+    let byte = gray_byte(EDGE_GRAY);
+    rgb::Color::new(byte, byte, byte)
+}
+
+fn ink_stroke(width_pt: f32, dashed: bool) -> Stroke {
+    paint_stroke(width_pt, dashed, ink_color())
+}
+
+fn edge_stroke(width_pt: f32) -> Stroke {
+    paint_stroke(width_pt, false, edge_color())
+}
+
+fn paint_stroke(width_pt: f32, dashed: bool, color: rgb::Color) -> Stroke {
     Stroke {
-        paint: rgb::Color::new(20, 20, 20).into(),
+        paint: color.into(),
         width: width_pt,
         dash: dashed.then(|| StrokeDash {
             array: vec![pt_f32(CONT_CUE_DASH_ON_PT), pt_f32(CONT_CUE_DASH_OFF_PT)],
@@ -638,4 +842,135 @@ fn stroke(width_pt: f32, dashed: bool) -> Stroke {
 
 fn rect_pt(x: f64, y: f64, w: f64, h: f64) -> Option<Rect> {
     Rect::from_xywh(pt(x), pt(y), pt(w), pt(h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        centered_x, fit_header_line, header_slots, leader_arrow_length_pt, leader_segment,
+    };
+    use crate::error::Error;
+    use crate::measure::Measurer;
+    use crate::units::PageGeometry;
+
+    struct Widths {
+        per_char_mm: f64,
+        ellipsis_mm: f64,
+    }
+
+    impl Measurer for Widths {
+        fn string_width_mm(&mut self, text: &str, _size_pt: f64) -> Result<f64, Error> {
+            let mut width = 0.0;
+            for ch in text.chars() {
+                width += if ch == '…' {
+                    self.ellipsis_mm
+                } else {
+                    self.per_char_mm
+                };
+            }
+            Ok(width)
+        }
+
+        fn line_height_mm(&mut self, size_pt: f64) -> f64 {
+            size_pt
+        }
+
+        fn ensure_glyphs(&mut self, _text: &str) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    fn near(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+    }
+
+    #[test]
+    fn main_title_slot_starts_at_the_page_margin() {
+        let geometry = PageGeometry::default();
+        let mut widths = Widths {
+            per_char_mm: 1.0,
+            ellipsis_mm: 1.0,
+        };
+        let slots = header_slots(geometry, "主体", "副标题", &mut widths).expect("slots");
+        near(slots.main_top_mm, 8.0);
+        near(slots.sub_top_mm, 8.0 + 16.0 + 1.5);
+        near(slots.left_mm, 8.0);
+        near(slots.width_mm, 210.0 - 16.0);
+        near(
+            slots.left_mm + slots.width_mm / 2.0,
+            geometry.page_width_mm / 2.0,
+        );
+        assert_eq!(slots.main_text, "主体");
+        assert_eq!(slots.sub_text, "副标题");
+    }
+
+    #[test]
+    fn overlong_header_ends_with_an_ellipsis() {
+        let geometry = PageGeometry::default();
+        let mut widths = Widths {
+            per_char_mm: 100.0,
+            ellipsis_mm: 10.0,
+        };
+        let slots = header_slots(geometry, "甲乙丙", "短", &mut widths).expect("slots");
+        assert_eq!(slots.main_text, "甲…");
+        assert!(slots.main_text.ends_with('…'));
+        assert_eq!(slots.sub_text, "短");
+    }
+
+    #[test]
+    fn header_ellipsis_wider_than_the_page_is_blank() {
+        let mut widths = Widths {
+            per_char_mm: 100.0,
+            ellipsis_mm: 1_000.0,
+        };
+        let fitted = fit_header_line(&mut widths, "甲乙", 16.0, 194.0).expect("fit");
+        assert_eq!(fitted, "");
+    }
+
+    #[test]
+    fn cue_text_starts_in_the_slot_not_at_the_pad() {
+        let x = centered_x(10.0, 40.0, 10.0);
+        near(x, 25.0);
+        assert!((x - 12.0).abs() > 1.0);
+    }
+
+    #[test]
+    fn a_side_leader_joins_facing_edge_midpoints() {
+        let slot = crate::page::CueSlot {
+            anchor_id: "a".to_owned(),
+            side: crate::captions::CueSide::Shareholder,
+            x: 0.0,
+            y: 10.0,
+            width: 20.0,
+            height: 10.0,
+            needs_leader: true,
+        };
+        let anchor = crate::page::PlacedNode {
+            id: crate::ids::NodeId::from_index(0),
+            protocol_id: "a".to_owned(),
+            x: 40.0,
+            y: 10.0,
+            width: 20.0,
+            height: 10.0,
+        };
+        let (from, to) = leader_segment(&slot, &anchor);
+        near(from.x, 20.0);
+        near(from.y, 15.0);
+        near(to.x, 40.0);
+        near(to.y, 15.0);
+    }
+
+    #[test]
+    fn leader_arrow_is_four_point_five_pt_at_thirty_degrees() {
+        near(leader_arrow_length_pt(), 4.5);
+        let wing = crate::units::LEADER_ARROW_HALF_ANGLE_DEG.to_radians().tan();
+        near(wing, 3.0_f64.sqrt().recip());
+        assert!((wing - 0.45).abs() > 0.05);
+    }
+
+    #[test]
+    fn continuation_box_stroke_is_one_point_and_one_millimetre() {
+        near(crate::units::CONT_CUE_LINE_WIDTH_PT, 1.0);
+        near(crate::units::CONT_CUE_CORNER_MM, 1.0);
+    }
 }

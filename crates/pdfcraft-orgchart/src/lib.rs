@@ -83,6 +83,7 @@ mod model;
 mod page;
 mod paging;
 mod prepare;
+mod ratios;
 mod render;
 #[cfg(test)]
 mod test_font;

@@ -506,3 +506,65 @@ fn write_overflow_line(
         ..box_.clone()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{absorb_cue_slots, CueAnchorSize};
+    use crate::captions::CueSide;
+    use crate::ids::NodeId;
+    use crate::page::{LayoutResult, PlacedNode};
+    use crate::units::PageGeometry;
+
+    fn node(
+        index: usize,
+        protocol_id: &str,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> PlacedNode {
+        PlacedNode {
+            id: NodeId::from_index(index),
+            protocol_id: protocol_id.to_owned(),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn placed_slot(nodes: Vec<PlacedNode>) -> crate::page::CueSlot {
+        let anchor = CueAnchorSize {
+            anchor_id: "anchor".to_owned(),
+            side: CueSide::Shareholder,
+            width_mm: 30.0,
+            height_mm: 14.0,
+        };
+        let layout = LayoutResult::from_parts(nodes, Vec::new(), Vec::new()).expect("layout");
+        let placed = absorb_cue_slots(
+            &[anchor],
+            move |_gap| Ok(layout.clone()),
+            PageGeometry::default(),
+        )
+        .expect("place")
+        .expect("slot fits");
+        placed.slots.into_iter().next().expect("one slot")
+    }
+
+    #[test]
+    fn a_cue_above_its_anchor_does_not_need_a_leader() {
+        let slot = placed_slot(vec![node(0, "anchor", 100.0, 80.0, 40.0, 20.0)]);
+        assert!(!slot.needs_leader);
+        assert!(slot.y < 80.0);
+    }
+
+    #[test]
+    fn a_cue_beside_its_anchor_needs_a_leader() {
+        let slot = placed_slot(vec![
+            node(0, "anchor", 100.0, 80.0, 40.0, 20.0),
+            node(1, "block", 105.0, 63.0, 30.0, 14.0),
+        ]);
+        assert!(slot.needs_leader);
+        assert!(slot.x + slot.width < 100.0);
+    }
+}

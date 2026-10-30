@@ -30,10 +30,20 @@ pub(crate) const RATIO_LABEL_OFFSET_X_MM: f64 = 1.2;
 pub(crate) const RATIO_LABEL_GAP_Y_MM: f64 = 0.4;
 pub(crate) const SHAREHOLDER_STUB_MIN_MM: f64 = 6.5;
 pub(crate) const EDGE_WIDTH_PT: f64 = 0.7;
+/// Black stroke for node boxes and continuation boxes.
+pub(crate) const INK_BYTE: u8 = 0;
+/// Gray for edges, edge arrows, continuation leaders, and leader arrows.
+///
+/// An 8-bit channel of this gray is byte 51.
+pub(crate) const EDGE_GRAY: f64 = 0.2;
 pub(crate) const ARROW_SIZE_PT: f64 = 6.0;
 pub(crate) const SUBJECT_BORDER_PT: f64 = 1.5;
 pub(crate) const NORMAL_BORDER_PT: f64 = 0.8;
 pub(crate) const MAIN_TITLE_PT: f64 = 16.0;
+/// Gap from the page margin down to the main-title slot top.
+pub(crate) const MAIN_TITLE_TOP_GAP_MM: f64 = 0.0;
+/// Gap between the main-title line and the subtitle slot top.
+pub(crate) const TITLE_LINE_GAP_MM: f64 = 1.5;
 pub(crate) const SUB_TITLE_PT: f64 = 8.0;
 pub(crate) const FOOTER_TEXT_PT: f64 = 9.0;
 pub(crate) const CONT_CUE_TEXT_PT: f64 = 6.0;
@@ -45,6 +55,14 @@ pub(crate) const CONT_CUE_PAGE_DIGITS: f64 = 3.0;
 pub(crate) const CONT_CUE_GAP_MM: f64 = 3.0;
 pub(crate) const CONT_CUE_DASH_ON_PT: f64 = 4.0;
 pub(crate) const CONT_CUE_DASH_OFF_PT: f64 = 3.0;
+/// Continuation-box stroke width. Node boxes stay on their own widths.
+pub(crate) const CONT_CUE_LINE_WIDTH_PT: f64 = 1.0;
+/// Continuation-box corner radius. Node boxes stay at `NODE_CORNER_RADIUS_MM`.
+pub(crate) const CONT_CUE_CORNER_MM: f64 = 1.0;
+/// Leader arrow length as a fraction of `ARROW_SIZE_PT`. The drawn length is 4.5 pt.
+pub(crate) const LEADER_ARROW_LENGTH_FACTOR: f64 = 0.75;
+/// Leader arrow half-angle, degrees each side of the shaft. Edge arrows stay at 0.45.
+pub(crate) const LEADER_ARROW_HALF_ANGLE_DEG: f64 = 30.0;
 pub(crate) const PAGE_NUMBER_INSET_MM: f64 = 5.0;
 pub(crate) const COMPANY_SHADE: f64 = 247.0 / 255.0;
 
@@ -163,9 +181,13 @@ impl PageGeometry {
 }
 
 fn count_units(value: f64) -> usize {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    let whole = value.trunc();
     let mut count = 0_usize;
     let mut cursor = 0.0;
-    while cursor + 1.0 <= value && count < 64 {
+    while cursor + 1.0 <= whole && count < 64 {
         cursor += 1.0;
         count += 1;
     }
@@ -175,5 +197,41 @@ fn count_units(value: f64) -> usize {
 impl Default for PageGeometry {
     fn default() -> Self {
         Self::portrait(MARGIN_MM)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PageGeometry, NODE_SPACING_MM, NODE_WIDTH_MM};
+
+    #[test]
+    fn default_portrait_fits_four_columns() {
+        assert_eq!(PageGeometry::default().max_cols(NODE_WIDTH_MM), 4);
+    }
+
+    #[test]
+    fn default_landscape_fits_six_columns() {
+        assert_eq!(
+            PageGeometry::default().landscape().max_cols(NODE_WIDTH_MM),
+            6
+        );
+    }
+
+    #[test]
+    fn a_raw_count_above_64_stays_at_64() {
+        let geometry = PageGeometry {
+            page_width_mm: 20_000.0,
+            page_height_mm: 297.0,
+            margin_mm: 0.0,
+            header_height_mm: 0.0,
+            footer_height_mm: 0.0,
+        };
+        assert_eq!(geometry.max_cols(1.0), 64);
+    }
+
+    #[test]
+    fn a_non_positive_pitch_is_one_column() {
+        assert_eq!(PageGeometry::default().max_cols(-NODE_SPACING_MM), 1);
+        assert_eq!(PageGeometry::default().max_cols(-NODE_SPACING_MM - 1.0), 1);
     }
 }

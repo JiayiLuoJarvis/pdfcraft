@@ -1,7 +1,7 @@
 //! Placed nodes, cue slots, and one finished page.
 
 use crate::captions::CueSide;
-use crate::display::RatioFact;
+use crate::display::{LabelHug, RatioFact};
 use crate::error::{Error, ErrorCode};
 use crate::graph::OVERFLOW_ID_PREFIX;
 use crate::ids::NodeId;
@@ -182,6 +182,40 @@ impl LayoutResult {
     }
 }
 
+/// Which box edge a ratio label hugs.
+///
+/// Placement reads this instead of [`LabelHug`], so the ratio module does not
+/// depend on `display`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RatioHug {
+    /// Shareholder. The label sits under the box.
+    Bottom,
+    /// Investment. The label sits above the box.
+    Top,
+}
+
+/// Protocol ids of the holding edge a percent was copied from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreferredParent {
+    /// Holder protocol id.
+    pub from_id: String,
+    /// Held protocol id.
+    pub to_id: String,
+}
+
+/// One ratio fact reduced to the fields placement needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RatioAnchor {
+    /// Layout identity.
+    pub node_id: NodeId,
+    /// `xx.xx%`.
+    pub text: String,
+    /// Which edge of the box the label hugs.
+    pub hug: RatioHug,
+    /// Parent edge when the percent came from that edge.
+    pub preferred_parent: Option<PreferredParent>,
+}
+
 /// Navigation cue. The drawn box is the matching [`CueSlot`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContCue {
@@ -226,6 +260,26 @@ pub struct PageSpec {
 }
 
 impl PageSpec {
+    /// Facts in page order, with hug and parent ids only.
+    #[must_use]
+    pub(crate) fn ratio_anchors(&self) -> Vec<RatioAnchor> {
+        self.ratio_facts
+            .iter()
+            .map(|fact| RatioAnchor {
+                node_id: fact.node_id,
+                text: fact.text.clone(),
+                hug: match fact.hug {
+                    LabelHug::Bottom => RatioHug::Bottom,
+                    LabelHug::Top => RatioHug::Top,
+                },
+                preferred_parent: fact.preferred_parent.as_ref().map(|edge| PreferredParent {
+                    from_id: edge.from_id.clone(),
+                    to_id: edge.to_id.clone(),
+                }),
+            })
+            .collect()
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         let overflow_ids: Vec<&str> = self
             .boxes

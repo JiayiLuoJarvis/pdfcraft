@@ -150,6 +150,8 @@ cargo doc -p pdfcraft-post --no-deps
 
 `pdfcraft-forms` 的填写测试会调用 `pdftotext`。
 
+小步检查。功能简单、改动拆成连续小步时，不要每步全量跑上面的 `cargo test`。每步跑该包的 `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和 `cargo check --all-targets`。这一步新加的测试按名字跑。几步合在一起之后，以及改动要合并之前，再跑上面的完整 `cargo test`。
+
 ### 语言与依赖
 
 - **Edition** `2021`，**MSRV** `1.92`（跟 krilla 0.8.2）；CI 用同一 toolchain。政策见 [`docs/msrv.md`](docs/msrv.md)。
@@ -240,7 +242,7 @@ cargo-audit/deny 按 fail closed 接入门禁。
 3. 实现时按层推进：geom/error（含长度类型）→ canvas →（backend）→ fonts/measure → line break → flow/paginate → table/decorate → `spec` 接线。
 4. 排版测试优先断言 `RecordingCanvas` 记录；`to_pdf` 冒烟只断言 `%PDF` 之类，不断言压缩内容流细节（内容流数字实验仅属于 backend 适配器测试）。
 5. 对话过长、上下文明显膨胀时，建议用户开新对话，并指向本文件与提案书。
-6. 改代码前读周边文件；提交前跑「门禁」一节命令；不擅自 `git commit` / push，除非用户明确要求。
+6. 改代码前读周边文件。简单功能按小步改时，中间步骤按「门禁」里的小步检查，不每步全量 `cargo test`。提交前跑完整门禁。不擅自 `git commit` / push，除非用户明确要求。
 
 ## 明确不要做
 

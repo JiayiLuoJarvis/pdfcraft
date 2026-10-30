@@ -90,10 +90,11 @@ fn fold_parent(
             .then(left_from.cmp(&right_from))
     });
     let dropped = ranked.split_off(top_n);
-    let total: f64 = dropped
+    let dropped_ratios: Vec<f64> = dropped
         .iter()
         .map(|&edge| ratios[&graph.edge_from(edge)])
-        .sum();
+        .collect();
+    let total = exact_sum(&dropped_ratios);
     if !total.is_finite() || !(RATIO_MIN..=RATIO_MAX).contains(&total) {
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
@@ -113,6 +114,72 @@ fn fold_parent(
         dropped,
         total,
     }))
+}
+
+/// Finite sum matching `CPython` `math.fsum`, including the half-even correction.
+fn exact_sum(values: &[f64]) -> f64 {
+    let mut partials: Vec<f64> = Vec::new();
+    for &value in values {
+        let mut x = value;
+        let mut i = 0;
+        for j in 0..partials.len() {
+            let mut y = partials[j];
+            if x.abs() < y.abs() {
+                std::mem::swap(&mut x, &mut y);
+            }
+            let hi = x + y;
+            let yr = hi - x;
+            let lo = y - yr;
+            if nonzero(lo) {
+                partials[i] = lo;
+                i += 1;
+            }
+            x = hi;
+        }
+        partials.truncate(i);
+        if nonzero(x) {
+            partials.push(x);
+        }
+    }
+    if partials.is_empty() {
+        return 0.0;
+    }
+    let mut n = partials.len() - 1;
+    let mut hi = partials[n];
+    let mut lo = 0.0;
+    while n > 0 {
+        let x = hi;
+        n -= 1;
+        let y = partials[n];
+        hi = x + y;
+        let yr = hi - x;
+        lo = y - yr;
+        if nonzero(lo) {
+            break;
+        }
+    }
+    if n > 0 {
+        let next = partials[n - 1];
+        if (lo < 0.0 && next < 0.0) || (lo > 0.0 && next > 0.0) {
+            let y = lo * 2.0;
+            let x = hi + y;
+            let yr = x - hi;
+            if same_float(y, yr) {
+                hi = x;
+            }
+        }
+    }
+    hi
+}
+
+fn nonzero(value: f64) -> bool {
+    value.to_bits() != 0.0_f64.to_bits() && value.to_bits() != (-0.0_f64).to_bits()
+}
+
+fn same_float(left: f64, right: f64) -> bool {
+    left.to_bits() == right.to_bits()
+        || (left.to_bits() == 0.0_f64.to_bits() && right.to_bits() == (-0.0_f64).to_bits())
+        || (left.to_bits() == (-0.0_f64).to_bits() && right.to_bits() == 0.0_f64.to_bits())
 }
 
 fn rebuild(graph: &Graph, holders: &HashSet<NodeId>, folds: &[Fold]) -> ChartRequest {
@@ -471,6 +538,28 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    #[test]
+    fn six_equal_sixths_fold_to_one_hundred() {
+        let share = 100.0 / 6.0;
+        let mut nodes = vec![company("root", "主体", None)];
+        let mut edges = Vec::new();
+        for index in 0..7 {
+            let id = format!("s{index}");
+            nodes.push(person(&id, &id, share));
+            edges.push(holding(&id, "root", share));
+        }
+        let mut request = ChartRequest::new("root", nodes, edges);
+        request.options.top_n = Some(1);
+        let folded = prepare_request(&request).expect("six sixths sum to 100");
+        let synthetic = folded
+            .nodes
+            .iter()
+            .find(|node| node.id == "__other__:root")
+            .expect("synthetic");
+        assert_eq!(synthetic.ratio.map(f64::to_bits), Some(100.0_f64.to_bits()));
+        assert_eq!(synthetic.name, "其他股东(6家)");
     }
 
     #[test]
