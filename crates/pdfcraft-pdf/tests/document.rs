@@ -1,24 +1,27 @@
 //! `layout_spec` against recorded canvas commands.
 
+use std::error::Error as StdError;
 use std::num::{NonZeroU16, NonZeroU32};
+use std::sync::{Arc, Mutex};
 
 use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::spec::ImageSpec;
 use pdfcraft_pdf::spec::{
-    Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CanvasMark, CanvasSpec,
-    CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec,
-    InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, PageWhen, ParagraphSpec,
-    Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec, TextRun,
-};
-use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
-    ErrorKind, GeometryKind, ImageFormat, Ink, Length, LinkTarget, MarginPreset, Margins,
-    NonNegative, Numbering, PageSize, Path, PathVerb, Pen, Point, Positive, Ratio, RecordedPage,
-    Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
+    Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
+    CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily,
+    FontRegistry, HLineSpec, InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec,
+    PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec,
+    TextRun,
 };
 #[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::{to_pdf, Paper};
+use pdfcraft_pdf::to_pdf;
+use pdfcraft_pdf::{
+    layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
+    ErrorKind, GeometryKind, ImageFormat, Ink, Length, LinkTarget, Location, MarginPreset, Margins,
+    NonNegative, Numbering, PageSize, Paper, Path, PathVerb, Pen, Point, Positive, Ratio,
+    RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
+};
 
 #[path = "common/mod.rs"]
 mod common;
@@ -495,11 +498,11 @@ fn full_template(c: &Contract, company: &str) -> Result<Rendered> {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(36.0)),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_text(vec![TextRun::Literal(company.into())])),
                 right: Some(slot_text(page_label())),
                 ..BandSpec::default()
-            }),
+            })),
             behind: vec![mark_text(
                 PageWhen::All,
                 "DRAFT",
@@ -579,11 +582,12 @@ fn header_inset_aligns_slots_with_caller_chosen_side_margins() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(36.0)),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(slot_text(vec![TextRun::Literal("ACME".into())])),
                 right: Some(slot_text(vec![TextRun::Literal("page".into())])),
-            }),
+                marks: Vec::new(),
+            })),
             body: vec![para("Body")],
             ..SectionSpec::default()
         },
@@ -735,14 +739,14 @@ fn footer_sees_section_counters_equal_to_document_totals() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(20.0)),
-            footer: Some(BandSpec {
+            footer: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_text(vec![
                     TextRun::SectionNumber,
                     TextRun::Literal("/".into()),
                     TextRun::SectionCount,
                 ])),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("A"), Block::PageBreak, para("B")],
             ..SectionSpec::default()
         },
@@ -764,10 +768,10 @@ fn a_later_header_call_replaces_the_earlier_one() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(20.0)),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 right: Some(slot_text(vec![TextRun::Literal("new".into())])),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("A")],
             ..SectionSpec::default()
         },
@@ -775,6 +779,798 @@ fn a_later_header_call_replaces_the_earlier_one() {
     .unwrap()
     .pages();
     assert_eq!(texts(&pages[0]), ["new", "A"]);
+}
+
+fn glyph_y_bits(page: &RecordedPage, text: &str) -> u32 {
+    runs(page)
+        .into_iter()
+        .find(|run| run.text == text)
+        .unwrap()
+        .y
+        .to_bits()
+}
+
+fn two_pages(
+    header: Option<pdfcraft_pdf::BandFn<()>>,
+    footer: Option<pdfcraft_pdf::BandFn<()>>,
+) -> Rendered {
+    font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header,
+            footer,
+            body: vec![para("A"), Block::PageBreak, para("B")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn header_fn_changes_page_one_only() {
+    if skip_without_font() {
+        return;
+    }
+    let pages = two_pages(
+        Some(pdfcraft_pdf::BandFn::from_fn(|query| {
+            let label = if query.number.get() == 1 {
+                "PAGE-ONE"
+            } else {
+                "PAGE-TWO"
+            };
+            Ok(Some(left_band(label)))
+        })),
+        None,
+    )
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert!(texts(&pages[0]).contains(&"PAGE-ONE".to_owned()));
+    assert!(!texts(&pages[1]).contains(&"PAGE-ONE".to_owned()));
+    assert!(texts(&pages[1]).contains(&"PAGE-TWO".to_owned()));
+}
+
+#[test]
+fn header_fn_none_keeps_the_body_origin() {
+    if skip_without_font() {
+        return;
+    }
+    let fixed = two_pages(Some(pdfcraft_pdf::BandFn::fixed(left_band("H"))), None).pages();
+    let dynamic = two_pages(
+        Some(pdfcraft_pdf::BandFn::from_fn(|query| {
+            if query.number.get() == 2 {
+                Ok(None)
+            } else {
+                Ok(Some(left_band("H")))
+            }
+        })),
+        None,
+    )
+    .pages();
+    assert_eq!(texts(&dynamic[1]), ["B"]);
+    assert_eq!(glyph_y_bits(&dynamic[1], "B"), glyph_y_bits(&fixed[1], "B"));
+}
+
+#[test]
+fn footer_fn_none_skips_only_that_page() {
+    if skip_without_font() {
+        return;
+    }
+    let section = |footer| SectionSpec {
+        margins: Margins::uniform(nn(36.0)),
+        footer,
+        body: vec![
+            para("A"),
+            Block::PageBreak,
+            para("B"),
+            Block::PageBreak,
+            para("C"),
+        ],
+        ..SectionSpec::default()
+    };
+    let fixed = font_pages(
+        PageSize::A4,
+        section(Some(BandFn::fixed(left_band("FOOT")))),
+    )
+    .unwrap()
+    .pages();
+    let dynamic = font_pages(
+        PageSize::A4,
+        section(Some(BandFn::from_fn(|query| {
+            if query.number.get() == 2 {
+                Ok(None)
+            } else {
+                Ok(Some(left_band("FOOT")))
+            }
+        }))),
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(texts(&dynamic[0]), ["A", "FOOT"]);
+    assert_eq!(texts(&dynamic[1]), ["B"]);
+    assert_eq!(texts(&dynamic[2]), ["C", "FOOT"]);
+    assert_eq!(glyph_y_bits(&dynamic[1], "B"), glyph_y_bits(&fixed[1], "B"));
+}
+
+#[test]
+fn band_fn_calls_in_page_order_header_then_footer() {
+    if skip_without_font() {
+        return;
+    }
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let record = |log: Arc<Mutex<Vec<(u32, &'static str)>>>, side: &'static str| {
+        let log = Arc::clone(&log);
+        BandFn::from_fn(move |query| {
+            log.lock().unwrap().push((query.number.get(), side));
+            Ok(Some(left_band(side)))
+        })
+    };
+    let _ = two_pages(
+        Some(record(Arc::clone(&log), "header")),
+        Some(record(Arc::clone(&log), "footer")),
+    );
+    let calls = log.lock().unwrap();
+    assert_eq!(
+        calls.as_slice(),
+        [(1, "header"), (1, "footer"), (2, "header"), (2, "footer")]
+    );
+    assert_eq!(calls.len(), 2 * 2);
+    drop(calls);
+
+    let header_only = Arc::new(Mutex::new(Vec::new()));
+    let header_log = Arc::clone(&header_only);
+    let _ = two_pages(
+        Some(BandFn::from_fn(move |query| {
+            header_log.lock().unwrap().push(query.number.get());
+            Ok(None)
+        })),
+        None,
+    );
+    assert_eq!(header_only.lock().unwrap().as_slice(), [1, 2]);
+}
+
+#[test]
+fn band_fn_error_is_located() {
+    if skip_without_font() {
+        return;
+    }
+    let header_err = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header: Some(BandFn::from_fn(|_| Err(Error::band_fn("boom")))),
+            body: vec![para("A"), Block::PageBreak, para("B")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        header_err.first().kind.to_string(),
+        "header or footer function failed"
+    );
+    assert_eq!(header_err.first().kind, ErrorKind::BandFn);
+    let at = header_err.first().at.unwrap();
+    assert_eq!(at.section, Some(0));
+    assert_eq!(at.page, Some(1));
+    assert_eq!(at.region, Some(Region::Header));
+    assert_eq!(
+        StdError::source(header_err.first()).unwrap().to_string(),
+        "boom"
+    );
+
+    let mut failure = Error::band_fn("boom");
+    let mut at = Location::default();
+    at.page = Some(7);
+    failure.at = Some(at);
+    let footer_err = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            footer: Some(BandFn::from_fn(move |_| Err(failure.clone()))),
+            body: vec![para("A"), Block::PageBreak, para("B")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(footer_err.first().kind, ErrorKind::BandFn);
+    let at = footer_err.first().at.unwrap();
+    assert_eq!(at.section, Some(0));
+    assert_eq!(at.page, Some(7));
+    assert_eq!(at.region, Some(Region::Footer));
+    assert_eq!(
+        StdError::source(footer_err.first()).unwrap().to_string(),
+        "boom"
+    );
+}
+
+#[test]
+fn band_fn_query_size_is_the_final_page_size() {
+    if skip_without_font() {
+        return;
+    }
+    let custom = PageSize::custom(Size::try_pt(320.0, 480.0).unwrap());
+    let landscape = Paper::A4.landscape();
+    let expected = [
+        PageSize::A4.resolve(),
+        landscape.resolve(),
+        custom.resolve(),
+    ];
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let band = |log: &Arc<Mutex<Vec<Size>>>| {
+        let log = Arc::clone(log);
+        BandFn::from_fn(move |query| {
+            log.lock().unwrap().push(query.size);
+            let label = format!(
+                "{}x{}",
+                query.size.width().as_pt(),
+                query.size.height().as_pt()
+            );
+            Ok(Some(left_band(&label)))
+        })
+    };
+    let section = |page_size, body: &str, log: &Arc<Mutex<Vec<Size>>>| SectionSpec {
+        page_size,
+        margins: Margins::uniform(nn(36.0)),
+        header: Some(band(log)),
+        body: vec![para(body)],
+        ..SectionSpec::default()
+    };
+    let pages = render(
+        PageSize::A4,
+        font_resources(),
+        vec![
+            section(None, "S1", &seen),
+            section(Some(landscape), "S2", &seen),
+            section(Some(custom), "S3", &seen),
+        ],
+    )
+    .unwrap()
+    .pages();
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.as_slice(), expected);
+    let labels: Vec<_> = expected
+        .iter()
+        .map(|size| format!("{}x{}", size.width().as_pt(), size.height().as_pt()))
+        .collect();
+    assert_eq!(texts(&pages[0])[0], labels[0]);
+    assert_eq!(texts(&pages[1])[0], labels[1]);
+    assert_eq!(texts(&pages[2])[0], labels[2]);
+    assert_ne!(labels[0], labels[1]);
+    assert_ne!(labels[1], labels[2]);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum GhostKey {
+    Body,
+    Missing,
+}
+
+fn ghost_resources() -> Resources<GhostKey> {
+    let mut fonts = FontRegistry::new();
+    fonts.register(
+        GhostKey::Body,
+        FontFamily {
+            regular: FontFace::new(font_bytes(), 0),
+            bold: None,
+            italic: None,
+            bold_italic: None,
+        },
+    );
+    Resources::with_fonts(fonts)
+}
+
+fn ghost_band() -> BandSpec<GhostKey> {
+    BandSpec {
+        left: Some(BandSlot::Text {
+            runs: vec![TextRun::Literal("H".into())],
+            font: GhostKey::Missing,
+            style: RunStyle::default(),
+        }),
+        ..BandSpec::default()
+    }
+}
+
+fn ghost_doc(header: BandFn<GhostKey>) -> pdfcraft_pdf::Result<Rendered> {
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: ghost_resources(),
+        limits: pdfcraft_pdf::Limits::default(),
+        info: pdfcraft_pdf::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            header: Some(header),
+            body: vec![
+                Block::paragraph(GhostKey::Body, "A"),
+                Block::PageBreak,
+                Block::paragraph(GhostKey::Body, "B"),
+            ],
+            ..SectionSpec::default()
+        }],
+    })
+}
+
+#[test]
+fn fixed_band_font_error_reports_once_per_section() {
+    if skip_without_font() {
+        return;
+    }
+    let err = ghost_doc(BandFn::fixed(ghost_band())).unwrap_err();
+    assert_eq!(err.len(), 1);
+    assert!(matches!(
+        err.first().kind,
+        ErrorKind::UnregisteredFont { .. }
+    ));
+    let at = err.first().at.unwrap();
+    assert_eq!(at.section, Some(0));
+    assert_eq!(at.page, None);
+}
+
+#[test]
+fn from_fn_band_font_error_reports_per_page() {
+    if skip_without_font() {
+        return;
+    }
+    let err = ghost_doc(BandFn::from_fn(|_| Ok(Some(ghost_band())))).unwrap_err();
+    assert_eq!(err.len(), 2);
+    for (error, page) in err.as_slice().iter().zip(1..=2) {
+        assert!(matches!(error.kind, ErrorKind::UnregisteredFont { .. }));
+        let at = error.at.unwrap();
+        assert_eq!(at.section, Some(0));
+        assert_eq!(at.page, Some(page));
+        assert_eq!(at.region, Some(Region::Header));
+    }
+}
+
+fn band_rect(rect: Rect, ink: Ink) -> BandMark<()> {
+    BandMark::Shape(LayerShape::Rect { rect, ink })
+}
+
+fn band_text_line(text: &str, at: Point, size: f32, color: Color) -> BandMark<()> {
+    BandMark::Shape(LayerShape::Text {
+        text: vec![TextRun::Literal(text.into())],
+        font: (),
+        at,
+        style: RunStyle {
+            font_size: Some(pos(size)),
+            color: Some(color),
+            ..RunStyle::default()
+        },
+    })
+}
+
+fn marked_band(marks: Vec<BandMark<()>>) -> BandSpec<()> {
+    BandSpec {
+        marks,
+        ..BandSpec::default()
+    }
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn footer_image_mark_lands_in_band_coordinates() {
+    let mut resources = Resources::default();
+    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = render(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        resources,
+        vec![SectionSpec {
+            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            footer: Some(BandFn::fixed(marked_band(vec![BandMark::Shape(
+                LayerShape::Image {
+                    image,
+                    rect: Rect::try_pt(10.0, 5.0, 20.0, 20.0).unwrap(),
+                },
+            )]))),
+            body: Vec::new(),
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+    let images = image_rects(&rendered.pages()[0]);
+    assert_eq!(images.len(), 1);
+    assert_eq!(
+        rect_bits(images[0].3),
+        rect_bits(Rect::try_pt(10.0, 135.0, 20.0, 20.0).unwrap())
+    );
+}
+
+#[test]
+fn footer_rect_mark_strokes_at_band_offset() {
+    if skip_without_font() {
+        return;
+    }
+    let pen = Pen::new(Color::rgb(153, 153, 153), 1.0).unwrap();
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            footer: Some(BandFn::fixed(marked_band(vec![band_rect(
+                Rect::try_pt(20.0, 2.0, 180.0, 65.0).unwrap(),
+                Ink::Stroke(pen),
+            )]))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+    .pages();
+    let CanvasCommand::StrokePath {
+        path,
+        paint,
+        stroke,
+    } = &pages[0].ops()[1]
+    else {
+        panic!("expected footer stroke");
+    };
+    assert_eq!(paint.color(), Color::rgb(153, 153, 153));
+    assert_eq!(stroke.width().as_pt().to_bits(), 1.0f32.to_bits());
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(20.0, 132.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(200.0, 132.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(200.0, 197.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(20.0, 197.0).unwrap()),
+            PathVerb::Close,
+        ]
+    );
+}
+
+#[test]
+fn band_marks_paint_before_slots() {
+    if skip_without_font() {
+        return;
+    }
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(36.0), nn(0.0), nn(0.0), nn(0.0)),
+            header: Some(BandFn::fixed(BandSpec {
+                left: Some(slot_text(vec![TextRun::Literal("H".into())])),
+                marks: vec![band_rect(
+                    Rect::try_pt(1.0, 1.0, 10.0, 10.0).unwrap(),
+                    Ink::Fill(Color::rgb(1, 2, 3)),
+                )],
+                ..BandSpec::default()
+            })),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+    .pages();
+    let ops = pages[0].ops();
+    assert!(matches!(ops[0], CanvasCommand::FillPath { .. }));
+    assert!(matches!(ops[1], CanvasCommand::DrawGlyphRun { .. }));
+    assert_eq!(texts(&pages[0]), ["H", "A"]);
+}
+
+#[test]
+fn band_text_marks_keep_fixed_lines() {
+    if skip_without_font() {
+        return;
+    }
+    let black = Color::rgb(0, 0, 0);
+    let gray = Color::rgb(120, 120, 120);
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            footer: Some(BandFn::fixed(marked_band(vec![
+                band_text_line("first", Point::try_pt(20.0, 4.0).unwrap(), 9.0, black),
+                band_text_line("second", Point::try_pt(20.0, 22.0).unwrap(), 9.0, black),
+                band_text_line("No. 2", Point::try_pt(20.0, 43.0).unwrap(), 8.0, gray),
+            ]))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+    .pages();
+    let runs = runs(&pages[0]);
+    let footer = &runs[1..];
+    assert_eq!(
+        footer
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second", "No. 2"]
+    );
+    for (run, x, top, size) in [
+        (&footer[0], 20.0, 134.0, 9.0),
+        (&footer[1], 20.0, 152.0, 9.0),
+        (&footer[2], 20.0, 173.0, 8.0),
+    ] {
+        assert!(pt_near(run.x, x));
+        assert!(pt_near(run.y, top + baseline() * size / 12.0));
+    }
+    let commands: Vec<_> = pages[0]
+        .ops()
+        .iter()
+        .filter_map(|command| match command {
+            CanvasCommand::DrawGlyphRun { run } if run.text != "A" => Some(run),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(commands[0].font_size.as_pt().to_bits(), 9.0f32.to_bits());
+    assert_eq!(commands[1].font_size.as_pt().to_bits(), 9.0f32.to_bits());
+    assert_eq!(commands[2].font_size.as_pt().to_bits(), 8.0f32.to_bits());
+    assert_eq!(commands[0].color, black);
+    assert_eq!(commands[1].color, black);
+    assert_eq!(commands[2].color, gray);
+}
+
+#[test]
+fn band_mark_below_band_is_taller_than_margin() {
+    if skip_without_font() {
+        return;
+    }
+    let result = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(20.0), nn(0.0), nn(30.0), nn(0.0)),
+            footer: Some(BandFn::fixed(marked_band(vec![band_rect(
+                Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
+                Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
+            )]))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    );
+    assert!(matches!(
+        result.map_err(|errors| errors.first().kind.clone()),
+        Err(ErrorKind::DecorationTallerThanMargin { height, margin })
+            if pt_near(height, 30.5) && pt_near(margin, 30.0)
+    ));
+}
+
+#[test]
+fn band_mark_past_page_width_is_wider_than_frame() {
+    if skip_without_font() {
+        return;
+    }
+    let result = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+            header: Some(BandFn::fixed(marked_band(vec![band_rect(
+                Rect::try_pt(190.0, 1.0, 11.0, 10.0).unwrap(),
+                Ink::Fill(Color::rgb(0, 0, 0)),
+            )]))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    );
+    assert!(matches!(
+        result.map_err(|errors| errors.first().kind.clone()),
+        Err(ErrorKind::DecorationWiderThanFrame { width, avail })
+            if pt_near(width, 201.0) && pt_near(avail, 200.0)
+    ));
+}
+
+#[test]
+fn band_mark_above_band_is_outside() {
+    if skip_without_font() {
+        return;
+    }
+    let err = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+            header: Some(BandFn::fixed(marked_band(vec![band_rect(
+                Rect::try_pt(10.0, -1.0, 20.0, 10.0).unwrap(),
+                Ink::Fill(Color::rgb(0, 0, 0)),
+            )]))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.first().kind,
+        ErrorKind::InvalidGeometry(GeometryKind::BandMarkOutside { x: 10.0, y: -1.0 })
+    );
+    assert_eq!(
+        location(err.first()),
+        (Some(0), Some(1), Some(Region::Header), None)
+    );
+}
+
+#[test]
+fn rotated_band_mark_checks_rotated_bounds() {
+    if skip_without_font() {
+        return;
+    }
+    let result = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+            header: Some(BandFn::fixed(marked_band(vec![BandMark::Rotated {
+                degrees: 45.0,
+                pivot: Point::try_pt(55.0, 25.0).unwrap(),
+                shapes: vec![LayerShape::Rect {
+                    rect: Rect::try_pt(50.0, 20.0, 10.0, 10.0).unwrap(),
+                    ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                }],
+            }]))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    );
+    assert!(matches!(
+        result.map_err(|errors| errors.first().kind.clone()),
+        Err(ErrorKind::DecorationTallerThanMargin { height, margin })
+            if pt_near(height, 32.071_068) && pt_near(margin, 30.0)
+    ));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn from_fn_odd_even_marks() {
+    if skip_without_font() {
+        return;
+    }
+    let mut resources = font_resources();
+    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let footer = BandFn::from_fn(move |query| {
+        let marks = if query.number.get() % 2 == 1 {
+            vec![BandMark::Shape(LayerShape::Image {
+                image,
+                rect: Rect::try_pt(220.0, 5.0, 20.0, 20.0).unwrap(),
+            })]
+        } else {
+            vec![
+                band_rect(
+                    Rect::try_pt(20.0, 2.0, 180.0, 65.0).unwrap(),
+                    Ink::Stroke(Pen::new(Color::rgb(153, 153, 153), 1.0).unwrap()),
+                ),
+                band_text_line(
+                    "first",
+                    Point::try_pt(25.0, 8.0).unwrap(),
+                    9.0,
+                    Color::rgb(0, 0, 0),
+                ),
+                band_text_line(
+                    "second",
+                    Point::try_pt(25.0, 24.0).unwrap(),
+                    9.0,
+                    Color::rgb(0, 0, 0),
+                ),
+                band_text_line(
+                    "No. 2",
+                    Point::try_pt(25.0, 42.0).unwrap(),
+                    8.0,
+                    Color::rgb(120, 120, 120),
+                ),
+                BandMark::Shape(LayerShape::Image {
+                    image,
+                    rect: Rect::try_pt(220.0, 5.0, 55.0, 55.0).unwrap(),
+                }),
+            ]
+        };
+        Ok(Some(marked_band(marks)))
+    });
+    let pages = render(
+        PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
+        resources,
+        vec![SectionSpec {
+            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            footer: Some(footer),
+            body: vec![para("A"), Block::PageBreak, para("B")],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(image_rects(&pages[0]).len(), 1);
+    assert_eq!(texts(&pages[0]), ["A"]);
+    assert_eq!(image_rects(&pages[1]).len(), 1);
+    assert_eq!(texts(&pages[1]), ["B", "first", "second", "No. 2"]);
+    assert!(pages[1]
+        .ops()
+        .iter()
+        .any(|command| matches!(command, CanvasCommand::StrokePath { .. })));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn fixed_band_foreign_image_reports_once_per_section() {
+    let stolen = {
+        let mut other = Resources::<()>::default();
+        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+    };
+    let err = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            footer: Some(BandFn::fixed(marked_band(vec![BandMark::Shape(
+                LayerShape::Image {
+                    image: stolen,
+                    rect: Rect::try_pt(10.0, 10.0, 10.0, 10.0).unwrap(),
+                },
+            )]))),
+            body: vec![
+                Block::Spacer(nn(1.0)),
+                Block::PageBreak,
+                Block::Spacer(nn(1.0)),
+            ],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap_err();
+    assert_eq!(err.len(), 1);
+    assert_eq!(err.first().kind, ErrorKind::UnknownImage { id: 0 });
+    assert_eq!(location(err.first()), (Some(0), None, None, None));
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn from_fn_band_foreign_image_reports_per_page() {
+    let stolen = {
+        let mut other = Resources::<()>::default();
+        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+    };
+    let err = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            footer: Some(BandFn::from_fn(move |_| {
+                Ok(Some(marked_band(vec![BandMark::Shape(
+                    LayerShape::Image {
+                        image: stolen,
+                        rect: Rect::try_pt(10.0, 10.0, 10.0, 10.0).unwrap(),
+                    },
+                )])))
+            })),
+            body: vec![
+                Block::Spacer(nn(1.0)),
+                Block::PageBreak,
+                Block::Spacer(nn(1.0)),
+            ],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap_err();
+    assert_eq!(err.len(), 2);
+    for (error, page) in err.as_slice().iter().zip(1..=2) {
+        assert_eq!(error.kind, ErrorKind::UnknownImage { id: 0 });
+        assert_eq!(
+            location(error),
+            (Some(0), Some(page), Some(Region::Footer), None)
+        );
+    }
+}
+
+#[test]
+fn empty_marks_and_slots_skip_the_side() {
+    if skip_without_font() {
+        return;
+    }
+    let bare = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+    .pages();
+    let empty = font_pages(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(nn(36.0)),
+            footer: Some(BandFn::from_fn(|_| Ok(Some(BandSpec::default())))),
+            body: vec![para("A")],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(empty[0].ops(), bare[0].ops());
+    assert_eq!(glyph_y_bits(&empty[0], "A"), glyph_y_bits(&bare[0], "A"));
 }
 
 #[test]
@@ -785,7 +1581,7 @@ fn header_with_zero_margin_is_rejected() {
     let result = font_pages(
         PageSize::A4,
         SectionSpec {
-            header: Some(left_band("H")),
+            header: Some(BandFn::fixed(left_band("H"))),
             body: vec![para("A")],
             ..SectionSpec::default()
         },
@@ -1648,13 +2444,13 @@ fn two_sections_number_document_pages_and_section_pages() {
         vec![
             SectionSpec {
                 margins: margin,
-                footer: Some(counter_footer()),
+                footer: Some(BandFn::fixed(counter_footer())),
                 body: vec![para("A"), Block::PageBreak, para("B")],
                 ..SectionSpec::default()
             },
             SectionSpec {
                 margins: margin,
-                footer: Some(counter_footer()),
+                footer: Some(BandFn::fixed(counter_footer())),
                 body: vec![para("C")],
                 ..SectionSpec::default()
             },
@@ -1679,17 +2475,18 @@ fn second_section_header_stays_at_page_edge_until_caller_insets() {
         vec![
             SectionSpec {
                 margins: Margins::uniform(nn(20.0)),
-                header: Some(left_band("One")),
+                header: Some(BandFn::fixed(left_band("One"))),
                 body: vec![para("A")],
                 ..SectionSpec::default()
             },
             SectionSpec {
                 margins: Margins::new(nn(20.0), nn(10.0), nn(20.0), nn(48.0)),
-                header: Some(BandSpec {
+                header: Some(BandFn::fixed(BandSpec {
                     inset: BandInset::PageMargins,
                     left: Some(slot_text(vec![TextRun::Literal("Two".into())])),
                     right: None,
-                }),
+                    marks: Vec::new(),
+                })),
                 body: vec![para("B")],
                 ..SectionSpec::default()
             },
@@ -1713,7 +2510,7 @@ fn empty_section_is_one_page_and_still_draws_its_footer() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(20.0)),
-            footer: Some(left_band("foot")),
+            footer: Some(BandFn::fixed(left_band("foot"))),
             ..SectionSpec::default()
         },
     )
@@ -1780,7 +2577,7 @@ fn painted_layer_paths() -> Rendered {
         PageSize::custom(Size::try_pt(200.0, 160.0).unwrap()),
         SectionSpec {
             margins: Margins::uniform(nn(20.0)),
-            header: Some(left_band("H")),
+            header: Some(BandFn::fixed(left_band("H"))),
             body: vec![para("A")],
             behind: vec![
                 LayerMark::Line {
@@ -3017,7 +3814,7 @@ fn header_and_footer_slots_annotate_at_the_band_origin() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(margin)),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_link(
                     vec![TextRun::Literal("https://example.com/left".into())],
                     "Left",
@@ -3027,14 +3824,14 @@ fn header_and_footer_slots_annotate_at_the_band_origin() {
                     "Right",
                 )),
                 ..BandSpec::default()
-            }),
-            footer: Some(BandSpec {
+            })),
+            footer: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_link(
                     vec![TextRun::Literal("https://example.com/foot".into())],
                     "Foot",
                 )),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("Body")],
             ..SectionSpec::default()
         },
@@ -3084,7 +3881,7 @@ fn header_uri_can_differ_per_page() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(36.0)),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 left: Some(BandSlot::Link {
                     font: (),
                     uri: vec![
@@ -3095,7 +3892,7 @@ fn header_uri_can_differ_per_page() {
                     style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("A"), Block::PageBreak, para("B")],
             ..SectionSpec::default()
         },
@@ -3127,10 +3924,10 @@ fn empty_uri_fails_the_document() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(nn(36.0)),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 right: Some(slot_link(vec![TextRun::Literal(String::new())], "Home")),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("A")],
             ..SectionSpec::default()
         },

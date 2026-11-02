@@ -9,6 +9,7 @@ errors, limits, and testing.
 | This guide | How-to for real documents |
 | [migrate-inline.md](migrate-inline.md) | Required edits from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
 | [migrate-table-row.md](migrate-table-row.md) | Required edits from `header: Vec<Vec<CellSpec>>` / `border_width` + `border_color` |
+| [migrate-band-marks.md](migrate-band-marks.md) | Move page-coordinate footer marks into a footer band |
 | [rustdoc](https://docs.rs/pdfcraft-pdf) | Every public signature (`cargo doc -p pdfcraft-pdf --open`) |
 
 Related crates (separate packages, separate docs):
@@ -20,8 +21,9 @@ Related crates (separate packages, separate docs):
 
 ## Mental model
 
-You do **not** hand the library a template engine, JSON schema, or layout
-closures. You build ordinary Rust values, then call two functions:
+You do **not** hand the library a template engine or a JSON schema. Body
+blocks are ordinary Rust values. A header or footer may be `BandFn`. You then
+call two functions:
 
 ```text
 Resources + DocumentSpec  →  layout_spec  →  Rendered  →  to_pdf  →  PDF bytes
@@ -31,9 +33,9 @@ Two moments matter:
 
 1. **Assemble time.** Your application already has data. Use Rust `if` / `for`
    to push `Block`s into `SectionSpec.body`. You do not know the page count yet.
-2. **Paint time.** After pagination, the library paints each page. Header,
-   footer, and layer marks may contain `TextRun` / `PageWhen` values; the
-   library substitutes page numbers and last-page visibility then.
+2. **Paint time.** After pagination, the library paints each page. It calls
+   the header function, then the footer function, and fills `TextRun` page
+   counters. `PageWhen` still chooses layer marks only.
 
 ```rust
 use pdfcraft_pdf::spec::{
@@ -227,7 +229,7 @@ DocumentSpec {
 | --- | --- |
 | `page_size` | `Some(…)` overrides the document default for this section |
 | `margins` | Body inset; top/bottom = band height |
-| `header` / `footer` | Optional `BandSpec` |
+| `header` / `footer` | Optional `BandFn` (`fixed` or per page) |
 | `behind` / `front` | Page-fixed `LayerMark` lists |
 | `body` | Flow content (`Vec<Block>`) |
 
@@ -423,9 +425,9 @@ not provided. Nest lists instead.
 ## Header, footer, and page numbers
 
 ```rust
-use pdfcraft_pdf::spec::{BandInset, BandSlot, BandSpec, RunStyle, TextRun};
+use pdfcraft_pdf::spec::{BandFn, BandInset, BandSlot, BandSpec, RunStyle, TextRun};
 
-BandSpec {
+BandFn::fixed(BandSpec {
     inset: BandInset::PageMargins, // or BandInset::Fixed { left, right }
     left: Some(BandSlot::Text {
         runs: vec![TextRun::Literal("Acme Co.".into())],
@@ -442,7 +444,8 @@ BandSpec {
         font: (),
         style: RunStyle::default(),
     }),
-}
+    ..BandSpec::default()
+})
 ```
 
 | `TextRun` | Value |
@@ -451,10 +454,54 @@ BandSpec {
 | `PageNumber` / `PageCount` | Document page (1-based) |
 | `SectionNumber` / `SectionCount` | Page within the current section |
 
+`BandFn::from_fn` receives a `PageBandQuery` (`number`, `count`,
+`section_number`, `section_count`, and the page's final `size`). `Ok(None)`
+skips that side on that page. The margin stays, and the body origin does not
+move. `Ok(Some(spec))` resolves fonts for that page. `Err` fails `layout_spec`.
+Wrap your own failure with `Error::band_fn`. Its display stays
+`header or footer function failed`, and `std::error::Error::source` returns
+your error. `layout_spec` requires `K: 'static`.
+
 Bands span the full page width unless inset. Content taller than the margin
-band fails with `ErrorKind::DecorationTallerThanMargin` before any page starts.
+band fails with `ErrorKind::DecorationTallerThanMargin`. A `fixed` band reports
+that once for the section. A `from_fn` band reports it on the page.
 `BandSlot::Link` builds the URI from `TextRun`s at paint time the same way.
 Band, layer, and canvas text take a `RunStyle` that starts from the seed, not from any enclosing block.
+
+`BandSpec.marks` holds `BandMark` values. Coordinates start at the band
+top-left. A header point `(x, y)` is the same point on the page. A footer
+point `(x, y)` is the page point `(x, y + page_height - margin.bottom)`.
+`BandInset` moves the slots only. The library paints the marks in order, then
+the slots. Each mark box, including half the stroke width, must stay inside
+the page width and that side's margin. A box that starts above or to the left
+of the band is `GeometryKind::BandMarkOutside`. A box past the bottom of the
+margin is `DecorationTallerThanMargin`. A box past the right edge of the page
+is `DecorationWiderThanFrame`. The library does not clip the mark and does not
+increase the margin.
+
+To vary a header or footer by page, call `BandFn::from_fn` and branch on
+`query.number.get() % 2`. Return `Ok(Some(spec))` with that page's marks, or
+`Ok(None)` when that page should stay blank. To move a `front` footer onto the
+band, follow [migrate-band-marks.md](migrate-band-marks.md).
+
+```rust
+use pdfcraft_pdf::spec::{BandFn, BandMark, BandSpec, LayerShape};
+use pdfcraft_pdf::{Color, Ink, Pen, Rect};
+
+let footer = BandFn::from_fn(|query| {
+    if query.number.get() % 2 == 1 {
+        return Ok(None);
+    }
+    let pen = Pen::new(Color::rgb(153, 153, 153), 1.0)?;
+    Ok(Some(BandSpec {
+        marks: vec![BandMark::Shape(LayerShape::Rect {
+            rect: Rect::try_pt(24.0, 8.0, 180.0, 65.0)?,
+            ink: Ink::Stroke(pen),
+        })],
+        ..BandSpec::default()
+    }))
+});
+```
 
 ---
 
@@ -504,7 +551,7 @@ Overflow → `ErrorKind::LimitExceeded` + `LimitKind`.
 - Inspect with `first()`, `as_slice()`, `iter()`, `truncated()`
 - Each `Error` has `kind: ErrorKind` and optional `at: Location` (section, page,
   region, cell)
-- Underlying skrifa/krilla failures: `std::error::Error::source()`
+- Skrifa, krilla, and `Error::band_fn` failures: `std::error::Error::source()`
 - Equality compares `kind` + `at` only (tests need not rebuild dependency errors)
 
 Any error fails the document; there is no “partial PDF on failure” path.
@@ -549,6 +596,7 @@ rejects draws, and `to_pdf` is unavailable.
 cargo run -p pdfcraft-pdf --example hello   # writes out/hello.pdf
 cargo run -p pdfcraft-pdf --example bill    # CJK: set PDFCRAFT_CJK_FONT or use .fonts/
 cargo run -p pdfcraft-pdf --example anchors # §12.4 links and outline → out/anchors.pdf
+BAND_FN_CASE=odd-even-marks cargo run -p pdfcraft-pdf --example band_fn  # odd/even footer marks → out/band_fn.pdf
 ```
 
 See [examples/README.md](../examples/README.md).

@@ -723,6 +723,89 @@ impl Rect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EdgeBox {
+    pub(crate) min_x: f32,
+    pub(crate) min_y: f32,
+    pub(crate) max_x: f32,
+    pub(crate) max_y: f32,
+}
+
+impl EdgeBox {
+    pub(crate) fn from_points(first: Point, second: Point) -> Self {
+        let first_x = first.x().as_pt();
+        let first_y = first.y().as_pt();
+        let second_x = second.x().as_pt();
+        let second_y = second.y().as_pt();
+        Self {
+            min_x: first_x.min(second_x),
+            min_y: first_y.min(second_y),
+            max_x: first_x.max(second_x),
+            max_y: first_y.max(second_y),
+        }
+    }
+
+    pub(crate) fn from_rect(rect: Rect) -> Self {
+        let min_x = rect.origin().x().as_pt();
+        let min_y = rect.origin().y().as_pt();
+        Self {
+            min_x,
+            min_y,
+            max_x: min_x + rect.size().width().as_pt(),
+            max_y: min_y + rect.size().height().as_pt(),
+        }
+    }
+
+    pub(crate) fn from_origin_extent(origin: Point, width: f32, height: f32) -> Self {
+        let min_x = origin.x().as_pt();
+        let min_y = origin.y().as_pt();
+        Self {
+            min_x,
+            min_y,
+            max_x: min_x + width,
+            max_y: min_y + height,
+        }
+    }
+
+    pub(crate) fn outset(self, amount: Length<NonNegative>) -> Self {
+        let amount = amount.as_pt();
+        Self {
+            min_x: self.min_x - amount,
+            min_y: self.min_y - amount,
+            max_x: self.max_x + amount,
+            max_y: self.max_y + amount,
+        }
+    }
+
+    pub(crate) fn union(self, other: Self) -> Self {
+        Self {
+            min_x: self.min_x.min(other.min_x),
+            min_y: self.min_y.min(other.min_y),
+            max_x: self.max_x.max(other.max_x),
+            max_y: self.max_y.max(other.max_y),
+        }
+    }
+
+    pub(crate) fn transformed(self, affine: Affine) -> std::result::Result<Self, Error> {
+        let corners = [
+            Point::try_pt(self.min_x, self.min_y)?,
+            Point::try_pt(self.max_x, self.min_y)?,
+            Point::try_pt(self.max_x, self.max_y)?,
+            Point::try_pt(self.min_x, self.max_y)?,
+        ];
+        let mut transformed = corners.into_iter().map(|point| affine.apply(point));
+        let first = transformed
+            .next()
+            .expect("an edge box always has four corners")?;
+        let mut bounds = Self::from_points(first, first);
+        for point in transformed {
+            let point = point?;
+            bounds = bounds.union(Self::from_points(point, point));
+        }
+        Ok(bounds)
+    }
+}
+
 /// Four page margins. Each side is finite and at least zero.
 ///
 /// [`Default`] is four zeros.
@@ -1054,10 +1137,6 @@ impl Affine {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "used by Path::rotated; layer paint uses the CTM instead"
-    )]
     pub(crate) fn apply(self, point: Point) -> std::result::Result<Point, Error> {
         let x = point.x().as_pt();
         let y = point.y().as_pt();
@@ -1643,6 +1722,55 @@ mod tests {
         // translate first → (−2, 6); then 90° CW about origin → (−6, −2)
         assert!(crate::canvas::pt_near(got.x().as_pt(), -6.0));
         assert!(crate::canvas::pt_near(got.y().as_pt(), -2.0));
+    }
+
+    #[test]
+    fn edge_box_outset_includes_half_line_stroke() {
+        let line = EdgeBox::from_points(pt(10.0, 20.0), pt(30.0, 40.0));
+        let stroke_radius = NonNegative::pt(0.5).unwrap();
+        assert_eq!(
+            line.outset(stroke_radius),
+            EdgeBox {
+                min_x: 9.5,
+                min_y: 19.5,
+                max_x: 30.5,
+                max_y: 40.5,
+            }
+        );
+    }
+
+    #[test]
+    fn edge_box_uses_ellipse_rect_edges() {
+        let ellipse = Rect::try_pt(3.0, 4.0, 20.0, 10.0).unwrap();
+        assert_eq!(
+            EdgeBox::from_rect(ellipse),
+            EdgeBox {
+                min_x: 3.0,
+                min_y: 4.0,
+                max_x: 23.0,
+                max_y: 14.0,
+            }
+        );
+        assert_eq!(
+            EdgeBox::from_origin_extent(pt(3.0, 4.0), 0.0, 10.0),
+            EdgeBox {
+                min_x: 3.0,
+                min_y: 4.0,
+                max_x: 3.0,
+                max_y: 14.0,
+            }
+        );
+    }
+
+    #[test]
+    fn edge_box_transforms_all_four_corners() {
+        let bounds = EdgeBox::from_rect(Rect::try_pt(0.0, 0.0, 10.0, 20.0).unwrap());
+        let affine = Affine::rotate_cw_about(90.0, Point::ZERO).unwrap();
+        let rotated = bounds.transformed(affine).unwrap();
+        assert!(crate::canvas::pt_near(rotated.min_x, -20.0));
+        assert!(crate::canvas::pt_near(rotated.min_y, 0.0));
+        assert!(crate::canvas::pt_near(rotated.max_x, 0.0));
+        assert!(crate::canvas::pt_near(rotated.max_y, 10.0));
     }
 
     #[test]

@@ -368,7 +368,7 @@ fn an_empty_band_uri_is_located_in_the_header() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
-            header: Some(crate::spec::BandSpec {
+            header: Some(crate::spec::BandFn::fixed(crate::spec::BandSpec {
                 left: Some(crate::spec::BandSlot::Link {
                     font: (),
                     uri: vec![TextRun::Literal(String::new())],
@@ -382,7 +382,7 @@ fn an_empty_band_uri_is_located_in_the_header() {
                     style: RunStyle::default(),
                 }),
                 ..crate::spec::BandSpec::default()
-            }),
+            })),
             body: vec![Block::paragraph((), "A")],
             ..SectionSpec::default()
         },
@@ -411,14 +411,92 @@ fn a_missing_header_glyph_is_located_in_the_header() {
         PageSize::A4,
         SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
-            header: Some(crate::spec::BandSpec {
+            header: Some(crate::spec::BandFn::fixed(crate::spec::BandSpec {
                 left: Some(crate::spec::BandSlot::Text {
                     runs: vec![TextRun::Literal(MISSING.to_string())],
                     font: (),
                     style: RunStyle::default(),
                 }),
                 ..crate::spec::BandSpec::default()
-            }),
+            })),
+            body: vec![Block::paragraph((), "A")],
+            ..SectionSpec::default()
+        },
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
+    assert_eq!(
+        error.first().kind,
+        ErrorKind::MissingGlyph {
+            font: 0,
+            scalar: MISSING,
+        }
+    );
+    assert_eq!(
+        error.first().at.as_ref().and_then(|at| at.region),
+        Some(Region::Header)
+    );
+}
+
+#[test]
+fn an_empty_band_uri_from_fn_is_located_in_the_header() {
+    let Some(error) = lay(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            header: Some(crate::spec::BandFn::from_fn(|_| {
+                Ok(Some(crate::spec::BandSpec {
+                    left: Some(crate::spec::BandSlot::Link {
+                        font: (),
+                        uri: vec![TextRun::Literal(String::new())],
+                        text: vec![TextRun::Literal("Home".into())],
+                        style: RunStyle::default(),
+                    }),
+                    right: Some(crate::spec::BandSlot::Link {
+                        font: (),
+                        uri: vec![TextRun::Literal("https://example.com".into())],
+                        text: vec![TextRun::Literal("Later".into())],
+                        style: RunStyle::default(),
+                    }),
+                    ..crate::spec::BandSpec::default()
+                }))
+            })),
+            body: vec![Block::paragraph((), "A")],
+            ..SectionSpec::default()
+        },
+    ) else {
+        return;
+    };
+    let error = error.err().unwrap();
+    assert_eq!(error.first().kind, ErrorKind::EmptyLink);
+    assert_eq!(
+        error.first().at,
+        Some(Location {
+            section: Some(0),
+            page: Some(1),
+            region: Some(Region::Header),
+            cell: None,
+        })
+    );
+}
+
+#[test]
+fn a_missing_header_glyph_from_fn_is_located_in_the_header() {
+    let Some(error) = lay(
+        PageSize::A4,
+        SectionSpec {
+            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            header: Some(crate::spec::BandFn::from_fn(|_| {
+                Ok(Some(crate::spec::BandSpec {
+                    left: Some(crate::spec::BandSlot::Text {
+                        runs: vec![TextRun::Literal(MISSING.to_string())],
+                        font: (),
+                        style: RunStyle::default(),
+                    }),
+                    ..crate::spec::BandSpec::default()
+                }))
+            })),
             body: vec![Block::paragraph((), "A")],
             ..SectionSpec::default()
         },

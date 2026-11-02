@@ -16,10 +16,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock, CellSpec,
-    ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec, InlineRun,
-    ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
-    TableRow, TableSpec, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock,
+    CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec,
+    InlineRun, ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, RunStyle, SectionSpec,
+    TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_uniform(48.0)?,
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(BandSlot::Link {
                     font: (),
@@ -80,8 +80,9 @@ fn main() -> Result<()> {
                     font: (),
                     style: RunStyle::default(),
                 }),
-            }),
-            footer: Some(BandSpec {
+                marks: Vec::new(),
+            })),
+            footer: Some(BandFn::fixed(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("layout smoke".into())],
@@ -94,7 +95,8 @@ fn main() -> Result<()> {
                     text: vec![TextRun::Literal("footer link".into())],
                     style: RunStyle::default(),
                 }),
-            }),
+                marks: Vec::new(),
+            })),
             body: hello_body(logo)?,
             ..SectionSpec::default()
         }],

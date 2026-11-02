@@ -7,10 +7,42 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 while remaining `0.x`. See the [workspace changelog](../../CHANGELOG.md) for
 cross-crate history.
 
-## [Unreleased] - 2026-10-27
+## [Unreleased]
+
+## [0.3.0] - 2026-11-02
 
 ### Breaking
 
+- `BandSpec` adds the public field `marks: Vec<BandMark<K>>`. A struct literal
+  must set `marks: Vec::new()` or end with `..BandSpec::default()`. `Default`
+  leaves `marks` empty. Callers can still build `BandSpec` with a struct literal.
+- `GeometryKind::BandMarkOutside { x, y }` reports a header or footer mark
+  whose bounds start above or to the left of the band. `x` and `y` are that
+  corner. The geometry display is `header or footer mark starts outside its band at (x, y)`.
+
+### Added
+
+- `BandMark<K>` is `Shape(LayerShape<K>)` or `Rotated { degrees, pivot, shapes }`.
+  A header or footer paints those marks in order, then the left and right slots.
+  Coordinates start at the band top-left. `x` matches the page. Footer `y` starts
+  at the top of the footer band. `BandInset` does not move marks. A box that
+  crosses the bottom of the margin is `DecorationTallerThanMargin`. A box that
+  crosses the page width is `DecorationWiderThanFrame`. The library does not clip
+  the mark and does not grow the margin. Choose the page with `BandFn::from_fn`.
+  `BandMark` has no `PageWhen`. See `docs/migrate-band-marks.md`.
+
+## [0.2.0] - 2026-11-02
+
+### Breaking
+
+- `SectionSpec::header` and `SectionSpec::footer` are `Option<BandFn<K>>`.
+  `BandFn::fixed` keeps one `BandSpec` on every page of the section.
+  `BandFn::from_fn` runs after body pagination, once per page, header then
+  footer. `Ok(None)` skips painting that side. The margin stays, and the body
+  is not laid out again. `None` means that side does not exist.
+- `ErrorKind::BandFn` and `Error::band_fn` report a function failure. Display
+  stays `header or footer function failed`. The caller's error is
+  `std::error::Error::source`. `layout_spec` requires `K: 'static`.
 - `CellIndex` is now `#[non_exhaustive]`. External code can no longer build it
   with a struct literal (`CellIndex { row, col }`). Add a wildcard arm when
   matching, and obtain values from layout output instead of constructing them.
@@ -32,7 +64,3 @@ cross-crate history.
 ### Added
 
 - MSRV policy written down in `docs/msrv.md` (MSRV 1.92, follows krilla).
-
-### Fixed
-
-- Nothing crate-specific in this cycle.

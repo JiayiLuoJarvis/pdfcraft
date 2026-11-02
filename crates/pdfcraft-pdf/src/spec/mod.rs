@@ -8,7 +8,7 @@
 //! | [`SectionSpec`] | Margins, bands, layers, flow [`Block`] list |
 //! | [`Resources`] | [`FontRegistry`] and [`Resources::add_image`] → [`ImageRef`] |
 //! | [`Block`] | Paragraphs, tables, columns, lists, images, rules, … |
-//! | [`BandSpec`] / [`TextRun`] | Header/footer; page numbers resolved at paint time |
+//! | [`BandFn`] / [`BandSpec`] / [`TextRun`] | Header/footer; fixed or per page |
 //! | [`LayerMark`] / [`PageWhen`] | Page-anchored marks (`behind` / `front`) |
 //! | [`layout_spec`] | Lower + lay out → [`Rendered`] |
 //!
@@ -34,9 +34,11 @@ pub use lower::layout_spec;
 #[doc(inline)]
 pub use types::{Numbering, Ratio, Rendered, Track};
 
+use std::fmt;
 use std::num::{NonZeroU16, NonZeroU32};
 
 use crate::canvas::ImageFormat;
+use crate::error::Error;
 use crate::geom::{
     Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
     Size,
@@ -76,6 +78,11 @@ impl<K> DocumentSpec<K> {
         }
     }
 }
+
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<DocumentSpec<()>>();
+};
 
 /// Fonts and encoded images owned by a specification.
 #[derive(Debug)]
@@ -145,10 +152,10 @@ pub struct SectionSpec<K> {
     pub page_size: Option<PageSize>,
     /// Page margins and header/footer band heights.
     pub margins: Margins,
-    /// Header rendered on every page in this section.
-    pub header: Option<BandSpec<K>>,
-    /// Footer rendered on every page in this section.
-    pub footer: Option<BandSpec<K>>,
+    /// Header for this section. `None` is not called.
+    pub header: Option<BandFn<K>>,
+    /// Footer for this section. `None` is not called.
+    pub footer: Option<BandFn<K>>,
     /// Marks painted below the header and body.
     pub behind: Vec<LayerMark<K>>,
     /// Marks painted above the footer and body.
@@ -677,8 +684,109 @@ impl Default for HLineSpec {
     }
 }
 
-/// Header or footer slots.
-#[derive(Debug)]
+/// One page passed to a header or footer function.
+///
+/// The library builds this after the body is paginated. Callers only read it.
+/// Margins stay on the section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+#[non_exhaustive]
+pub struct PageBandQuery {
+    /// One-based page number across the whole document.
+    pub number: NonZeroU32,
+    /// Page count of the whole document.
+    pub count: NonZeroU32,
+    /// One-based page number inside the current section.
+    pub section_number: NonZeroU32,
+    /// Page count of the current section.
+    pub section_count: NonZeroU32,
+    /// Final page width and height.
+    ///
+    /// A [`PageSize::Paper`](crate::PageSize::Paper) value includes orientation.
+    /// [`PageSize::Custom`](crate::PageSize::Custom) is already final.
+    pub size: Size,
+}
+
+type BandCallback<K> =
+    Box<dyn FnMut(&PageBandQuery) -> std::result::Result<Option<BandSpec<K>>, Error> + Send + Sync>;
+
+enum BandFnInner<K> {
+    Fixed(BandSpec<K>),
+    Dynamic(BandCallback<K>),
+}
+
+/// Header or footer for one section.
+///
+/// [`Self::fixed`] uses one [`BandSpec`] on every page. [`Self::from_fn`] is
+/// called once per page after the body is paginated. `None` on
+/// [`SectionSpec::header`] or [`SectionSpec::footer`] means that side does not
+/// exist and the function is not called.
+///
+/// `Ok(None)` skips painting that side on that page. The margin stays, and the
+/// body does not move.
+#[must_use]
+pub struct BandFn<K> {
+    inner: BandFnInner<K>,
+}
+
+impl<K> fmt::Debug for BandFn<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("BandFn")
+    }
+}
+
+impl<K> BandFn<K> {
+    /// Uses `spec` on every page of the section.
+    ///
+    /// Font keys are checked once while [`layout_spec`] assembles the section,
+    /// not once per page.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return [`Result`](std::result::Result). A missing
+    /// font is reported by [`layout_spec`] for the section, with no page number.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic.
+    pub fn fixed(spec: BandSpec<K>) -> Self {
+        Self {
+            inner: BandFnInner::Fixed(spec),
+        }
+    }
+
+    /// Calls `f` once per page, header before footer, in page order.
+    ///
+    /// `Ok(None)` paints nothing on that side for that page. `Ok(Some(spec))`
+    /// resolves fonts for that page. `Err` stops later pages. The body is
+    /// paginated first, so a body failure never calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// `f` may return [`Error::band_fn`](crate::Error::band_fn) or any other
+    /// [`Error`]. [`layout_spec`] keeps a page `f` already stored on the error
+    /// and fills the section, page, and header or footer region that are still
+    /// empty.
+    ///
+    /// # Panics
+    ///
+    /// A panic inside `f` aborts [`layout_spec`]. The library does not catch it.
+    pub fn from_fn<F>(f: F) -> Self
+    where
+        K: 'static,
+        F: FnMut(&PageBandQuery) -> std::result::Result<Option<BandSpec<K>>, Error>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            inner: BandFnInner::Dynamic(Box::new(f)),
+        }
+    }
+}
+
+/// Header or footer content.
+#[derive(Debug, Clone)]
 #[must_use]
 pub struct BandSpec<K> {
     /// Horizontal inset rule.
@@ -687,6 +795,11 @@ pub struct BandSpec<K> {
     pub left: Option<BandSlot<K>>,
     /// End-aligned slot.
     pub right: Option<BandSlot<K>>,
+    /// Absolute marks in band coordinates, painted before the slots.
+    ///
+    /// The origin is the band top-left. A box outside the band fails layout.
+    /// The library does not clip the mark and does not grow the margin.
+    pub marks: Vec<BandMark<K>>,
 }
 
 impl<K> Default for BandSpec<K> {
@@ -695,8 +808,29 @@ impl<K> Default for BandSpec<K> {
             inset: BandInset::default(),
             left: None,
             right: None,
+            marks: Vec::new(),
         }
     }
+}
+
+/// One absolute mark inside a header or footer band.
+///
+/// Coordinates are the band top-left. There is no page filter on the mark.
+/// Choose the page in [`BandFn::from_fn`].
+#[derive(Debug, Clone, PartialEq)]
+#[must_use]
+pub enum BandMark<K> {
+    /// One unrotated shape, text line, or image.
+    Shape(LayerShape<K>),
+    /// Shapes rotated as one group.
+    Rotated {
+        /// Clockwise angle in degrees.
+        degrees: f32,
+        /// Rotation pivot in band coordinates.
+        pivot: Point,
+        /// Shapes in paint order.
+        shapes: Vec<LayerShape<K>>,
+    },
 }
 
 /// Horizontal inset for a band.
@@ -724,7 +858,7 @@ impl Default for BandInset {
 }
 
 /// Text or linked text in one band slot.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[must_use]
 pub enum BandSlot<K> {
     /// Unlinked text.

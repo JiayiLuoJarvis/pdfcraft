@@ -238,7 +238,7 @@ impl<N: Flowable> ListNode<N> {
                     &self.marker_style,
                     Some(self.marker_width),
                 )?;
-                let baseline = first_baseline(&fragment).unwrap_or(marker.baseline);
+                let baseline = first_baseline(&fragment).unwrap_or(marker.metrics.baseline.as_pt());
                 line_run::append_commands(
                     &mut commands,
                     &marker.pieces,

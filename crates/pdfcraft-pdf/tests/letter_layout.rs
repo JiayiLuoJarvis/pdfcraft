@@ -4,8 +4,8 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
+    Alignment, BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily,
+    FontRegistry, ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
@@ -59,7 +59,7 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::uniform(margin),
-            footer: Some(BandSpec {
+            footer: Some(BandFn::fixed(BandSpec {
                 left: Some(BandSlot::Text {
                     runs: vec![
                         TextRun::Literal("第 ".into()),
@@ -72,7 +72,7 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
                     style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![
                 Block::paragraph((), BODY_1),
                 Block::paragraph((), BODY_2),

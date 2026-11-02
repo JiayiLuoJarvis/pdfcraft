@@ -15,9 +15,9 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
-    TableRow, TableSpec, TextRun,
+    BandFn, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily,
+    FontRegistry, InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec,
+    TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
         },
         sections: vec![SectionSpec {
             margins: Margins::try_uniform(48.0)?,
-            header: Some(page_chrome()),
+            header: Some(BandFn::fixed(page_chrome())),
             body: sample_body()?,
             ..SectionSpec::default()
         }],
@@ -133,6 +133,7 @@ fn page_chrome() -> BandSpec<()> {
             font: (),
             style: RunStyle::default(),
         }),
+        marks: Vec::new(),
     }
 }
 

@@ -1,6 +1,8 @@
 //! Pure-function lowering from [`DocumentSpec`] to layout nodes.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU32;
 
 use crate::canvas::{DecodedImage, ImageRegistry, LinkTarget, RecordingCanvas};
 use crate::error::{
@@ -9,14 +11,16 @@ use crate::error::{
 };
 use crate::fonts::{EmOffset, FaceDecorations, FontFace, FontId, FontKey, FontSource, FontStore};
 use crate::geom::{
-    Affine, Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive,
-    Rect,
+    Affine, Color, EdgeBox, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point,
+    Positive, Rect,
 };
 use crate::layout::anchor::{self, ExpectedAnchor, ExpectedOutline};
 use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
 use crate::layout::columns::ColumnsNode;
-use crate::layout::decorate::{Decorations, LayerContent, LayerItem, LayerText, PageInfo};
+use crate::layout::decorate::{
+    BandNodes, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
+};
 use crate::layout::flow::{self, AnchorNode, FlowNode, KeepTogetherNode, SpacerNode};
 use crate::layout::frame::LayoutCtx;
 use crate::layout::hline::HLineNode;
@@ -35,15 +39,16 @@ use crate::limits::Limits;
 use super::token::DocToken;
 use super::types::{self, Rendered, Track};
 use super::{
-    Alignment, BandInset, BandSlot, BandSpec, BlankWidth as SpecBlankWidth, Block, CanvasMark,
-    CanvasSpec, CellBlock, CellSpec, ColumnsSpec, DocumentSpec, HLineSpec, ImageRef, ImageSpec,
-    InlineRun, LayerMark, LayerShape, ListKind, ListSpec, OutlineEntry, PageWhen, ParagraphSpec,
-    Resources, RunStyle, SectionSpec, TextRun,
+    Alignment, BandCallback, BandFn, BandFnInner, BandInset, BandMark, BandSlot, BandSpec,
+    BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnsSpec,
+    DocumentSpec, HLineSpec, ImageRef, ImageSpec, InlineRun, LayerMark, LayerShape, ListKind,
+    ListSpec, OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, Resources, RunStyle,
+    SectionSpec, TextRun,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
 ///
-/// `K` is the caller's font key (`Copy + Eq + Hash + Debug`). A key that was not
+/// `K` is the caller's font key (`Copy + Eq + Hash + Debug + 'static`). A key that was not
 /// registered fails with [`ErrorKind::UnregisteredFont`]. A run whose family lacks
 /// the face its style needs fails with [`ErrorKind::BoldFaceRequired`],
 /// [`ErrorKind::ItalicFaceRequired`], or [`ErrorKind::BoldItalicFaceRequired`]. An
@@ -58,9 +63,11 @@ use super::{
 /// ([`truncated`](crate::Errors::truncated) reports that more were found). Each
 /// item carries a specific [`ErrorKind`] and, where known, a [`Location`]. Font
 /// parser failures stay reachable through [`std::error::Error::source`].
+/// A header or footer function's `Err` is included. A panic in that function
+/// is not caught.
 pub fn layout_spec<K>(spec: DocumentSpec<K>) -> Result<Rendered>
 where
-    K: Copy + Eq + std::hash::Hash + std::fmt::Debug,
+    K: Copy + Eq + std::hash::Hash + std::fmt::Debug + 'static,
 {
     let DocumentSpec {
         page_size,
@@ -465,7 +472,7 @@ impl AnchorRegistry {
     }
 }
 
-fn lower_section<K: FontKey>(
+fn lower_section<K: FontKey + 'static>(
     spec: SectionSpec<K>,
     default_page: PageSize,
     fonts: &FontTable<K>,
@@ -486,13 +493,15 @@ fn lower_section<K: FontKey>(
     let mut errors = ErrorBag::default();
     let seed = InheritedPaint::seed();
     let nodes = lower_blocks(body, &seed, fonts, doc, images, at, anchors, &mut errors);
-    let header = header.and_then(|spec| own_band(spec, fonts, &mut errors));
-    let footer = footer.and_then(|spec| own_band(spec, fonts, &mut errors));
+    let header =
+        header.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
+    let footer =
+        footer.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
     let behind = own_marks(behind, fonts, &mut errors);
     let front = own_marks(front, fonts, &mut errors);
     let decorations = Decorations {
-        header: header.map(band_content),
-        footer: footer.map(band_content),
+        header,
+        footer,
         behind: layer_content(behind, doc, images.clone()),
         front: layer_content(front, doc, images.clone()),
     };
@@ -1260,6 +1269,16 @@ struct OwnedBand {
     inset: BandInset,
     left: Option<OwnedSlot>,
     right: Option<OwnedSlot>,
+    marks: Vec<OwnedBandMark>,
+}
+
+enum OwnedBandMark {
+    Shape(OwnedShape),
+    Rotated {
+        degrees: f32,
+        pivot: Point,
+        shapes: Vec<OwnedShape>,
+    },
 }
 
 struct OwnedSlot {
@@ -1273,13 +1292,49 @@ fn own_band<K: FontKey>(
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Option<OwnedBand> {
-    let BandSpec { inset, left, right } = spec;
+    let BandSpec {
+        inset,
+        left,
+        right,
+        marks,
+    } = spec;
     let left = left.and_then(|slot| own_slot(slot, fonts, errors));
     let right = right.and_then(|slot| own_slot(slot, fonts, errors));
-    if left.is_none() && right.is_none() {
+    let marks = own_band_marks(marks, fonts, errors);
+    if left.is_none() && right.is_none() && marks.is_empty() {
         return None;
     }
-    Some(OwnedBand { inset, left, right })
+    Some(OwnedBand {
+        inset,
+        left,
+        right,
+        marks,
+    })
+}
+
+fn own_band_marks<K: FontKey>(
+    marks: Vec<BandMark<K>>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Vec<OwnedBandMark> {
+    marks
+        .into_iter()
+        .filter_map(|mark| match mark {
+            BandMark::Shape(shape) => {
+                let mut shapes = own_shapes(vec![shape], fonts, errors);
+                shapes.pop().map(OwnedBandMark::Shape)
+            }
+            BandMark::Rotated {
+                degrees,
+                pivot,
+                shapes,
+            } => Some(OwnedBandMark::Rotated {
+                degrees,
+                pivot,
+                shapes: own_shapes(shapes, fonts, errors),
+            }),
+        })
+        .collect()
 }
 
 fn own_slot<K: FontKey>(
@@ -1301,8 +1356,84 @@ fn own_slot<K: FontKey>(
     Some(OwnedSlot { runs, uri, style })
 }
 
-fn band_content(spec: OwnedBand) -> crate::layout::decorate::BandContent<'static> {
-    Box::new(move |info, errors| Ok(lower_band(&spec, info, errors)))
+fn band_content(
+    spec: OwnedBand,
+    doc: DocToken,
+    images: LoweredImages,
+) -> crate::layout::decorate::BandContent<'static> {
+    Box::new(move |info, errors| {
+        Ok(lower_band(
+            &spec,
+            info,
+            doc,
+            &images,
+            BandImageErrors::AlreadyValidated,
+            errors,
+        ))
+    })
+}
+
+fn install_band<K: FontKey + 'static>(
+    band: BandFn<K>,
+    fonts: &FontTable<K>,
+    doc: DocToken,
+    images: LoweredImages,
+    errors: &mut ErrorBag,
+) -> Option<crate::layout::decorate::BandContent<'static>> {
+    match band.inner {
+        BandFnInner::Fixed(spec) => {
+            own_band(spec, fonts, errors).map(|spec| band_content(spec, doc, images))
+        }
+        BandFnInner::Dynamic(func) => Some(dynamic_band(func, fonts.clone(), doc, images)),
+    }
+}
+
+fn dynamic_band<K: FontKey + 'static>(
+    func: BandCallback<K>,
+    fonts: FontTable<K>,
+    doc: DocToken,
+    images: LoweredImages,
+) -> crate::layout::decorate::BandContent<'static> {
+    // `BandContent` is `Fn` and decorate only shares `&Decorations`.
+    // This closure owns the `FnMut` so `BandFn` stays `Sync` and `DocumentSpec` holds no `RefCell`.
+    let func = RefCell::new(func);
+    Box::new(move |info, errors| {
+        let query = page_band_query(info);
+        let decided = {
+            let mut call = func
+                .try_borrow_mut()
+                .expect("header and footer functions are not re-entered");
+            call(&query)?
+        };
+        let Some(spec) = decided else {
+            return Ok(BandNodes::default());
+        };
+        let Some(owned) = own_band(spec, &fonts, errors) else {
+            return Ok(BandNodes::default());
+        };
+        Ok(lower_band(
+            &owned,
+            info,
+            doc,
+            &images,
+            BandImageErrors::PerPage,
+            errors,
+        ))
+    })
+}
+
+fn page_band_query(info: &PageInfo) -> PageBandQuery {
+    PageBandQuery {
+        number: page_counter(info.number.get()),
+        count: page_counter(info.count.get()),
+        section_number: page_counter(info.section_number.get()),
+        section_count: page_counter(info.section_count.get()),
+        size: info.size,
+    }
+}
+
+fn page_counter(value: u32) -> NonZeroU32 {
+    NonZeroU32::new(value).expect("page counter is non-zero")
 }
 
 #[derive(Clone, Copy)]
@@ -1332,7 +1463,22 @@ impl PageFacts {
     }
 }
 
-fn lower_band(spec: &OwnedBand, info: &PageInfo, errors: &mut ErrorBag) -> Vec<FlowNode> {
+fn lower_band(
+    spec: &OwnedBand,
+    info: &PageInfo,
+    doc: DocToken,
+    images: &LoweredImages,
+    image_errors: BandImageErrors,
+    errors: &mut ErrorBag,
+) -> BandNodes {
+    let page = PageFacts::from(info);
+    BandNodes {
+        flow: lower_band_flow(spec, info, errors),
+        marks: lower_band_marks(&spec.marks, &page, doc, images, image_errors, errors),
+    }
+}
+
+fn lower_band_flow(spec: &OwnedBand, info: &PageInfo, errors: &mut ErrorBag) -> Vec<FlowNode> {
     let page = PageFacts::from(info);
     let (inset_left, inset_right) = match spec.inset {
         BandInset::Fixed { left, right } => (left, right),
@@ -1468,6 +1614,12 @@ enum OwnedShape {
         image: ImageRef,
         rect: Rect,
     },
+}
+
+#[derive(Clone, Copy)]
+enum BandImageErrors {
+    AlreadyValidated,
+    PerPage,
 }
 
 enum OwnedMark {
@@ -1672,13 +1824,26 @@ fn lower_layer_marks(
                     errors,
                     straight_path(*from, *to),
                     Ink::Stroke(*pen),
+                    EdgeBox::from_points(*from, *to),
                 );
             }
             OwnedMark::Rect { rect, ink, .. } => {
-                push_shape(&mut items, errors, Path::rect(*rect), *ink);
+                push_shape(
+                    &mut items,
+                    errors,
+                    Path::rect(*rect),
+                    *ink,
+                    EdgeBox::from_rect(*rect),
+                );
             }
             OwnedMark::Ellipse { rect, ink, .. } => {
-                push_shape(&mut items, errors, Path::ellipse(*rect), *ink);
+                push_shape(
+                    &mut items,
+                    errors,
+                    Path::ellipse(*rect),
+                    *ink,
+                    EdgeBox::from_rect(*rect),
+                );
             }
             OwnedMark::Rotated {
                 degrees,
@@ -1686,35 +1851,90 @@ fn lower_layer_marks(
                 shapes,
                 ..
             } => {
-                if shapes.is_empty() {
-                    continue;
-                }
-                if !degrees.is_finite() {
-                    errors.record(GeometryKind::NonFiniteRotation { degrees: *degrees });
-                    continue;
-                }
-                let mut kids = Vec::with_capacity(shapes.len());
-                for shape in shapes {
-                    push_owned_shape(&mut kids, &page, doc, images, errors, shape);
-                }
-                if kids.is_empty() {
-                    continue;
-                }
-                if is_zero_angle(*degrees) {
-                    items.extend(kids);
-                    continue;
-                }
-                match Affine::rotate_cw_about(*degrees, *pivot) {
-                    Ok(affine) => items.push(LayerItem::Group {
-                        affine,
-                        items: kids,
-                    }),
-                    Err(error) => errors.record(error),
-                }
+                items.extend(lower_rotated(
+                    *degrees,
+                    *pivot,
+                    shapes,
+                    &page,
+                    doc,
+                    images,
+                    BandImageErrors::AlreadyValidated,
+                    errors,
+                ));
             }
         }
     }
     items
+}
+
+fn lower_band_marks(
+    marks: &[OwnedBandMark],
+    page: &PageFacts,
+    doc: DocToken,
+    images: &LoweredImages,
+    image_errors: BandImageErrors,
+    errors: &mut ErrorBag,
+) -> Vec<LayerItem> {
+    let mut items = Vec::new();
+    for mark in marks {
+        match mark {
+            OwnedBandMark::Shape(shape) => {
+                push_owned_shape(&mut items, page, doc, images, image_errors, errors, shape);
+            }
+            OwnedBandMark::Rotated {
+                degrees,
+                pivot,
+                shapes,
+            } => items.extend(lower_rotated(
+                *degrees,
+                *pivot,
+                shapes,
+                page,
+                doc,
+                images,
+                image_errors,
+                errors,
+            )),
+        }
+    }
+    items
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "rotation lowering shares the complete image and page boundary context"
+)]
+fn lower_rotated(
+    degrees: f32,
+    pivot: Point,
+    shapes: &[OwnedShape],
+    page: &PageFacts,
+    doc: DocToken,
+    images: &LoweredImages,
+    image_errors: BandImageErrors,
+    errors: &mut ErrorBag,
+) -> Vec<LayerItem> {
+    if shapes.is_empty() {
+        return Vec::new();
+    }
+    if !degrees.is_finite() {
+        errors.record(GeometryKind::NonFiniteRotation { degrees });
+        return Vec::new();
+    }
+    let mut items = Vec::with_capacity(shapes.len());
+    for shape in shapes {
+        push_owned_shape(&mut items, page, doc, images, image_errors, errors, shape);
+    }
+    if items.is_empty() || is_zero_angle(degrees) {
+        return items;
+    }
+    match Affine::rotate_cw_about(degrees, pivot) {
+        Ok(affine) => vec![LayerItem::Group { affine, items }],
+        Err(error) => {
+            errors.record(error);
+            Vec::new()
+        }
+    }
 }
 
 fn push_owned_shape(
@@ -1722,18 +1942,37 @@ fn push_owned_shape(
     page: &PageFacts,
     doc: DocToken,
     images: &LoweredImages,
+    image_errors: BandImageErrors,
     errors: &mut ErrorBag,
     shape: &OwnedShape,
 ) {
     match shape {
         OwnedShape::Line { from, to, pen } => {
-            push_shape(items, errors, straight_path(*from, *to), Ink::Stroke(*pen));
+            push_shape(
+                items,
+                errors,
+                straight_path(*from, *to),
+                Ink::Stroke(*pen),
+                EdgeBox::from_points(*from, *to),
+            );
         }
         OwnedShape::Rect { rect, ink } => {
-            push_shape(items, errors, Path::rect(*rect), *ink);
+            push_shape(
+                items,
+                errors,
+                Path::rect(*rect),
+                *ink,
+                EdgeBox::from_rect(*rect),
+            );
         }
         OwnedShape::Ellipse { rect, ink } => {
-            push_shape(items, errors, Path::ellipse(*rect), *ink);
+            push_shape(
+                items,
+                errors,
+                Path::ellipse(*rect),
+                *ink,
+                EdgeBox::from_rect(*rect),
+            );
         }
         OwnedShape::Text { text, at, style } => {
             items.push(LayerItem::Text(LayerText {
@@ -1742,27 +1981,51 @@ fn push_owned_shape(
                 style: *style,
             }));
         }
-        OwnedShape::Image { image, rect } => {
-            if let Some(image) = image_for(*image, images) {
-                if image.doc == doc {
-                    items.push(LayerItem::Image {
-                        image: image.decoded,
-                        rect: *rect,
-                    });
-                } else {
-                    errors.record(Error::from(ErrorKind::UnknownImage {
-                        id: image.decoded.id.as_u32(),
-                    }));
-                }
+        OwnedShape::Image { image, rect } => match image_for(*image, images) {
+            Some(image) if image.doc == doc => {
+                items.push(LayerItem::Image {
+                    image: image.decoded,
+                    rect: *rect,
+                });
             }
-        }
+            Some(image) => {
+                errors.record(Error::from(ErrorKind::UnknownImage {
+                    id: image.decoded.id.as_u32(),
+                }));
+            }
+            None if matches!(image_errors, BandImageErrors::PerPage) => {
+                errors.record(Error::from(ErrorKind::UnknownImage { id: image.index }));
+            }
+            None => {}
+        },
     }
 }
 
-fn push_shape(items: &mut Vec<LayerItem>, errors: &mut ErrorBag, path: Fallible<Path>, ink: Ink) {
+fn push_shape(
+    items: &mut Vec<LayerItem>,
+    errors: &mut ErrorBag,
+    path: Fallible<Path>,
+    ink: Ink,
+    bounds: EdgeBox,
+) {
     match path {
-        Ok(path) => items.push(LayerItem::Shape { path, ink }),
+        Ok(path) => items.push(LayerItem::Shape {
+            path,
+            ink,
+            bounds: ink_bounds(bounds, ink),
+        }),
         Err(error) => errors.record(error),
+    }
+}
+
+fn ink_bounds(bounds: EdgeBox, ink: Ink) -> EdgeBox {
+    let pen = match ink {
+        Ink::Fill(_) => None,
+        Ink::Stroke(pen) | Ink::FillStroke(_, pen) => Some(pen),
+    };
+    match pen {
+        Some(pen) => bounds.outset(Length::from_trusted_pt(pen.width().as_pt() / 2.0)),
+        None => bounds,
     }
 }
 
@@ -1792,9 +2055,37 @@ fn validate_section_images<K>(
     images: &LoweredImages,
     errors: &mut ErrorBag,
 ) {
+    for band in [&section.header, &section.footer].into_iter().flatten() {
+        if let BandFnInner::Fixed(spec) = &band.inner {
+            validate_band_marks(&spec.marks, images, errors);
+        }
+    }
     validate_marks(&section.behind, images, errors);
     validate_marks(&section.front, images, errors);
     validate_blocks(&section.body, images, errors);
+}
+
+fn validate_band_marks<K>(marks: &[BandMark<K>], images: &LoweredImages, errors: &mut ErrorBag) {
+    for mark in marks {
+        match mark {
+            BandMark::Shape(LayerShape::Image { image, .. }) => {
+                reject_image(*image, images, errors);
+            }
+            BandMark::Rotated { shapes, .. } => {
+                for shape in shapes {
+                    if let LayerShape::Image { image, .. } = shape {
+                        reject_image(*image, images, errors);
+                    }
+                }
+            }
+            BandMark::Shape(
+                LayerShape::Line { .. }
+                | LayerShape::Rect { .. }
+                | LayerShape::Ellipse { .. }
+                | LayerShape::Text { .. },
+            ) => {}
+        }
+    }
 }
 
 fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut ErrorBag) {

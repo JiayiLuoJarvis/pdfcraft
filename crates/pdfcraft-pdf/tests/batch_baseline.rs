@@ -15,8 +15,8 @@ use std::process::Command;
 use std::time::Instant;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
+    Alignment, BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily,
+    FontRegistry, ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize, Positive,
@@ -120,7 +120,7 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::uniform(NonNegative::pt(36.0)?),
-            footer: Some(BandSpec {
+            footer: Some(BandFn::fixed(BandSpec {
                 left: Some(BandSlot::Text {
                     runs: vec![
                         TextRun::Literal("第 ".into()),
@@ -133,7 +133,7 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
                     style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
-            }),
+            })),
             body,
             ..SectionSpec::default()
         }],

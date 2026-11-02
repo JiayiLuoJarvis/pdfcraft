@@ -13,6 +13,11 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+### Breaking
+
+- **Breaking.** `pdfcraft-pdf` `0.3.0`. `BandSpec` adds `marks: Vec<BandMark<K>>`. Struct literals need `marks: Vec::new()` or `..BandSpec::default()`. Headers and footers paint images, lines, rectangles, ellipses, single-line text, and rotated groups in band coordinates. A mark outside the band is an error. See [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+- **Breaking.** `pdfcraft-pdf` `0.2.0`. `SectionSpec::header` and `SectionSpec::footer` are `Option<BandFn<K>>`. See [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+
 ### Fixed
 
 - `pdfcraft-orgchart` `0.1.1`. Public signatures stay. Drawn charts follow the

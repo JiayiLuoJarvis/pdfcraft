@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use crate::error::{
     Error, ErrorBag, ErrorKind, Fallible as Result, GeometryKind, Location, Region,
 };
-use crate::geom::{Affine, Ink, Margins, NonNegative, Paint, Path, Point, Size, Stroke};
+use crate::geom::{Affine, EdgeBox, Ink, Margins, NonNegative, Paint, Path, Point, Size, Stroke};
 use crate::layout::flow::FlowNode;
 use crate::layout::frame::{
     self, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, PlacedFragment, Split,
@@ -45,8 +45,13 @@ pub(crate) struct PageInfo {
     pub(crate) margins: Margins,
 }
 
-pub(crate) type BandContent<'a> =
-    Box<dyn Fn(&PageInfo, &mut ErrorBag) -> Result<Vec<FlowNode>> + 'a>;
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct BandNodes {
+    pub(crate) flow: Vec<FlowNode>,
+    pub(crate) marks: Vec<LayerItem>,
+}
+
+pub(crate) type BandContent<'a> = Box<dyn Fn(&PageInfo, &mut ErrorBag) -> Result<BandNodes> + 'a>;
 
 /// Unwrapped line for behind/front. `at` is the line-box top-left; alignment is ignored.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +74,7 @@ pub(crate) enum LayerItem {
     Shape {
         path: Path,
         ink: Ink,
+        bounds: EdgeBox,
     },
     /// Paint-time transform wrapping unrotated children.
     Group {
@@ -246,7 +252,7 @@ fn measure_layer(
     };
     let mut commands = Vec::new();
     for item in content(page, ctx.errors)? {
-        append_layer_item(&mut commands, ctx, item)?;
+        let _ = append_layer_item(&mut commands, ctx, item)?;
     }
     if commands.is_empty() {
         return Ok(None);
@@ -266,7 +272,7 @@ fn append_layer_item(
     commands: &mut Vec<FragmentCommand>,
     ctx: &mut LayoutCtx<'_>,
     item: LayerItem,
-) -> Result<()> {
+) -> Result<Option<EdgeBox>> {
     match item {
         LayerItem::Text(item) => {
             let line = line_run::single_line_run(ctx, &item.text, &item.style, None)?;
@@ -274,53 +280,103 @@ fn append_layer_item(
                 commands,
                 &line.pieces,
                 item.at.x().as_pt(),
-                item.at.y().as_pt() + line.baseline,
+                item.at.y().as_pt() + line.metrics.baseline.as_pt(),
                 0.0,
             )?;
+            Ok(Some(EdgeBox::from_origin_extent(
+                item.at,
+                line.width.as_pt(),
+                line.metrics.line_height.as_pt(),
+            )))
         }
         LayerItem::Image { image, rect } => {
             commands.push(FragmentCommand::Image { image, rect });
+            Ok(Some(EdgeBox::from_rect(rect)))
         }
-        LayerItem::Shape { path, ink } => match ink {
-            Ink::Fill(color) => commands.push(FragmentCommand::Fill {
-                path,
-                paint: Paint::solid(color),
-            }),
-            Ink::Stroke(pen) => commands.push(FragmentCommand::Stroke {
-                path,
-                paint: Paint::solid(pen.color()),
-                stroke: Stroke::new(pen.width()),
-            }),
-            Ink::FillStroke(color, pen) => {
-                commands.push(FragmentCommand::Fill {
-                    path: path.clone(),
+        LayerItem::Shape { path, ink, bounds } => {
+            match ink {
+                Ink::Fill(color) => commands.push(FragmentCommand::Fill {
+                    path,
                     paint: Paint::solid(color),
-                });
-                commands.push(FragmentCommand::Stroke {
+                }),
+                Ink::Stroke(pen) => commands.push(FragmentCommand::Stroke {
                     path,
                     paint: Paint::solid(pen.color()),
                     stroke: Stroke::new(pen.width()),
-                });
-            }
-        },
-        LayerItem::Group { affine, items } => {
-            if affine.is_identity() {
-                for child in items {
-                    append_layer_item(commands, ctx, child)?;
+                }),
+                Ink::FillStroke(color, pen) => {
+                    commands.push(FragmentCommand::Fill {
+                        path: path.clone(),
+                        paint: Paint::solid(color),
+                    });
+                    commands.push(FragmentCommand::Stroke {
+                        path,
+                        paint: Paint::solid(pen.color()),
+                        stroke: Stroke::new(pen.width()),
+                    });
                 }
-                return Ok(());
             }
-            commands.push(FragmentCommand::PushTransform { affine });
+            Ok(Some(bounds))
+        }
+        LayerItem::Group { affine, items } => {
+            let transformed = !affine.is_identity();
+            if transformed {
+                commands.push(FragmentCommand::PushTransform { affine });
+            }
+            let mut bounds: Option<EdgeBox> = None;
             for child in items {
-                append_layer_item(commands, ctx, child)?;
+                let child = append_layer_item(commands, ctx, child)?;
+                let child = if transformed {
+                    child.map(|bounds| bounds.transformed(affine)).transpose()?
+                } else {
+                    child
+                };
+                if let Some(child) = child {
+                    bounds = Some(match bounds {
+                        Some(bounds) => bounds.union(child),
+                        None => child,
+                    });
+                }
             }
-            commands.push(FragmentCommand::PopTransform);
+            if transformed {
+                commands.push(FragmentCommand::PopTransform);
+            }
+            Ok(bounds)
         }
     }
-    Ok(())
 }
 
 fn measure_band(
+    ctx: &mut LayoutCtx<'_>,
+    nodes: BandNodes,
+    size: Size,
+    margin: f32,
+) -> Result<Option<Fragment>> {
+    let BandNodes { flow, marks } = nodes;
+    if flow.is_empty() && marks.is_empty() {
+        return Ok(None);
+    }
+    let mut fragment = measure_band_flow(ctx, flow, size, margin)?.unwrap_or(Fragment {
+        height: NonNegative::ZERO,
+        spacing_after: NonNegative::ZERO,
+        commands: Vec::new(),
+        anchors: Vec::new(),
+    });
+    let mut mark_commands = Vec::new();
+    for mark in marks {
+        if let Some(bounds) = append_layer_item(&mut mark_commands, ctx, mark)? {
+            check_mark_bounds(bounds, size.width().as_pt(), margin)?;
+        }
+    }
+    if mark_commands.is_empty() && fragment.commands.is_empty() {
+        return Ok(None);
+    }
+    mark_commands.append(&mut fragment.commands);
+    fragment.commands = mark_commands;
+    Ok(Some(fragment))
+}
+
+fn measure_band_flow(
     ctx: &mut LayoutCtx<'_>,
     nodes: Vec<FlowNode>,
     size: Size,
@@ -353,4 +409,29 @@ fn measure_band(
         })),
         Err(other) => Err(other),
     }
+}
+
+fn check_mark_bounds(bounds: EdgeBox, page_width: f32, band_height: f32) -> Result<()> {
+    if bounds.min_x < 0.0 || bounds.min_y < 0.0 {
+        return Err(GeometryKind::BandMarkOutside {
+            x: bounds.min_x,
+            y: bounds.min_y,
+        }
+        .into());
+    }
+    if bounds.max_y > band_height {
+        return Err(ErrorKind::DecorationTallerThanMargin {
+            height: bounds.max_y,
+            margin: band_height,
+        }
+        .into());
+    }
+    if bounds.max_x > page_width {
+        return Err(ErrorKind::DecorationWiderThanFrame {
+            width: bounds.max_x,
+            avail: page_width,
+        }
+        .into());
+    }
+    Ok(())
 }

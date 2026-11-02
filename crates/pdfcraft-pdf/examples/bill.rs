@@ -14,9 +14,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec, ColumnsSpec,
-    FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, InlineRun, ParagraphSpec,
-    Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec,
+    ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, InlineRun,
+    ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_new(28.0, 40.0, 28.0, 40.0)?,
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("恒誠商務有限公司".into())],
@@ -78,8 +78,9 @@ fn main() -> Result<()> {
                     font: (),
                     style: RunStyle::default(),
                 }),
-            }),
-            footer: Some(BandSpec {
+                marks: Vec::new(),
+            })),
+            footer: Some(BandFn::fixed(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("Tel.: 00852 - 2668 1868".into())],
@@ -91,7 +92,8 @@ fn main() -> Result<()> {
                     font: (),
                     style: RunStyle::default(),
                 }),
-            }),
+                marks: Vec::new(),
+            })),
             body: bill_body(logo, mark, diamond)?,
             ..SectionSpec::default()
         }],

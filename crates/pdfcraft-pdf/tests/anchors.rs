@@ -2,9 +2,9 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry, InlineRun,
-    OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow,
-    TableSpec, TextRun,
+    BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
+    InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
+    TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
@@ -351,7 +351,7 @@ fn band_link_stays_uri_only() {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_new(48.0, 48.0, 48.0, 48.0).unwrap(),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 left: Some(BandSlot::Link {
                     font: (),
                     uri: vec![TextRun::Literal("https://band.example".into())],
@@ -359,7 +359,7 @@ fn band_link_stays_uri_only() {
                     style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("body")],
             ..SectionSpec::default()
         }],
@@ -382,7 +382,7 @@ fn empty_band_uri_is_empty_link_in_header() {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_new(48.0, 48.0, 48.0, 48.0).unwrap(),
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 left: Some(BandSlot::Link {
                     font: (),
                     uri: vec![TextRun::Literal(String::new())],
@@ -390,7 +390,7 @@ fn empty_band_uri_is_empty_link_in_header() {
                     style: RunStyle::default(),
                 }),
                 ..BandSpec::default()
-            }),
+            })),
             body: vec![para("body")],
             ..SectionSpec::default()
         }],

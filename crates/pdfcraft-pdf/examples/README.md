@@ -40,3 +40,19 @@ cargo run -p pdfcraft-pdf --example anchors
 Writes `out/anchors.pdf`. The program prints what to look for with `pdfinfo`,
 `pdftotext`, and a reader outline sidebar. Font: `PDFCRAFT_PDF_FONT`, else
 `PDFCRAFT_CJK_FONT`, else `.fonts/body.ttf`. The face must cover the CJK sample.
+
+## band_fn
+
+Per-page header and footer. `BAND_FN_CASE` selects `first`, `last`, `odd-even`,
+`odd-even-marks`, `skip`, `count`, `sections`, `link`, `too-tall`, `fail`, or
+`footer-skip`. The default is `first`. Writes `out/band_fn.pdf`. `fail` prints
+the error and its source, then exits non-zero. `odd-even-marks` paints one image
+on odd footers and a stroked anti-counterfeit box, three fixed text lines, and
+a 55 pt image on even footers.
+
+```bash
+BAND_FN_CASE=sections cargo run -p pdfcraft-pdf --example band_fn
+BAND_FN_CASE=odd-even-marks cargo run -p pdfcraft-pdf --example band_fn -- out/band_fn_odd_even_marks.pdf
+```
+
+Font lookup matches `hello`.

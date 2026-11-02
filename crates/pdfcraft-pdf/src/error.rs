@@ -89,6 +89,43 @@ impl Error {
         self
     }
 
+    /// A header or footer function failed.
+    ///
+    /// [`kind`](Self::kind) is [`ErrorKind::BandFn`]. Display stays
+    /// `header or footer function failed`. `source` is the error the function
+    /// returned, read with [`StdError::source`]. Layout may later fill empty
+    /// [`Location`] fields. A page the function already set is kept.
+    ///
+    /// # Errors
+    ///
+    /// This constructor does not fail. [`crate::layout_spec`] returns this
+    /// [`Error`] when the function returns it.
+    ///
+    /// # Panics
+    ///
+    /// This constructor does not panic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::error::Error as StdError;
+    ///
+    /// use pdfcraft_pdf::Error;
+    ///
+    /// let err = Error::band_fn("boom");
+    /// assert_eq!(err.kind.to_string(), "header or footer function failed");
+    /// assert_eq!(StdError::source(&err).unwrap().to_string(), "boom");
+    /// assert!(!err.to_string().contains("boom"));
+    /// ```
+    #[must_use]
+    pub fn band_fn(source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        Self {
+            kind: ErrorKind::BandFn,
+            at: None,
+            source: Some(Arc::from(source.into())),
+        }
+    }
+
     /// Fills location fields this error does not know yet. An inner value wins.
     pub(crate) fn fill_missing(&mut self, at: &Location) {
         let loc = self.location();
@@ -421,6 +458,10 @@ pub enum ErrorKind {
         /// What pdfcraft asked the backend to do.
         message: String,
     },
+    /// A header or footer function returned an error.
+    ///
+    /// The caller's error is the [`source`](StdError::source).
+    BandFn,
 }
 
 impl fmt::Display for ErrorKind {
@@ -509,6 +550,7 @@ impl fmt::Display for ErrorKind {
                 write!(f, "single-line text {text:?} contains a forced line break")
             }
             Self::Backend { message } => write!(f, "PDF backend failed: {message}"),
+            Self::BandFn => f.write_str("header or footer function failed"),
         }
     }
 }
@@ -585,6 +627,13 @@ pub enum GeometryKind {
         /// The rejected angle in degrees.
         degrees: f32,
     },
+    /// A header or footer mark starts above or to the left of its band.
+    BandMarkOutside {
+        /// Left edge of the mark bounds.
+        x: f32,
+        /// Top edge of the mark bounds.
+        y: f32,
+    },
     /// An ordered list number has no label. Letters stop at Z and roman numerals at 3999.
     MarkerOutOfRange {
         /// The item number.
@@ -651,6 +700,12 @@ impl fmt::Display for GeometryKind {
             Self::DegeneratePath => f.write_str("path has no drawable segment"),
             Self::NonFiniteRotation { degrees } => {
                 write!(f, "rotation {degrees} degrees is not finite")
+            }
+            Self::BandMarkOutside { x, y } => {
+                write!(
+                    f,
+                    "header or footer mark starts outside its band at ({x}, {y})"
+                )
             }
             Self::MarkerOutOfRange { number } => write!(f, "list number {number} has no label"),
             Self::EmptyListMarker => f.write_str("custom list marker is empty"),

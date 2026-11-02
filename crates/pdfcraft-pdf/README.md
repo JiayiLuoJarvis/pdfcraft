@@ -14,11 +14,11 @@ part of the public API. Body links use `LinkTarget::Uri` or `LinkTarget::Anchor`
 | | |
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
-| Migration | [docs/migrate-inline.md](docs/migrate-inline.md) |
+| Migration | [inline styles](docs/migrate-inline.md), [table rows](docs/migrate-table-row.md), [band marks](docs/migrate-band-marks.md) |
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.92 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.1.0`. The API can break before `1.0` |
+| Status | `0.3.0`. The API can break before `1.0` |
 
 Filling existing AcroForms is [`pdfcraft-forms`](https://docs.rs/pdfcraft-forms).
 Equity charts are [`pdfcraft-orgchart`](https://docs.rs/pdfcraft-orgchart). Both
@@ -30,7 +30,7 @@ are separate crates with their own guides.
 
 ```toml
 [dependencies]
-pdfcraft-pdf = "0.1.0"
+pdfcraft-pdf = "0.3.0"
 ```
 
 Default features enable the krilla backend (`to_pdf`).
@@ -38,7 +38,7 @@ Default features enable the krilla backend (`to_pdf`).
 ```toml
 # Optional. Re-exports `pt_near` and `PT_ABS_TOLERANCE` at the crate root.
 # `canvas::pt_near` is available without this feature.
-pdfcraft-pdf = { version = "0.1.0", features = ["test-utils"] }
+pdfcraft-pdf = { version = "0.3.0", features = ["test-utils"] }
 ```
 
 ---
@@ -47,7 +47,7 @@ pdfcraft-pdf = { version = "0.1.0", features = ["test-utils"] }
 
 ```rust
 use pdfcraft_pdf::spec::{
-    BandInset, BandSlot, BandSpec, Block, DocumentInfo, FontFace, FontFamily, FontRegistry,
+    BandFn, BandInset, BandSlot, BandSpec, Block, DocumentInfo, FontFace, FontFamily, FontRegistry,
     Resources, RunStyle, SectionSpec, TextRun,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize, Result};
@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         info: DocumentInfo::default(),
         sections: vec![SectionSpec {
             margins: Margins::try_uniform(48.0)?,
-            header: Some(BandSpec {
+            header: Some(BandFn::fixed(BandSpec {
                 inset: BandInset::PageMargins,
                 left: Some(BandSlot::Text {
                     runs: vec![TextRun::Literal("pdfcraft-pdf".into())],
@@ -85,7 +85,8 @@ fn main() -> Result<()> {
                     font: (),
                     style: RunStyle::default(),
                 }),
-            }),
+                ..BandSpec::default()
+            })),
             body: vec![
                 Block::paragraph((), "Hello from pdfcraft-pdf."),
                 Block::paragraph((), "Missing glyphs fail the whole document."),
@@ -109,6 +110,7 @@ Runnable demos:
 cargo run -p pdfcraft-pdf --example hello
 cargo run -p pdfcraft-pdf --example bill    # needs a CJK face; see examples/README.md
 cargo run -p pdfcraft-pdf --example anchors # §12.4 sample → out/anchors.pdf
+cargo run -p pdfcraft-pdf --example band_fn # BAND_FN_CASE selects the sample → out/band_fn.pdf
 ```
 
 ---
@@ -132,8 +134,8 @@ cargo run -p pdfcraft-pdf --example anchors # §12.4 sample → out/anchors.pdf
 Coordinates: PDF points, **top-left origin, y downward**.  
 Fonts: register face bytes under your own key type. A missing cmap entry fails the document.  
 Inline style: `RunStyle` selects bold, italic, and bold italic faces you register, plus underline, strikethrough, tracking, size, and color.  
-Dynamic data: use Rust `if` / `for` when building values — there is no template
-DSL and no caller-provided layout closures.
+Dynamic data: use Rust `if` / `for` when building body values. There is no template
+DSL. A header or footer may be `BandFn`.
 
 Deep dive: **[docs/guide.md](docs/guide.md)** (blocks, tables, links, limits,
 errors, testing).
@@ -157,7 +159,7 @@ errors, testing).
 | `DocumentSpec.info` | PDF title and author (`DocumentInfo`). Creator stays `pdfcraft` |
 | `FontRegistry` / `Resources::with_fonts` | Faces keyed by your type, plus `add_image` → `ImageRef` |
 | `Block` and friends | Flow content |
-| `BandSpec` / `TextRun` | Header/footer; page numbers at paint time |
+| `BandFn` / `BandSpec` / `TextRun` | Header/footer. `fixed` or a per-page function. Page numbers at paint time |
 | `LayerMark` / `PageWhen` | Page-anchored marks |
 | `Limits` | Batch safety caps |
 | `layout_spec` | Measure, paginate, record |

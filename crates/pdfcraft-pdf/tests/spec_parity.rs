@@ -61,29 +61,32 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         margins: Margins::uniform(margin),
         ..SectionSpec::default()
     };
-    section.header = Some(pdfcraft_pdf::spec::BandSpec {
-        inset: BandInset::PageMargins,
-        left: Some(BandSlot::Link {
-            font: (),
-            uri: vec![
-                TextRun::Literal("https://example.com/".to_owned()),
-                TextRun::PageNumber,
-            ],
-            text: vec![TextRun::Literal("Home".to_owned())],
-            style: RunStyle::default(),
-        }),
-        right: Some(BandSlot::Text {
-            runs: vec![
-                TextRun::Literal("第 ".to_owned()),
-                TextRun::PageNumber,
-                TextRun::Literal(" 页 / 共 ".to_owned()),
-                TextRun::PageCount,
-                TextRun::Literal(" 页".to_owned()),
-            ],
-            font: (),
-            style: RunStyle::default(),
-        }),
-    });
+    section.header = Some(pdfcraft_pdf::spec::BandFn::fixed(
+        pdfcraft_pdf::spec::BandSpec {
+            inset: BandInset::PageMargins,
+            left: Some(BandSlot::Link {
+                font: (),
+                uri: vec![
+                    TextRun::Literal("https://example.com/".to_owned()),
+                    TextRun::PageNumber,
+                ],
+                text: vec![TextRun::Literal("Home".to_owned())],
+                style: RunStyle::default(),
+            }),
+            right: Some(BandSlot::Text {
+                runs: vec![
+                    TextRun::Literal("第 ".to_owned()),
+                    TextRun::PageNumber,
+                    TextRun::Literal(" 页 / 共 ".to_owned()),
+                    TextRun::PageCount,
+                    TextRun::Literal(" 页".to_owned()),
+                ],
+                font: (),
+                style: RunStyle::default(),
+            }),
+            marks: Vec::new(),
+        },
+    ));
     section.body = vec![
         Block::paragraph((), "Alpha"),
         Block::PageBreak,

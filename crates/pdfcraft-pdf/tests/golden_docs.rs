@@ -33,10 +33,10 @@ mod common;
 use std::num::NonZeroU16;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellBlock, CellSpec,
-    DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, InlineRun, LayerMark, LayerShape,
-    PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec,
-    TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellBlock,
+    CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, InlineRun, LayerMark,
+    LayerShape, PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow,
+    TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, Color, DocumentSpec, Finite, Ink, Length, Limits, Margins, NonNegative, PageSize,
@@ -328,7 +328,7 @@ fn bands_section() -> SectionSpec<()> {
     SectionSpec {
         page_size: None,
         margins: Margins::try_uniform(48.0).unwrap(),
-        header: Some(BandSpec {
+        header: Some(BandFn::fixed(BandSpec {
             inset: BandInset::PageMargins,
             left: Some(BandSlot::Text {
                 runs: vec![TextRun::Literal("Golden bands.".to_owned())],
@@ -344,8 +344,9 @@ fn bands_section() -> SectionSpec<()> {
                 font: (),
                 style: RunStyle::default(),
             }),
-        }),
-        footer: Some(BandSpec {
+            marks: Vec::new(),
+        })),
+        footer: Some(BandFn::fixed(BandSpec {
             inset: BandInset::PageMargins,
             left: Some(BandSlot::Text {
                 runs: vec![TextRun::Literal("Footer left.".to_owned())],
@@ -358,7 +359,8 @@ fn bands_section() -> SectionSpec<()> {
                 font: (),
                 style: RunStyle::default(),
             }),
-        }),
+            marks: Vec::new(),
+        })),
         behind: vec![
             LayerMark::Line {
                 when: PageWhen::All,

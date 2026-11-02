@@ -480,11 +480,12 @@ pub(crate) fn append_commands(
     Ok(())
 }
 
-/// One unwrapped line and its ascent.
+/// One unwrapped line and its measurements.
 pub(crate) struct SingleLine {
     /// Pieces on a baseline at y = 0, starting at x = 0.
     pub(crate) pieces: Vec<LinePiece>,
-    pub(crate) baseline: f32,
+    pub(crate) width: Length<NonNegative>,
+    pub(crate) metrics: LineMetrics,
 }
 
 /// One unwrapped line of `text` in `style`, with tracking and decorations.
@@ -526,7 +527,8 @@ pub(crate) fn single_line_run(
     painter.text(&measured, &clusters, &draws)?;
     Ok(SingleLine {
         pieces: painter.finish(Some(style.font), style.font_size, style.color)?,
-        baseline: metrics.baseline.as_pt(),
+        width,
+        metrics,
     })
 }
 

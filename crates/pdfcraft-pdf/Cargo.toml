@@ -1,6 +1,6 @@
 [package]
 name = "pdfcraft-pdf"
-version = "0.1.0"
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Lay out DocumentSpec values (flow, bands, layers) and emit vector PDF via a sealed krilla backend"
@@ -58,4 +58,8 @@ required-features = ["backend-krilla"]
 
 [[example]]
 name = "bill"
+required-features = ["backend-krilla"]
+
+[[example]]
+name = "band_fn"
 required-features = ["backend-krilla"]

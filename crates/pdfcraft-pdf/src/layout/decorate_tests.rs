@@ -4,11 +4,11 @@
 
 use crate::canvas::CanvasCommand;
 use crate::error::{Error, ErrorBag, ErrorKind, Region};
-use crate::geom::{Color, Ink, NonNegative, Path, Pen, Point, Rect};
+use crate::geom::{Affine, Color, EdgeBox, Ink, NonNegative, Path, Pen, Point, Rect};
 use crate::layout::column_width::{ColumnWidth, Ratio};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::{
-    BandContent, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
+    BandContent, BandNodes, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
 };
 use crate::layout::flow::FlowNode;
 use crate::layout::style::{GlyphStyle, Style, TextAlign};
@@ -20,15 +20,29 @@ use crate::layout::test_util::{
 
 fn band(label: &'static str, style: &Style) -> BandContent<'static> {
     let style = style.clone();
-    Box::new(move |_: &PageInfo, _: &mut ErrorBag| Ok(vec![text(label, &style)]))
+    Box::new(move |_: &PageInfo, _: &mut ErrorBag| Ok(flow_band(vec![text(label, &style)])))
 }
 
 fn numbered(style: &Style) -> BandContent<'static> {
     let style = style.clone();
     Box::new(move |page: &PageInfo, _: &mut ErrorBag| {
         let label = format!("Page {} / {}", page.number.get(), page.count.get());
-        Ok(vec![text(&label, &style)])
+        Ok(flow_band(vec![text(&label, &style)]))
     })
+}
+
+fn flow_band(flow: Vec<FlowNode>) -> BandNodes {
+    BandNodes {
+        flow,
+        marks: Vec::new(),
+    }
+}
+
+fn mark_band(marks: Vec<LayerItem>) -> BandNodes {
+    BandNodes {
+        flow: Vec::new(),
+        marks,
+    }
 }
 
 fn three_pages_with_blank(style: &Style) -> FlowNode {
@@ -150,7 +164,7 @@ fn header_taller_than_the_page_reports_its_full_height() {
     let lines = vec!["H"; 40].join("\n");
     let decorations = Decorations {
         header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
-            Ok(vec![text(&lines, &style)])
+            Ok(flow_band(vec![text(&lines, &style)]))
         })),
         ..Decorations::none()
     };
@@ -229,7 +243,7 @@ fn band_rejects_images() {
     .unwrap();
     let decorations = Decorations {
         header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
-            Ok(vec![FlowNode::Image(image.clone())])
+            Ok(flow_band(vec![FlowNode::Image(image.clone())]))
         })),
         ..Decorations::none()
     };
@@ -259,9 +273,9 @@ fn band_rejects_tables() {
     };
     let decorations = Decorations {
         header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
-            Ok(vec![FlowNode::Table(TableNode::new(TableSpec::new(
-                vec![ColumnWidth::Auto],
-            ))?)])
+            Ok(flow_band(vec![FlowNode::Table(TableNode::new(
+                TableSpec::new(vec![ColumnWidth::Auto]),
+            )?)]))
         })),
         footer: None,
         ..Decorations::none()
@@ -300,10 +314,10 @@ fn band_columns_share_one_line() {
     let header_style = style.clone();
     let decorations = Decorations {
         header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
-            Ok(vec![two_columns(
+            Ok(flow_band(vec![two_columns(
                 vec![text("L", &header_style)],
                 vec![text("R", &header_style)],
-            )])
+            )]))
         })),
         ..Decorations::none()
     };
@@ -333,10 +347,10 @@ fn band_columns_still_reject_a_nested_table() {
     let decorations = Decorations {
         header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
             let table = TableNode::new(TableSpec::new(vec![ColumnWidth::Auto]))?;
-            Ok(vec![two_columns(
+            Ok(flow_band(vec![two_columns(
                 vec![text("L", &header_style)],
                 vec![FlowNode::Table(table)],
-            )])
+            )]))
         })),
         ..Decorations::none()
     };
@@ -357,6 +371,193 @@ fn band_columns_still_reject_a_nested_table() {
         .in_section(0))
     );
     assert!(rec.commands().is_empty());
+}
+
+fn filled_rect(rect: Rect) -> LayerItem {
+    LayerItem::Shape {
+        path: Path::rect(rect).unwrap(),
+        ink: Ink::Fill(Color::rgb(1, 2, 3)),
+        bounds: EdgeBox::from_rect(rect),
+    }
+}
+
+fn stroked_rect(rect: Rect, width: f32) -> LayerItem {
+    LayerItem::Shape {
+        path: Path::rect(rect).unwrap(),
+        ink: Ink::Stroke(Pen::new(Color::rgb(1, 2, 3), width).unwrap()),
+        bounds: EdgeBox::from_rect(rect).outset(NonNegative::pt(width / 2.0).unwrap()),
+    }
+}
+
+#[test]
+fn band_mark_stroke_outset_checks_bottom_and_allows_the_exact_edge() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let overflow = Decorations {
+        header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
+            Ok(mark_band(vec![stroked_rect(
+                Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
+                1.0,
+            )]))
+        })),
+        ..Decorations::none()
+    };
+    let (result, rec) = render(
+        text("A", &style),
+        &mut fonts,
+        margins(30.0, 0.0, 0.0),
+        &overflow,
+    );
+    assert_eq!(
+        result,
+        Err(Error::from(ErrorKind::DecorationTallerThanMargin {
+            height: 30.5,
+            margin: 30.0,
+        })
+        .in_region(Region::Header)
+        .on_page_index(0)
+        .in_section(0))
+    );
+    assert!(rec.commands().is_empty());
+
+    let exact = Decorations {
+        header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
+            Ok(mark_band(vec![stroked_rect(
+                Rect::try_pt(10.0, 10.0, 20.0, 19.5).unwrap(),
+                1.0,
+            )]))
+        })),
+        ..Decorations::none()
+    };
+    let (result, _) = render(
+        text("A", &style),
+        &mut fonts,
+        margins(30.0, 0.0, 0.0),
+        &exact,
+    );
+    result.unwrap();
+}
+
+#[test]
+fn band_mark_past_page_width_reports_its_right_edge() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let decorations = Decorations {
+        header: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
+            Ok(mark_band(vec![filled_rect(
+                Rect::try_pt(190.0, 1.0, 11.0, 10.0).unwrap(),
+            )]))
+        })),
+        ..Decorations::none()
+    };
+    let (result, rec) = render(
+        text("A", &style),
+        &mut fonts,
+        margins(30.0, 0.0, 0.0),
+        &decorations,
+    );
+    assert_eq!(
+        result,
+        Err(Error::from(ErrorKind::DecorationWiderThanFrame {
+            width: 201.0,
+            avail: 200.0,
+        })
+        .in_region(Region::Header)
+        .on_page_index(0)
+        .in_section(0))
+    );
+    assert!(rec.commands().is_empty());
+}
+
+#[test]
+fn band_mark_negative_y_reports_outside_with_page_and_region() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let decorations = Decorations {
+        footer: Some(Box::new(|_: &PageInfo, _: &mut ErrorBag| {
+            Ok(mark_band(vec![filled_rect(
+                Rect::try_pt(10.0, -1.0, 20.0, 10.0).unwrap(),
+            )]))
+        })),
+        ..Decorations::none()
+    };
+    let (result, rec) = render(
+        text("A", &style),
+        &mut fonts,
+        margins(0.0, 0.0, 30.0),
+        &decorations,
+    );
+    assert_eq!(
+        result,
+        Err(
+            Error::from(crate::error::GeometryKind::BandMarkOutside { x: 10.0, y: -1.0 })
+                .in_region(Region::Footer)
+                .on_page_index(0)
+                .in_section(0)
+        )
+    );
+    assert!(rec.commands().is_empty());
+}
+
+#[test]
+fn rotated_band_mark_checks_rotated_corners() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let rect = Rect::try_pt(50.0, 20.0, 10.0, 10.0).unwrap();
+    let decorations = Decorations {
+        header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
+            Ok(mark_band(vec![LayerItem::Group {
+                affine: Affine::rotate_cw_about(45.0, Point::try_pt(55.0, 25.0).unwrap()).unwrap(),
+                items: vec![filled_rect(rect)],
+            }]))
+        })),
+        ..Decorations::none()
+    };
+    let (result, rec) = render(
+        text("A", &style),
+        &mut fonts,
+        margins(30.0, 0.0, 0.0),
+        &decorations,
+    );
+    let ErrorKind::DecorationTallerThanMargin { height, margin } = result.unwrap_err().kind else {
+        panic!("expected DecorationTallerThanMargin");
+    };
+    assert!(crate::canvas::pt_near(height, 32.071_068));
+    assert_eq!(margin.to_bits(), 30.0f32.to_bits());
+    assert!(rec.commands().is_empty());
+}
+
+#[test]
+fn band_marks_paint_before_flow_slots() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let header_style = style.clone();
+    let decorations = Decorations {
+        header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
+            Ok(BandNodes {
+                flow: vec![text("H", &header_style)],
+                marks: vec![filled_rect(Rect::try_pt(1.0, 1.0, 10.0, 10.0).unwrap())],
+            })
+        })),
+        ..Decorations::none()
+    };
+    let (result, rec) = render(
+        text("A", &style),
+        &mut fonts,
+        margins(30.0, 0.0, 0.0),
+        &decorations,
+    );
+    result.unwrap();
+    let pages = rec.pages();
+    let ops = pages[0].ops();
+    assert!(matches!(ops[0], CanvasCommand::FillPath { .. }));
+    assert!(matches!(ops[1], CanvasCommand::DrawGlyphRun { .. }));
+    assert_eq!(texts(&pages[0]), ["H", "A"]);
 }
 
 fn layer(label: &'static str, x: f32, y: f32, style: &Style) -> LayerContent<'static> {
@@ -471,6 +672,11 @@ fn path_behind_paints_before_header_glyphs() {
             Ok(vec![LayerItem::Shape {
                 path: path.clone(),
                 ink: Ink::Stroke(Pen::new(Color::rgb(1, 2, 3), 1.5).unwrap()),
+                bounds: EdgeBox::from_points(
+                    Point::try_pt(0.0, 0.0).unwrap(),
+                    Point::try_pt(40.0, 10.0).unwrap(),
+                )
+                .outset(NonNegative::pt(0.75).unwrap()),
             }])
         })),
         ..Decorations::none()
@@ -504,6 +710,7 @@ fn fill_stroke_paints_fill_then_stroke() {
                     Color::rgba(9, 8, 7, 40),
                     Pen::new(Color::rgb(1, 2, 3), 2.0).unwrap(),
                 ),
+                bounds: EdgeBox::from_rect(rect).outset(NonNegative::pt(1.0).unwrap()),
             }])
         })),
         ..Decorations::none()

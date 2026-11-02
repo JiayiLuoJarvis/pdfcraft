@@ -12,9 +12,8 @@
 //!
 //! - **Assemble time** — your `if` / `for` choose which [`spec::Block`] values
 //!   enter the body. Page count is unknown.
-//! - **Paint time** — headers, footers, and layer marks may use
-//!   [`spec::TextRun`] / [`spec::PageWhen`]; the library fills page numbers when
-//!   painting each page.
+//! - **Paint time** — headers and footers may be [`spec::BandFn`]. [`spec::TextRun`]
+//!   and [`spec::PageWhen`] are filled when painting each page.
 //!
 //! # Coordinates
 //!
@@ -110,7 +109,10 @@ pub mod fonts;
 pub mod spec;
 
 #[doc(inline)]
-pub use spec::{layout_spec, DocumentSpec, Numbering, OutlineEntry, Ratio, Rendered, Track};
+pub use spec::{
+    layout_spec, BandFn, DocumentSpec, Numbering, OutlineEntry, PageBandQuery, Ratio, Rendered,
+    Track,
+};
 
 #[cfg(feature = "test-utils")]
 #[doc(inline)]
