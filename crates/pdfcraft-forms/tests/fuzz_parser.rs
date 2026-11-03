@@ -181,11 +181,9 @@ fn replay_seed_corpus() {
                     ..FillOptions::default()
                 };
                 let result = fill_and_flatten(&form_pdf, &text_field(), &options);
-                let rejected = matches!(
-                    result,
-                    Err(ref error)
-                        if matches!(error.kind, ErrorKind::FontNotConfigured { .. })
-                );
+                let rejected = result
+                    .as_ref()
+                    .is_err_and(|error| matches!(error.kind, ErrorKind::FontNotConfigured { .. }));
                 assert!(
                     rejected,
                     "fuzz case {case}: garbage font bytes must stay FontNotConfigured, got {result:?}"

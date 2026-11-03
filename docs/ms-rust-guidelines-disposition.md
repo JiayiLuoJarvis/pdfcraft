@@ -16,7 +16,7 @@ lint 级别的改动先改规范与根 `[workspace.lints]`，本表同一 PR 更
 | --- | --- | --- | --- |
 | M-UPSTREAM-GUIDELINES | Follow the upstream guidelines | done | 规范 §0 的来源顺序：Style Guide、API Guidelines、本指南、Google |
 | M-STATIC-VERIFICATION | Use static verification | done | 规范 TOOL-5（门禁）、DEP-6（cargo-deny fail closed）、§15（lint 取舍）。cargo-deny 的 advisories 检查与 cargo-audit 查同一 RustSec 库与同一 `Cargo.lock`，不另加 cargo-audit job；公告的处理是升级依赖，或在 `deny.toml` 记带理由的显式例外，不弱化 CI job |
-| M-LINT-OVERRIDE-EXPECT | Lint overrides should use expect | adopt | 规范 LINT-2、TRK-9，执行 `lint:clippy::allow_attributes`。部分 target 才成立的覆盖用 `cfg_attr(.., expect(..))`。现存生产 `allow` 11 处（规范 §16） |
+| M-LINT-OVERRIDE-EXPECT | Lint overrides should use expect | done | 规范 LINT-2、TRK-9。`clippy::allow_attributes` 在 `[workspace.lints]` 里 deny。例外写在代码上的 `#[expect(lint, reason = "...")]`，只在部分 target 成立的用 `cfg_attr(.., expect(..))`。`price_lints.py` 对该 lint 为 0 |
 | M-PUBLIC-DEBUG | Public types are Debug | done | 规范 API-7，`lint:missing_debug_implementations`（四包 deny） |
 | M-PUBLIC-DISPLAY | Public types meant to be read are Display | done | 各包 Error/错误面已有 Display；行为不变 |
 | M-SMALLER-CRATES | If in doubt, split the crate | N/A | 锁定：四包结构见 workspace-crates-spec，不拆分（Google 小包条同步 N/A） |
@@ -118,7 +118,7 @@ lint 级别的改动先改规范与根 `[workspace.lints]`，本表同一 PR 更
 | M-PANIC-IS-STOP | Panic means stop the program | done | 唯一公共 panic 是 Errors::first（有 Panics 文档）；不做 panic 续行 |
 | M-PANIC-ON-BUG | Detected programming bugs are panics, not errors | done | 缺字/越界等编程错误走 panic 或 Result 按现有模型；行为不变 |
 | M-PANIC-CONTINUATION | Panic continuation is last resort | done | 规范 PAN-7：零 `catch_unwind`（评审） |
-| M-PANIC-MESSAGE | Custom panics have a helpful message | adopt | 规范 PAN-2、PAN-3：`unwrap_used`、`expect_used`、`panic`、`unreachable` 四包 deny，已证明不变量逐处 `#[expect(reason)]`。pdf 现存生产 `expect` 27 处、`unreachable` 2 处待登记或消除（规范 §16） |
+| M-PANIC-MESSAGE | Custom panics have a helpful message | done | 规范 PAN-2、PAN-3。`unwrap_used`、`expect_used`、`panic`、`unreachable` 在 `[workspace.lints]` 里 deny。已证明的不变量在原地 `#[expect(reason)]`。`price_lints.py` 对这四条为 0 |
 
 ## Performance
 
@@ -140,7 +140,7 @@ lint 级别的改动先改规范与根 `[workspace.lints]`，本表同一 PR 更
 
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
-| M-CARGO-WORKSPACE | Common settings come from the workspace Cargo.toml | done | 版本/依赖钉在根 workspace.dependencies，成员用 workspace=true |
+| M-CARGO-WORKSPACE | Common settings come from the workspace Cargo.toml | done | 版本与依赖钉在根 `workspace.dependencies`，成员用 `workspace = true`。lint 钉在根 `[workspace.lints]`，成员只写 `[lints] workspace = true`（规范 TOOL-4） |
 | M-CRATES-IN-WORKSPACE | The workspace lists and versions all crates | done | 四包同仓，版本各自独立（规范 VER-4） |
 | M-CRATES-FLAT-FOLDER | All crates are siblings in one folder | done | crates/ 下四包平级 |
 | M-LATEST-EDITION | New crates target latest edition | N/A | 锁定 edition 2021（规范 TOOL-1、§17）；升级须单独 PR |

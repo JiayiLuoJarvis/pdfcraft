@@ -307,25 +307,9 @@ cargo deny check advisories licenses bans sources
 
 ## 16. 落地清单
 
-四个包切到 `[lints] workspace = true` 之前，先清掉下列生产代码命中。数字来自 `.omo/evidence/engineering-standard/workspace_lints_probe.py`（1.98.1，`--all-targets --all-features`，生产/测试）。
+已完成。四个成员 crate 只写 `[lints] workspace = true`。`python3 scripts/price_lints.py`（rustc 1.98.1，`--all-targets --all-features`）对 `[workspace.lints]` 的生产命中和测试命中都是 0。合并前跑 TOOL-5，clippy 带 `-D warnings`。
 
-| lint | pdf | forms | orgchart | post | 处理 |
-| --- | --- | --- | --- | --- | --- |
-| `unreachable_pub` | 20/26 | 0/0 | 66/8 | 0/11 | 机械改 `pub(crate)` |
-| `unused_qualifications` | 79/15 | 1/0 | 2/5 | 0/0 | `cargo fix` |
-| `expect_used` | 27/44 | 0/5 | 0/17 | 0/24 | 先按 PAN-4 消，余下按 PAN-3 登记；测试辅助按 §3 文件头登记 |
-| `wildcard_enum_match_arm` | 6/35 | 8/3 | 0/4 | 2/0 | 改穷尽匹配 |
-| `shadow_unrelated` | 11/17 | 1/3 | 3/3 | 0/7 | 改名 |
-| `too_many_arguments`（阈值 7 时） | 6/0 | 0/0 | 6/0 | 0/0 | Options struct |
-| `allow_attributes` | 4/9 | 2/0 | 4/2 | 1/7 | 改 `expect` / `cfg_attr` |
-| `str_to_string` | 0/0 | 9/65 | 0/34 | 0/4 | `to_owned()` |
-| `let_underscore_untyped` / `_must_use` / `_drop` | 2+1+1 | 0 | 4 | 0 | 逐条审（`frame.rs:317` 丢 `Result`） |
-| `iter_over_hash_type` | 0 | 2 | 1 | 0 | DET-1 |
-| `unreachable` | 2/10 | 0 | 0 | 0 | PAN-3 登记 |
-| 其余（`unneeded_field_pattern` 2、`missing_assert_message` 1、`string_add` 1、`redundant_clone` 1、`needless_pass_by_ref_mut` 1） | | | | | 逐条改 |
-| examples 里的 `unwrap` / `expect` / `panic` / 打印 | | | | | `main` 返回 `Result`；打印在文件头登记 |
-
-生产合计约 278 处。建议的 PR 顺序（每个 PR 单一主题、门禁绿）：
+已做完的 PR 顺序（每个 PR 单一主题、门禁绿）：
 
 1. 本规范与收敛文档、工具链升 1.98。本草案不改产品代码，但这一步合并前必须修 3 处 rustdoc 冗余链接：`pdf/src/spec/mod.rs:705`、`:706`、`:746`。1.98 的 rustdoc 报 `redundant_explicit_links`，CI 现有的两条 pdf `cargo doc` 命令在 1.98 上都 exit 101。同一步把定价脚本合成 `scripts/price_lints.py`（LINT-3）。MSRV 的 CHANGELOG 条目已在草案里。
 1.5. 修 pdf `--no-default-features` 基线红项（单独 PR，不动库代码）：`anchors` example 补 `required-features = ["backend-krilla"]`；用到 `to_pdf` 的集成测试按 feature 门控（`[[test]] required-features` 或文件头 `#![cfg(feature = "backend-krilla")]`）；删 `golden` 测试里未用的 `ImageFormat`、`ImageSpec` import。
