@@ -49,6 +49,12 @@
 //! input: the corrupt-scratch probe covers the only hostile case that matters
 //! here (a golden that no longer matches the log must fail naming the file).
 
+#![expect(
+    clippy::panic,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(clippy::print_stdout, reason = "bless mode prints the golden path")]
+
 use std::path::{Path as FsPath, PathBuf};
 
 use pdfcraft_pdf::geom::Affine;

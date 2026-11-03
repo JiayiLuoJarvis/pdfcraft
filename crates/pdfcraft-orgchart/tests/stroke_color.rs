@@ -1,5 +1,10 @@
 //! Node strokes are black. Edge strokes and edge-arrow fills are byte 51.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use pdfcraft_orgchart::{generate_pdf, ChartRequest, Edge, FontBytes, Node};
 
 fn hc_font() -> Option<FontBytes> {

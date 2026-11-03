@@ -1,5 +1,14 @@
 //! Page text, `MediaBox`, dash operands, and link annotations.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::panic,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use std::process::Command;
 
 use pdfcraft_orgchart::{

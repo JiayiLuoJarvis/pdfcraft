@@ -332,11 +332,19 @@ pub(crate) fn build_roles<T>(groups: &[MeasuredInline], segs: &[Seg<T>]) -> Vec<
                     if range.is_empty() {
                         continue;
                     }
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "a cluster with glyphs is a non-empty grapheme"
+                    )]
                     let first = cluster
                         .as_str()
                         .chars()
                         .next()
                         .expect("non-empty cluster has a scalar");
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "the glyph range was measured into this inline"
+                    )]
                     let style = measured.style_of(range).expect("glyph range has a style");
                     if first == ' ' {
                         let cap = Length::from_trusted_pt(0.5 * style.font_size.as_pt());

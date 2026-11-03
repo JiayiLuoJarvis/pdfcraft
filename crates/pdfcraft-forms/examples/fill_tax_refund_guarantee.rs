@@ -21,30 +21,24 @@
 //!   cargo run -p pdfcraft-forms --example fill_tax_refund_guarantee
 //! ```
 
+#![expect(clippy::print_stdout, reason = "example reports the written PDF path")]
+
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process;
 
 use pdfcraft_forms::{fill_and_flatten, FieldValue, FillOptions, FontBytes, HAlign, VAlign};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let pdf =
-        fs::read(root.join("tests/fixtures/tax_refund_guarantee_id.pdf")).unwrap_or_else(|err| {
-            eprintln!("read template: {err}");
-            process::exit(1);
-        });
+    let pdf = fs::read(root.join("tests/fixtures/tax_refund_guarantee_id.pdf"))
+        .map_err(|err| format!("read template: {err}"))?;
 
-    let font_path = env::var_os("PDFCRAFT_FORMS_FONT").unwrap_or_else(|| {
-        eprintln!("set PDFCRAFT_FORMS_FONT to a .ttf path");
-        process::exit(1);
-    });
-    let font = fs::read(&font_path).unwrap_or_else(|err| {
-        eprintln!("read font {}: {err}", PathBuf::from(&font_path).display());
-        process::exit(1);
-    });
+    let font_path =
+        env::var_os("PDFCRAFT_FORMS_FONT").ok_or("set PDFCRAFT_FORMS_FONT to a .ttf path")?;
+    let font = fs::read(&font_path)
+        .map_err(|err| format!("read font {}: {err}", PathBuf::from(&font_path).display()))?;
 
     // ASCII-only sample map. Production also sets companyName / recipientName /
     // address (CJK) and, for China ID, idTypeName = 「中國」.
@@ -88,20 +82,13 @@ fn main() {
         ..FillOptions::default()
     };
 
-    let filled = fill_and_flatten(&pdf, &fields, &options).unwrap_or_else(|err| {
-        eprintln!("fill_and_flatten: {err}");
-        process::exit(1);
-    });
+    let filled = fill_and_flatten(&pdf, &fields, &options)
+        .map_err(|err| format!("fill_and_flatten: {err}"))?;
 
     let out_dir = PathBuf::from("out");
-    fs::create_dir_all(&out_dir).unwrap_or_else(|err| {
-        eprintln!("create out/: {err}");
-        process::exit(1);
-    });
+    fs::create_dir_all(&out_dir).map_err(|err| format!("create out/: {err}"))?;
     let out_path = out_dir.join("fill_tax_refund_guarantee.pdf");
-    fs::write(&out_path, filled).unwrap_or_else(|err| {
-        eprintln!("write {}: {err}", out_path.display());
-        process::exit(1);
-    });
+    fs::write(&out_path, &filled).map_err(|err| format!("write {}: {err}", out_path.display()))?;
     println!("wrote {}", out_path.display());
+    Ok(())
 }

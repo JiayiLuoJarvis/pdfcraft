@@ -793,12 +793,10 @@ impl EdgeBox {
             Point::try_pt(self.max_x, self.max_y)?,
             Point::try_pt(self.min_x, self.max_y)?,
         ];
-        let mut transformed = corners.into_iter().map(|point| affine.apply(point));
-        let first = transformed
-            .next()
-            .expect("an edge box always has four corners")?;
+        let [first, second, third, fourth] = corners.map(|point| affine.apply(point));
+        let first = first?;
         let mut bounds = Self::from_points(first, first);
-        for point in transformed {
+        for point in [second, third, fourth] {
             let point = point?;
             bounds = bounds.union(Self::from_points(point, point));
         }

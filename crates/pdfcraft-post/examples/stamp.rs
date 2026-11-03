@@ -1,36 +1,27 @@
 //! Stamp `/Info` Title and encrypt in one pass.
 
+#![expect(clippy::print_stdout, reason = "example reports the written PDF path")]
+
 use std::env;
 use std::fs;
-use std::process::ExitCode;
 
 use pdfcraft_post::{Encrypt, EncryptionPreset, SetMetadata, StampAndEncrypt};
 
-fn main() -> ExitCode {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
-    let Some(input) = args.next() else {
-        eprintln!("usage: stamp <input.pdf> <output.pdf> <owner-password> <title>");
-        return ExitCode::FAILURE;
-    };
-    let Some(output) = args.next() else {
-        eprintln!("usage: stamp <input.pdf> <output.pdf> <owner-password> <title>");
-        return ExitCode::FAILURE;
-    };
-    let Some(owner) = args.next() else {
-        eprintln!("usage: stamp <input.pdf> <output.pdf> <owner-password> <title>");
-        return ExitCode::FAILURE;
-    };
+    let input = args
+        .next()
+        .ok_or("usage: stamp <input.pdf> <output.pdf> <owner-password> <title>")?;
+    let output = args
+        .next()
+        .ok_or("usage: stamp <input.pdf> <output.pdf> <owner-password> <title>")?;
+    let owner = args
+        .next()
+        .ok_or("usage: stamp <input.pdf> <output.pdf> <owner-password> <title>")?;
     let title = args.next().unwrap_or_else(|| "stamped".into());
 
-    let pdf = match fs::read(&input) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!("read {input}: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let out = match (StampAndEncrypt {
+    let pdf = fs::read(&input).map_err(|err| format!("read {input}: {err}"))?;
+    let out = (StampAndEncrypt {
         metadata: SetMetadata {
             title: Some(title),
             ..SetMetadata::default()
@@ -42,18 +33,8 @@ fn main() -> ExitCode {
         },
     })
     .apply(&pdf)
-    {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!("stamp: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    if let Err(err) = fs::write(&output, &out) {
-        eprintln!("write {output}: {err}");
-        return ExitCode::FAILURE;
-    }
+    .map_err(|err| format!("stamp: {err}"))?;
+    fs::write(&output, &out).map_err(|err| format!("write {output}: {err}"))?;
     println!("wrote {output} ({} bytes)", out.len());
-    ExitCode::SUCCESS
+    Ok(())
 }

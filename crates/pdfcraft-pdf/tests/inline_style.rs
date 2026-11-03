@@ -1,5 +1,18 @@
 //! Inline `RunStyle` through `layout_spec`, read from recorded canvas commands.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::panic,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, HLineSpec,

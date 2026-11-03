@@ -9,6 +9,11 @@
 //! layout time, `to_pdf` time, page count, PDF bytes, and peak RSS.
 
 #![cfg(feature = "backend-krilla")]
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(clippy::print_stdout, reason = "baseline harness prints timings")]
 
 use std::fs;
 use std::process::Command;

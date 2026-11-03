@@ -1,5 +1,10 @@
 //! `list_fields` against the copied `AcroForm` fixtures.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;

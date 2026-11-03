@@ -1,9 +1,5 @@
 //! Pure-function lowering from [`DocumentSpec`] to layout nodes.
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::num::NonZeroU32;
-
 use crate::canvas::{DecodedImage, ImageRegistry, LinkTarget, RecordingCanvas};
 use crate::error::{
     ColumnWidthsReason, DecorationKind, Error, ErrorBag, ErrorKind, Fallible, GeometryKind,
@@ -35,6 +31,8 @@ use crate::layout::paragraph::{
 use crate::layout::style::{Decoration, GlyphStyle, Style, TextAlign};
 use crate::layout::table::{self as layout_table, TableNode, TableSpec as LayoutTableSpec};
 use crate::limits::Limits;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 use super::token::DocToken;
 use super::types::{self, Rendered, Track};
@@ -211,7 +209,7 @@ impl InheritedPaint {
             lines: LineFlags::default(),
             tracking: Finite::ZERO,
             color: Color::rgb(0, 0, 0),
-            font_size: Positive::pt(12.0).expect("12 pt is positive"),
+            font_size: Length::from_trusted_pt(12.0),
         }
     }
 
@@ -633,6 +631,14 @@ fn lower_paragraph<K: FontKey>(
     Some(FlowNode::Text(TextNode::from_items(items, style)))
 }
 
+fn sole_or_stack(nodes: Vec<FlowNode>) -> FlowNode {
+    match <[FlowNode; 1]>::try_from(nodes) {
+        Ok([node]) => node,
+        Err(nodes) if nodes.is_empty() => FlowNode::Stack(Vec::new()),
+        Err(nodes) => FlowNode::Stack(nodes),
+    }
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors lower_blocks; id/outline are Anchor-only"
@@ -651,11 +657,7 @@ fn lower_anchor_block<K: FontKey>(
 ) -> Option<FlowNode> {
     let id = anchors.register(id, outline, at, errors)?;
     let lowered = lower_blocks(vec![child], paint, fonts, doc, images, at, anchors, errors);
-    let child_node = match lowered.len() {
-        0 => FlowNode::Stack(Vec::new()),
-        1 => lowered.into_iter().next().expect("len 1"),
-        _ => FlowNode::Stack(lowered),
-    };
+    let child_node = sole_or_stack(lowered);
     Some(FlowNode::Anchor(AnchorNode {
         id,
         child: Box::new(child_node),
@@ -950,12 +952,7 @@ fn lower_table<K: FontKey>(
     let mut blocked = !bag.is_empty() || header.is_none() || body.is_none();
     let widths = match spec.tracks {
         Some(tracks) => table_widths(tracks, cols, &mut blocked, &mut bag),
-        None => Some(vec![
-            ColumnWidth::Ratio(
-                LayoutRatio::new(1.0).expect("1 is positive")
-            );
-            cols
-        ]),
+        None => Some(vec![ColumnWidth::Ratio(LayoutRatio::ONE); cols]),
     };
     if let Some(widths) = widths.as_ref() {
         if let Err(error) = types::reject_auto_with_ratio(widths) {
@@ -1126,11 +1123,7 @@ fn lower_cell_anchor<K: FontKey>(
     if failed {
         return None;
     }
-    let child_node = match content.len() {
-        0 => FlowNode::Stack(Vec::new()),
-        1 => content.into_iter().next().expect("len 1"),
-        _ => FlowNode::Stack(content),
-    };
+    let child_node = sole_or_stack(content);
     Some(FlowNode::Anchor(AnchorNode {
         id,
         child: Box::new(child_node),
@@ -1400,6 +1393,10 @@ fn dynamic_band<K: FontKey + 'static>(
     Box::new(move |info, errors| {
         let query = page_band_query(info);
         let decided = {
+            #[expect(
+                clippy::expect_used,
+                reason = "decorate calls each band once and does not re-enter it"
+            )]
             let mut call = func
                 .try_borrow_mut()
                 .expect("header and footer functions are not re-entered");
@@ -1424,16 +1421,12 @@ fn dynamic_band<K: FontKey + 'static>(
 
 fn page_band_query(info: &PageInfo) -> PageBandQuery {
     PageBandQuery {
-        number: page_counter(info.number.get()),
-        count: page_counter(info.count.get()),
-        section_number: page_counter(info.section_number.get()),
-        section_count: page_counter(info.section_count.get()),
+        number: info.number.nonzero(),
+        count: info.count.nonzero(),
+        section_number: info.section_number.nonzero(),
+        section_count: info.section_count.nonzero(),
         size: info.size,
     }
-}
-
-fn page_counter(value: u32) -> NonZeroU32 {
-    NonZeroU32::new(value).expect("page counter is non-zero")
 }
 
 #[derive(Clone, Copy)]
@@ -1511,7 +1504,7 @@ fn lower_band_flow(spec: &OwnedBand, info: &PageInfo, errors: &mut ErrorBag) -> 
         };
         vec![FlowNode::Text(node)]
     };
-    let even = ColumnWidth::Ratio(LayoutRatio::new(1.0).expect("1 is positive"));
+    let even = ColumnWidth::Ratio(LayoutRatio::ONE);
     let slots: Vec<_> = [(left, TextAlign::Start), (right, TextAlign::End)]
         .into_iter()
         .filter_map(|(text, align)| text.map(|text| (even, column(text, align))))

@@ -22,6 +22,10 @@ impl PageNumber {
     pub(crate) fn get(self) -> u32 {
         self.0.get()
     }
+
+    pub(crate) const fn nonzero(self) -> NonZeroU32 {
+        self.0
+    }
 }
 
 /// Total pages in the document, blank body pages included.
@@ -31,6 +35,10 @@ pub(crate) struct PageCount(NonZeroU32);
 impl PageCount {
     pub(crate) fn get(self) -> u32 {
         self.0.get()
+    }
+
+    pub(crate) const fn nonzero(self) -> NonZeroU32 {
+        self.0
     }
 }
 

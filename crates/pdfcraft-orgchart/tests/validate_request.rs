@@ -1,5 +1,10 @@
 //! Protocol failures and accepted graphs, through `validate_request`.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use pdfcraft_orgchart::{
     validate_request, ChartOptions, ChartRequest, Edge, Error, ErrorCode, Node,
 };

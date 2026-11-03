@@ -141,11 +141,12 @@ impl Limits {
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::ImageEdge`] when `edge` is 0
     /// (`max` is 0) or greater than four times the default.
     pub fn set_max_image_edge(&mut self, edge: u32) -> Result<(), Error> {
-        self.image_edge = narrow_u32(admit(
+        admit(
             u64::from(edge),
             u64::from(DEFAULT_IMAGE_EDGE),
             LimitKind::ImageEdge,
-        )?);
+        )?;
+        self.image_edge = edge;
         Ok(())
     }
 
@@ -156,11 +157,8 @@ impl Limits {
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::Pages`] when `pages` is 0
     /// (`max` is 0) or greater than four times the default.
     pub fn set_max_pages(&mut self, pages: u32) -> Result<(), Error> {
-        self.pages = narrow_u32(admit(
-            u64::from(pages),
-            u64::from(DEFAULT_PAGES),
-            LimitKind::Pages,
-        )?);
+        admit(u64::from(pages), u64::from(DEFAULT_PAGES), LimitKind::Pages)?;
+        self.pages = pages;
         Ok(())
     }
 
@@ -171,11 +169,12 @@ impl Limits {
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::Blocks`] when `blocks` is 0
     /// (`max` is 0) or greater than four times the default.
     pub fn set_max_blocks(&mut self, blocks: u32) -> Result<(), Error> {
-        self.blocks = narrow_u32(admit(
+        admit(
             u64::from(blocks),
             u64::from(DEFAULT_BLOCKS),
             LimitKind::Blocks,
-        )?);
+        )?;
+        self.blocks = blocks;
         Ok(())
     }
 
@@ -186,11 +185,12 @@ impl Limits {
     /// [`ErrorKind::LimitExceeded`] with [`LimitKind::TableCells`] when `cells` is 0
     /// (`max` is 0) or greater than four times the default.
     pub fn set_max_table_cells(&mut self, cells: u32) -> Result<(), Error> {
-        self.table_cells = narrow_u32(admit(
+        admit(
             u64::from(cells),
             u64::from(DEFAULT_TABLE_CELLS),
             LimitKind::TableCells,
-        )?);
+        )?;
+        self.table_cells = cells;
         Ok(())
     }
 
@@ -217,12 +217,8 @@ fn admit(value: u64, default: u64, kind: LimitKind) -> Result<u64, Error> {
 }
 
 fn admit_usize(value: usize, default: usize, kind: LimitKind) -> Result<usize, Error> {
-    let admitted = admit(value as u64, default as u64, kind)?;
-    Ok(usize::try_from(admitted).expect("admitted byte cap fits usize"))
-}
-
-fn narrow_u32(value: u64) -> u32 {
-    u32::try_from(value).expect("admitted count fits u32")
+    admit(value as u64, default as u64, kind)?;
+    Ok(value)
 }
 
 #[cfg(test)]

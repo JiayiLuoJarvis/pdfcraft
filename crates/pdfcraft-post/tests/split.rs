@@ -1,5 +1,14 @@
 //! Integration tests for `split_pdfs`.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::panic,
+    reason = "integration test: a panic is the failure report"
+)]
+
 #[expect(
     dead_code,
     reason = "shared helpers may be unused in some test targets"

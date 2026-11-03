@@ -372,6 +372,10 @@ impl GridPaint<'_> {
             ..
         } in laid
         {
+            #[expect(
+                clippy::expect_used,
+                reason = "row_groups covers every row index before paint"
+            )]
             let group = self
                 .groups
                 .iter()
@@ -481,11 +485,11 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
         }
     }
     let mut placed = 0usize;
-    while let Some(block) = table.body.front() {
+    while let Some(block) = table.body.pop_front() {
         if (y + block.height).as_pt() > avail.height.as_pt() {
+            table.body.push_front(block);
             break;
         }
-        let block = table.body.pop_front().expect("front exists");
         let h = block.height;
         let offset = block.with_offset(Finite::ZERO, y.into())?;
         commands.extend(offset.commands);

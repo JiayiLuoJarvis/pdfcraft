@@ -5,6 +5,10 @@
 
 #![cfg(feature = "thumbnail")]
 #![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
     clippy::similar_names,
     reason = "fixture builder uses page/pages ids like tests/common"
 )]

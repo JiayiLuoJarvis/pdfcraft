@@ -7,15 +7,15 @@
 //! `BAND_FN_CASE` selects `first`, `last`, `odd-even`, `odd-even-marks`,
 //! `skip`, `count`, `sections`, `link`, `too-tall`, `fail`, or
 //! `footer-skip`. The default is `first`. Writes `out/band_fn.pdf`. `fail`
-//! prints the error and its source, then exits non-zero. `too-tall` fails
-//! layout and exits non-zero.
+//! and `too-tall` return the layout error.
 //!
 //! Font lookup matches `hello`.
+
+#![expect(clippy::print_stderr, reason = "example reports the written PDF path")]
 
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::ExitCode;
 use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
@@ -30,14 +30,13 @@ use pdfcraft_pdf::{
 const MARK: &[u8] = include_bytes!("assets/mark.png");
 const DIAMOND: &[u8] = include_bytes!("assets/diamond.png");
 
-fn load_font() -> Vec<u8> {
+fn load_font() -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
     let path = env::var_os("PDFCRAFT_PDF_FONT")
         .or_else(|| env::var_os("PDFCRAFT_CJK_FONT"))
-        .unwrap_or_else(|| {
-            panic!("set PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT to a .ttf/.otf path")
-        });
-    fs::read(&path)
-        .unwrap_or_else(|error| panic!("read font {}: {error}", PathBuf::from(path).display()))
+        .ok_or("set PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT to a .ttf/.otf path")?;
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("read font {}: {error}", PathBuf::from(&path).display()))?;
+    Ok(bytes)
 }
 
 fn text_band(text: impl Into<String>, style: RunStyle) -> BandSpec<()> {
@@ -120,14 +119,14 @@ fn link_band() -> BandSpec<()> {
     }
 }
 
-fn tall_band() -> BandSpec<()> {
-    text_band(
+fn tall_band() -> Result<BandSpec<()>> {
+    Ok(text_band(
         "T",
         RunStyle {
-            font_size: Some(Positive::pt(48.0).expect("48 pt is positive")),
+            font_size: Some(Positive::pt(48.0).map_err(pdfcraft_pdf::Errors::from)?),
             ..RunStyle::default()
         },
-    )
+    ))
 }
 
 fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
@@ -257,7 +256,7 @@ fn sections_for(
         )],
         "too-tall" => vec![section(
             Margins::try_new(8.0, 36.0, 36.0, 36.0)?,
-            Some(BandFn::fixed(tall_band())),
+            Some(BandFn::fixed(tall_band()?)),
             None,
             vec![Block::paragraph((), "body")],
         )],
@@ -270,27 +269,26 @@ fn sections_for(
             Some(when_page("footer", |query| query.number.get() != 2)),
         )],
         _ => {
-            eprintln!(
-                "BAND_FN_CASE must be first, last, odd-even, odd-even-marks, skip, count, sections, link, too-tall, fail, or footer-skip"
-            );
-            std::process::exit(2);
+            return Err(pdfcraft_pdf::Errors::from(pdfcraft_pdf::Error::band_fn(
+                "BAND_FN_CASE must be first, last, odd-even, odd-even-marks, skip, count, sections, link, too-tall, fail, or footer-skip",
+            )));
         }
     };
     Ok(sections)
 }
 
-fn main() -> Result<ExitCode> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let case = env::var("BAND_FN_CASE").unwrap_or_else(|_| "first".into());
     let out = env::args()
         .nth(1)
         .map_or_else(|| PathBuf::from("out/band_fn.pdf"), PathBuf::from);
     if let Some(parent) = out.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).expect("create output dir");
+            fs::create_dir_all(parent)?;
         }
     }
 
-    let font = Arc::new(load_font());
+    let font = Arc::new(load_font()?);
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
         regular: FontFace::from_shared(Arc::clone(&font), 0),
         bold: Some(FontFace::from_shared(font, 0)),
@@ -307,18 +305,9 @@ fn main() -> Result<ExitCode> {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections,
     });
-    let rendered = match rendered {
-        Ok(rendered) => rendered,
-        Err(errors) => {
-            eprintln!("{errors}");
-            if let Some(source) = std::error::Error::source(&errors) {
-                eprintln!("{source}");
-            }
-            return Ok(ExitCode::from(1));
-        }
-    };
+    let rendered = rendered?;
     let pdf = to_pdf(rendered)?;
-    fs::write(&out, &pdf).expect("write PDF");
+    fs::write(&out, &pdf)?;
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }

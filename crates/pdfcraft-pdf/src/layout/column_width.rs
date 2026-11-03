@@ -18,6 +18,9 @@ pub(crate) enum ColumnWidth {
 pub(crate) struct Ratio(f32);
 
 impl Ratio {
+    /// Weight 1. The literal is finite and strictly positive, so it skips [`Self::new`].
+    pub(crate) const ONE: Self = Self(1.0);
+
     pub(crate) fn new(weight: f32) -> Result<Self> {
         if !weight.is_finite() {
             return Err(Error::from(ErrorKind::ColumnWidths {

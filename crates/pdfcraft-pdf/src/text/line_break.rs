@@ -352,6 +352,10 @@ fn pack_lines<T: Copy>(
                 i += 1;
             }
             Atom::Ink { .. } | Atom::Blank { .. } => {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "this arm matches only ink and blank, and both store a width"
+                )]
                 let part = width_part(&atoms[i]).expect("ink and blank atoms have widths");
                 let (before, trial) = append_width(settled, tail, part);
                 if trial.as_pt() <= avail.as_pt() {
@@ -557,6 +561,10 @@ fn emit_line<T: Copy>(
     let mut index = start;
     while index < end {
         match atoms[index] {
+            #[expect(
+                clippy::unreachable,
+                reason = "pack_lines emits hard breaks as line ends, not as span contents"
+            )]
             Atom::Hard { .. } => unreachable!("hard breaks are not emitted inside a line"),
             Atom::Blank { width, payload, .. } => {
                 segs.push(Seg::Blank { width, payload });

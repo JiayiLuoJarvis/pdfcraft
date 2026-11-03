@@ -172,6 +172,10 @@ pub(crate) fn paint_laid(laid: &LaidDocument, canvas: &mut dyn Canvas) -> Result
 }
 
 /// `first_page` is the zero-based index of this section's first page in the document.
+#[expect(
+    clippy::expect_used,
+    reason = "ensure_content_page opened the page before either split arm reads it"
+)]
 fn plan_pages(
     root: FlowNode,
     ctx: &mut LayoutCtx<'_>,

@@ -1,46 +1,29 @@
 //! Merge two or more PDFs into one file.
 
+#![expect(clippy::print_stdout, reason = "example reports the written PDF path")]
+
 use std::env;
 use std::fs;
-use std::process::ExitCode;
 
 use pdfcraft_post::merge_pdfs;
 
-fn main() -> ExitCode {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
-    let Some(output) = args.next() else {
-        eprintln!("usage: merge <output.pdf> <input1.pdf> [input2.pdf ...]");
-        return ExitCode::FAILURE;
-    };
+    let output = args
+        .next()
+        .ok_or("usage: merge <output.pdf> <input1.pdf> [input2.pdf ...]")?;
     let inputs: Vec<String> = args.collect();
     if inputs.is_empty() {
-        eprintln!("usage: merge <output.pdf> <input1.pdf> [input2.pdf ...]");
-        return ExitCode::FAILURE;
+        return Err("usage: merge <output.pdf> <input1.pdf> [input2.pdf ...]".into());
     }
 
     let mut parts = Vec::new();
     for path in &inputs {
-        match fs::read(path) {
-            Ok(bytes) => parts.push(bytes),
-            Err(err) => {
-                eprintln!("read {path}: {err}");
-                return ExitCode::FAILURE;
-            }
-        }
+        parts.push(fs::read(path).map_err(|err| format!("read {path}: {err}"))?);
     }
 
-    let out = match merge_pdfs(&parts, false) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!("merge: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    if let Err(err) = fs::write(&output, &out) {
-        eprintln!("write {output}: {err}");
-        return ExitCode::FAILURE;
-    }
+    let out = merge_pdfs(&parts, false).map_err(|err| format!("merge: {err}"))?;
+    fs::write(&output, &out).map_err(|err| format!("write {output}: {err}"))?;
     println!("wrote {output} ({} bytes)", out.len());
-    ExitCode::SUCCESS
+    Ok(())
 }

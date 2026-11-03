@@ -40,9 +40,12 @@ impl MarkerKind {
 
 fn alpha(number: u64) -> Result<char> {
     match number {
-        MIN_MARKER_NUMBER..=MAX_ALPHA_MARKER => Ok(char::from(
-            b'A' + u8::try_from(number - 1).expect("below MAX_ALPHA_MARKER"),
-        )),
+        MIN_MARKER_NUMBER..=MAX_ALPHA_MARKER => {
+            let Ok(offset) = u8::try_from(number - 1) else {
+                return Err(GeometryKind::MarkerOutOfRange { number }.into());
+            };
+            Ok(char::from(b'A' + offset))
+        }
         _ => Err(GeometryKind::MarkerOutOfRange { number }.into()),
     }
 }

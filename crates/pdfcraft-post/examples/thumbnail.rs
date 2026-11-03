@@ -3,58 +3,42 @@
 //! Requires the `thumbnail` feature:
 //! `cargo run -p pdfcraft-post --features thumbnail --example thumbnail`.
 
-use std::process::ExitCode;
+#![cfg_attr(
+    feature = "thumbnail",
+    expect(clippy::print_stdout, reason = "example reports the written JPEG path")
+)]
 
 #[cfg(feature = "thumbnail")]
-fn main() -> ExitCode {
-    use std::{env, fs};
+use std::env;
+#[cfg(feature = "thumbnail")]
+use std::fs;
 
-    use pdfcraft_post::{first_page_jpeg, ThumbnailOptions};
+#[cfg(feature = "thumbnail")]
+use pdfcraft_post::{first_page_jpeg, ThumbnailOptions};
 
+#[cfg(feature = "thumbnail")]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
-    let Some(input) = args.next() else {
-        eprintln!("usage: thumbnail <input.pdf> <output.jpg>");
-        return ExitCode::FAILURE;
-    };
-    let Some(output) = args.next() else {
-        eprintln!("usage: thumbnail <input.pdf> <output.jpg>");
-        return ExitCode::FAILURE;
-    };
+    let input = args
+        .next()
+        .ok_or("usage: thumbnail <input.pdf> <output.jpg>")?;
+    let output = args
+        .next()
+        .ok_or("usage: thumbnail <input.pdf> <output.jpg>")?;
 
-    let pdf = match fs::read(&input) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!("read {input}: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let thumb = match first_page_jpeg(&pdf, &ThumbnailOptions::default()) {
-        Ok(Some(bytes)) => bytes,
-        Ok(None) => {
-            eprintln!("thumbnail: input has no pages");
-            return ExitCode::FAILURE;
-        }
-        Err(err) => {
-            eprintln!("thumbnail: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    if let Err(err) = fs::write(&output, &thumb) {
-        eprintln!("write {output}: {err}");
-        return ExitCode::FAILURE;
-    }
+    let pdf = fs::read(&input).map_err(|err| format!("read {input}: {err}"))?;
+    let thumb = first_page_jpeg(&pdf, &ThumbnailOptions::default())
+        .map_err(|err| format!("thumbnail: {err}"))?
+        .ok_or("thumbnail: input has no pages")?;
+    fs::write(&output, &thumb).map_err(|err| format!("write {output}: {err}"))?;
     println!("wrote {output} ({} bytes)", thumb.len());
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 #[cfg(not(feature = "thumbnail"))]
-fn main() -> ExitCode {
-    eprintln!(
-        "thumbnail example needs the `thumbnail` feature; \
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Err("thumbnail example needs the `thumbnail` feature; \
          re-run with `cargo run -p pdfcraft-post --features thumbnail \
          --example thumbnail -- <input.pdf> <output.jpg>`"
-    );
-    ExitCode::FAILURE
+        .into())
 }

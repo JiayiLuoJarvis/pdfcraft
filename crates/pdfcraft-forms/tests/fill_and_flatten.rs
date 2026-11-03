@@ -1,5 +1,14 @@
 //! `fill_and_flatten` against the copied `AcroForm` fixtures.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;

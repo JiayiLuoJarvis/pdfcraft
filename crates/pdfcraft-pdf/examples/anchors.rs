@@ -9,6 +9,11 @@
 //! Font lookup matches `hello`, then falls back to `.fonts/body.ttf` (same face
 //! `bill` uses). The face must cover the CJK in this sample.
 
+#![expect(
+    clippy::print_stderr,
+    reason = "example reports the written PDF path and how to read it"
+)]
+
 use std::env;
 use std::fs;
 use std::num::NonZeroU16;
@@ -28,13 +33,13 @@ const LINK_BLUE: Color = Color::rgb(0x1a, 0x56, 0xdb);
 const HEADER_FILL: Color = Color::rgb(0xe8, 0xee, 0xf8);
 const BODY_ROWS: usize = 36;
 
-fn main() -> Result<()> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let out = env::args()
         .nth(1)
         .map_or_else(|| PathBuf::from("out/anchors.pdf"), PathBuf::from);
     if let Some(parent) = out.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).expect("create output dir");
+            fs::create_dir_all(parent)?;
         }
     }
 
@@ -63,7 +68,7 @@ fn main() -> Result<()> {
     let pages = rendered.pages().len();
     let outline_len = rendered.outline_len();
     let pdf = to_pdf(rendered)?;
-    fs::write(&out, &pdf).expect("write PDF");
+    fs::write(&out, &pdf)?;
     eprintln!(
         "wrote {} ({} bytes, {pages} pages)",
         out.display(),
@@ -205,7 +210,9 @@ fn sample_table() -> Result<Block<()>> {
         });
     }
     Ok(Block::Table(TableSpec {
-        tracks: Some(vec![Track::Ratio(Ratio::new(1.0).expect("weight"))]),
+        tracks: Some(vec![Track::Ratio(
+            Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?,
+        )]),
         header: vec![header],
         body: rows,
         repeat_header: true,

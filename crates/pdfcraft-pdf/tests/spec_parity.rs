@@ -1,5 +1,10 @@
 //! Behavior checks for the data-only document specification path.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::spec::{

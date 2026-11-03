@@ -824,7 +824,7 @@ mod tests {
             ]
         ));
         let CanvasCommand::PushTransform { affine: recorded } = &pages[0].ops()[0] else {
-            unreachable!();
+            panic!("expected PushTransform");
         };
         assert!(pt_near(recorded.a, affine.a));
         assert!(pt_near(recorded.b, affine.b));

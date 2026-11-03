@@ -1,8 +1,16 @@
 //! Shared fixture helpers for integration tests.
 
 #![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
     clippy::similar_names,
     reason = "fixture helpers use short similar names"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
 )]
 
 use lopdf::content::{Content, Operation};

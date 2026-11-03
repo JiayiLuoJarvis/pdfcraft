@@ -57,6 +57,10 @@ impl ClusteredText {
 
         for (byte_start, grapheme) in normalized.grapheme_indices(true) {
             let byte_end = byte_start + grapheme.len();
+            #[expect(
+                clippy::expect_used,
+                reason = "Unicode grapheme clusters contain at least one scalar"
+            )]
             let first = grapheme.chars().next().expect("grapheme non-empty");
             let class = break_class::classify(first);
             let start = ClusterCursor {

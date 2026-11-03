@@ -1,5 +1,22 @@
 //! `layout_spec` against recorded canvas commands.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::panic,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::unreachable,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use std::error::Error as StdError;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::{Arc, Mutex};

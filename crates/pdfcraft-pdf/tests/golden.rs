@@ -6,6 +6,11 @@
 //! glyph test needs `PDFCRAFT_PDF_FONT`/`PDFCRAFT_CJK_FONT` and the image test
 //! needs `backend-krilla`; both skip otherwise.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 #[path = "golden/sha256.rs"]
 mod sha256;
 #[expect(

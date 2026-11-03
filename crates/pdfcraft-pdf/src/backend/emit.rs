@@ -68,6 +68,10 @@ fn to_outline(items: &[OutlineItem]) -> Option<Outline> {
             ),
         );
         while stack.last().is_some_and(|(level, _)| item.level <= *level) {
+            #[expect(
+                clippy::expect_used,
+                reason = "the loop condition just observed a stack top"
+            )]
             let (_, finished) = stack.pop().expect("stack non-empty");
             attach_outline_child(&mut root_children, &mut stack, finished);
         }
@@ -257,6 +261,10 @@ fn draw_mark(surface: &mut Surface<'_>, mark: &Mark) -> Result<()> {
             surface.draw_image(raster.krilla().clone(), size);
             surface.pop();
         }
+        #[expect(
+            clippy::unreachable,
+            reason = "draw_marks applies group transforms before draw_mark"
+        )]
         Mark::PushTransform(_) | Mark::PopTransform => {
             unreachable!("group transforms are handled in draw_marks");
         }

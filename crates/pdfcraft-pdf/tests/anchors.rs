@@ -1,5 +1,14 @@
 //! §12.4 anchors, in-document links, and outline (contract §6.2).
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,

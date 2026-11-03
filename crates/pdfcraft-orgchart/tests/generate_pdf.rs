@@ -1,5 +1,10 @@
 //! `generate_pdf` writes a PDF whose text includes the role header.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use std::process::Command;
 
 use pdfcraft_orgchart::{generate_pdf, ChartRequest, Edge, FontBytes, Node};

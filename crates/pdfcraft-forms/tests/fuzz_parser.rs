@@ -13,6 +13,15 @@
 //! past `TIME_BUDGET` naming the case that exceeded it, so a hung parser
 //! fails instead of hanging CI.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::panic,
+    reason = "integration test: a panic is the failure report"
+)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;

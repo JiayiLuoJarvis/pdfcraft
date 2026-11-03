@@ -90,7 +90,7 @@ pub(crate) fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Fallible<()> {
 pub(crate) fn default_style() -> Style {
     Style {
         font: None,
-        font_size: Positive::pt(12.0).expect("12 pt is positive"),
+        font_size: Length::from_trusted_pt(12.0),
         line_height_factor: 1.2,
         color: crate::geom::Color::rgb(0, 0, 0),
         paragraph_spacing: crate::geom::NonNegative::ZERO,

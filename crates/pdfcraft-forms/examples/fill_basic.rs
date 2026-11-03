@@ -9,14 +9,13 @@ use std::path::PathBuf;
 
 use pdfcraft_forms::{fill_and_flatten, FieldValue, FillOptions, FontBytes};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let pdf = fs::read(root.join("tests/fixtures/basic_form.pdf")).unwrap();
-    let font_path = env::var_os("PDFCRAFT_FORMS_FONT")
-        .unwrap_or_else(|| panic!("set PDFCRAFT_FORMS_FONT to a .ttf path"));
-    let font = fs::read(&font_path).unwrap_or_else(|error| {
-        panic!("read font {}: {error}", PathBuf::from(font_path).display())
-    });
+    let pdf = fs::read(root.join("tests/fixtures/basic_form.pdf"))?;
+    let font_path =
+        env::var_os("PDFCRAFT_FORMS_FONT").ok_or("set PDFCRAFT_FORMS_FONT to a .ttf path")?;
+    let font = fs::read(&font_path)
+        .map_err(|error| format!("read font {}: {error}", PathBuf::from(&font_path).display()))?;
     let mut fields = HashMap::new();
     fields.insert(
         "employee_name".to_owned(),
@@ -31,7 +30,8 @@ fn main() {
         }),
         ..FillOptions::default()
     };
-    let filled = fill_and_flatten(&pdf, &fields, &options).unwrap();
-    fs::create_dir_all("out").unwrap();
-    fs::write("out/fill_basic.pdf", filled).unwrap();
+    let filled = fill_and_flatten(&pdf, &fields, &options)?;
+    fs::create_dir_all("out")?;
+    fs::write("out/fill_basic.pdf", filled)?;
+    Ok(())
 }

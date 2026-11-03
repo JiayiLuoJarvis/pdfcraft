@@ -17,6 +17,12 @@
 //! a font swap must show up as a reviewed re-bless, not a red gate. The
 //! `table_spans` golden is font-free and verifies everywhere.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(clippy::print_stderr, reason = "golden mismatch prints the diff")]
+
 #[path = "golden/sha256.rs"]
 mod sha256;
 

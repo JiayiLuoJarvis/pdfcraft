@@ -553,7 +553,7 @@ impl<K> Default for ListSpec<K> {
         Self {
             kind: ListKind::Bullet,
             start: NonZeroU32::MIN,
-            marker_width: Positive::pt(18.0).expect("18 pt is positive"),
+            marker_width: Length::from_trusted_pt(18.0),
             nest_indent: None,
             items: Vec::new(),
         }
@@ -676,7 +676,7 @@ impl Default for HLineSpec {
         Self {
             width: None,
             align: Alignment::Center,
-            thickness: Positive::pt(1.0).expect("1 pt is positive"),
+            thickness: Length::from_trusted_pt(1.0),
             color: Color::rgb(0, 0, 0),
             space_before: NonNegative::ZERO,
             space_after: NonNegative::ZERO,

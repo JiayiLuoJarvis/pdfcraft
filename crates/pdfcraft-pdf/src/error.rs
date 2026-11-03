@@ -921,6 +921,10 @@ impl Errors {
     /// # Panics
     ///
     /// Panics if `self` has no items. Construction keeps at least one failure.
+    #[expect(
+        clippy::expect_used,
+        reason = "Errors is constructed with at least one item"
+    )]
     #[must_use]
     pub fn first(&self) -> &Error {
         self.items.first().expect("Errors keeps at least one item")

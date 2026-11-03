@@ -4,6 +4,14 @@
 //! `pdftotext`. It reads `/Info` and prints `Title` and `Author`.
 
 #![cfg(feature = "backend-krilla")]
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test: a panic is the failure report"
+)]
 
 use std::io::Write;
 use std::process::{Command, Stdio};

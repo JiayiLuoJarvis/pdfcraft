@@ -76,6 +76,10 @@ pub(crate) fn to_fill(paint: Paint) -> Fill {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a u8 divided by 255 is finite and inside 0..=1"
+)]
 fn opacity(alpha: u8) -> NormalizedF32 {
     NormalizedF32::new(f32::from(alpha) / 255.0).expect("a u8 over 255 is within 0..=1")
 }

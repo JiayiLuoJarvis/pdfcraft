@@ -1,6 +1,10 @@
 //! Confirmation-letter layout on the CJK letter fixture.
 
 #![cfg(feature = "backend-krilla")]
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{

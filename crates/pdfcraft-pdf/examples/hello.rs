@@ -9,6 +9,8 @@
 //! Set `PDFCRAFT_PDF_FONT` or `PDFCRAFT_CJK_FONT` to a face that covers the
 //! demo text (ASCII, U+2022, and 第 / 页 / 共). Missing glyphs fail the document.
 
+#![expect(clippy::print_stderr, reason = "example reports the written PDF path")]
+
 use std::env;
 use std::fs;
 use std::num::{NonZeroU16, NonZeroU32};
@@ -28,25 +30,24 @@ use pdfcraft_pdf::{
 
 const PIXEL: &[u8] = include_bytes!("../tests/fixtures/one-pixel.png");
 
-fn load_font() -> Vec<u8> {
+fn load_font() -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
     let path = env::var_os("PDFCRAFT_PDF_FONT")
         .or_else(|| env::var_os("PDFCRAFT_CJK_FONT"))
-        .unwrap_or_else(|| {
-            panic!("set PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT to a .ttf/.otf path")
-        });
-    fs::read(&path)
-        .unwrap_or_else(|error| panic!("read font {}: {error}", PathBuf::from(path).display()))
+        .ok_or("set PDFCRAFT_PDF_FONT or PDFCRAFT_CJK_FONT to a .ttf/.otf path")?;
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("read font {}: {error}", PathBuf::from(&path).display()))?;
+    Ok(bytes)
 }
 
-fn main() -> Result<()> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let out = env::args()
         .nth(1)
         .map_or_else(|| PathBuf::from("out/hello.pdf"), PathBuf::from);
     if let Some(parent) = out.parent() {
-        fs::create_dir_all(parent).expect("create output dir");
+        fs::create_dir_all(parent)?;
     }
 
-    let font = Arc::new(load_font());
+    let font = Arc::new(load_font()?);
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
         regular: FontFace::from_shared(Arc::clone(&font), 0),
         bold: Some(FontFace::from_shared(font, 0)),
@@ -102,7 +103,7 @@ fn main() -> Result<()> {
         }],
     })?;
     let pdf = to_pdf(rendered)?;
-    fs::write(&out, &pdf).expect("write PDF");
+    fs::write(&out, &pdf)?;
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());
     Ok(())
 }
@@ -134,11 +135,11 @@ fn bold(value: impl Into<String>) -> InlineRun<()> {
     }
 }
 
-fn link(uri: &str, runs: Vec<InlineRun<()>>) -> InlineRun<()> {
-    InlineRun::Link {
-        target: pdfcraft_pdf::LinkTarget::uri(uri).expect("example uri"),
+fn link(uri: &str, runs: Vec<InlineRun<()>>) -> Result<InlineRun<()>> {
+    Ok(InlineRun::Link {
+        target: pdfcraft_pdf::LinkTarget::uri(uri).map_err(pdfcraft_pdf::Errors::from)?,
         runs,
-    }
+    })
 }
 
 fn blank(
@@ -182,11 +183,11 @@ fn rule(
     }))
 }
 
-fn ratio(weight: f32, blocks: Vec<Block<()>>) -> ColumnSpec<()> {
-    ColumnSpec {
-        width: Track::Ratio(Ratio::new(weight).expect("weight is positive")),
+fn ratio(weight: f32, blocks: Vec<Block<()>>) -> Result<ColumnSpec<()>> {
+    Ok(ColumnSpec {
+        width: Track::Ratio(Ratio::new(weight).map_err(pdfcraft_pdf::Errors::from)?),
         blocks,
-    }
+    })
 }
 
 fn bullets() -> Result<Block<()>> {
@@ -245,7 +246,7 @@ fn bullets() -> Result<Block<()>> {
 fn ordered() -> Result<Block<()>> {
     Ok(Block::List(ListSpec {
         kind: ListKind::Ordered(Numbering::LowerAlpha),
-        start: NonZeroU32::new(2).unwrap(),
+        start: NonZeroU32::MIN.saturating_add(1),
         items: vec![
             item(paragraph(vec![text("paginate")], Alignment::Start, 0.0)?),
             item(paragraph(vec![text("decorate")], Alignment::Start, 0.0)?),
@@ -301,7 +302,7 @@ fn span_text(value: &str, cols: u16) -> CellSpec<()> {
             text: value.into(),
             font: (),
         }],
-        col_span: NonZeroU16::new(cols).unwrap(),
+        col_span: NonZeroU16::MIN.saturating_add(cols.saturating_sub(1)),
         ..CellSpec::default()
     }
 }
@@ -315,7 +316,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                         text: "A1".into(),
                         font: (),
                     }],
-                    row_span: NonZeroU16::new(2).unwrap(),
+                    row_span: NonZeroU16::MIN.saturating_add(1),
                     ..CellSpec::default()
                 },
                 CellSpec {
@@ -342,7 +343,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
             cells: vec![
                 CellSpec {
                     content: vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![link("https://example.test/ink", vec![text("Ink")])],
+                        runs: vec![link("https://example.test/ink", vec![text("Ink")])?],
                         ..ParagraphSpec::default()
                     })],
                     ..CellSpec::default()
@@ -427,7 +428,7 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
                 text("This example exercises paragraph runs, "),
                 bold("bold"),
                 text(", "),
-                link("https://example.test/docs", vec![text("links")]),
+                link("https://example.test/docs", vec![text("links")])?,
                 text(", blanks, lists, columns, tables, images, keep-together,"),
                 text(" and page breaks."),
             ],
@@ -471,14 +472,14 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
                         paragraph(vec![bold("Bullets")], Alignment::Start, 0.0)?,
                         bullets()?,
                     ],
-                ),
+                )?,
                 ratio(
                     1.2,
                     vec![
                         paragraph(vec![bold("Ordered")], Alignment::Start, 0.0)?,
                         ordered()?,
                     ],
-                ),
+                )?,
             ],
         }),
         rule(
@@ -510,8 +511,8 @@ fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block<()>> {
         body: shipment_rows(logo)?,
         tracks: Some(vec![
             Track::Fixed(pos(54.0)?),
-            Track::Ratio(Ratio::new(2.0).unwrap()),
-            Track::Ratio(Ratio::new(1.0).unwrap()),
+            Track::Ratio(Ratio::new(2.0).map_err(pdfcraft_pdf::Errors::from)?),
+            Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
             Track::Fixed(pos(48.0)?),
         ]),
         cell_padding: nn(4.0)?,

@@ -9,6 +9,8 @@
 //!
 //! Writes `out/bill.pdf` (gitignored). Pass another path as argv[1].
 
+#![expect(clippy::print_stderr, reason = "example reports the written PDF path")]
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,12 +34,12 @@ const LOGO: &[u8] = include_bytes!("assets/logo.png");
 const MARK: &[u8] = include_bytes!("assets/mark.png");
 const DIAMOND: &[u8] = include_bytes!("assets/diamond.png");
 
-fn main() -> Result<()> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let out = env::args()
         .nth(1)
         .map_or_else(default_out_path, PathBuf::from);
     if let Some(parent) = out.parent() {
-        fs::create_dir_all(parent).expect("create output dir");
+        fs::create_dir_all(parent)?;
     }
 
     let mut resources = Resources::with_fonts(FontRegistry::single(FontFamily {
@@ -99,7 +101,7 @@ fn main() -> Result<()> {
         }],
     })?;
     let pdf = to_pdf(rendered)?;
-    fs::write(&out, &pdf).expect("write PDF");
+    fs::write(&out, &pdf)?;
     eprintln!("wrote {} ({} bytes)", out.display(), pdf.len());
     Ok(())
 }
@@ -156,11 +158,11 @@ fn rule(
     }))
 }
 
-fn ratio_col(weight: f32, blocks: Vec<Block<()>>) -> ColumnSpec<()> {
-    ColumnSpec {
-        width: Track::Ratio(Ratio::new(weight).expect("weight is positive")),
+fn ratio_col(weight: f32, blocks: Vec<Block<()>>) -> Result<ColumnSpec<()>> {
+    Ok(ColumnSpec {
+        width: Track::Ratio(Ratio::new(weight).map_err(pdfcraft_pdf::Errors::from)?),
         blocks,
-    }
+    })
 }
 
 fn filled(content: Vec<CellBlock<()>>, fill: Color) -> CellSpec<()> {
@@ -215,7 +217,7 @@ fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block<()>>> {
                         styled(9.0, NAVY, vec![line("商 業 理 想 同 行 者")])?,
                         rule(None, Alignment::Center, 0.75, 8.0, 4.0)?,
                     ],
-                ),
+                )?,
                 ColumnSpec {
                     width: Track::Fixed(pos(56.0)?),
                     blocks: vec![Block::Image(ImageSpec {
@@ -279,7 +281,7 @@ fn service_table() -> Result<Vec<Block<()>>> {
                 ratio_col(
                     1.0,
                     vec![styled(12.0, NAVY, vec![line("Service Summary 服務概要")])?],
-                ),
+                )?,
                 ratio_col(
                     1.0,
                     vec![styled(
@@ -287,7 +289,7 @@ fn service_table() -> Result<Vec<Block<()>>> {
                         NAVY,
                         vec![aligned("日期：2025年10月28日", Alignment::End)],
                     )?],
-                ),
+                )?,
             ],
         }),
         Block::Spacer(nn(8.0)?),
@@ -324,8 +326,8 @@ fn service_table() -> Result<Vec<Block<()>>> {
             }],
             body,
             tracks: Some(vec![
-                Track::Ratio(Ratio::new(2.2).unwrap()),
-                Track::Ratio(Ratio::new(1.0).unwrap()),
+                Track::Ratio(Ratio::new(2.2).map_err(pdfcraft_pdf::Errors::from)?),
+                Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
             ]),
             cell_padding: nn(8.0)?,
             border: TableBorder {
@@ -415,8 +417,8 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
         body,
         tracks: Some(vec![
             Track::Fixed(pos(22.0)?),
-            Track::Ratio(Ratio::new(1.0).unwrap()),
-            Track::Ratio(Ratio::new(1.0).unwrap()),
+            Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
+            Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
         ]),
         cell_padding: nn(4.0)?,
         border: TableBorder {
@@ -442,14 +444,14 @@ fn cheque_notes() -> Result<Vec<Block<()>>> {
                             line("Cheque made payable to \"HC BUSINESS LIMITED\""),
                             line("支票付款請以 \"恒誠商務有限公司\" 抬頭"),
                         ],
-                    ),
+                    )?,
                     ratio_col(
                         1.0,
                         vec![
                             line("FPS Unique ID: 3952652 (HK local bank transactions only)"),
                             line("快速支付編號: 3952652 (僅限香港本地銀行交易)"),
                         ],
-                    ),
+                    )?,
                 ],
             })],
         )?,
