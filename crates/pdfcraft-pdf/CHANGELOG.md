@@ -9,9 +9,16 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
 ### Changed
 
-- MSRV is now 1.98 (was 1.92).
+- MSRV is now 1.98 (was 1.92). Per VER-1 this raises the `0.y` digit.
+- Lint configuration inherits the workspace `[workspace.lints]` table. Writing
+  rules live in [`docs/rust-engineering-standard.md`](../../docs/rust-engineering-standard.md).
+- Examples that need `to_pdf` require feature `backend-krilla` (including
+  `anchors`). Integration tests that call `to_pdf` are gated the same way so
+  `--no-default-features` stays green.
 
 ## [0.3.0] - 2026-11-02
 

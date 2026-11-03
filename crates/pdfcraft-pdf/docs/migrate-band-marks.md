@@ -1,6 +1,6 @@
 # 把 front 页脚迁到 band marks
 
-这份说明记录从 `SectionSpec.front` 上的页脚 `LayerMark` 迁到 `SectionSpec.footer` 上的 `BandMark`。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.3.0`。`pdfcraft-forms`、`pdfcraft-orgchart` 和 `pdfcraft-post` 的类型不变。
+这份说明记录从 `SectionSpec.front` 上的页脚 `LayerMark` 迁到 `SectionSpec.footer` 上的 `BandMark`。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.4.0`。`pdfcraft-forms`、`pdfcraft-orgchart` 和 `pdfcraft-post` 的类型不变。
 
 按下面的顺序改。第 1 步是编译错误。后面的步骤能编译通过，但坐标、字号或越界错误会和旧页脚不一致。
 

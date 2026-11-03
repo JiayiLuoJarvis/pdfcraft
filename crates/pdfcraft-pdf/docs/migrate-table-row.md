@@ -1,6 +1,6 @@
 # 迁到表格行与边框类型
 
-这份说明记录从 `header: Vec<Vec<CellSpec>>` 和 `border_width` / `border_color` 迁到当前表格行。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.3.0`。`pdfcraft-forms` 和 `pdfcraft-orgchart` 的类型不变。
+这份说明记录从 `header: Vec<Vec<CellSpec>>` 和 `border_width` / `border_color` 迁到当前表格行。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.4.0`。`pdfcraft-forms` 和 `pdfcraft-orgchart` 的类型不变。
 
 按下面的顺序改。每一步都对应一类编译错误。改完再看文末的说明。版式没有变化。
 

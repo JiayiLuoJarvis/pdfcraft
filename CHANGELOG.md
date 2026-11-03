@@ -13,14 +13,28 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+## 2026-11-03
+
+### Changed
+
+- Four crates raise `0.y` for MSRV 1.98 (engineering standard VER-1):
+  `pdfcraft-pdf` `0.4.0`, `pdfcraft-forms` `0.2.0`, `pdfcraft-orgchart` `0.2.0`,
+  `pdfcraft-post` `0.3.0`. See [`docs/msrv.md`](docs/msrv.md) and
+  [`docs/rust-engineering-standard.md`](docs/rust-engineering-standard.md).
+- Members inherit root `[workspace.lints]`. Pricing uses
+  `python3 scripts/price_lints.py` (LINT-3).
+
+### Fixed
+
+- `pdfcraft-forms` `0.2.0`. When several `font_size_overrides` or `line_below`
+  entries are invalid, the error names the lexicographically first field.
+
+### Earlier notes still open in Unreleased below
+
 ### Breaking
 
 - **Breaking.** `pdfcraft-pdf` `0.3.0`. `BandSpec` adds `marks: Vec<BandMark<K>>`. Struct literals need `marks: Vec::new()` or `..BandSpec::default()`. Headers and footers paint images, lines, rectangles, ellipses, single-line text, and rotated groups in band coordinates. A mark outside the band is an error. See [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 - **Breaking.** `pdfcraft-pdf` `0.2.0`. `SectionSpec::header` and `SectionSpec::footer` are `Option<BandFn<K>>`. See [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
-
-### Changed
-
-- All four crates: MSRV is now 1.98 (was 1.92). The workspace builds, lints, and documents on one toolchain. See [`docs/msrv.md`](docs/msrv.md).
 
 ### Fixed
 

@@ -1,6 +1,6 @@
-# pdfcraft Rust 工程规范（草案）
+# pdfcraft Rust 工程规范
 
-状态：草案，待确认。适用于整个 workspace 的四个包：`pdfcraft-pdf`、`pdfcraft-forms`、`pdfcraft-orgchart`、`pdfcraft-post`。
+状态：已确认并生效（随四包 MSRV 1.98 发布）。适用于整个 workspace 的四个包：`pdfcraft-pdf`、`pdfcraft-forms`、`pdfcraft-orgchart`、`pdfcraft-post`。
 
 本文管「代码怎么写、工程怎么组织」。产品范围与行为不在这里，以 [`提案书.md`](提案书.md) 为准。
 

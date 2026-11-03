@@ -16,7 +16,7 @@ checks, and choices, then removes every widget annotation and the catalog
 | API | [docs.rs/pdfcraft-forms](https://docs.rs/pdfcraft-forms) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.1.0`. The API can break before `1.0` |
+| Status | `0.2.0`. The API can break before `1.0` |
 
 ---
 
@@ -24,7 +24,7 @@ checks, and choices, then removes every widget annotation and the catalog
 
 ```toml
 [dependencies]
-pdfcraft-forms = "0.1.0"
+pdfcraft-forms = "0.2.0"
 ```
 
 ---

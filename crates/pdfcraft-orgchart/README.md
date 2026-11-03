@@ -15,7 +15,7 @@ subject. Outbound investments sit below. Measurement uses
 | API | [docs.rs/pdfcraft-orgchart](https://docs.rs/pdfcraft-orgchart) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.1.1`. The API can break before `1.0` |
+| Status | `0.2.0`. The API can break before `1.0` |
 
 ---
 
@@ -23,7 +23,7 @@ subject. Outbound investments sit below. Measurement uses
 
 ```toml
 [dependencies]
-pdfcraft-orgchart = "0.1.1"
+pdfcraft-orgchart = "0.2.0"
 ```
 
 ---
