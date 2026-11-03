@@ -251,7 +251,7 @@ fn pdf_num(value: f32) -> Result<String> {
         }
     }
     if text == "-0" {
-        Ok("0".to_string())
+        Ok("0".to_owned())
     } else {
         Ok(text)
     }

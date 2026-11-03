@@ -109,7 +109,7 @@ struct Session<'a, E: LayoutEngine, M: Measurer> {
 /// # Errors
 ///
 /// Returns [`Error`] when the request is illegal or no page plan fits.
-pub fn paginate<M: Measurer>(
+pub(crate) fn paginate<M: Measurer>(
     graph: Graph,
     boxes: &[NodeBox],
     geometry: PageGeometry,
@@ -123,7 +123,7 @@ pub fn paginate<M: Measurer>(
 /// # Errors
 ///
 /// Returns [`Error`] when the request is illegal or no page plan fits.
-pub fn paginate_with<E: LayoutEngine, M: Measurer>(
+pub(crate) fn paginate_with<E: LayoutEngine, M: Measurer>(
     graph: Graph,
     boxes: &[NodeBox],
     geometry: PageGeometry,
@@ -139,7 +139,7 @@ pub fn paginate_with<E: LayoutEngine, M: Measurer>(
 
 /// Test entry that validates `request` then paginates.
 #[cfg(test)]
-pub fn paginate_request<M: Measurer>(
+pub(crate) fn paginate_request<M: Measurer>(
     request: &ChartRequest,
     boxes: &[NodeBox],
     geometry: PageGeometry,
@@ -151,7 +151,7 @@ pub fn paginate_request<M: Measurer>(
 
 /// Test entry with a caller-supplied engine.
 #[cfg(test)]
-pub fn paginate_request_with<E: LayoutEngine, M: Measurer>(
+pub(crate) fn paginate_request_with<E: LayoutEngine, M: Measurer>(
     request: &ChartRequest,
     boxes: &[NodeBox],
     geometry: PageGeometry,
@@ -165,7 +165,7 @@ pub fn paginate_request_with<E: LayoutEngine, M: Measurer>(
 /// Two millimetres per character. Paging tests inject this instead of a face.
 #[cfg(test)]
 #[derive(Debug, Default, Clone, Copy)]
-pub struct FallbackMeasurer;
+pub(crate) struct FallbackMeasurer;
 
 #[cfg(test)]
 impl Measurer for FallbackMeasurer {
@@ -911,7 +911,7 @@ fn task_index(
     Ok(target)
 }
 
-fn investment_id_refs<'a>(ids: &[NodeId], boxes: &'a [crate::measure::NodeBox]) -> Vec<&'a str> {
+fn investment_id_refs<'a>(ids: &[NodeId], boxes: &'a [NodeBox]) -> Vec<&'a str> {
     ids.iter()
         .filter_map(|id| {
             boxes

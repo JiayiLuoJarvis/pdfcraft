@@ -1,6 +1,6 @@
 //! Text clustering, measurement, and line breaking.
 
-pub mod break_class;
-pub mod cluster;
-pub mod line_break;
-pub mod measure;
+pub(crate) mod break_class;
+pub(crate) mod cluster;
+pub(crate) mod line_break;
+pub(crate) mod measure;

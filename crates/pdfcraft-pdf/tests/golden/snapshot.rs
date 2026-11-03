@@ -60,14 +60,14 @@ use pdfcraft_pdf::{
 };
 
 /// Golden format marker. Bump when the text format changes on purpose.
-pub const GOLDEN_VERSION: &str = "1";
+pub(crate) const GOLDEN_VERSION: &str = "1";
 
 /// skrifa release the pinned measurement stack resolves to.
 ///
 /// The workspace pins `skrifa = "=0.48.0"` because measurement and drawing
 /// share one glyph pipeline; `golden_skrifa_version_matches_workspace_pin`
 /// fails loudly if this drifts from the pin so goldens get re-blessed.
-pub const SKRIFA_VERSION: &str = "0.48.0";
+pub(crate) const SKRIFA_VERSION: &str = "0.48.0";
 
 /// Font identity for one raw [`FontId`][pdfcraft_pdf::FontId] slot.
 ///
@@ -75,7 +75,7 @@ pub const SKRIFA_VERSION: &str = "0.48.0";
 /// the file plus units per em from skrifa. `serialize_pages` looks entries up
 /// by raw font id, so `fonts[raw]` must describe raw id `raw`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FontMeta {
+pub(crate) struct FontMeta {
     /// Lowercase hex SHA-256 of the font file bytes (64 characters).
     pub sha256_hex: String,
     /// Units per em from skrifa metrics; prints integral when whole.
@@ -85,7 +85,7 @@ pub struct FontMeta {
 impl FontMeta {
     /// Describes one registered font face.
     #[must_use]
-    pub fn new(sha256_hex: String, upem: f32) -> Self {
+    pub(crate) fn new(sha256_hex: String, upem: f32) -> Self {
         Self { sha256_hex, upem }
     }
 }
@@ -94,7 +94,7 @@ impl FontMeta {
 ///
 /// The message always names the file or the page and op index involved.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GoldenError {
+pub(crate) struct GoldenError {
     message: String,
 }
 
@@ -109,7 +109,7 @@ impl GoldenError {
 
     /// Human-readable failure; names the golden file on mismatches.
     #[must_use]
-    pub fn message(&self) -> &str {
+    pub(crate) fn message(&self) -> &str {
         &self.message
     }
 }
@@ -124,14 +124,14 @@ impl std::error::Error for GoldenError {}
 
 /// Page-space length with 3 decimals; `-0.0` prints as `0.000`.
 #[must_use]
-pub fn fmt_pt3(value: f32) -> String {
+pub(crate) fn fmt_pt3(value: f32) -> String {
     let value = if value == 0.0 { 0.0 } else { value };
     format!("{value:.3}")
 }
 
 /// Advance/affine term with 6 decimals; `-0.0` prints as `0.000000`.
 #[must_use]
-pub fn fmt_norm6(value: f32) -> String {
+pub(crate) fn fmt_norm6(value: f32) -> String {
     let value = if value == 0.0 { 0.0 } else { value };
     format!("{value:.6}")
 }
@@ -279,7 +279,7 @@ impl Slots {
 ///
 /// [`GoldenError`] for page-marker leakage or unknown font ids, mirroring
 /// [`serialize_pages`].
-pub fn fmt_single_op_for_tests(op: &CanvasCommand) -> Result<String, GoldenError> {
+pub(crate) fn fmt_single_op_for_tests(op: &CanvasCommand) -> Result<String, GoldenError> {
     let slots = Slots {
         fonts: Vec::new(),
         images: Vec::new(),
@@ -292,7 +292,7 @@ pub fn fmt_single_op_for_tests(op: &CanvasCommand) -> Result<String, GoldenError
 /// # Errors
 ///
 /// [`GoldenError`] naming the page and op index on underflow or leftover depth.
-pub fn check_transform_balance(
+pub(crate) fn check_transform_balance(
     page_index: usize,
     ops: &[CanvasCommand],
 ) -> Result<(), GoldenError> {
@@ -429,7 +429,7 @@ fn fmt_doc_info(info: &DocumentInfo) -> String {
 ///
 /// [`GoldenError`] on unbalanced transforms, unknown font ids, or page-marker
 /// leakage. Never a diff: diffs belong to [`verify_golden`].
-pub fn serialize_pages(
+pub(crate) fn serialize_pages(
     pages: &[RecordedPage],
     info: Option<&DocumentInfo>,
     fonts: &[FontMeta],
@@ -493,7 +493,7 @@ fn image_dims(pages: &[RecordedPage], raw: u32) -> (u32, u32) {
 
 /// Directory holding checked-in goldens: `<crate>/tests/goldens`.
 #[must_use]
-pub fn goldens_dir() -> PathBuf {
+pub(crate) fn goldens_dir() -> PathBuf {
     FsPath::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("goldens")
@@ -501,7 +501,7 @@ pub fn goldens_dir() -> PathBuf {
 
 /// Scratch directory for `.actual` files: `<workspace>/target/golden`.
 #[must_use]
-pub fn scratch_dir() -> PathBuf {
+pub(crate) fn scratch_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
         return PathBuf::from(dir).join("golden");
     }
@@ -533,7 +533,7 @@ fn check_name(name: &str) -> Result<(), GoldenError> {
 /// Common prefix and suffix collapse; the middle prints as `-`/`+` lines
 /// under one `@@` header. Equal inputs produce an empty string.
 #[must_use]
-pub fn unified_diff(expected: &str, actual: &str) -> String {
+pub(crate) fn unified_diff(expected: &str, actual: &str) -> String {
     const CAP: usize = 40;
     if expected == actual {
         return String::new();
@@ -585,7 +585,7 @@ pub fn unified_diff(expected: &str, actual: &str) -> String {
 ///
 /// [`GoldenError`] naming the golden file when it is missing, unreadable,
 /// invalidly named, or different from the log.
-pub fn verify_golden(
+pub(crate) fn verify_golden(
     pages: &[RecordedPage],
     info: Option<&DocumentInfo>,
     fonts: &[FontMeta],
@@ -619,7 +619,7 @@ pub fn verify_golden(
 /// # Errors
 ///
 /// [`GoldenError`] on invalid names, serialization failures, or IO errors.
-pub fn bless_golden_in_dir(
+pub(crate) fn bless_golden_in_dir(
     pages: &[RecordedPage],
     info: Option<&DocumentInfo>,
     fonts: &[FontMeta],
@@ -647,7 +647,7 @@ pub fn bless_golden_in_dir(
 /// # Errors
 ///
 /// [`GoldenError`] on invalid names or IO errors.
-pub fn write_actual(text: &str, name: &str) -> Result<PathBuf, GoldenError> {
+pub(crate) fn write_actual(text: &str, name: &str) -> Result<PathBuf, GoldenError> {
     check_name(name)?;
     let dir = scratch_dir();
     std::fs::create_dir_all(&dir).map_err(|error| {
@@ -677,7 +677,7 @@ pub fn write_actual(text: &str, name: &str) -> Result<PathBuf, GoldenError> {
     dead_code,
     reason = "todo 8 bless entry point; self-tests cover verify/bless cores"
 )]
-pub fn assert_golden(
+pub(crate) fn assert_golden(
     pages: &[RecordedPage],
     info: Option<&DocumentInfo>,
     fonts: &[FontMeta],

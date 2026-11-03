@@ -32,9 +32,9 @@ fn lists_basic_names_and_types() {
     assert_eq!(
         by_name["level"].options,
         Some(vec![
-            "Junior".to_string(),
-            "Senior".to_string(),
-            "Lead".to_string()
+            "Junior".to_owned(),
+            "Senior".to_owned(),
+            "Lead".to_owned()
         ])
     );
 }

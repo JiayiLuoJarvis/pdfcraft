@@ -11,7 +11,7 @@
     reason = "a..h are the FIPS 180-4 working-variable names"
 )]
 #[must_use]
-pub fn digest(bytes: &[u8]) -> [u8; 32] {
+pub(crate) fn digest(bytes: &[u8]) -> [u8; 32] {
     let mut state: [u32; 8] = [
         0x6a09_e667,
         0xbb67_ae85,
@@ -98,7 +98,7 @@ pub fn digest(bytes: &[u8]) -> [u8; 32] {
 
 /// Lowercase hex of the SHA-256 of `bytes`.
 #[must_use]
-pub fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     let mut text = String::with_capacity(64);
     for byte in digest(bytes) {
         text.push(char::from_digit(u32::from(byte >> 4), 16).unwrap_or('?'));

@@ -517,7 +517,7 @@ enum Step {
 fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
     for n in 0..64 {
         let candidate = if n == 0 {
-            "QuireForms".to_string()
+            "QuireForms".to_owned()
         } else {
             format!("QuireForms{}", n + 1)
         };

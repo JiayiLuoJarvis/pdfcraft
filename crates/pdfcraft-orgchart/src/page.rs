@@ -10,7 +10,7 @@ use crate::units::{within, PageGeometry};
 
 /// One holding edge on a page, in holder → held order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EdgeRef {
+pub(crate) struct EdgeRef {
     /// Holder.
     pub from_id: NodeId,
     /// Held company.
@@ -19,14 +19,14 @@ pub struct EdgeRef {
 
 impl EdgeRef {
     #[must_use]
-    pub fn new(from_id: NodeId, to_id: NodeId) -> Self {
+    pub(crate) fn new(from_id: NodeId, to_id: NodeId) -> Self {
         Self { from_id, to_id }
     }
 }
 
 /// A point in layout space. Origin is the chart's top-left. `y` grows downward.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PointMm {
+pub(crate) struct PointMm {
     /// Millimetres from the chart origin.
     pub x: f64,
     /// Millimetres from the chart origin.
@@ -35,7 +35,7 @@ pub struct PointMm {
 
 /// Owned placed node.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PlacedNode {
+pub(crate) struct PlacedNode {
     /// Layout identity.
     pub id: NodeId,
     /// Caller id or synthetic overflow id.
@@ -52,7 +52,7 @@ pub struct PlacedNode {
 
 /// Orthogonal edge polyline. The last point is the arrow tip when `draw_arrow` is set.
 #[derive(Debug, Clone, PartialEq)]
-pub struct LaidOutEdge {
+pub(crate) struct LaidOutEdge {
     /// Holder.
     pub from_id: NodeId,
     /// Held company.
@@ -65,7 +65,7 @@ pub struct LaidOutEdge {
 
 /// Placed continuation-cue box.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CueSlot {
+pub(crate) struct CueSlot {
     /// Node the cue points at.
     pub anchor_id: String,
     /// Which cone the cue belongs to.
@@ -84,7 +84,7 @@ pub struct CueSlot {
 
 /// Packed chart in layout space, before the page offset.
 #[derive(Debug, Clone, PartialEq)]
-pub struct LayoutResult {
+pub(crate) struct LayoutResult {
     /// Placed nodes.
     pub nodes: Vec<PlacedNode>,
     /// Routed edges.
@@ -104,7 +104,7 @@ pub struct LayoutResult {
 impl LayoutResult {
     /// Empty chart.
     #[must_use]
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -121,7 +121,7 @@ impl LayoutResult {
     /// # Errors
     ///
     /// Returns [`ErrorCode::LayoutFailed`] when two slots share an anchor and a side.
-    pub fn from_parts(
+    pub(crate) fn from_parts(
         nodes: Vec<PlacedNode>,
         edges: Vec<LaidOutEdge>,
         slots: Vec<CueSlot>,
@@ -176,7 +176,7 @@ impl LayoutResult {
 
     /// The bounding box sits inside the printable area, within half a millimetre.
     #[must_use]
-    pub fn fits(&self, geometry: PageGeometry) -> bool {
+    pub(crate) fn fits(&self, geometry: PageGeometry) -> bool {
         within(self.width_mm, geometry.printable_width_mm())
             && within(self.height_mm, geometry.printable_height_mm())
     }
@@ -218,7 +218,7 @@ pub(crate) struct RatioAnchor {
 
 /// Navigation cue. The drawn box is the matching [`CueSlot`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct ContCue {
+pub(crate) struct ContCue {
     /// 1-based PDF page number.
     pub target_page: usize,
     /// Direct children represented by the cue.
@@ -231,7 +231,7 @@ pub struct ContCue {
 
 /// Clickable overflow box. `target_page` is 1-based.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodePageLink {
+pub(crate) struct NodePageLink {
     /// Overflow node id.
     pub node_id: String,
     /// 1-based PDF page number.
@@ -240,7 +240,7 @@ pub struct NodePageLink {
 
 /// One finished page. Render draws `main_title` and `sub_title` as stored.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PageSpec {
+pub(crate) struct PageSpec {
     /// Centered header title.
     pub main_title: String,
     /// Centered header subtitle.

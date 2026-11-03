@@ -44,7 +44,7 @@ impl Ratio {
     ///
     /// [`ErrorKind::ColumnWidths`] with [`ColumnWidthsReason::NonFiniteRatio`] or
     /// [`ColumnWidthsReason::NonPositiveRatio`].
-    pub fn new(weight: f32) -> std::result::Result<Self, Error> {
+    pub fn new(weight: f32) -> Result<Self, Error> {
         LayoutRatio::new(weight)?;
         Ok(Self(weight))
     }

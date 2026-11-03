@@ -146,7 +146,7 @@ fn centered_fill_blank_starts_at_the_frame_x() {
     assert_eq!(glyph.map(f32::to_bits), Some(0.0f32.to_bits()));
     let end = fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
-            crate::geom::PathVerb::LineTo(point) => point.x().as_pt(),
+            PathVerb::LineTo(point) => point.x().as_pt(),
             _ => f32::NAN,
         }),
         _ => None,
@@ -702,7 +702,7 @@ fn justify_fill_line_stays_start_and_fill_still_eats_width() {
     assert!(pt_near(glyphs[0].1, 0.0));
     let end = fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
-            crate::geom::PathVerb::LineTo(point) => point.x().as_pt(),
+            PathVerb::LineTo(point) => point.x().as_pt(),
             _ => f32::NAN,
         }),
         _ => None,

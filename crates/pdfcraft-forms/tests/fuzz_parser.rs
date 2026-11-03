@@ -114,8 +114,8 @@ fn read_seed(name: &str) -> Vec<u8> {
 
 fn text_field() -> HashMap<String, FieldValue> {
     HashMap::from([(
-        "employee_name".to_string(),
-        FieldValue::Text("Ada".to_string()),
+        "employee_name".to_owned(),
+        FieldValue::Text("Ada".to_owned()),
     )])
 }
 
@@ -186,7 +186,7 @@ fn replay_seed_corpus() {
                 eprintln!("fuzz case {case}: list_fields -> {}", listed.is_ok());
                 if name == "f01-basic-form.pdf" && mutation == 0 {
                     let mut checkbox = HashMap::new();
-                    checkbox.insert("agree".to_string(), FieldValue::CheckBox(true));
+                    checkbox.insert("agree".to_owned(), FieldValue::CheckBox(true));
                     let filled = fill_and_flatten(&input, &checkbox, &FillOptions::default())
                         .expect("fill base");
                     assert!(filled.starts_with(b"%PDF"), "fuzz case {case}: fill output");

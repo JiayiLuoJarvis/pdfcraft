@@ -1,26 +1,26 @@
 //! Layout engine: split/draw flowables, check nested content, paginate, decorate.
 
 pub(crate) mod anchor;
-pub mod atomic;
-pub mod canvas;
-pub mod column_width;
-pub mod columns;
-pub mod decorate;
+pub(crate) mod atomic;
+pub(crate) mod canvas;
+pub(crate) mod column_width;
+pub(crate) mod columns;
+pub(crate) mod decorate;
 #[cfg(test)]
 mod decorate_tests;
-pub mod flow;
-pub mod frame;
-pub mod hline;
-pub mod image;
+pub(crate) mod flow;
+pub(crate) mod frame;
+pub(crate) mod hline;
+pub(crate) mod image;
 pub(crate) mod justify;
-pub mod line_run;
-pub mod list;
-pub mod nesting;
+pub(crate) mod line_run;
+pub(crate) mod list;
+pub(crate) mod nesting;
 #[cfg(test)]
 mod node_tests;
-pub mod paginate;
-pub mod paragraph;
-pub mod style;
-pub mod table;
+pub(crate) mod paginate;
+pub(crate) mod paragraph;
+pub(crate) mod style;
+pub(crate) mod table;
 #[cfg(test)]
 mod test_util;

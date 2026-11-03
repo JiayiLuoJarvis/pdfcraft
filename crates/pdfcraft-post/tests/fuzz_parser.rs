@@ -108,7 +108,7 @@ fn read_seed(name: &str) -> Vec<u8> {
 
 fn metadata() -> SetMetadata {
     SetMetadata {
-        title: Some("fuzz".to_string()),
+        title: Some("fuzz".to_owned()),
         ..SetMetadata::default()
     }
 }

@@ -62,7 +62,7 @@ fn main() {
         ("fileNumber1", "12"),
         ("fileNumber2", "34567890"),
     ] {
-        fields.insert(name.to_string(), FieldValue::Text(value.to_string()));
+        fields.insert(name.to_owned(), FieldValue::Text(value.to_owned()));
     }
     if env::var_os("PDFCRAFT_FORMS_FONT").is_some() {
         for (name, value) in [
@@ -71,12 +71,12 @@ fn main() {
             ("address", "香港中環"),
             ("idTypeName", "中國"),
         ] {
-            fields.insert(name.to_string(), FieldValue::Text(value.to_string()));
+            fields.insert(name.to_owned(), FieldValue::Text(value.to_owned()));
         }
     }
 
     let mut h_overrides = HashMap::new();
-    h_overrides.insert("fileNumber2".to_string(), HAlign::Left);
+    h_overrides.insert("fileNumber2".to_owned(), HAlign::Left);
     let options = FillOptions {
         font: Some(FontBytes {
             bytes: &font,

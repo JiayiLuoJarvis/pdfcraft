@@ -708,7 +708,7 @@ pub struct PageBandQuery {
 }
 
 type BandCallback<K> =
-    Box<dyn FnMut(&PageBandQuery) -> std::result::Result<Option<BandSpec<K>>, Error> + Send + Sync>;
+    Box<dyn FnMut(&PageBandQuery) -> Result<Option<BandSpec<K>>, Error> + Send + Sync>;
 
 enum BandFnInner<K> {
     Fixed(BandSpec<K>),
@@ -774,10 +774,7 @@ impl<K> BandFn<K> {
     pub fn from_fn<F>(f: F) -> Self
     where
         K: 'static,
-        F: FnMut(&PageBandQuery) -> std::result::Result<Option<BandSpec<K>>, Error>
-            + Send
-            + Sync
-            + 'static,
+        F: FnMut(&PageBandQuery) -> Result<Option<BandSpec<K>>, Error> + Send + Sync + 'static,
     {
         Self {
             inner: BandFnInner::Dynamic(Box::new(f)),

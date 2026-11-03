@@ -790,10 +790,7 @@ fn glyph_y_bits(page: &RecordedPage, text: &str) -> u32 {
         .to_bits()
 }
 
-fn two_pages(
-    header: Option<pdfcraft_pdf::BandFn<()>>,
-    footer: Option<pdfcraft_pdf::BandFn<()>>,
-) -> Rendered {
+fn two_pages(header: Option<BandFn<()>>, footer: Option<BandFn<()>>) -> Rendered {
     font_pages(
         PageSize::A4,
         SectionSpec {
@@ -813,7 +810,7 @@ fn header_fn_changes_page_one_only() {
         return;
     }
     let pages = two_pages(
-        Some(pdfcraft_pdf::BandFn::from_fn(|query| {
+        Some(BandFn::from_fn(|query| {
             let label = if query.number.get() == 1 {
                 "PAGE-ONE"
             } else {
@@ -835,9 +832,9 @@ fn header_fn_none_keeps_the_body_origin() {
     if skip_without_font() {
         return;
     }
-    let fixed = two_pages(Some(pdfcraft_pdf::BandFn::fixed(left_band("H"))), None).pages();
+    let fixed = two_pages(Some(BandFn::fixed(left_band("H"))), None).pages();
     let dynamic = two_pages(
-        Some(pdfcraft_pdf::BandFn::from_fn(|query| {
+        Some(BandFn::from_fn(|query| {
             if query.number.get() == 2 {
                 Ok(None)
             } else {
@@ -1070,7 +1067,7 @@ fn ghost_band() -> BandSpec<GhostKey> {
     }
 }
 
-fn ghost_doc(header: BandFn<GhostKey>) -> pdfcraft_pdf::Result<Rendered> {
+fn ghost_doc(header: BandFn<GhostKey>) -> Result<Rendered> {
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: ghost_resources(),

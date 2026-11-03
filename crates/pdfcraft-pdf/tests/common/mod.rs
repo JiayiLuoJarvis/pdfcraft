@@ -12,7 +12,7 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 
 /// Bytes from `PDFCRAFT_PDF_FONT`, or `PDFCRAFT_CJK_FONT` if the former is unset.
-pub fn test_font_bytes() -> Option<Vec<u8>> {
+pub(crate) fn test_font_bytes() -> Option<Vec<u8>> {
     let path =
         std::env::var_os("PDFCRAFT_PDF_FONT").or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
     Some(std::fs::read(&path).unwrap_or_else(|error| {
@@ -28,7 +28,7 @@ pub fn test_font_bytes() -> Option<Vec<u8>> {
     dead_code,
     reason = "used by letter_layout / batch_baseline via #[path]"
 )]
-pub fn cjk_font_bytes() -> Option<Vec<u8>> {
+pub(crate) fn cjk_font_bytes() -> Option<Vec<u8>> {
     let path = std::env::var_os("PDFCRAFT_CJK_FONT")?;
     Some(std::fs::read(&path).unwrap_or_else(|error| {
         panic!(
@@ -41,7 +41,7 @@ pub fn cjk_font_bytes() -> Option<Vec<u8>> {
 /// Line height of one face at `size` pt and `factor`.
 #[allow(dead_code, reason = "shared helper; not every test binary uses it")]
 #[must_use]
-pub fn line_height_at(font: &[u8], size: f32, factor: f32) -> f32 {
+pub(crate) fn line_height_at(font: &[u8], size: f32, factor: f32) -> f32 {
     let font_ref = FontRef::new(font).unwrap_or_else(|_| {
         FontRef::from_index(font, 0).expect("PDFCRAFT_PDF_FONT must be a usable face")
     });
@@ -56,7 +56,7 @@ pub fn line_height_at(font: &[u8], size: f32, factor: f32) -> f32 {
     dead_code,
     reason = "used by document / letter_layout / spec_parity via #[path]"
 )]
-pub fn body_line_12(font: &[u8]) -> (f32, f32) {
+pub(crate) fn body_line_12(font: &[u8]) -> (f32, f32) {
     let font_ref = FontRef::new(font).unwrap_or_else(|_| {
         FontRef::from_index(font, 0).expect("PDFCRAFT_PDF_FONT must be a usable face")
     });
@@ -74,14 +74,14 @@ pub fn body_line_12(font: &[u8]) -> (f32, f32) {
 
 /// Shared face bytes for tests that register once.
 #[allow(dead_code, reason = "shared helper; not every test binary uses it")]
-pub fn test_font_arc() -> Option<Arc<Vec<u8>>> {
+pub(crate) fn test_font_arc() -> Option<Arc<Vec<u8>>> {
     test_font_bytes().map(Arc::new)
 }
 
 /// Advance width of `ch` at `size` pt (skrifa hmtx, no kerning).
 #[allow(dead_code, reason = "used by document via #[path]")]
 #[must_use]
-pub fn advance_pt(font: &[u8], ch: char, size: f32) -> f32 {
+pub(crate) fn advance_pt(font: &[u8], ch: char, size: f32) -> f32 {
     let font_ref = FontRef::new(font).unwrap_or_else(|_| {
         FontRef::from_index(font, 0).expect("PDFCRAFT_PDF_FONT must be a usable face")
     });

@@ -58,7 +58,7 @@ fn chart(holders: usize, investments: usize) -> ChartRequest {
     ChartRequest::new("root", nodes, edges)
 }
 
-fn pages_of(request: &ChartRequest) -> Vec<crate::page::PageSpec> {
+fn pages_of(request: &ChartRequest) -> Vec<PageSpec> {
     let graph = crate::graph::validate(request).expect("graph");
     let display = build_display(request).expect("display");
     let facts = ratio_facts(request).expect("facts");
@@ -67,7 +67,7 @@ fn pages_of(request: &ChartRequest) -> Vec<crate::page::PageSpec> {
         .iter()
         .enumerate()
         .map(|(index, node)| {
-            let id = crate::ids::NodeId::from_index(index);
+            let id = NodeId::from_index(index);
             InboxNode {
                 id,
                 protocol_id: node.id.as_str(),
@@ -199,7 +199,7 @@ impl LayoutEngine for FakeEngine {
     fn layout(
         &self,
         boxes: &[NodeBox],
-        _edges: &[crate::page::EdgeRef],
+        _edges: &[EdgeRef],
         _node_order: &[NodeId],
         _cols: usize,
         _node_width_mm: f64,
@@ -237,7 +237,7 @@ impl LayoutEngine for FakeEngine {
     fn family_row_metrics(
         &self,
         boxes: &[NodeBox],
-        _edges: &[crate::page::EdgeRef],
+        _edges: &[EdgeRef],
         _node_order: &[NodeId],
         _cols: usize,
         _node_width_mm: f64,

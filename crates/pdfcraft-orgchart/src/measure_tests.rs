@@ -468,7 +468,7 @@ fn overflow_box_reserves_a_blank_second_name_row() {
     assert!(!box_.is_subject);
 }
 
-fn hc_font() -> Option<crate::FontBytes> {
+fn hc_font() -> Option<FontBytes> {
     crate::test_font::env_font()
 }
 

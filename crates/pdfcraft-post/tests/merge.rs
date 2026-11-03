@@ -68,7 +68,7 @@ fn preserve_outlines_keeps_only_the_first() {
     let a = common::pdf_with_outline("First");
     let b = common::pdf_with_outline("Second");
     let out = merge_pdfs([a.as_slice(), b.as_slice()], true).expect("merge");
-    assert_eq!(common::outline_titles(&out), vec!["First".to_string()]);
+    assert_eq!(common::outline_titles(&out), vec!["First".to_owned()]);
     assert_eq!(Document::load_mem(&out).expect("open").get_pages().len(), 2);
 }
 

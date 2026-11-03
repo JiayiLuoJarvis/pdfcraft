@@ -130,14 +130,14 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
     if options.missing == MissingName::Error {
         if let Some(name) = first_unknown(&first, fields.keys().map(String::as_str)) {
             return Err(ErrorKind::UnknownField {
-                field_name: name.to_string(),
+                field_name: name.to_owned(),
             }
             .into());
         }
         if let Some(map) = options.h_align_overrides {
             if let Some(name) = first_unknown(&first, map.keys().map(String::as_str)) {
                 return Err(ErrorKind::UnknownField {
-                    field_name: name.to_string(),
+                    field_name: name.to_owned(),
                 }
                 .into());
             }
@@ -145,7 +145,7 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
         if let Some(map) = options.v_align_overrides {
             if let Some(name) = first_unknown(&first, map.keys().map(String::as_str)) {
                 return Err(ErrorKind::UnknownField {
-                    field_name: name.to_string(),
+                    field_name: name.to_owned(),
                 }
                 .into());
             }
@@ -155,7 +155,7 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
         if options.missing == MissingName::Error {
             if let Some(name) = first_unknown(&first, map.keys().map(String::as_str)) {
                 return Err(ErrorKind::UnknownField {
-                    field_name: name.to_string(),
+                    field_name: name.to_owned(),
                 }
                 .into());
             }
@@ -170,7 +170,7 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
         if options.missing == MissingName::Error {
             if let Some(name) = first_unknown(&first, map.keys().map(String::as_str)) {
                 return Err(ErrorKind::UnknownField {
-                    field_name: name.to_string(),
+                    field_name: name.to_owned(),
                 }
                 .into());
             }

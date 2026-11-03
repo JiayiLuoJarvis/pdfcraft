@@ -434,7 +434,7 @@ fn require_numbered_line_fits(
         let text = measurer
             .string_width_mm(&first, CONT_CUE_TEXT_PT)?
             .max(measurer.string_width_mm(&second, CONT_CUE_TEXT_PT)?);
-        if text + 2.0 * CONT_CUE_PAD_MM > slot.width + crate::units::FIT_EPSILON_MM {
+        if text + 2.0 * CONT_CUE_PAD_MM > slot.width + FIT_EPSILON_MM {
             return Err(Error::new(
                 ErrorCode::LayoutFailed,
                 format!(

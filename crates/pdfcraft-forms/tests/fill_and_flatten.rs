@@ -39,11 +39,11 @@ fn options(font_bytes: &[u8]) -> FillOptions<'_> {
 fn basic_fields() -> HashMap<String, FieldValue> {
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name".to_string(),
-        FieldValue::Text("Ada".to_string()),
+        "employee_name".to_owned(),
+        FieldValue::Text("Ada".to_owned()),
     );
-    fields.insert("agree".to_string(), FieldValue::CheckBox(true)); // checked
-    fields.insert("level".to_string(), FieldValue::Text("Senior".to_string()));
+    fields.insert("agree".to_owned(), FieldValue::CheckBox(true)); // checked
+    fields.insert("level".to_owned(), FieldValue::Text("Senior".to_owned()));
     fields
 }
 
@@ -93,7 +93,7 @@ fn empty_map_strips_widgets() {
 #[test]
 fn checkbox_only_fill_does_not_embed_a_font() {
     let mut fields = HashMap::new();
-    fields.insert("agree".to_string(), FieldValue::CheckBox(true)); // checked
+    fields.insert("agree".to_owned(), FieldValue::CheckBox(true)); // checked
     let pdf =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap();
     assert!(!pdf
@@ -107,7 +107,7 @@ fn unchecked_box_draws_no_mark() {
         return;
     };
     let mut fields = HashMap::new();
-    fields.insert("agree".to_string(), FieldValue::CheckBox(false)); // unchecked
+    fields.insert("agree".to_owned(), FieldValue::CheckBox(false)); // unchecked
     let pdf = fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options(&font_bytes)).unwrap();
     let doc = lopdf::Document::load_mem(&pdf).unwrap();
     assert!(!has_agree_mark(&doc), "{}", page_text(&doc));
@@ -127,13 +127,13 @@ fn rejects_illegal_choice() {
         return;
     };
     let mut fields = HashMap::new();
-    fields.insert("level".to_string(), FieldValue::Text("Nope".to_string()));
+    fields.insert("level".to_owned(), FieldValue::Text("Nope".to_owned()));
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options(&font_bytes)).unwrap_err();
     assert_eq!(
         err.kind,
         ErrorKind::IllegalChoice {
-            field_name: "level".to_string(),
+            field_name: "level".to_owned(),
         }
     );
 }
@@ -141,13 +141,13 @@ fn rejects_illegal_choice() {
 #[test]
 fn rejects_a_checkbox_value_on_a_text_widget() {
     let mut fields = HashMap::new();
-    fields.insert("employee_name".to_string(), FieldValue::CheckBox(true)); // checked
+    fields.insert("employee_name".to_owned(), FieldValue::CheckBox(true)); // checked
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
     assert_eq!(
         err.kind,
         ErrorKind::InvalidArgument {
-            field_name: Some("employee_name".to_string()),
+            field_name: Some("employee_name".to_owned()),
             reason: ArgumentReason::CheckboxOnText,
         }
     );
@@ -158,15 +158,15 @@ fn rejects_any_value_on_a_radio_widget() {
     let pdf = radio_widget_pdf();
     for value in [
         FieldValue::CheckBox(true), // checked
-        FieldValue::Text("Ada".to_string()),
+        FieldValue::Text("Ada".to_owned()),
     ] {
         let mut fields = HashMap::new();
-        fields.insert("radio".to_string(), value);
+        fields.insert("radio".to_owned(), value);
         let err = fill_and_flatten(&pdf, &fields, &FillOptions::default()).unwrap_err();
         assert_eq!(
             err.kind,
             ErrorKind::WidgetUnsupported {
-                field_name: "radio".to_string(),
+                field_name: "radio".to_owned(),
             }
         );
     }
@@ -178,13 +178,13 @@ fn rejects_text_on_a_checkbox() {
         return;
     };
     let mut fields = HashMap::new();
-    fields.insert("agree".to_string(), FieldValue::Text("yes".to_string()));
+    fields.insert("agree".to_owned(), FieldValue::Text("yes".to_owned()));
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options(&font_bytes)).unwrap_err();
     assert_eq!(
         err.kind,
         ErrorKind::InvalidCheckbox {
-            field_name: "agree".to_string(),
+            field_name: "agree".to_owned(),
         }
     );
 }
@@ -193,8 +193,8 @@ fn rejects_text_on_a_checkbox() {
 fn rejects_a_missing_font_when_text_is_drawn() {
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name".to_string(),
-        FieldValue::Text("Ada".to_string()),
+        "employee_name".to_owned(),
+        FieldValue::Text("Ada".to_owned()),
     );
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
@@ -211,8 +211,8 @@ fn rejects_a_missing_font_when_text_is_drawn() {
 fn rejects_unusable_font_bytes() {
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name".to_string(),
-        FieldValue::Text("Ada".to_string()),
+        "employee_name".to_owned(),
+        FieldValue::Text("Ada".to_owned()),
     );
     let cases = [
         (b"ttcf".as_slice(), FontReason::Collection),
@@ -301,15 +301,15 @@ fn rejects_a_missing_glyph() {
     };
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name".to_string(),
-        FieldValue::Text("王".to_string()),
+        "employee_name".to_owned(),
+        FieldValue::Text("王".to_owned()),
     );
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &options(&font_bytes)).unwrap_err();
     assert_eq!(
         err.kind,
         ErrorKind::MissingGlyph {
-            field_name: "employee_name".to_string(),
+            field_name: "employee_name".to_owned(),
             scalar: '王',
         }
     );
@@ -322,7 +322,7 @@ fn rejects_text_that_cannot_fit() {
     };
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name".to_string(),
+        "employee_name".to_owned(),
         FieldValue::Text("x".repeat(500)),
     );
     let err =
@@ -330,7 +330,7 @@ fn rejects_text_that_cannot_fit() {
     assert_eq!(
         err.kind,
         ErrorKind::BoxOverflow {
-            field_name: "employee_name".to_string(),
+            field_name: "employee_name".to_owned(),
         }
     );
 }
@@ -338,7 +338,7 @@ fn rejects_text_that_cannot_fit() {
 #[test]
 fn rejects_filling_a_signature() {
     let mut fields = HashMap::new();
-    fields.insert("signature".to_string(), FieldValue::Text("Ada".to_string()));
+    fields.insert("signature".to_owned(), FieldValue::Text("Ada".to_owned()));
     let err = fill_and_flatten(
         &fixture("signature_form.pdf"),
         &fields,
@@ -348,7 +348,7 @@ fn rejects_filling_a_signature() {
     assert_eq!(
         err.kind,
         ErrorKind::SignatureNotWritable {
-            field_name: "signature".to_string(),
+            field_name: "signature".to_owned(),
         }
     );
 }
@@ -356,13 +356,13 @@ fn rejects_filling_a_signature() {
 #[test]
 fn rejects_an_unknown_name() {
     let mut fields = HashMap::new();
-    fields.insert("missing".to_string(), FieldValue::CheckBox(true)); // checked
+    fields.insert("missing".to_owned(), FieldValue::CheckBox(true)); // checked
     let err =
         fill_and_flatten(&fixture("basic_form.pdf"), &fields, &FillOptions::default()).unwrap_err();
     assert_eq!(
         err.kind,
         ErrorKind::UnknownField {
-            field_name: "missing".to_string(),
+            field_name: "missing".to_owned(),
         }
     );
 }
@@ -373,7 +373,7 @@ fn rejects_an_unknown_h_align_override() {
         return;
     };
     let mut overrides = HashMap::new();
-    overrides.insert("nope".to_string(), HAlign::Center);
+    overrides.insert("nope".to_owned(), HAlign::Center);
     let options = FillOptions {
         font: Some(FontBytes {
             bytes: &font_bytes,
@@ -386,7 +386,7 @@ fn rejects_an_unknown_h_align_override() {
     assert_eq!(
         err.kind,
         ErrorKind::UnknownField {
-            field_name: "nope".to_string(),
+            field_name: "nope".to_owned(),
         }
     );
 }
@@ -397,7 +397,7 @@ fn ignores_an_unknown_v_align_override_when_missing_is_ignore() {
         return;
     };
     let mut overrides = HashMap::new();
-    overrides.insert("nope".to_string(), VAlign::Top);
+    overrides.insert("nope".to_owned(), VAlign::Top);
     let options = FillOptions {
         font: Some(FontBytes {
             bytes: &font_bytes,
@@ -417,7 +417,7 @@ fn fills_with_center_align_and_a_left_override() {
         return;
     };
     let mut overrides = HashMap::new();
-    overrides.insert("level".to_string(), HAlign::Left);
+    overrides.insert("level".to_owned(), HAlign::Left);
     let options = FillOptions {
         font: Some(FontBytes {
             bytes: &font_bytes,
@@ -451,7 +451,7 @@ fn fills_with_center_align_and_a_left_override() {
 #[test]
 fn draws_a_line_below_without_filling_the_field() {
     let mut below = HashMap::new();
-    below.insert("employee_name".to_string(), 5.0);
+    below.insert("employee_name".to_owned(), 5.0);
     let options = FillOptions {
         line_below: Some(&below),
         ..FillOptions::default()
@@ -467,7 +467,7 @@ fn draws_a_line_below_without_filling_the_field() {
 #[test]
 fn rejects_non_finite_line_below_on_a_known_name_when_missing_is_ignore() {
     let mut below = HashMap::new();
-    below.insert("employee_name".to_string(), f32::NAN);
+    below.insert("employee_name".to_owned(), f32::NAN);
     let options = FillOptions {
         missing: MissingName::Ignore,
         line_below: Some(&below),
@@ -489,7 +489,7 @@ fn rejects_non_finite_line_below_on_a_known_name_when_missing_is_ignore() {
 #[test]
 fn ignores_non_finite_line_below_on_an_unknown_name_when_missing_is_ignore() {
     let mut below = HashMap::new();
-    below.insert("not_on_the_form".to_string(), f32::NAN);
+    below.insert("not_on_the_form".to_owned(), f32::NAN);
     let options = FillOptions {
         missing: MissingName::Ignore,
         line_below: Some(&below),
@@ -503,7 +503,7 @@ fn ignores_non_finite_line_below_on_an_unknown_name_when_missing_is_ignore() {
 #[test]
 fn rejects_an_unknown_line_below_name() {
     let mut below = HashMap::new();
-    below.insert("nope".to_string(), 5.0);
+    below.insert("nope".to_owned(), 5.0);
     let options = FillOptions {
         line_below: Some(&below),
         ..FillOptions::default()
@@ -512,7 +512,7 @@ fn rejects_an_unknown_line_below_name() {
     assert_eq!(
         err.kind,
         ErrorKind::UnknownField {
-            field_name: "nope".to_string(),
+            field_name: "nope".to_owned(),
         }
     );
 }
@@ -557,7 +557,7 @@ fn font_size_override_changes_the_drawn_size() {
         return;
     };
     let mut overrides = HashMap::new();
-    overrides.insert("employee_name".to_string(), 8.0);
+    overrides.insert("employee_name".to_owned(), 8.0);
     let options = FillOptions {
         font: Some(FontBytes {
             bytes: &font_bytes,
@@ -582,8 +582,8 @@ fn fills_chinese_text_when_pdfcraft_forms_font_is_set() {
     let font_bytes = fs::read(path).unwrap();
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name_zh".to_string(),
-        FieldValue::Text("王".to_string()),
+        "employee_name_zh".to_owned(),
+        FieldValue::Text("王".to_owned()),
     );
     let pdf = match fill_and_flatten(&fixture("chinese_form.pdf"), &fields, &options(&font_bytes)) {
         Ok(pdf) => pdf,
@@ -607,8 +607,8 @@ fn fills_chinese_text() {
     };
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name_zh".to_string(),
-        FieldValue::Text("王".to_string()),
+        "employee_name_zh".to_owned(),
+        FieldValue::Text("王".to_owned()),
     );
     let pdf =
         fill_and_flatten(&fixture("chinese_form.pdf"), &fields, &options(&font_bytes)).unwrap();

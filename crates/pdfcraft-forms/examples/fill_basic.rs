@@ -19,11 +19,11 @@ fn main() {
     });
     let mut fields = HashMap::new();
     fields.insert(
-        "employee_name".to_string(),
-        FieldValue::Text("Ada".to_string()),
+        "employee_name".to_owned(),
+        FieldValue::Text("Ada".to_owned()),
     );
-    fields.insert("agree".to_string(), FieldValue::CheckBox(true)); // checked
-    fields.insert("level".to_string(), FieldValue::Text("Senior".to_string()));
+    fields.insert("agree".to_owned(), FieldValue::CheckBox(true)); // checked
+    fields.insert("level".to_owned(), FieldValue::Text("Senior".to_owned()));
     let options = FillOptions {
         font: Some(FontBytes {
             bytes: &font,

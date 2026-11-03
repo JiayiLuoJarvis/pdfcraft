@@ -108,7 +108,7 @@ impl LinkTarget {
     /// # Errors
     ///
     /// [`ErrorKind::EmptyLink`] when `uri` is empty.
-    pub fn uri(uri: &str) -> std::result::Result<Self, Error> {
+    pub fn uri(uri: &str) -> Result<Self, Error> {
         if uri.is_empty() {
             return Err(Error::from(ErrorKind::EmptyLink));
         }
@@ -122,7 +122,7 @@ impl LinkTarget {
     /// # Errors
     ///
     /// [`ErrorKind::EmptyAnchorId`] when `id` is empty.
-    pub fn anchor(id: &str) -> std::result::Result<Self, Error> {
+    pub fn anchor(id: &str) -> Result<Self, Error> {
         if id.is_empty() {
             return Err(Error::from(ErrorKind::EmptyAnchorId));
         }
@@ -206,11 +206,7 @@ pub(crate) trait ImageRegistry: Any + Send + Sync + fmt::Debug {
     /// Checks limits, decodes, and returns the id plus pixel size layout will use.
     ///
     /// A failure leaves earlier registrations unchanged.
-    fn register(
-        &mut self,
-        bytes: Vec<u8>,
-        format: ImageFormat,
-    ) -> std::result::Result<DecodedImage, Error>;
+    fn register(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<DecodedImage, Error>;
 }
 
 /// Registry for builds without a decoder. Every image fails.
@@ -227,11 +223,7 @@ pub(crate) struct RejectingImageRegistry;
 impl ImageRegistry for RejectingImageRegistry {
     fn set_limits(&mut self, _limits: &Limits) {}
 
-    fn register(
-        &mut self,
-        _bytes: Vec<u8>,
-        _format: ImageFormat,
-    ) -> std::result::Result<DecodedImage, Error> {
+    fn register(&mut self, _bytes: Vec<u8>, _format: ImageFormat) -> Result<DecodedImage, Error> {
         Err(Error::from(ErrorKind::Image {
             message: "decoding needs feature `backend-krilla`".to_owned(),
         }))
@@ -340,13 +332,13 @@ pub enum CanvasCommand {
 /// Outside crates cannot name it.
 pub(crate) trait Canvas {
     /// Stores document metadata.
-    fn set_document_info(&mut self, info: &DocumentInfo) -> std::result::Result<(), Error>;
+    fn set_document_info(&mut self, info: &DocumentInfo) -> Result<(), Error>;
 
     /// Opens a page of `size`.
-    fn start_page(&mut self, size: Size) -> std::result::Result<(), Error>;
+    fn start_page(&mut self, size: Size) -> Result<(), Error>;
 
     /// Closes the current page.
-    fn finish_page(&mut self) -> std::result::Result<(), Error>;
+    fn finish_page(&mut self) -> Result<(), Error>;
 
     /// Fills `path` with `paint`.
     // `Path` is borrowed. `Paint` stays a reference beside it.
@@ -354,7 +346,7 @@ pub(crate) trait Canvas {
         clippy::trivially_copy_pass_by_ref,
         reason = "Paint stays a reference beside Path for a symmetric Canvas API"
     )]
-    fn fill_path(&mut self, path: &Path, paint: &Paint) -> std::result::Result<(), Error>;
+    fn fill_path(&mut self, path: &Path, paint: &Paint) -> Result<(), Error>;
 
     /// Strokes `path` with `paint` and `stroke`.
     // `Path` is borrowed. `Paint` and `Stroke` stay references beside it.
@@ -362,31 +354,26 @@ pub(crate) trait Canvas {
         clippy::trivially_copy_pass_by_ref,
         reason = "Paint and Stroke stay references beside Path for a symmetric Canvas API"
     )]
-    fn stroke_path(
-        &mut self,
-        path: &Path,
-        paint: &Paint,
-        stroke: &Stroke,
-    ) -> std::result::Result<(), Error>;
+    fn stroke_path(&mut self, path: &Path, paint: &Paint, stroke: &Stroke) -> Result<(), Error>;
 
     /// Draws `image` into `rect`.
-    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> std::result::Result<(), Error>;
+    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> Result<(), Error>;
 
     /// Draws a positioned glyph run.
     ///
     /// Advances stay in font units per em.
-    fn draw_glyph_run(&mut self, run: &GlyphRun) -> std::result::Result<(), Error>;
+    fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<(), Error>;
 
     /// Records a hyperlink over `rect`.
     ///
     /// `target` is already a non-empty URI.
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> std::result::Result<(), Error>;
+    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<(), Error>;
 
     /// Concatenate `affine` onto the current CTM. Must pair with [`Self::pop_transform`].
-    fn push_transform(&mut self, affine: &Affine) -> std::result::Result<(), Error>;
+    fn push_transform(&mut self, affine: &Affine) -> Result<(), Error>;
 
     /// Pop the CTM pushed by the matching [`Self::push_transform`].
-    fn pop_transform(&mut self) -> std::result::Result<(), Error>;
+    fn pop_transform(&mut self) -> Result<(), Error>;
 }
 
 /// Runs `draw` under `affine`, always popping when push succeeded.
@@ -397,8 +384,8 @@ pub(crate) trait Canvas {
 pub(crate) fn with_transform(
     canvas: &mut dyn Canvas,
     affine: &Affine,
-    draw: impl FnOnce(&mut dyn Canvas) -> std::result::Result<(), Error>,
-) -> std::result::Result<(), Error> {
+    draw: impl FnOnce(&mut dyn Canvas) -> Result<(), Error>,
+) -> Result<(), Error> {
     canvas.push_transform(affine)?;
     let drawn = draw(canvas);
     let popped = canvas.pop_transform();
@@ -503,23 +490,23 @@ impl RecordingCanvas {
 }
 
 impl Canvas for RecordingCanvas {
-    fn set_document_info(&mut self, info: &DocumentInfo) -> std::result::Result<(), Error> {
+    fn set_document_info(&mut self, info: &DocumentInfo) -> Result<(), Error> {
         self.commands
             .push(CanvasCommand::SetDocumentInfo(info.clone()));
         Ok(())
     }
 
-    fn start_page(&mut self, size: Size) -> std::result::Result<(), Error> {
+    fn start_page(&mut self, size: Size) -> Result<(), Error> {
         self.commands.push(CanvasCommand::StartPage(size));
         Ok(())
     }
 
-    fn finish_page(&mut self) -> std::result::Result<(), Error> {
+    fn finish_page(&mut self) -> Result<(), Error> {
         self.commands.push(CanvasCommand::FinishPage);
         Ok(())
     }
 
-    fn fill_path(&mut self, path: &Path, paint: &Paint) -> std::result::Result<(), Error> {
+    fn fill_path(&mut self, path: &Path, paint: &Paint) -> Result<(), Error> {
         self.commands.push(CanvasCommand::FillPath {
             path: path.clone(),
             paint: *paint,
@@ -527,12 +514,7 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn stroke_path(
-        &mut self,
-        path: &Path,
-        paint: &Paint,
-        stroke: &Stroke,
-    ) -> std::result::Result<(), Error> {
+    fn stroke_path(&mut self, path: &Path, paint: &Paint, stroke: &Stroke) -> Result<(), Error> {
         self.commands.push(CanvasCommand::StrokePath {
             path: path.clone(),
             paint: *paint,
@@ -541,7 +523,7 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> std::result::Result<(), Error> {
+    fn draw_image(&mut self, image: &DecodedImage, rect: Rect) -> Result<(), Error> {
         self.commands.push(CanvasCommand::DrawImage {
             image: *image,
             rect,
@@ -549,19 +531,19 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn draw_glyph_run(&mut self, run: &GlyphRun) -> std::result::Result<(), Error> {
+    fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<(), Error> {
         self.commands
             .push(CanvasCommand::DrawGlyphRun { run: run.clone() });
         Ok(())
     }
 
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> std::result::Result<(), Error> {
+    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<(), Error> {
         self.commands
             .push(CanvasCommand::AnnotateLink { rect, target });
         Ok(())
     }
 
-    fn push_transform(&mut self, affine: &Affine) -> std::result::Result<(), Error> {
+    fn push_transform(&mut self, affine: &Affine) -> Result<(), Error> {
         if !affine.is_finite() {
             return Err(Error::from(ErrorKind::NonFiniteLength { value: affine.a }));
         }
@@ -570,7 +552,7 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn pop_transform(&mut self) -> std::result::Result<(), Error> {
+    fn pop_transform(&mut self) -> Result<(), Error> {
         self.commands.push(CanvasCommand::PopTransform);
         Ok(())
     }
@@ -580,10 +562,7 @@ impl Canvas for RecordingCanvas {
     not(feature = "backend-krilla"),
     allow(dead_code, reason = "only the krilla backend replays a recording")
 )]
-pub(crate) fn replay(
-    recording: &RecordingCanvas,
-    canvas: &mut dyn Canvas,
-) -> std::result::Result<(), Error> {
+pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Result<(), Error> {
     for command in recording.commands() {
         match command {
             CanvasCommand::SetDocumentInfo(info) => canvas.set_document_info(info)?,
@@ -645,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn records_draw_order_advances_and_one_page() -> std::result::Result<(), Error> {
+    fn records_draw_order_advances_and_one_page() -> Result<(), Error> {
         let info = DocumentInfo {
             title: Some("Letter".to_owned()),
             author: Some("Quire".to_owned()),
@@ -742,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_link_is_rejected_and_not_recorded() -> std::result::Result<(), Error> {
+    fn empty_link_is_rejected_and_not_recorded() -> Result<(), Error> {
         let error = LinkTarget::uri("").expect_err("empty uri");
         assert!(matches!(error.kind, ErrorKind::EmptyLink));
         assert_eq!(error.to_string(), "link URI is empty");
@@ -761,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_reissues_every_command_in_order() -> std::result::Result<(), Error> {
+    fn replay_reissues_every_command_in_order() -> Result<(), Error> {
         let at = Point::try_pt(5.0, 6.0)?;
         let mut source = RecordingCanvas::new();
         source.set_document_info(&DocumentInfo {
@@ -802,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn canvas_accepts_a_trait_object() -> std::result::Result<(), Error> {
+    fn canvas_accepts_a_trait_object() -> Result<(), Error> {
         let mut rec = RecordingCanvas::new();
         let canvas: &mut dyn Canvas = &mut rec;
         canvas.finish_page()?;
@@ -826,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn records_push_and_pop_transform() -> std::result::Result<(), Error> {
+    fn records_push_and_pop_transform() -> Result<(), Error> {
         let mut rec = RecordingCanvas::new();
         rec.start_page(A4)?;
         let affine = Affine::rotate_cw_about(45.0, Point::try_pt(10.0, 20.0)?)?;

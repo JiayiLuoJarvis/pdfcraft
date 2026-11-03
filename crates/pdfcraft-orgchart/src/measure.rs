@@ -27,12 +27,12 @@ use crate::units::{
 /// Ordinary node width used when chart options leave the width unset.
 #[cfg(test)]
 #[must_use]
-pub fn default_node_width_mm() -> f64 {
+pub(crate) fn default_node_width_mm() -> f64 {
     crate::units::NODE_WIDTH_MM
 }
 
 /// Width, line height, and glyph coverage for wrapping.
-pub trait Measurer {
+pub(crate) trait Measurer {
     /// Width of `text` at `size_pt`, in mm.
     ///
     /// # Errors
@@ -53,7 +53,7 @@ pub trait Measurer {
 
 /// One glyph produced by the same charmap and advance path drawing will use.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GlyphUse {
+pub(crate) struct GlyphUse {
     /// Glyph id in the face.
     pub glyph_id: u32,
     /// Advance in font units, before size scaling.
@@ -62,7 +62,7 @@ pub struct GlyphUse {
 
 /// One face, opened from memory.
 #[derive(Debug, Clone)]
-pub struct FontMetrics {
+pub(crate) struct FontMetrics {
     bytes: Arc<Vec<u8>>,
     upem: f64,
     ascent: f64,
@@ -79,7 +79,7 @@ impl FontMetrics {
     /// # Errors
     ///
     /// Returns [`ErrorCode::FontError`] when the bytes are not one usable face.
-    pub fn open(font: &FontBytes) -> Result<Self, Error> {
+    pub(crate) fn open(font: &FontBytes) -> Result<Self, Error> {
         if font.data.starts_with(b"ttcf") {
             return Err(Error::new(ErrorCode::FontError, "TTC not supported"));
         }
@@ -133,7 +133,7 @@ impl FontMetrics {
     /// # Errors
     ///
     /// Returns [`ErrorCode::MissingGlyph`] or [`ErrorCode::FontError`].
-    pub fn glyph_run(&mut self, text: &str) -> Result<Vec<GlyphUse>, Error> {
+    pub(crate) fn glyph_run(&mut self, text: &str) -> Result<Vec<GlyphUse>, Error> {
         if text.chars().any(|ch| !self.glyphs.contains_key(&ch)) {
             let face = parse_face(&self.bytes)?;
             let charmap = face.charmap();
@@ -168,7 +168,7 @@ impl FontMetrics {
     /// # Errors
     ///
     /// Returns [`ErrorCode::MissingGlyph`] when `text` is not covered.
-    pub fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, Error> {
+    pub(crate) fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, Error> {
         let units: f64 = self
             .glyph_run(text)?
             .iter()
@@ -179,7 +179,7 @@ impl FontMetrics {
 
     /// Distance from the baseline to the ascender, in mm.
     #[must_use]
-    pub fn ascent_mm(&self, size_pt: f64) -> f64 {
+    pub(crate) fn ascent_mm(&self, size_pt: f64) -> f64 {
         pt_to_mm(self.ascent / self.upem * size_pt)
     }
 
@@ -187,7 +187,7 @@ impl FontMetrics {
     ///
     /// The value is positive. It does not include the 2 pt line gap.
     #[must_use]
-    pub fn descent_mm(&self, size_pt: f64) -> f64 {
+    pub(crate) fn descent_mm(&self, size_pt: f64) -> f64 {
         pt_to_mm(self.descent / self.upem * size_pt)
     }
 
@@ -205,7 +205,7 @@ impl FontMetrics {
 
     /// Ascender plus descender, scaled, plus a 2 pt gap.
     #[must_use]
-    pub fn line_height_mm(&self, size_pt: f64) -> f64 {
+    pub(crate) fn line_height_mm(&self, size_pt: f64) -> f64 {
         pt_to_mm((self.ascent + self.descent) / self.upem * size_pt + LINE_GAP_PT)
     }
 }
@@ -240,7 +240,7 @@ fn missing_glyph(text: &str) -> Error {
 
 /// One wrapped row inside a node box.
 #[derive(Debug, Clone, PartialEq)]
-pub struct WrappedLine {
+pub(crate) struct WrappedLine {
     /// Name, legal person, or detail.
     pub kind: LineKind,
     /// The slice of the source line that fits this row.
@@ -251,7 +251,7 @@ pub struct WrappedLine {
 
 /// Measured box. Coordinates are not assigned here.
 #[derive(Debug, Clone, PartialEq)]
-pub struct NodeBox {
+pub(crate) struct NodeBox {
     /// Layout identity from the graph arena (request nodes or overflow).
     pub id: NodeId,
     /// Caller id, or the synthetic `__overflow__:` / `__other__:` id.
@@ -271,7 +271,7 @@ pub struct NodeBox {
 }
 
 /// One node's in-box lines, before wrapping.
-pub struct InboxNode<'a> {
+pub(crate) struct InboxNode<'a> {
     /// Arena id.
     pub id: NodeId,
     /// Protocol id for error messages and the box.
@@ -289,7 +289,7 @@ pub struct InboxNode<'a> {
 /// # Errors
 ///
 /// Returns the measurer's glyph or font error.
-pub fn wrap_text(
+pub(crate) fn wrap_text(
     text: &str,
     measurer: &mut impl Measurer,
     size_pt: f64,
@@ -377,7 +377,7 @@ fn line_size(kind: LineKind, is_subject: bool) -> f64 {
 /// # Errors
 ///
 /// Returns [`ErrorCode::NodeTooTall`], or a measurer error.
-pub fn build_node_boxes(
+pub(crate) fn build_node_boxes(
     nodes: &[InboxNode<'_>],
     measurer: &mut impl Measurer,
     node_width_mm: f64,
@@ -441,7 +441,7 @@ pub fn build_node_boxes(
 /// # Errors
 ///
 /// Returns a measurer error.
-pub fn overflow_box(
+pub(crate) fn overflow_box(
     node_id: NodeId,
     protocol_id: &str,
     name: &str,
@@ -485,7 +485,7 @@ pub fn overflow_box(
 /// # Errors
 ///
 /// Returns a measurer error.
-pub fn promote_to_page_subject(
+pub(crate) fn promote_to_page_subject(
     box_: &NodeBox,
     node_width_mm: f64,
     measurer: &mut impl Measurer,
@@ -551,7 +551,7 @@ fn join_segments(lines: &[WrappedLine]) -> Vec<(LineKind, String, f64)> {
 
 /// Continuation-cue box height. Two lines, one gap, padding on both ends.
 #[must_use]
-pub fn cont_cue_height_mm(measurer: &mut impl Measurer) -> f64 {
+pub(crate) fn cont_cue_height_mm(measurer: &mut impl Measurer) -> f64 {
     CONT_CUE_LINE_COUNT * measurer.line_height_mm(CONT_CUE_TEXT_PT)
         + (CONT_CUE_LINE_COUNT - 1.0) * CONT_CUE_LINE_GAP_MM
         + 2.0 * CONT_CUE_PAD_MM
@@ -559,7 +559,7 @@ pub fn cont_cue_height_mm(measurer: &mut impl Measurer) -> f64 {
 
 /// A continuation cue's measured slot, before placement.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CueAnchor {
+pub(crate) struct CueAnchor {
     /// Node the cue points at.
     pub anchor_id: String,
     /// Shareholder or investment side.
@@ -576,7 +576,7 @@ pub struct CueAnchor {
 ///
 /// Returns [`ErrorCode::LayoutFailed`] when an anchor is missing or is an overflow id,
 /// and measurer errors from the cue text.
-pub fn sized_cue_anchors(
+pub(crate) fn sized_cue_anchors(
     anchors: &[(&str, CueSide)],
     boxes: &[NodeBox],
     measurer: &mut impl Measurer,

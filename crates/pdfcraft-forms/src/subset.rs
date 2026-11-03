@@ -530,7 +530,7 @@ fn push_u32(output: &mut Vec<u8>, value: u32) {
     output.extend_from_slice(&value.to_be_bytes());
 }
 
-fn head_error() -> crate::error::Error {
+fn head_error() -> error::Error {
     error::font_unusable(FontReason::Head)
 }
 

@@ -106,11 +106,11 @@ impl LaidText {
 fn fail(field_name: &str, err: &FitError) -> Error {
     match err {
         FitError::TooBig => ErrorKind::BoxOverflow {
-            field_name: field_name.to_string(),
+            field_name: field_name.to_owned(),
         }
         .into(),
         FitError::Missing(scalar) => ErrorKind::MissingGlyph {
-            field_name: field_name.to_string(),
+            field_name: field_name.to_owned(),
             scalar: *scalar,
         }
         .into(),
@@ -485,7 +485,7 @@ mod tests {
             assert_eq!(
                 err.kind,
                 ErrorKind::MissingGlyph {
-                    field_name: "employee_name".to_string(),
+                    field_name: "employee_name".to_owned(),
                     scalar: '王',
                 }
             );
@@ -507,7 +507,7 @@ mod tests {
             assert_eq!(
                 err.kind,
                 ErrorKind::BoxOverflow {
-                    field_name: "employee_name".to_string(),
+                    field_name: "employee_name".to_owned(),
                 }
             );
         }) else {
@@ -640,7 +640,7 @@ mod tests {
             assert_eq!(
                 err.kind,
                 ErrorKind::BoxOverflow {
-                    field_name: "employee_name".to_string(),
+                    field_name: "employee_name".to_owned(),
                 }
             );
             let laid = fit(face, "a", PdfRect::new(0.0, 0.0, 200.0, 80.0), 0.0001).unwrap();

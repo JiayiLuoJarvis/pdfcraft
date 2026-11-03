@@ -16,7 +16,7 @@ use crate::model::NodeType;
 
 /// Which cone a node belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DisplayRole {
+pub(crate) enum DisplayRole {
     /// The chart subject.
     Subject,
     /// A node reached by walking holders upward.
@@ -27,7 +27,7 @@ pub enum DisplayRole {
 
 /// What an in-box line is for. Measuring uses this to pick a font size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LineKind {
+pub(crate) enum LineKind {
     /// The party name.
     Name,
     /// A legal representative, with no prefix.
@@ -38,7 +38,7 @@ pub enum LineKind {
 
 /// One drawn line inside a node box.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LogicalLine {
+pub(crate) struct LogicalLine {
     /// Name, legal person, or detail.
     pub kind: LineKind,
     /// Text after blank fields are dropped. The name is kept as stored.
@@ -47,13 +47,13 @@ pub struct LogicalLine {
 
 /// Lines and role for every node, indexed by [`NodeId`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeDisplays {
+pub(crate) struct NodeDisplays {
     nodes: Vec<NodeContent>,
 }
 
 /// In-box content for one node.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeContent {
+pub(crate) struct NodeContent {
     /// Cone role.
     pub role: DisplayRole,
     /// Lines in draw order. Empty optional fields are absent.
@@ -64,20 +64,20 @@ impl NodeDisplays {
     /// Content for `id`.
     #[cfg(test)]
     #[must_use]
-    pub fn get(&self, id: NodeId) -> Option<&NodeContent> {
+    pub(crate) fn get(&self, id: NodeId) -> Option<&NodeContent> {
         self.nodes.get(id.index())
     }
 
     /// Content parallel to graph nodes.
     #[must_use]
-    pub fn nodes(&self) -> &[NodeContent] {
+    pub(crate) fn nodes(&self) -> &[NodeContent] {
         &self.nodes
     }
 }
 
 /// Which side of a peripheral node the ratio label sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LabelHug {
+pub(crate) enum LabelHug {
     /// Shareholder. The label sits under the box.
     Bottom,
     /// Investment. The label sits above the box.
@@ -86,7 +86,7 @@ pub enum LabelHug {
 
 /// The holding edge a ratio was copied from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParentEdge {
+pub(crate) struct ParentEdge {
     /// Holder id.
     pub from_id: String,
     /// Held id.
@@ -95,7 +95,7 @@ pub struct ParentEdge {
 
 /// Graph-time ratio for one non-subject node. No coordinates.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RatioFact {
+pub(crate) struct RatioFact {
     /// Node id.
     pub node_id: NodeId,
     /// Protocol id for page filtering and PDF text keys.
@@ -118,7 +118,7 @@ pub struct RatioFact {
 ///
 /// Returns [`Error`] when `request` breaks the chart protocol.
 #[cfg(test)]
-pub fn build_display(request: &ChartRequest) -> Result<NodeDisplays, Error> {
+pub(crate) fn build_display(request: &ChartRequest) -> Result<NodeDisplays, Error> {
     let graph = graph::validate(request)?;
     Ok(display_of(&graph))
 }
@@ -218,7 +218,7 @@ fn inbox_fields(
 /// [`NodeType::Person`] is always white, even when `legal_person` is set.
 #[cfg(test)]
 #[must_use]
-pub fn company_fill(node: &Node) -> bool {
+pub(crate) fn company_fill(node: &Node) -> bool {
     company_fill_fields(node.node_type, node.legal_person.as_deref())
 }
 
@@ -255,7 +255,7 @@ fn shown(value: Option<&str>) -> Option<String> {
 
 /// `xx.xx%`, two digits after the decimal point.
 #[must_use]
-pub fn format_display_ratio(ratio: f64) -> String {
+pub(crate) fn format_display_ratio(ratio: f64) -> String {
     format!("{ratio:.2}%")
 }
 
@@ -265,7 +265,7 @@ pub fn format_display_ratio(ratio: f64) -> String {
 ///
 /// Returns [`Error`] when `request` fails validation, or when a parent edge is ambiguous.
 #[cfg(test)]
-pub fn ratio_facts(request: &ChartRequest) -> Result<Vec<RatioFact>, Error> {
+pub(crate) fn ratio_facts(request: &ChartRequest) -> Result<Vec<RatioFact>, Error> {
     let mut graph = graph::validate(request)?;
     facts_of(&mut graph)
 }
@@ -345,29 +345,29 @@ mod tests {
             "root",
             vec![
                 Node {
-                    legal_person: Some("李四".to_string()),
+                    legal_person: Some("李四".to_owned()),
                     ratio: Some(10.0),
-                    paid_in_amount: Some("1万".to_string()),
-                    currency: Some("USD".to_string()),
-                    location: Some("上海".to_string()),
-                    approval_date: Some("2020-01-01".to_string()),
+                    paid_in_amount: Some("1万".to_owned()),
+                    currency: Some("USD".to_owned()),
+                    location: Some("上海".to_owned()),
+                    approval_date: Some("2020-01-01".to_owned()),
                     ..Node::new("root", "主体")
                 },
                 Node {
-                    legal_person: Some("  王五  ".to_string()),
+                    legal_person: Some("  王五  ".to_owned()),
                     ratio: Some(40.0),
-                    paid_in_amount: Some("9万".to_string()),
-                    currency: Some("HKD".to_string()),
-                    location: Some("北京".to_string()),
-                    approval_date: Some("2019-01-01".to_string()),
+                    paid_in_amount: Some("9万".to_owned()),
+                    currency: Some("HKD".to_owned()),
+                    location: Some("北京".to_owned()),
+                    approval_date: Some("2019-01-01".to_owned()),
                     ..Node::new("s", "股东甲")
                 },
                 Node {
-                    legal_person: Some("赵六".to_string()),
-                    paid_in_amount: Some("100万".to_string()),
-                    currency: Some("CNY".to_string()),
-                    location: Some("  深圳  ".to_string()),
-                    approval_date: Some("2024-06-01".to_string()),
+                    legal_person: Some("赵六".to_owned()),
+                    paid_in_amount: Some("100万".to_owned()),
+                    currency: Some("CNY".to_owned()),
+                    location: Some("  深圳  ".to_owned()),
+                    approval_date: Some("2024-06-01".to_owned()),
                     ..Node::new("c", "子公司")
                 },
             ],
@@ -449,13 +449,13 @@ mod tests {
             vec![
                 Node::new("root", "主体"),
                 Node {
-                    currency: Some("CNY".to_string()),
-                    legal_person: Some("不应出现".to_string()),
+                    currency: Some("CNY".to_owned()),
+                    legal_person: Some("不应出现".to_owned()),
                     ..Node::new("c1", "只有币种")
                 },
                 Node {
-                    paid_in_amount: Some("   ".to_string()),
-                    location: Some("  ".to_string()),
+                    paid_in_amount: Some("   ".to_owned()),
+                    location: Some("  ".to_owned()),
                     ..Node::new("c2", "空白实缴")
                 },
             ],
@@ -500,7 +500,7 @@ mod tests {
     fn person_is_white_and_company_is_gray() {
         assert!(!company_fill(&Node {
             node_type: Some(NodeType::Person),
-            legal_person: Some("张三".to_string()),
+            legal_person: Some("张三".to_owned()),
             ..Node::new("p", "张三")
         }));
         assert!(company_fill(&Node {
@@ -508,11 +508,11 @@ mod tests {
             ..Node::new("c", "公司")
         }));
         assert!(company_fill(&Node {
-            legal_person: Some("李四".to_string()),
+            legal_person: Some("李四".to_owned()),
             ..Node::new("u", "未标")
         }));
         assert!(!company_fill(&Node {
-            legal_person: Some("  ".to_string()),
+            legal_person: Some("  ".to_owned()),
             ..Node::new("b", "空白")
         }));
     }

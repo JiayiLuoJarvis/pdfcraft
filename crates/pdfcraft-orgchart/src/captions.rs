@@ -5,7 +5,7 @@
 
 /// Which side a continuation cue belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CueSide {
+pub(crate) enum CueSide {
     /// Shareholder cone.
     Shareholder,
     /// Investment cone.
@@ -20,13 +20,13 @@ fn role_title(role: &str, name: &str) -> String {
 
 /// Shareholder overview and whole-chart main title.
 #[must_use]
-pub fn equity_chart_title(subject_name: &str) -> String {
+pub(crate) fn equity_chart_title(subject_name: &str) -> String {
     role_title("股权架构图", subject_name)
 }
 
 /// Investment overview main title.
 #[must_use]
-pub fn investment_chart_title(subject_name: &str) -> String {
+pub(crate) fn investment_chart_title(subject_name: &str) -> String {
     role_title("对外投资", subject_name)
 }
 
@@ -34,13 +34,13 @@ pub fn investment_chart_title(subject_name: &str) -> String {
 ///
 /// `index` is the side-local page index, starting at 1. Callers pass `index >= 2`.
 #[must_use]
-pub fn continuation_title(index: usize, subject_name: &str) -> String {
+pub(crate) fn continuation_title(index: usize, subject_name: &str) -> String {
     role_title(&format!("续页{index}"), subject_name)
 }
 
 /// Document-info title. `None` becomes `{subject_name}股权架构图`. A blank string stays blank.
 #[must_use]
-pub fn main_title(subject_name: &str, options_title: Option<&str>) -> String {
+pub(crate) fn main_title(subject_name: &str, options_title: Option<&str>) -> String {
     match options_title {
         Some(title) => title.to_owned(),
         None => format!("{subject_name}股权架构图"),
@@ -51,13 +51,13 @@ pub fn main_title(subject_name: &str, options_title: Option<&str>) -> String {
 ///
 /// `page_number` is the PDF page number, the same N as `详见附件{N}`.
 #[must_use]
-pub fn penetration_title(page_number: usize, name: &str) -> String {
+pub(crate) fn penetration_title(page_number: usize, name: &str) -> String {
     role_title(&format!("附件{page_number}"), name)
 }
 
 /// Whole-chart subtitle. Investments extend the arrow through the subject.
 #[must_use]
-pub fn whole_chart_subtitle(subject_name: &str, has_investments: bool) -> String {
+pub(crate) fn whole_chart_subtitle(subject_name: &str, has_investments: bool) -> String {
     let base = format!("各股东/合伙人 → {subject_name}");
     if has_investments {
         format!("{base} → 对外投资")
@@ -68,14 +68,14 @@ pub fn whole_chart_subtitle(subject_name: &str, has_investments: bool) -> String
 
 /// Shareholder-side subtitle. `index` is unused and kept so call sites match investment pages.
 #[must_use]
-pub fn shareholder_overview(subject_name: &str, index: usize) -> String {
+pub(crate) fn shareholder_overview(subject_name: &str, index: usize) -> String {
     let _ = index;
     whole_chart_subtitle(subject_name, false)
 }
 
 /// Investment-side subtitle. `index` is unused.
 #[must_use]
-pub fn investment_overview(subject_name: &str, index: usize) -> String {
+pub(crate) fn investment_overview(subject_name: &str, index: usize) -> String {
     let _ = index;
     format!("{subject_name} → 对外投资")
 }
@@ -84,7 +84,7 @@ pub fn investment_overview(subject_name: &str, index: usize) -> String {
 ///
 /// `index` is 1-based. `1` is the overview. `2` and above are continuations.
 #[must_use]
-pub fn shareholder_page_titles(subject_name: &str, index: usize) -> (String, String) {
+pub(crate) fn shareholder_page_titles(subject_name: &str, index: usize) -> (String, String) {
     let main = if index <= 1 {
         equity_chart_title(subject_name)
     } else {
@@ -97,7 +97,7 @@ pub fn shareholder_page_titles(subject_name: &str, index: usize) -> (String, Str
 ///
 /// `index` is 1-based. `1` is the overview. `2` and above are continuations.
 #[must_use]
-pub fn investment_page_titles(subject_name: &str, index: usize) -> (String, String) {
+pub(crate) fn investment_page_titles(subject_name: &str, index: usize) -> (String, String) {
     let main = if index <= 1 {
         investment_chart_title(subject_name)
     } else {
@@ -108,13 +108,13 @@ pub fn investment_page_titles(subject_name: &str, index: usize) -> (String, Stri
 
 /// Shareholder cut subtitle. Omits the percent when `ratio` is `None`.
 #[must_use]
-pub fn holds_relation(holder: &str, held: &str, ratio: Option<f64>) -> String {
+pub(crate) fn holds_relation(holder: &str, held: &str, ratio: Option<f64>) -> String {
     with_ratio(&format!("{holder}持有{held}"), ratio)
 }
 
 /// Investment cut subtitle. Omits the percent when `ratio` is `None`.
 #[must_use]
-pub fn invests_relation(investor: &str, target: &str, ratio: Option<f64>) -> String {
+pub(crate) fn invests_relation(investor: &str, target: &str, ratio: Option<f64>) -> String {
     with_ratio(&format!("{investor}投资{target}"), ratio)
 }
 
@@ -127,25 +127,25 @@ fn with_ratio(text: &str, ratio: Option<f64>) -> String {
 
 /// Folded shareholder name. `count` is the number of folded direct children.
 #[must_use]
-pub fn other_shareholders_name(count: usize) -> String {
+pub(crate) fn other_shareholders_name(count: usize) -> String {
     format!("其他股东({count}家)")
 }
 
 /// Folded investment name. `count` is the number of folded direct children.
 #[must_use]
-pub fn other_investments_name(count: usize) -> String {
+pub(crate) fn other_investments_name(count: usize) -> String {
     format!("其他投资({count}家)")
 }
 
 /// Second line of an overflow box, written after page numbers are known.
 #[must_use]
-pub fn overflow_detail_line(target_page: usize) -> String {
+pub(crate) fn overflow_detail_line(target_page: usize) -> String {
     format!("详见附件{target_page}")
 }
 
 /// First continuation-cue line. The attachment line is separate.
 #[must_use]
-pub fn cont_cue_see(side: CueSide) -> &'static str {
+pub(crate) fn cont_cue_see(side: CueSide) -> &'static str {
     match side {
         CueSide::Shareholder => "股东详见",
         CueSide::Investment => "对外投资详见",
@@ -153,11 +153,11 @@ pub fn cont_cue_see(side: CueSide) -> &'static str {
 }
 
 /// Prefix of the attachment line, before the page number.
-pub const ATTACHMENT_PREFIX: &str = "附件";
+pub(crate) const ATTACHMENT_PREFIX: &str = "附件";
 
 /// Two continuation-cue lines. They stay separate so glyph checks never see a newline.
 #[must_use]
-pub fn cont_cue_lines(target_page: usize, side: CueSide) -> (String, String) {
+pub(crate) fn cont_cue_lines(target_page: usize, side: CueSide) -> (String, String) {
     (
         cont_cue_see(side).to_owned(),
         format!("{ATTACHMENT_PREFIX}{target_page}"),
@@ -166,7 +166,7 @@ pub fn cont_cue_lines(target_page: usize, side: CueSide) -> (String, String) {
 
 /// Footer. The last character is `頁`.
 #[must_use]
-pub fn footer(page_index: usize, page_count: usize) -> String {
+pub(crate) fn footer(page_index: usize, page_count: usize) -> String {
     format!("第 {page_index} / {page_count} 頁")
 }
 
@@ -189,24 +189,21 @@ mod tests {
         assert_eq!(
             shareholder_page_titles("主体", 1),
             (
-                "股权架构图: 主体".to_string(),
-                "各股东/合伙人 → 主体".to_string()
+                "股权架构图: 主体".to_owned(),
+                "各股东/合伙人 → 主体".to_owned()
             )
         );
         assert_eq!(
             shareholder_page_titles("主体", 2),
-            (
-                "续页2: 主体".to_string(),
-                "各股东/合伙人 → 主体".to_string()
-            )
+            ("续页2: 主体".to_owned(), "各股东/合伙人 → 主体".to_owned())
         );
         assert_eq!(
             investment_page_titles("主体", 1),
-            ("对外投资: 主体".to_string(), "主体 → 对外投资".to_string())
+            ("对外投资: 主体".to_owned(), "主体 → 对外投资".to_owned())
         );
         assert_eq!(
             investment_page_titles("主体", 3),
-            ("续页3: 主体".to_string(), "主体 → 对外投资".to_string())
+            ("续页3: 主体".to_owned(), "主体 → 对外投资".to_owned())
         );
     }
 
@@ -240,11 +237,11 @@ mod tests {
         );
         assert_eq!(
             cont_cue_lines(2, CueSide::Shareholder),
-            ("股东详见".to_string(), "附件2".to_string())
+            ("股东详见".to_owned(), "附件2".to_owned())
         );
         assert_eq!(
             cont_cue_lines(3, CueSide::Investment),
-            ("对外投资详见".to_string(), "附件3".to_string())
+            ("对外投资详见".to_owned(), "附件3".to_owned())
         );
         assert_eq!(other_shareholders_name(3), "其他股东(3家)");
         assert_eq!(other_investments_name(3), "其他投资(3家)");

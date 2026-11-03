@@ -39,7 +39,7 @@ pub(crate) struct FamilyRowMetrics {
 }
 
 /// Places boxes and reports how many rows each family uses.
-pub trait LayoutEngine {
+pub(crate) trait LayoutEngine {
     /// Place `boxes` inside `printable_width_mm`.
     ///
     /// # Errors
@@ -74,7 +74,7 @@ pub trait LayoutEngine {
 
 /// Production packer. Forks use family columns. Chains stack.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct WrappedEngine;
+pub(crate) struct WrappedEngine;
 
 impl LayoutEngine for WrappedEngine {
     fn layout(

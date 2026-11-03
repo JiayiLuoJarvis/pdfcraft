@@ -22,18 +22,18 @@ mod snapshot;
 
 use std::path::PathBuf;
 
+#[cfg(feature = "backend-krilla")]
+use pdfcraft_pdf::spec::ImageSpec;
 use pdfcraft_pdf::spec::{
     Alignment, Block, CanvasMark, CanvasSpec, DocumentInfo, FontFace, FontFamily, FontRegistry,
     HLineSpec, LayerMark, LayerShape, PageWhen, Resources, SectionSpec,
 };
+#[cfg(feature = "backend-krilla")]
+use pdfcraft_pdf::ImageFormat;
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, Color, DocumentSpec, Ink, LinkTarget, Margins, NonNegative,
     PageSize, Path, Pen, Point, Positive, Rect, Size,
 };
-#[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::spec::ImageSpec;
-#[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::ImageFormat;
 use snapshot::{FontMeta, GoldenError};
 
 fn pt(x: f32, y: f32) -> Point {

@@ -1298,7 +1298,7 @@ mod tests {
         let plain = Error::from(ErrorKind::Backend {
             message: "m".to_owned(),
         });
-        let chained = plain.clone().with_source(std::fmt::Error);
+        let chained = plain.clone().with_source(fmt::Error);
         assert_eq!(plain, chained);
         assert!(plain.source().is_none());
         assert!(chained.source().is_some());
@@ -1438,7 +1438,7 @@ mod tests {
         let chained = Error::from(ErrorKind::Backend {
             message: "m".to_owned(),
         })
-        .with_source(std::fmt::Error);
+        .with_source(fmt::Error);
         let one = Errors::from(chained);
         assert!(one.source().is_some());
         let mut bag = ErrorBag::default();

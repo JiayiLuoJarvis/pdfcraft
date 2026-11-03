@@ -9,7 +9,7 @@ use lopdf::content::{Content, Operation};
 use lopdf::{dictionary, Document, LoadOptions, Object, Stream};
 
 /// Build a one-page PDF with optional `/Info` Title and Creator.
-pub fn sample_pdf(title: Option<&str>, creator: Option<&str>) -> Vec<u8> {
+pub(crate) fn sample_pdf(title: Option<&str>, creator: Option<&str>) -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
     let font_id = doc.add_object(dictionary! {
@@ -69,7 +69,7 @@ pub fn sample_pdf(title: Option<&str>, creator: Option<&str>) -> Vec<u8> {
 }
 
 /// Read a literal string `/Info` field, if present.
-pub fn info_string(pdf: &[u8], key: &[u8]) -> Option<String> {
+pub(crate) fn info_string(pdf: &[u8], key: &[u8]) -> Option<String> {
     let doc = Document::load_mem(pdf).ok()?;
     let info_ref = doc.trailer.get(b"Info").ok()?;
     let Object::Reference(id) = info_ref else {
@@ -83,7 +83,7 @@ pub fn info_string(pdf: &[u8], key: &[u8]) -> Option<String> {
 }
 
 /// Open encrypted PDF bytes with a user password.
-pub fn open_with_password(pdf: &[u8], password: &str) -> Result<Document, lopdf::Error> {
+pub(crate) fn open_with_password(pdf: &[u8], password: &str) -> Result<Document, lopdf::Error> {
     Document::load_mem_with_options(pdf, LoadOptions::with_password(password))
 }
 
@@ -93,7 +93,7 @@ pub fn open_with_password(pdf: &[u8], password: &str) -> Result<Document, lopdf:
 /// `is_encrypted()` is false while `was_encrypted()` is true. Fixtures from
 /// here anchor the `was_encrypted` gate branch instead of the `Decryption`
 /// error path.
-pub fn encrypted_with_empty_user(pdf: &[u8]) -> Vec<u8> {
+pub(crate) fn encrypted_with_empty_user(pdf: &[u8]) -> Vec<u8> {
     pdfcraft_post::Encrypt {
         config: Some(pdfcraft_post::EncryptionPreset::READ_ONLY),
         owner_password: Some("owner-secret".into()),
@@ -104,7 +104,7 @@ pub fn encrypted_with_empty_user(pdf: &[u8]) -> Vec<u8> {
 }
 
 /// True when the trailer declares `/Encrypt`.
-pub fn is_encrypted_pdf(pdf: &[u8]) -> bool {
+pub(crate) fn is_encrypted_pdf(pdf: &[u8]) -> bool {
     Document::load_metadata_mem(pdf).is_ok_and(|meta| meta.encrypted)
 }
 
@@ -112,7 +112,7 @@ pub fn is_encrypted_pdf(pdf: &[u8]) -> bool {
 ///
 /// `load_mem` drops `/Encrypt` when the empty user password opens the file,
 /// so the bit test reads the saved bytes.
-pub fn permission_integer(pdf: &[u8]) -> i64 {
+pub(crate) fn permission_integer(pdf: &[u8]) -> i64 {
     let marker = b"/P ";
     let idx = pdf
         .windows(marker.len())
@@ -130,12 +130,12 @@ pub fn permission_integer(pdf: &[u8]) -> i64 {
 }
 
 /// PDF permission bit in `/P` (bit 0 is the least significant bit).
-pub fn perm_bit(pdf: &[u8], bit: u32) -> bool {
+pub(crate) fn perm_bit(pdf: &[u8], bit: u32) -> bool {
     permission_integer(pdf) & (1_i64 << bit) != 0
 }
 
 /// One page per mark. The mark is the page's `Tj` operand.
-pub fn pages_with_marks(marks: &[&str]) -> Vec<u8> {
+pub(crate) fn pages_with_marks(marks: &[&str]) -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
     let mut kids = Vec::new();
@@ -143,7 +143,7 @@ pub fn pages_with_marks(marks: &[&str]) -> Vec<u8> {
         let content = Content {
             operations: vec![Operation::new(
                 "Tj",
-                vec![Object::string_literal((*mark).to_string())],
+                vec![Object::string_literal((*mark).to_owned())],
             )],
         };
         let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
@@ -174,7 +174,7 @@ pub fn pages_with_marks(marks: &[&str]) -> Vec<u8> {
 }
 
 /// One-page PDF whose outline root item is `title`.
-pub fn pdf_with_outline(title: &str) -> Vec<u8> {
+pub(crate) fn pdf_with_outline(title: &str) -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
     let page_id = doc.add_object(dictionary! {
@@ -196,7 +196,7 @@ pub fn pdf_with_outline(title: &str) -> Vec<u8> {
     });
     doc.trailer.set("Root", catalog_id);
     doc.add_bookmark(
-        lopdf::Bookmark::new(title.to_string(), [0.0, 0.0, 0.0], 0, page_id),
+        lopdf::Bookmark::new(title.to_owned(), [0.0, 0.0, 0.0], 0, page_id),
         None,
     );
     let outline_id = doc.build_outline().expect("outline");
@@ -209,7 +209,7 @@ pub fn pdf_with_outline(title: &str) -> Vec<u8> {
 }
 
 /// Titles of the top-level outline items, in order.
-pub fn outline_titles(pdf: &[u8]) -> Vec<String> {
+pub(crate) fn outline_titles(pdf: &[u8]) -> Vec<String> {
     let doc = Document::load_mem(pdf).expect("load");
     let Ok(outlines) = doc.catalog().expect("catalog").get(b"Outlines") else {
         return Vec::new();
@@ -237,7 +237,7 @@ pub fn outline_titles(pdf: &[u8]) -> Vec<String> {
 }
 
 /// Page content streams in reading order.
-pub fn page_texts(pdf: &[u8]) -> Vec<String> {
+pub(crate) fn page_texts(pdf: &[u8]) -> Vec<String> {
     let doc = Document::load_mem(pdf).expect("load");
     doc.page_iter()
         .map(|id| String::from_utf8_lossy(&doc.get_page_content(id)).into_owned())

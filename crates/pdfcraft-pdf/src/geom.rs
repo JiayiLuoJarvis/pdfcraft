@@ -69,14 +69,14 @@ impl<C> Length<C> {
 
     pub(crate) fn min(self, other: Self) -> Self {
         match self.partial_cmp(&other) {
-            Some(std::cmp::Ordering::Greater) => other,
+            Some(Ordering::Greater) => other,
             _ => self,
         }
     }
 
     pub(crate) fn max(self, other: Self) -> Self {
         match self.partial_cmp(&other) {
-            Some(std::cmp::Ordering::Less) => other,
+            Some(Ordering::Less) => other,
             _ => self,
         }
     }
@@ -98,7 +98,7 @@ pub enum NonNegative {}
 #[derive(Debug, Clone, Copy)]
 pub enum Positive {}
 
-fn finite_pt(value: f32) -> std::result::Result<f32, Error> {
+fn finite_pt(value: f32) -> Result<f32, Error> {
     if value.is_finite() {
         Ok(value)
     } else {
@@ -106,7 +106,7 @@ fn finite_pt(value: f32) -> std::result::Result<f32, Error> {
     }
 }
 
-fn pt_from_mm(mm: f32) -> std::result::Result<f32, Error> {
+fn pt_from_mm(mm: f32) -> Result<f32, Error> {
     let mm = finite_pt(mm)?;
     finite_pt(mm * MM_TO_PT)
 }
@@ -117,7 +117,7 @@ impl Finite {
     /// # Errors
     ///
     /// [`ErrorKind::NonFiniteLength`] when `value` is NaN or infinite.
-    pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
+    pub fn pt(value: f32) -> Result<Length<Self>, Error> {
         Ok(Length::from_trusted_pt(finite_pt(value)?))
     }
 
@@ -126,7 +126,7 @@ impl Finite {
     /// # Errors
     ///
     /// [`ErrorKind::NonFiniteLength`] when `value` or its point equivalent is NaN or infinite.
-    pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
+    pub fn mm(value: f32) -> Result<Length<Self>, Error> {
         Ok(Length::from_trusted_pt(pt_from_mm(value)?))
     }
 }
@@ -141,7 +141,7 @@ impl NonNegative {
     ///
     /// [`ErrorKind::NonFiniteLength`] when `value` is NaN or infinite.
     /// [`ErrorKind::NegativeLength`] when `value` is negative.
-    pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
+    pub fn pt(value: f32) -> Result<Length<Self>, Error> {
         let value = finite_pt(value)?;
         if value < 0.0 {
             return Err(Error::from(ErrorKind::NegativeLength { value }));
@@ -155,7 +155,7 @@ impl NonNegative {
     ///
     /// [`ErrorKind::NonFiniteLength`] when `value` or its point equivalent is NaN or infinite.
     /// [`ErrorKind::NegativeLength`] when `value` or its point equivalent is negative.
-    pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
+    pub fn mm(value: f32) -> Result<Length<Self>, Error> {
         let mm = finite_pt(value)?;
         if mm < 0.0 {
             return Err(Error::from(ErrorKind::NegativeLength { value: mm }));
@@ -175,7 +175,7 @@ impl Positive {
     ///
     /// [`ErrorKind::NonFiniteLength`] when `value` is NaN or infinite.
     /// [`ErrorKind::NonPositiveLength`] when `value` is zero or negative.
-    pub fn pt(value: f32) -> std::result::Result<Length<Self>, Error> {
+    pub fn pt(value: f32) -> Result<Length<Self>, Error> {
         let value = finite_pt(value)?;
         if value <= 0.0 {
             return Err(Error::from(ErrorKind::NonPositiveLength { value }));
@@ -189,7 +189,7 @@ impl Positive {
     ///
     /// [`ErrorKind::NonFiniteLength`] when `value` or its point equivalent is NaN or infinite.
     /// [`ErrorKind::NonPositiveLength`] when `value` or its point equivalent is zero or negative.
-    pub fn mm(value: f32) -> std::result::Result<Length<Self>, Error> {
+    pub fn mm(value: f32) -> Result<Length<Self>, Error> {
         let mm = finite_pt(value)?;
         if mm <= 0.0 {
             return Err(Error::from(ErrorKind::NonPositiveLength { value: mm }));
@@ -328,23 +328,23 @@ pub trait IntoNonNegative {
     ///
     /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NegativeLength`] for a raw `f32`.
     /// A length that is already [`NonNegative`] or [`Positive`] is returned as-is.
-    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error>;
+    fn into_non_negative(self) -> Result<Length<NonNegative>, Error>;
 }
 
 impl IntoNonNegative for Length<NonNegative> {
-    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error> {
+    fn into_non_negative(self) -> Result<Length<NonNegative>, Error> {
         Ok(self)
     }
 }
 
 impl IntoNonNegative for Length<Positive> {
-    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error> {
+    fn into_non_negative(self) -> Result<Length<NonNegative>, Error> {
         Ok(self.into())
     }
 }
 
 impl IntoNonNegative for f32 {
-    fn into_non_negative(self) -> std::result::Result<Length<NonNegative>, Error> {
+    fn into_non_negative(self) -> Result<Length<NonNegative>, Error> {
         NonNegative::pt(self)
     }
 }
@@ -357,17 +357,17 @@ pub trait IntoPositive {
     ///
     /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NonPositiveLength`] for a raw `f32`.
     /// A length that is already [`Positive`] is returned as-is.
-    fn into_positive(self) -> std::result::Result<Length<Positive>, Error>;
+    fn into_positive(self) -> Result<Length<Positive>, Error>;
 }
 
 impl IntoPositive for Length<Positive> {
-    fn into_positive(self) -> std::result::Result<Length<Positive>, Error> {
+    fn into_positive(self) -> Result<Length<Positive>, Error> {
         Ok(self)
     }
 }
 
 impl IntoPositive for f32 {
-    fn into_positive(self) -> std::result::Result<Length<Positive>, Error> {
+    fn into_positive(self) -> Result<Length<Positive>, Error> {
         Positive::pt(self)
     }
 }
@@ -380,29 +380,29 @@ pub trait IntoFinite {
     ///
     /// [`ErrorKind::NonFiniteLength`] for a raw `f32`.
     /// A length that is already finite, non-negative, or positive is returned as-is.
-    fn into_finite(self) -> std::result::Result<Length<Finite>, Error>;
+    fn into_finite(self) -> Result<Length<Finite>, Error>;
 }
 
 impl IntoFinite for Length<Finite> {
-    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
+    fn into_finite(self) -> Result<Length<Finite>, Error> {
         Ok(self)
     }
 }
 
 impl IntoFinite for Length<NonNegative> {
-    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
+    fn into_finite(self) -> Result<Length<Finite>, Error> {
         Ok(self.into())
     }
 }
 
 impl IntoFinite for Length<Positive> {
-    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
+    fn into_finite(self) -> Result<Length<Finite>, Error> {
         Ok(self.into())
     }
 }
 
 impl IntoFinite for f32 {
-    fn into_finite(self) -> std::result::Result<Length<Finite>, Error> {
+    fn into_finite(self) -> Result<Length<Finite>, Error> {
         Finite::pt(self)
     }
 }
@@ -415,17 +415,17 @@ pub trait IntoPoint {
     ///
     /// [`ErrorKind::NonFiniteLength`] when either coordinate is NaN or infinite.
     /// An existing [`Point`] is returned as-is.
-    fn into_point(self) -> std::result::Result<Point, Error>;
+    fn into_point(self) -> Result<Point, Error>;
 }
 
 impl IntoPoint for Point {
-    fn into_point(self) -> std::result::Result<Point, Error> {
+    fn into_point(self) -> Result<Point, Error> {
         Ok(self)
     }
 }
 
 impl IntoPoint for (f32, f32) {
-    fn into_point(self) -> std::result::Result<Point, Error> {
+    fn into_point(self) -> Result<Point, Error> {
         Point::try_pt(self.0, self.1)
     }
 }
@@ -438,17 +438,17 @@ pub trait IntoRect {
     ///
     /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NonPositiveLength`] when a raw tuple
     /// cannot form a [`Rect`]. An existing [`Rect`] is returned as-is.
-    fn into_rect(self) -> std::result::Result<Rect, Error>;
+    fn into_rect(self) -> Result<Rect, Error>;
 }
 
 impl IntoRect for Rect {
-    fn into_rect(self) -> std::result::Result<Rect, Error> {
+    fn into_rect(self) -> Result<Rect, Error> {
         Ok(self)
     }
 }
 
 impl IntoRect for (f32, f32, f32, f32) {
-    fn into_rect(self) -> std::result::Result<Rect, Error> {
+    fn into_rect(self) -> Result<Rect, Error> {
         Rect::try_pt(self.0, self.1, self.2, self.3)
     }
 }
@@ -475,7 +475,7 @@ impl Point {
     /// # Errors
     ///
     /// [`ErrorKind::NonFiniteLength`] when `x` or `y` is NaN or infinite.
-    pub fn try_pt(x: f32, y: f32) -> std::result::Result<Self, Error> {
+    pub fn try_pt(x: f32, y: f32) -> Result<Self, Error> {
         Ok(Self::new(Finite::pt(x)?, Finite::pt(y)?))
     }
 
@@ -484,7 +484,7 @@ impl Point {
     /// # Errors
     ///
     /// [`ErrorKind::NonFiniteLength`] when `x`, `y`, or either point equivalent is NaN or infinite.
-    pub fn try_mm(x: f32, y: f32) -> std::result::Result<Self, Error> {
+    pub fn try_mm(x: f32, y: f32) -> Result<Self, Error> {
         Ok(Self::new(Finite::mm(x)?, Finite::mm(y)?))
     }
 
@@ -526,7 +526,7 @@ impl Size {
     ///
     /// [`ErrorKind::NonFiniteLength`] when `width` or `height` is NaN or infinite.
     /// [`ErrorKind::NonPositiveLength`] when either value is zero or negative.
-    pub fn try_pt(width: f32, height: f32) -> std::result::Result<Self, Error> {
+    pub fn try_pt(width: f32, height: f32) -> Result<Self, Error> {
         Ok(Self::new(Positive::pt(width)?, Positive::pt(height)?))
     }
 
@@ -536,7 +536,7 @@ impl Size {
     ///
     /// [`ErrorKind::NonFiniteLength`] when a side or its point equivalent is NaN or infinite.
     /// [`ErrorKind::NonPositiveLength`] when a side or its point equivalent is zero or negative.
-    pub fn try_mm(width: f32, height: f32) -> std::result::Result<Self, Error> {
+    pub fn try_mm(width: f32, height: f32) -> Result<Self, Error> {
         Ok(Self::new(Positive::mm(width)?, Positive::mm(height)?))
     }
 
@@ -685,7 +685,7 @@ impl Rect {
     ///
     /// [`ErrorKind::NonFiniteLength`] when any argument is NaN or infinite.
     /// [`ErrorKind::NonPositiveLength`] when `width` or `height` is zero or negative.
-    pub fn try_pt(x: f32, y: f32, width: f32, height: f32) -> std::result::Result<Self, Error> {
+    pub fn try_pt(x: f32, y: f32, width: f32, height: f32) -> Result<Self, Error> {
         Ok(Self::new(
             Point::try_pt(x, y)?,
             Size::try_pt(width, height)?,
@@ -698,7 +698,7 @@ impl Rect {
     ///
     /// [`ErrorKind::NonFiniteLength`] when any argument or its point equivalent is NaN or infinite.
     /// [`ErrorKind::NonPositiveLength`] when `width` or `height`, or its point equivalent, is zero or negative.
-    pub fn try_mm(x: f32, y: f32, width: f32, height: f32) -> std::result::Result<Self, Error> {
+    pub fn try_mm(x: f32, y: f32, width: f32, height: f32) -> Result<Self, Error> {
         Ok(Self::new(
             Point::try_mm(x, y)?,
             Size::try_mm(width, height)?,
@@ -715,7 +715,7 @@ impl Rect {
         self.size
     }
 
-    pub(crate) fn translated(self, dx: f32, dy: f32) -> std::result::Result<Self, Error> {
+    pub(crate) fn translated(self, dx: f32, dy: f32) -> Result<Self, Error> {
         Ok(Self::new(
             Point::try_pt(self.origin.x().as_pt() + dx, self.origin.y().as_pt() + dy)?,
             self.size,
@@ -786,7 +786,7 @@ impl EdgeBox {
         }
     }
 
-    pub(crate) fn transformed(self, affine: Affine) -> std::result::Result<Self, Error> {
+    pub(crate) fn transformed(self, affine: Affine) -> Result<Self, Error> {
         let corners = [
             Point::try_pt(self.min_x, self.min_y)?,
             Point::try_pt(self.max_x, self.min_y)?,
@@ -845,7 +845,7 @@ impl Margins {
     ///
     /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NegativeLength`] when `value` is a raw `f32`
     /// that is not finite and at least zero. An existing non-negative length is accepted.
-    pub fn try_uniform(value: impl IntoNonNegative) -> std::result::Result<Self, Error> {
+    pub fn try_uniform(value: impl IntoNonNegative) -> Result<Self, Error> {
         Ok(Self::uniform(value.into_non_negative()?))
     }
 
@@ -860,7 +860,7 @@ impl Margins {
         right: impl IntoNonNegative,
         bottom: impl IntoNonNegative,
         left: impl IntoNonNegative,
-    ) -> std::result::Result<Self, Error> {
+    ) -> Result<Self, Error> {
         Ok(Self::new(
             top.into_non_negative()?,
             right.into_non_negative()?,
@@ -1011,7 +1011,7 @@ impl Pen {
     ///
     /// [`ErrorKind::NonFiniteLength`] or [`ErrorKind::NonPositiveLength`] when `width` is a raw `f32`
     /// that is not finite and strictly greater than zero. An existing positive length is accepted.
-    pub fn new(color: Color, width: impl IntoPositive) -> std::result::Result<Self, Error> {
+    pub fn new(color: Color, width: impl IntoPositive) -> Result<Self, Error> {
         Ok(Self {
             color,
             stroke: Stroke::new(width.into_positive()?),
@@ -1108,7 +1108,7 @@ impl Affine {
     }
 
     /// Clockwise about `pivot`, matching [`Path::rotated`] / krilla `Transform::from_rotate`.
-    pub(crate) fn rotate_cw_about(degrees: f32, pivot: Point) -> std::result::Result<Self, Error> {
+    pub(crate) fn rotate_cw_about(degrees: f32, pivot: Point) -> Result<Self, Error> {
         if !degrees.is_finite() {
             return Err(crate::error::GeometryKind::NonFiniteRotation { degrees }.into());
         }
@@ -1137,7 +1137,7 @@ impl Affine {
         }
     }
 
-    pub(crate) fn apply(self, point: Point) -> std::result::Result<Point, Error> {
+    pub(crate) fn apply(self, point: Point) -> Result<Point, Error> {
         let x = point.x().as_pt();
         let y = point.y().as_pt();
         Point::try_pt(
@@ -1190,7 +1190,7 @@ impl Path {
     /// Closed rectangle. `MoveTo` the top-left, then three `LineTo` clockwise, then `Close`.
     ///
     /// Fails when `origin + extent` is not finite.
-    pub(crate) fn rect(rect: Rect) -> std::result::Result<Self, Error> {
+    pub(crate) fn rect(rect: Rect) -> Result<Self, Error> {
         let x = rect.origin().x().as_pt();
         let y = rect.origin().y().as_pt();
         let right = x + rect.size().width().as_pt();
@@ -1207,7 +1207,7 @@ impl Path {
     /// `MoveTo` the right-middle, then four `CubicTo` quarter arcs clockwise (y down), then `Close`.
     /// Each control point is `KAPPA` radii off its endpoint.
     /// Fails when a constructed point is not finite.
-    pub(crate) fn ellipse(rect: Rect) -> std::result::Result<Self, Error> {
+    pub(crate) fn ellipse(rect: Rect) -> Result<Self, Error> {
         let rx = rect.size().width().as_pt() / 2.0;
         let ry = rect.size().height().as_pt() / 2.0;
         let cx = rect.origin().x().as_pt() + rx;
@@ -1253,7 +1253,7 @@ impl Path {
         &self.verbs
     }
 
-    pub(crate) fn translated(&self, dx: f32, dy: f32) -> std::result::Result<Self, Error> {
+    pub(crate) fn translated(&self, dx: f32, dy: f32) -> Result<Self, Error> {
         self.map_points(|point| Point::try_pt(point.x().as_pt() + dx, point.y().as_pt() + dy))
     }
 
@@ -1263,15 +1263,15 @@ impl Path {
     /// Fails when the angle is not finite or a rotated coordinate is not finite.
     /// Layer `Rotated` marks use the canvas CTM; this bake stays for geom tests.
     #[allow(dead_code, reason = "geom unit tests; layer rotation uses Canvas CTM")]
-    pub(crate) fn rotated(&self, degrees: f32, about: Point) -> std::result::Result<Self, Error> {
+    pub(crate) fn rotated(&self, degrees: f32, about: Point) -> Result<Self, Error> {
         let affine = Affine::rotate_cw_about(degrees, about)?;
         self.map_points(|point| affine.apply(point))
     }
 
     fn map_points(
         &self,
-        mut map: impl FnMut(Point) -> std::result::Result<Point, Error>,
-    ) -> std::result::Result<Self, Error> {
+        mut map: impl FnMut(Point) -> Result<Point, Error>,
+    ) -> Result<Self, Error> {
         let verbs = self
             .verbs
             .iter()
@@ -1287,7 +1287,7 @@ impl Path {
                     PathVerb::Close => PathVerb::Close,
                 })
             })
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(Self {
             verbs: verbs.into_boxed_slice(),
         })
