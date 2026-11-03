@@ -1,0 +1,12 @@
+ts	phase	decision	why	evidence	result
+2026-11-03T04:27:43Z	start	autonomous run from step 1.5 through 6 with one PR per step	operator said keep going unless contradiction; plan is the checklist	chat continuation after step 1 green	open
+2026-11-03T04:29:00Z	step-1	committed and pushed es/1-msrv-and-standard; gh PR blocked by bad token	plan wants one PR per step; SSH push works, GraphQL 401	52fca0f origin/es/1-msrv-and-standard	PR open blocked; stack continues
+2026-11-03T04:30:30Z	step-1.5	gated anchors/golden/document/doctest; pushed es/1.5-no-default-features	TOOL-5 no-default clippy/test/doc green; Laziness keep library logic untouched	54b872f	green; PR blocked on gh auth
+2026-11-03T04:30:56Z	step-2	delegated mechanical lint clear to poteto-agent on es/2-mechanical-lints	Guard context window; large mechanical sweep	agent 577ac43b-01ee-4e08-812c-7058b74f8e16	in progress
+2026-11-03T04:55:53Z	step-2	accepted mechanical lint clear; branching step 3	price_lints and TOOL-5 reported green by delegate; three lints absent from table	63ee2acf375f8c8ec54a50d8e79f2a85826fda5e	green; continue
+2026-11-03T05:26:22Z	step-3	accepted allow/expect, let_underscore, hash iter; branch step 4	frame pop_transform preserves paint err; fill overrides sorted; TOOL-5 and price_lints zero for step-3 lints	024c84ad7cb400c8ebaf3492deafc9bf2e839dfc	green; continue
+2026-11-03T05:57:43Z	step-4	accepted panic surface; branch step 5	16 expects eliminated, remainder registered; price_lints expect/unreachable absent; TOOL-5 green	9643a4d6e87d98f20e65e90cee310338a7c88266	green; continue
+2026-11-03T06:44:34Z	step-5	accepted semantic lints; branch step 6	threshold 8 removed; Options/Rect shapes; listed lints absent from price table; leftover ref_patterns 0/1 for step 6	f7f46cfa5de52ec758e99063756371346d9c6895	green; continue
+2026-11-03T07:12:42Z	step-6	accepted workspace lints switch; rollout code predicate met	price table empty; TOOL-5 green; four crates workspace=true; PRs still blocked on gh 401	889d81427276fee0354b87729342d61e53fd03ae	green; stack complete pending PR open
+2026-11-03T07:12:42Z	close	autonomous code run finished steps 1 through 6	operator asked keep going unless contradiction; only blocker is gh auth for PRs	.audit/engineering-standard-rollout.tsv	code done; PRs need auth or manual compare links
+2026-11-03T07:14:01Z	ship	fast-forward merged es/6-workspace-lints into main and pushed	operator asked merge all to main and push; no PRs	889d814 on origin/main	done
