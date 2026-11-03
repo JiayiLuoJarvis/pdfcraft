@@ -567,6 +567,17 @@ pub enum MarkerAlign {
 }
 
 /// Bulleted or numbered list settings.
+///
+/// On an item's first fragment, the marker baseline matches the first text
+/// baseline of that item's first block. A paragraph contributes its first
+/// line. A table contributes the first physical row. That row is the header
+/// when the table has one, and a cell that starts there counts even when it
+/// spans later rows. Columns contribute the topmost first line. A nested list
+/// contributes its first marker line. An image, a canvas, a horizontal rule,
+/// or a spacer taller than zero has no text baseline, so the marker's line
+/// box sits on the item top. A zero-height spacer, an empty stack, and an
+/// empty keep-together group are skipped. [`Block::Styled`] passes the rule
+/// through to its children. A continuation fragment draws no marker.
 #[derive(Debug)]
 #[must_use]
 pub struct ListSpec<K> {

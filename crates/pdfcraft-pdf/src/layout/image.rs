@@ -45,6 +45,7 @@ impl ImageNode {
                         rect: Rect::try_pt(x, 0.0, width, height)?,
                     }],
                     anchors: Vec::new(),
+                    first_baseline: None,
                 },
             }),
         }

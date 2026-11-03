@@ -131,6 +131,15 @@ fn fragment_is_effective(fragment: &Fragment) -> bool {
     fragment.height > NonNegative::ZERO || !fragment.commands.is_empty()
 }
 
+/// The first effective child owns the stack baseline, even when that value is `None`.
+fn note_first_baseline(chosen: &mut bool, slot: &mut Option<Length<Finite>>, fragment: &Fragment) {
+    if *chosen || !fragment_is_effective(fragment) {
+        return;
+    }
+    *slot = fragment.first_baseline;
+    *chosen = true;
+}
+
 fn stamp_anchor(id: &str, fragment: &mut Fragment) {
     fragment.anchors.push(AnchorMark {
         id: id.to_owned(),
@@ -204,6 +213,7 @@ impl SpacerNode {
             spacing_after: NonNegative::ZERO,
             commands: Vec::new(),
             anchors: Vec::new(),
+            first_baseline: None,
         };
         if rest <= 0.0 {
             Ok(Split::Fit {
@@ -284,6 +294,8 @@ fn split_stack(
     let mut y = NonNegative::ZERO;
     let mut trailing_spacing = NonNegative::ZERO;
     let mut placed_any = false;
+    let mut first_baseline = None;
+    let mut baseline_chosen = false;
 
     while let Some(child) = kids.pop_front() {
         match child.split(ctx, avail)? {
@@ -293,6 +305,7 @@ fn split_stack(
             } => {
                 let spacing = child_frag.spacing_after;
                 let offset = child_frag.with_offset(Finite::ZERO, y.into())?;
+                note_first_baseline(&mut baseline_chosen, &mut first_baseline, &offset);
                 commands.extend(offset.commands);
                 anchors.extend(offset.anchors);
                 y += height;
@@ -315,6 +328,7 @@ fn split_stack(
                 tail,
             } => {
                 let offset = head.with_offset(Finite::ZERO, y.into())?;
+                note_first_baseline(&mut baseline_chosen, &mut first_baseline, &offset);
                 commands.extend(offset.commands);
                 anchors.extend(offset.anchors);
                 y += head_height;
@@ -333,6 +347,7 @@ fn split_stack(
                         },
                         commands,
                         anchors,
+                        first_baseline,
                     },
                     tail: FlowNode::Stack(rest),
                 });
@@ -351,6 +366,7 @@ fn split_stack(
                         spacing_after: NonNegative::ZERO,
                         commands,
                         anchors,
+                        first_baseline,
                     },
                     tail: FlowNode::Stack(rest),
                 });
@@ -365,6 +381,7 @@ fn split_stack(
             spacing_after: trailing_spacing,
             commands,
             anchors,
+            first_baseline,
         },
     })
 }

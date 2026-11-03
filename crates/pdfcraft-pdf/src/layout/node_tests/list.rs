@@ -1,17 +1,22 @@
-use std::num::NonZeroU32;
+use std::num::{NonZeroU16, NonZeroU32};
 
 use crate::canvas::{pt_near, CanvasCommand, RecordedPage};
 use crate::error::{Error, ErrorBag, ErrorKind, GeometryKind};
-use crate::geom::{Color, NonNegative, Positive, Size};
-use crate::layout::canvas::CanvasNode;
+use crate::fonts::FontStore;
+use crate::geom::{Color, Finite, NonNegative, Point, Positive, Size};
+use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::ColumnWidth;
 use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::Decorations;
-use crate::layout::flow::{AnchorNode, FlowNode, KeepTogetherNode};
-use crate::layout::frame::{natural_height, Fragment, FragmentCommand, Frame, LayoutCtx};
-use crate::layout::list::{
-    first_baseline, ListItem, ListKind, ListNode, ListSpec, MarkerAffix, MarkerAlign, MarkerKind,
+use crate::layout::flow::{AnchorNode, FlowNode, KeepTogetherNode, SpacerNode};
+use crate::layout::frame::{
+    natural_height, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split,
 };
+use crate::layout::hline::HLineNode;
+use crate::layout::list::{
+    ListItem, ListKind, ListNode, ListSpec, MarkerAffix, MarkerAlign, MarkerKind,
+};
+use crate::layout::paragraph::{BlankWidth, InlineBlank, InlineItem, TextNode};
 use crate::layout::style::{GlyphStyle, Style, TextAlign};
 use crate::layout::table::{Cell, TableNode, TableSpec};
 use crate::layout::test_util::{bits, fonts_and_style, metrics, page, render, runs, text, texts};
@@ -542,24 +547,6 @@ fn empty_custom_marker_is_rejected() {
     assert_eq!(err, GeometryKind::EmptyListMarker.into());
 }
 
-#[test]
-fn image_command_has_no_baseline() {
-    let fragment = Fragment {
-        height: NonNegative::pt(10.0).unwrap(),
-        spacing_after: NonNegative::ZERO,
-        commands: vec![FragmentCommand::Image {
-            image: crate::canvas::DecodedImage {
-                id: crate::canvas::ImageId::from_raw(3),
-                pixel_width: 1,
-                pixel_height: 1,
-            },
-            rect: crate::geom::Rect::try_pt(0.0, 4.0, 10.0, 10.0).unwrap(),
-        }],
-        anchors: Vec::new(),
-    };
-    assert_eq!(first_baseline(&fragment), None);
-}
-
 fn image_node() -> FlowNode {
     FlowNode::Image(
         crate::layout::image::ImageNode::new(
@@ -697,7 +684,7 @@ fn column_may_hold_a_list_whose_item_holds_a_table() {
 
 #[test]
 fn item_allows_hline() {
-    let line = crate::layout::hline::HLineNode::new(
+    let line = HLineNode::new(
         None,
         TextAlign::Center,
         Positive::pt(1.0).unwrap(),
@@ -975,4 +962,606 @@ fn nested_list_uses_its_own_item_gap() {
         y_of(&drawn, "tail").to_bits(),
         (h + h + inner_gap + h + outer_gap + base).to_bits()
     );
+}
+
+fn one_item(marker: &Style, blocks: Vec<FlowNode>) -> FlowNode {
+    FlowNode::List(
+        ListNode::new(spec(
+            ordered(MarkerKind::Decimal, 1),
+            20.0,
+            marker,
+            vec![ListItem::new(blocks).unwrap()],
+        ))
+        .unwrap(),
+    )
+}
+
+fn page_runs(node: FlowNode, fonts: &mut FontStore) -> Vec<(String, f32, f32)> {
+    let (result, rec) = render(node, fonts, page(280.0, 500.0), &Decorations::none());
+    result.unwrap();
+    assert_eq!(rec.pages().len(), 1, "the sample fits on one page");
+    runs(&rec.pages()[0])
+}
+
+fn split_frame(
+    node: FlowNode,
+    fonts: &mut FontStore,
+    width: f32,
+    height: f32,
+    full: f32,
+) -> Split<FlowNode> {
+    let mut errors = ErrorBag::default();
+    let mut ctx = LayoutCtx {
+        natural: false,
+        fonts,
+        errors: &mut errors,
+    };
+    let split = node
+        .split(
+            &mut ctx,
+            Frame {
+                width: Positive::pt(width).unwrap(),
+                height: NonNegative::pt(height).unwrap(),
+                full_height: Positive::pt(full).unwrap(),
+            },
+        )
+        .unwrap();
+    assert!(errors.is_empty());
+    split
+}
+
+fn fit_fragment(node: FlowNode, fonts: &mut FontStore) -> Fragment {
+    let Split::Fit { fragment, .. } = split_frame(node, fonts, 240.0, 400.0, 400.0) else {
+        panic!("node fits");
+    };
+    fragment
+}
+
+fn sized(style: &Style, points: f32) -> Style {
+    let mut style = style.clone();
+    style.font_size = Positive::pt(points).unwrap();
+    style
+}
+
+fn baseline_bits(fragment: &Fragment) -> u32 {
+    fragment
+        .first_baseline
+        .expect("text baseline")
+        .as_pt()
+        .to_bits()
+}
+
+fn has_glyphs(fragment: &Fragment, label: &str) -> bool {
+    fragment.commands.iter().any(|command| match command {
+        FragmentCommand::Glyphs(run) => run.text == label,
+        FragmentCommand::Fill { .. }
+        | FragmentCommand::Stroke { .. }
+        | FragmentCommand::Image { .. }
+        | FragmentCommand::Link { .. }
+        | FragmentCommand::PushTransform { .. }
+        | FragmentCommand::PopTransform => false,
+    })
+}
+
+fn spacer(height: f32) -> FlowNode {
+    FlowNode::Spacer(SpacerNode {
+        height: NonNegative::pt(height).unwrap(),
+    })
+}
+
+fn rule() -> FlowNode {
+    FlowNode::HLine(HLineNode::new(
+        None,
+        TextAlign::Start,
+        Positive::pt(2.0).unwrap(),
+        Color::rgb(0, 0, 0),
+        NonNegative::ZERO,
+        NonNegative::ZERO,
+    ))
+}
+
+fn canvas_text(style: &Style) -> FlowNode {
+    let side = Positive::pt(40.0).unwrap();
+    FlowNode::Canvas(
+        CanvasNode::new(
+            Size::new(side, side),
+            TextAlign::Start,
+            [CanvasMarkNode::Text {
+                text: "C".into(),
+                at: Point::try_pt(0.0, 30.0).unwrap(),
+                style: GlyphStyle::plain(style),
+            }],
+        )
+        .unwrap(),
+    )
+}
+
+fn text_table(style: &Style, padding: f32, border: f32, header: bool) -> FlowNode {
+    let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(80.0).unwrap())]);
+    spec.padding = NonNegative::pt(padding).unwrap();
+    spec.border.width = NonNegative::pt(border).unwrap();
+    let cell = |label: &str| Cell::new(vec![text(label, style)]).unwrap();
+    if header {
+        spec.header = vec![vec![cell("H")]];
+    }
+    spec.body = vec![vec![cell("B")]];
+    FlowNode::Table(TableNode::new(spec).unwrap())
+}
+
+#[test]
+fn marker_matches_the_paragraph_first_line() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let drawn = page_runs(one_item(&style, vec![text("A\nB", &style)]), &mut fonts);
+    let base = m.baseline.as_pt().to_bits();
+    let second = (m.line_height.as_pt() + m.baseline.as_pt()).to_bits();
+    assert_eq!(y_of(&drawn, "1.").to_bits(), base);
+    assert_eq!(y_of(&drawn, "A").to_bits(), base);
+    assert_eq!(y_of(&drawn, "B").to_bits(), second);
+}
+
+#[test]
+fn marker_top_aligns_when_the_item_starts_with_an_image() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let drawn = page_runs(
+        one_item(&style, vec![image_node(), text("A", &style)]),
+        &mut fonts,
+    );
+    assert_eq!(y_of(&drawn, "1.").to_bits(), m.baseline.as_pt().to_bits());
+    assert_eq!(
+        y_of(&drawn, "A").to_bits(),
+        (10.0 + m.baseline.as_pt()).to_bits()
+    );
+}
+
+#[test]
+fn marker_top_aligns_when_the_item_starts_with_a_spacer() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let drawn = page_runs(
+        one_item(&style, vec![spacer(10.0), text("A", &style)]),
+        &mut fonts,
+    );
+    assert_eq!(y_of(&drawn, "1.").to_bits(), m.baseline.as_pt().to_bits());
+    assert_eq!(
+        y_of(&drawn, "A").to_bits(),
+        (10.0 + m.baseline.as_pt()).to_bits()
+    );
+}
+
+#[test]
+fn marker_top_aligns_when_the_item_starts_with_a_rule_or_canvas() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let ruled = page_runs(
+        one_item(&style, vec![rule(), text("A", &style)]),
+        &mut fonts,
+    );
+    assert_eq!(y_of(&ruled, "1.").to_bits(), m.baseline.as_pt().to_bits());
+    assert_eq!(
+        y_of(&ruled, "A").to_bits(),
+        (2.0 + m.baseline.as_pt()).to_bits()
+    );
+    let painted = page_runs(
+        one_item(&style, vec![canvas_text(&style), text("A", &style)]),
+        &mut fonts,
+    );
+    assert_eq!(y_of(&painted, "1.").to_bits(), m.baseline.as_pt().to_bits());
+    assert_eq!(y_of(&painted, "C").to_bits(), 30.0f32.to_bits());
+    assert_eq!(
+        y_of(&painted, "A").to_bits(),
+        (40.0 + m.baseline.as_pt()).to_bits()
+    );
+}
+
+#[test]
+fn zero_height_spacer_and_empty_keep_together_are_skipped() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let cases = [
+        vec![spacer(0.0), text("A", &style)],
+        vec![
+            FlowNode::KeepTogether(KeepTogetherNode::Open(Vec::new())),
+            text("A", &style),
+        ],
+    ];
+    for blocks in cases {
+        let drawn = page_runs(one_item(&style, blocks), &mut fonts);
+        assert_eq!(y_of(&drawn, "1.").to_bits(), m.baseline.as_pt().to_bits());
+        assert_eq!(y_of(&drawn, "A").to_bits(), m.baseline.as_pt().to_bits());
+    }
+}
+
+#[test]
+fn marker_matches_the_table_first_row_with_padding() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let inset = 5.0;
+    let drawn = page_runs(
+        one_item(&style, vec![text_table(&style, 4.0, 2.0, false)]),
+        &mut fonts,
+    );
+    let base = (inset + m.baseline.as_pt()).to_bits();
+    assert_eq!(y_of(&drawn, "1.").to_bits(), base);
+    assert_eq!(y_of(&drawn, "B").to_bits(), base);
+}
+
+#[test]
+fn marker_matches_the_table_header_row() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let inset = 5.0;
+    let drawn = page_runs(
+        one_item(&style, vec![text_table(&style, 4.0, 2.0, true)]),
+        &mut fonts,
+    );
+    let header = (inset + m.baseline.as_pt()).to_bits();
+    let body = (m.line_height.as_pt() + 3.0 * inset + m.baseline.as_pt()).to_bits();
+    assert_eq!(y_of(&drawn, "1.").to_bits(), header);
+    assert_eq!(y_of(&drawn, "H").to_bits(), header);
+    assert_eq!(y_of(&drawn, "B").to_bits(), body);
+}
+
+#[test]
+fn marker_ignores_text_that_starts_on_a_later_table_row() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let mut spec = TableSpec::new(vec![
+        ColumnWidth::Fixed(Positive::pt(40.0).unwrap()),
+        ColumnWidth::Fixed(Positive::pt(40.0).unwrap()),
+    ]);
+    spec.body = vec![
+        vec![
+            Cell::new(vec![image_node()])
+                .unwrap()
+                .with_span(NonZeroU16::MIN, NonZeroU16::new(2).unwrap()),
+            Cell::new(vec![spacer(20.0)]).unwrap(),
+        ],
+        vec![Cell::new(vec![text("B", &style)]).unwrap()],
+    ];
+    let drawn = page_runs(
+        one_item(&style, vec![FlowNode::Table(TableNode::new(spec).unwrap())]),
+        &mut fonts,
+    );
+    assert_eq!(y_of(&drawn, "1.").to_bits(), m.baseline.as_pt().to_bits());
+    assert_eq!(
+        y_of(&drawn, "B").to_bits(),
+        (20.0 + m.baseline.as_pt()).to_bits()
+    );
+}
+
+#[test]
+fn marker_matches_the_higher_column_baseline() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let large = sized(&style, 24.0);
+    let small = sized(&style, 18.0);
+    let marker = metrics(&fonts, &style).baseline.as_pt();
+    let high = metrics(&fonts, &small).baseline.as_pt();
+    let low = metrics(&fonts, &large).baseline.as_pt();
+    assert_ne!(high.to_bits(), marker.to_bits());
+    assert_ne!(high.to_bits(), low.to_bits());
+    let drawn = page_runs(
+        one_item(
+            &style,
+            vec![two_columns(
+                vec![text("L", &large)],
+                vec![text("S", &small)],
+            )],
+        ),
+        &mut fonts,
+    );
+    assert_eq!(y_of(&drawn, "1.").to_bits(), high.to_bits());
+    assert_eq!(y_of(&drawn, "S").to_bits(), high.to_bits());
+    assert_eq!(y_of(&drawn, "L").to_bits(), low.to_bits());
+}
+
+#[test]
+fn outer_marker_matches_the_nested_list_marker() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let inner = ListNode::new(spec(
+        ordered(MarkerKind::Decimal, 1),
+        16.0,
+        &style,
+        vec![ListItem::new(vec![image_node(), text("in", &style)]).unwrap()],
+    ))
+    .unwrap();
+    let drawn = page_runs(one_item(&style, vec![FlowNode::List(inner)]), &mut fonts);
+    let base = m.baseline.as_pt().to_bits();
+    assert_eq!(
+        drawn.iter().map(bits).collect::<Vec<_>>(),
+        [
+            ("1.", 0.0f32.to_bits(), base),
+            ("1.", 20.0f32.to_bits(), base),
+            (
+                "in",
+                36.0f32.to_bits(),
+                (10.0 + m.baseline.as_pt()).to_bits()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn marker_matches_anchor_and_keep_together_paragraphs() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let cases = [
+        FlowNode::Anchor(AnchorNode {
+            id: "a".into(),
+            child: Box::new(text("A", &style)),
+            marked: false,
+        }),
+        FlowNode::KeepTogether(KeepTogetherNode::Open(vec![text("A", &style)])),
+    ];
+    for block in cases {
+        let drawn = page_runs(one_item(&style, vec![block]), &mut fonts);
+        assert_eq!(y_of(&drawn, "1.").to_bits(), m.baseline.as_pt().to_bits());
+        assert_eq!(y_of(&drawn, "A").to_bits(), m.baseline.as_pt().to_bits());
+    }
+}
+
+#[test]
+fn marker_follows_a_larger_paragraph_baseline() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let big = sized(&style, 24.0);
+    let marker = metrics(&fonts, &style).baseline.as_pt();
+    let line = metrics(&fonts, &big).baseline.as_pt();
+    assert_ne!(marker.to_bits(), line.to_bits());
+    let drawn = page_runs(one_item(&style, vec![text("A", &big)]), &mut fonts);
+    assert_eq!(y_of(&drawn, "1.").to_bits(), line.to_bits());
+    assert_eq!(y_of(&drawn, "A").to_bits(), line.to_bits());
+}
+
+#[test]
+fn paragraph_blank_keeps_its_metric_baseline_without_glyphs() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let mut fontless = style.clone();
+    fontless.font = None;
+    let fragment = fit_fragment(
+        FlowNode::Text(TextNode::from_items(
+            vec![InlineItem::Blank(InlineBlank::new(BlankWidth::Fixed(
+                NonNegative::pt(12.0).unwrap(),
+            )))],
+            fontless,
+        )),
+        &mut fonts,
+    );
+    assert_eq!(
+        baseline_bits(&fragment),
+        style.font_size.as_pt().to_bits(),
+        "a blank line stores the fontless baseline"
+    );
+    assert!(
+        !fragment
+            .commands
+            .iter()
+            .any(|command| matches!(command, FragmentCommand::Glyphs(_))),
+        "the blank line has no glyph run to scan"
+    );
+    let text = fit_fragment(text("A\nB", &style), &mut fonts);
+    assert_eq!(baseline_bits(&text), m.baseline.as_pt().to_bits());
+    assert!(has_glyphs(&text, "A"), "the paragraph draws A");
+}
+
+#[test]
+fn with_offset_shifts_first_baseline() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let fragment = fit_fragment(text("A", &style), &mut fonts);
+    let shifted = fragment
+        .with_offset(Finite::pt(3.0).unwrap(), Finite::pt(7.0).unwrap())
+        .unwrap();
+    assert_eq!(
+        shifted.first_baseline.unwrap().as_pt().to_bits(),
+        (m.baseline.as_pt() + 7.0).to_bits()
+    );
+    let image = fit_fragment(image_node(), &mut fonts);
+    assert!(image.first_baseline.is_none());
+    assert!(image
+        .with_offset(Finite::ZERO, Finite::pt(4.0).unwrap())
+        .unwrap()
+        .first_baseline
+        .is_none());
+}
+
+#[test]
+fn stack_stops_at_the_first_effective_child() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let image_then_text = fit_fragment(
+        FlowNode::Stack(vec![image_node(), text("A", &style)]),
+        &mut fonts,
+    );
+    assert!(image_then_text.first_baseline.is_none());
+    assert!(has_glyphs(&image_then_text, "A"));
+    let spacer_then_text = fit_fragment(
+        FlowNode::Stack(vec![spacer(10.0), text("A", &style)]),
+        &mut fonts,
+    );
+    assert!(spacer_then_text.first_baseline.is_none());
+    let skipped = fit_fragment(
+        FlowNode::Stack(vec![spacer(0.0), text("A", &style)]),
+        &mut fonts,
+    );
+    assert_eq!(baseline_bits(&skipped), m.baseline.as_pt().to_bits());
+}
+
+#[test]
+fn columns_table_anchor_and_list_report_first_baseline() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let small = sized(&style, 18.0);
+    let large = sized(&style, 24.0);
+    let columns = fit_fragment(
+        two_columns(vec![text("L", &large)], vec![text("S", &small)]),
+        &mut fonts,
+    );
+    assert_eq!(
+        baseline_bits(&columns),
+        metrics(&fonts, &small).baseline.as_pt().to_bits()
+    );
+
+    let padded = fit_fragment(text_table(&style, 4.0, 2.0, false), &mut fonts);
+    assert_eq!(baseline_bits(&padded), (5.0 + m.baseline.as_pt()).to_bits());
+    let headed = fit_fragment(text_table(&style, 4.0, 2.0, true), &mut fonts);
+    assert_eq!(baseline_bits(&headed), (5.0 + m.baseline.as_pt()).to_bits());
+
+    let mut image_row = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(40.0).unwrap())]);
+    image_row.body = vec![
+        vec![Cell::new(vec![image_node()]).unwrap()],
+        vec![Cell::new(vec![text("B", &style)]).unwrap()],
+    ];
+    let image_first = fit_fragment(
+        FlowNode::Table(TableNode::new(image_row).unwrap()),
+        &mut fonts,
+    );
+    assert!(image_first.first_baseline.is_none());
+    assert!(has_glyphs(&image_first, "B"));
+
+    let mut spanned = TableSpec::new(vec![
+        ColumnWidth::Fixed(Positive::pt(40.0).unwrap()),
+        ColumnWidth::Fixed(Positive::pt(40.0).unwrap()),
+    ]);
+    spanned.body = vec![
+        vec![
+            Cell::new(vec![image_node()])
+                .unwrap()
+                .with_span(NonZeroU16::MIN, NonZeroU16::new(2).unwrap()),
+            Cell::new(vec![spacer(20.0)]).unwrap(),
+        ],
+        vec![Cell::new(vec![text("B", &style)]).unwrap()],
+    ];
+    let span = fit_fragment(
+        FlowNode::Table(TableNode::new(spanned).unwrap()),
+        &mut fonts,
+    );
+    assert!(
+        span.first_baseline.is_none(),
+        "a later row does not supply the table baseline"
+    );
+    assert!(has_glyphs(&span, "B"), "the later row is still drawn");
+
+    let anchor = fit_fragment(
+        FlowNode::Anchor(AnchorNode {
+            id: "a".into(),
+            child: Box::new(text("A", &style)),
+            marked: false,
+        }),
+        &mut fonts,
+    );
+    assert_eq!(baseline_bits(&anchor), m.baseline.as_pt().to_bits());
+    let kept = fit_fragment(
+        FlowNode::KeepTogether(KeepTogetherNode::Open(vec![text("A", &style)])),
+        &mut fonts,
+    );
+    assert_eq!(baseline_bits(&kept), m.baseline.as_pt().to_bits());
+
+    for node in [image_node(), canvas_text(&style), rule(), spacer(10.0)] {
+        assert!(fit_fragment(node, &mut fonts).first_baseline.is_none());
+    }
+    assert!(has_glyphs(
+        &fit_fragment(canvas_text(&style), &mut fonts),
+        "C"
+    ));
+
+    let listed = fit_fragment(one_item(&style, vec![text("A", &style)]), &mut fonts);
+    assert_eq!(baseline_bits(&listed), m.baseline.as_pt().to_bits());
+    let topped = fit_fragment(
+        one_item(&style, vec![image_node(), text("A", &style)]),
+        &mut fonts,
+    );
+    assert_eq!(baseline_bits(&topped), m.baseline.as_pt().to_bits());
+}
+
+#[test]
+fn continuation_fragment_uses_the_body_baseline() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let line = m.line_height.as_pt();
+    let Split::Partial { head, tail, .. } = split_frame(
+        one_item(&style, vec![text("A\nB", &style)]),
+        &mut fonts,
+        240.0,
+        line,
+        400.0,
+    ) else {
+        panic!("the item splits after the first line");
+    };
+    assert_eq!(baseline_bits(&head), m.baseline.as_pt().to_bits());
+    assert!(has_glyphs(&head, "1."));
+    let Split::Fit { fragment, .. } = split_frame(tail, &mut fonts, 240.0, 400.0, 400.0) else {
+        panic!("the continuation fits");
+    };
+    assert_eq!(baseline_bits(&fragment), m.baseline.as_pt().to_bits());
+    assert!(!has_glyphs(&fragment, "1."));
+    assert!(has_glyphs(&fragment, "B"));
+}
+
+#[test]
+fn repeated_header_keeps_the_header_baseline() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let line = m.line_height.as_pt();
+    let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(80.0).unwrap())]);
+    spec.header = vec![vec![Cell::new(vec![text("H", &style)]).unwrap()]];
+    spec.body = vec![
+        vec![Cell::new(vec![text("B", &style)]).unwrap()],
+        vec![Cell::new(vec![text("C", &style)]).unwrap()],
+    ];
+    let Split::Partial { head, tail, .. } = split_frame(
+        FlowNode::Table(TableNode::new(spec).unwrap()),
+        &mut fonts,
+        200.0,
+        line * 2.0 + 1.0,
+        400.0,
+    ) else {
+        panic!("the table splits after the header and the first body row");
+    };
+    assert_eq!(baseline_bits(&head), m.baseline.as_pt().to_bits());
+    let Split::Fit { fragment, .. } = split_frame(tail, &mut fonts, 200.0, line * 2.0 + 1.0, 400.0)
+    else {
+        panic!("the repeated header and the last row fit");
+    };
+    assert_eq!(baseline_bits(&fragment), m.baseline.as_pt().to_bits());
+    assert!(has_glyphs(&fragment, "H"));
+    assert!(has_glyphs(&fragment, "C"));
 }

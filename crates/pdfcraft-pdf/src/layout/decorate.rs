@@ -272,6 +272,7 @@ fn measure_layer(
             spacing_after: NonNegative::ZERO,
             commands,
             anchors: Vec::new(),
+            first_baseline: None,
         },
     }))
 }
@@ -369,6 +370,7 @@ fn measure_band(
         spacing_after: NonNegative::ZERO,
         commands: Vec::new(),
         anchors: Vec::new(),
+        first_baseline: None,
     });
     let mut mark_commands = Vec::new();
     for mark in marks {

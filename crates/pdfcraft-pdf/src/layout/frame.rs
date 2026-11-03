@@ -63,6 +63,11 @@ pub(crate) struct Fragment {
     pub(crate) spacing_after: Length<NonNegative>,
     pub(crate) commands: Vec<FragmentCommand>,
     pub(crate) anchors: Vec<AnchorMark>,
+    /// First text baseline in this fragment, y down from the fragment origin.
+    ///
+    /// `None` means the first effective content has no text line. Containers
+    /// copy or shift this value. They do not scan [`Self::commands`].
+    pub(crate) first_baseline: Option<Length<Finite>>,
 }
 
 impl Fragment {
@@ -72,6 +77,7 @@ impl Fragment {
             spacing_after: NonNegative::ZERO,
             commands: Vec::new(),
             anchors: Vec::new(),
+            first_baseline: None,
         }
     }
 
@@ -102,7 +108,24 @@ impl Fragment {
                 mark.relative.y().as_pt() + dy,
             )?;
         }
+        self.first_baseline = self
+            .first_baseline
+            .map(|baseline| Finite::pt(baseline.as_pt() + dy))
+            .transpose()?;
         Ok(self)
+    }
+}
+
+/// The baseline closer to the top. A `None` sibling has no text baseline.
+pub(crate) fn earlier_baseline(
+    current: Option<Length<Finite>>,
+    next: Option<Length<Finite>>,
+) -> Option<Length<Finite>> {
+    match (current, next) {
+        (Some(current), Some(next)) => Some(current.min(next)),
+        (Some(current), None) => Some(current),
+        (None, Some(next)) => Some(next),
+        (None, None) => None,
     }
 }
 

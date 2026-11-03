@@ -6,7 +6,7 @@ use crate::error::ErrorBag;
 use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
 #[cfg(test)]
 use crate::fonts::FontStore;
-use crate::geom::{Color, Length, NonNegative, Positive};
+use crate::geom::{Color, Finite, Length, NonNegative, Positive};
 use crate::layout::frame::{Fragment, Frame, LayoutCtx, Split};
 use crate::layout::justify::{self, StretchPlan, StretchRequest};
 use crate::layout::line_run::{self, BlankStroke, LinePainter, LinePiece, MeasuredInline};
@@ -77,6 +77,8 @@ impl InlineBlank {
 pub(crate) struct LineBox {
     pub(crate) pieces: Vec<LinePiece>,
     pub(crate) height: Length<Positive>,
+    /// Baseline measured from the line-box top, y down.
+    pub(crate) baseline: Length<Finite>,
 }
 
 /// Unwrapped text. Wraps at the width of the first frame it is split against.
@@ -223,6 +225,7 @@ impl ParagraphNode {
             lines.push(LineBox {
                 pieces,
                 height: metrics.line_height,
+                baseline: metrics.baseline,
             });
         }
 
@@ -339,6 +342,8 @@ fn fragment_from_lines(lines: &[LineBox], spacing_after: Length<NonNegative>) ->
         spacing_after,
         commands,
         anchors: Vec::new(),
+        // The first line starts at y = 0, so its line-box baseline is the fragment baseline.
+        first_baseline: lines.first().map(|line| line.baseline),
     })
 }
 

@@ -48,6 +48,15 @@ cross-crate history.
   now names the innermost container that forbids the node, so columns in a
   list item in a cell report `"table cell"`, and a page break there reports
   `"list item"`.
+- A list marker aligns to the first text baseline of the item's first block.
+  A paragraph uses its first line. A table uses its first physical row, and
+  that row is the header when the table has one. Columns use the topmost
+  first line among the columns. A nested list uses its first marker. When
+  that block has no text baseline (an image, a canvas, a rule, or a spacer
+  taller than zero), the marker's line box sits on the item top. A spacer
+  used as the item's first block no longer moves the marker down to a later
+  paragraph. Put that blank space before the list, or set `item_gap` between
+  items.
 
 ## [0.4.0] - 2026-11-03
 

@@ -9,8 +9,8 @@ use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positi
 use crate::layout_spec;
 use crate::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, InlineRun,
-    LayerMark, LayerShape, ListItemSpec, ListSpec, PageWhen, ParagraphSpec, Resources, RunStyle,
-    SectionSpec, TextRun,
+    LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, Numbering, PageWhen, ParagraphSpec,
+    Resources, RunStyle, SectionSpec, TextRun,
 };
 use crate::DocumentSpec;
 
@@ -840,4 +840,78 @@ fn a_bad_collection_index_is_the_font_error() {
         error.first().kind,
         ErrorKind::Font { index: 4, .. }
     ));
+}
+
+fn glyph_ys(rendered: &crate::Rendered) -> Vec<(String, f32)> {
+    rendered
+        .pages()
+        .iter()
+        .flat_map(crate::canvas::RecordedPage::ops)
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some((run.text.clone(), run.origin.y().as_pt())),
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
+        })
+        .collect()
+}
+
+fn marker_and_body(blocks: Vec<Block<()>>) -> Option<(u32, u32)> {
+    let rendered = lay(
+        PageSize::A4,
+        body(vec![Block::List(ListSpec {
+            kind: ListKind::Ordered(Numbering::Decimal),
+            items: vec![ListItemSpec {
+                marker: None,
+                blocks,
+            }],
+            ..ListSpec::default()
+        })]),
+    )?;
+    let rendered = rendered.expect("styled list lays out");
+    let ys = glyph_ys(&rendered);
+    let marker = ys
+        .iter()
+        .find(|row| row.0 == "1.")
+        .expect("marker")
+        .1
+        .to_bits();
+    let text = ys
+        .iter()
+        .find(|row| row.0 == "A")
+        .expect("paragraph")
+        .1
+        .to_bits();
+    Some((marker, text))
+}
+
+#[test]
+fn an_empty_styled_block_is_skipped_for_the_marker() {
+    let Some((marker, text)) = marker_and_body(vec![
+        Block::Styled {
+            style: RunStyle::default(),
+            children: Vec::new(),
+        },
+        Block::paragraph((), "A"),
+    ]) else {
+        return;
+    };
+    assert_eq!(marker, text);
+}
+
+#[test]
+fn a_styled_paragraph_keeps_the_marker_on_its_first_line() {
+    let Some((marker, text)) = marker_and_body(vec![Block::Styled {
+        style: RunStyle::default(),
+        children: vec![Block::paragraph((), "A")],
+    }]) else {
+        return;
+    };
+    assert_eq!(marker, text);
 }

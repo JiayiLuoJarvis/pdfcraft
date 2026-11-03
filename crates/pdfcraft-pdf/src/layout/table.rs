@@ -363,6 +363,7 @@ impl GridPaint<'_> {
                 spacing_after: NonNegative::ZERO,
                 commands: Vec::new(),
                 anchors: Vec::new(),
+                first_baseline: None,
             })
             .collect();
         for LaidCell {
@@ -396,6 +397,10 @@ impl GridPaint<'_> {
                 Length::from_trusted_pt(x + self.content_inset),
                 Length::from_trusted_pt(y + self.content_inset),
             )?;
+            if cell.row == self.groups[group].start {
+                fragment.first_baseline =
+                    frame::earlier_baseline(fragment.first_baseline, offset.first_baseline);
+            }
             fragment.commands.extend(offset.commands);
             fragment.anchors.extend(offset.anchors);
             if let Some((stroke, paint)) = self.border {
@@ -468,6 +473,8 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
     let mut y = NonNegative::ZERO;
     let mut commands = Vec::new();
     let mut anchors = Vec::new();
+    let mut first_baseline = None;
+    let mut baseline_chosen = false;
     if table.draw_header_next {
         if let Some(header) = &table.header {
             let first = table
@@ -481,6 +488,8 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
             }
             commands.extend(header.commands.iter().cloned());
             anchors.extend(header.anchors.iter().cloned());
+            first_baseline = header.first_baseline;
+            baseline_chosen = true;
             y = header.height;
         }
     }
@@ -492,6 +501,10 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
         }
         let h = block.height;
         let offset = block.with_offset(Finite::ZERO, y.into())?;
+        if !baseline_chosen {
+            first_baseline = offset.first_baseline;
+            baseline_chosen = true;
+        }
         commands.extend(offset.commands);
         anchors.extend(offset.anchors);
         y += h;
@@ -502,6 +515,7 @@ fn split_measured<N>(mut table: MeasuredTable, avail: Frame) -> Result<Split<Tab
         spacing_after: NonNegative::ZERO,
         commands,
         anchors,
+        first_baseline,
     };
     if table.body.is_empty() {
         return Ok(Split::Fit {

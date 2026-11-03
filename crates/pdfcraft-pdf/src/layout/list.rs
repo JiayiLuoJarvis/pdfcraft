@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::num::NonZeroU32;
 
 use crate::error::{Fallible as Result, GeometryKind};
-use crate::geom::{Length, NonNegative, Positive};
+use crate::geom::{Finite, Length, NonNegative, Positive};
 use crate::layout::frame::{Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
 use crate::layout::line_run;
 use crate::layout::nesting::ItemBody;
@@ -242,6 +242,7 @@ impl<N: Flowable> ListNode<N> {
         let mut y = NonNegative::ZERO;
         let mut trailing_spacing = NonNegative::ZERO;
         let mut placed_any = false;
+        let mut first_baseline = None;
 
         while let Some(item) = self.items.pop_front() {
             let frame = Frame {
@@ -264,29 +265,33 @@ impl<N: Flowable> ListNode<N> {
                     if !placed_any {
                         return Ok(Split::MoveToNextPage(self));
                     }
-                    return Ok(partial(commands, anchors, y, NonNegative::ZERO, self));
+                    return Ok(partial(
+                        commands,
+                        anchors,
+                        y,
+                        NonNegative::ZERO,
+                        first_baseline,
+                        self,
+                    ));
                 }
             };
 
             if let Some(label) = &item.pending_marker {
-                let marker = line_run::single_line_run(
+                let at = self.paint_marker(
                     ctx,
-                    label,
-                    &self.marker_style,
-                    Some(self.marker_width),
-                )?;
-                let baseline = first_baseline(&fragment).unwrap_or(marker.metrics.baseline.as_pt());
-                let marker_x = match self.align {
-                    MarkerAlign::Start => 0.0,
-                    MarkerAlign::End => (self.marker_width - marker.width).as_pt(),
-                };
-                line_run::append_commands(
                     &mut commands,
-                    &marker.pieces,
-                    marker_x,
-                    y.as_pt() + baseline,
-                    0.0,
+                    label,
+                    fragment.first_baseline,
+                    y.as_pt(),
                 )?;
+                if !placed_any {
+                    first_baseline = Some(at);
+                }
+            } else if !placed_any {
+                first_baseline = fragment
+                    .first_baseline
+                    .map(|baseline| Finite::pt(baseline.as_pt() + y.as_pt()))
+                    .transpose()?;
             }
             let spacing = fragment.spacing_after;
             let offset = fragment.with_offset(self.indent.into(), y.into())?;
@@ -301,7 +306,7 @@ impl<N: Flowable> ListNode<N> {
                     pending_marker: None,
                     body: node,
                 });
-                return Ok(partial(commands, anchors, y, spacing, self));
+                return Ok(partial(commands, anchors, y, spacing, first_baseline, self));
             }
             if self.items.is_empty() {
                 trailing_spacing = spacing;
@@ -325,8 +330,32 @@ impl<N: Flowable> ListNode<N> {
                 spacing_after: trailing_spacing,
                 commands,
                 anchors,
+                first_baseline,
             },
         })
+    }
+}
+
+impl<N> ListNode<N> {
+    /// Draws `label` and returns its baseline measured from the list fragment origin.
+    fn paint_marker(
+        &self,
+        ctx: &mut LayoutCtx<'_>,
+        commands: &mut Vec<FragmentCommand>,
+        label: &str,
+        body_baseline: Option<Length<Finite>>,
+        y: f32,
+    ) -> Result<Length<Finite>> {
+        let marker =
+            line_run::single_line_run(ctx, label, &self.marker_style, Some(self.marker_width))?;
+        let baseline = body_baseline.unwrap_or(marker.metrics.baseline);
+        let marker_x = match self.align {
+            MarkerAlign::Start => 0.0,
+            MarkerAlign::End => (self.marker_width - marker.width).as_pt(),
+        };
+        let baseline_y = y + baseline.as_pt();
+        line_run::append_commands(commands, &marker.pieces, marker_x, baseline_y, 0.0)?;
+        Finite::pt(baseline_y)
     }
 }
 
@@ -335,6 +364,7 @@ fn partial<N>(
     anchors: Vec<crate::layout::frame::AnchorMark>,
     y: Length<NonNegative>,
     spacing_after: Length<NonNegative>,
+    first_baseline: Option<Length<Finite>>,
     rest: ListNode<N>,
 ) -> Split<ListNode<N>> {
     Split::Partial {
@@ -344,19 +374,8 @@ fn partial<N>(
             spacing_after,
             commands,
             anchors,
+            first_baseline,
         },
         tail: rest,
     }
-}
-
-pub(crate) fn first_baseline(fragment: &Fragment) -> Option<f32> {
-    fragment.commands.iter().find_map(|command| match command {
-        FragmentCommand::Glyphs(run) => Some(run.origin.y().as_pt()),
-        FragmentCommand::Fill { .. }
-        | FragmentCommand::Stroke { .. }
-        | FragmentCommand::Image { .. }
-        | FragmentCommand::Link { .. }
-        | FragmentCommand::PushTransform { .. }
-        | FragmentCommand::PopTransform => None,
-    })
 }

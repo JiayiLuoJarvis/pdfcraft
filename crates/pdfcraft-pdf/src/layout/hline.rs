@@ -78,6 +78,7 @@ impl HLineNode {
                     stroke: Stroke::new(self.thickness),
                 }],
                 anchors: Vec::new(),
+                first_baseline: None,
             },
         })
     }

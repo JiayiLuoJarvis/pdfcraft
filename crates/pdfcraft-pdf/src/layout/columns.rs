@@ -3,7 +3,7 @@
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible as Result};
 use crate::geom::{Finite, Length, NonNegative};
 use crate::layout::column_width::{self, ColumnWidth};
-use crate::layout::frame::{Flowable, Fragment, Frame, LayoutCtx, Split};
+use crate::layout::frame::{self, Flowable, Fragment, Frame, LayoutCtx, Split};
 use crate::layout::nesting::{self, Container};
 
 pub(crate) const MIN_COLUMN_COUNT: usize = 2;
@@ -65,6 +65,7 @@ impl<N: Flowable> ColumnsNode<N> {
         let mut progress = false;
         let mut commands = Vec::new();
         let mut anchors = Vec::new();
+        let mut first_baseline = None;
         let mut rest = Vec::with_capacity(self.columns.len());
         let mut unfinished = false;
         for (column, width) in self.columns.into_iter().zip(&widths) {
@@ -90,6 +91,7 @@ impl<N: Flowable> ColumnsNode<N> {
             height = height.max(placed);
             spacing_after = spacing_after.max(fragment.spacing_after);
             let offset = fragment.with_offset(x.into(), Finite::ZERO)?;
+            first_baseline = frame::earlier_baseline(first_baseline, offset.first_baseline);
             commands.extend(offset.commands);
             anchors.extend(offset.anchors);
             rest.push(tail.unwrap_or_else(|| N::stack(Vec::new())));
@@ -109,6 +111,7 @@ impl<N: Flowable> ColumnsNode<N> {
                     spacing_after,
                     commands,
                     anchors,
+                    first_baseline,
                 },
             });
         }
@@ -122,6 +125,7 @@ impl<N: Flowable> ColumnsNode<N> {
                 spacing_after: NonNegative::ZERO,
                 commands,
                 anchors,
+                first_baseline,
             },
             tail,
         })
