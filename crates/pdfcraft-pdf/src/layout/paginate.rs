@@ -172,10 +172,6 @@ pub(crate) fn paint_laid(laid: &LaidDocument, canvas: &mut dyn Canvas) -> Result
 }
 
 /// `first_page` is the zero-based index of this section's first page in the document.
-#[expect(
-    clippy::expect_used,
-    reason = "ensure_content_page opened the page before either split arm reads it"
-)]
 fn plan_pages(
     root: FlowNode,
     ctx: &mut LayoutCtx<'_>,
@@ -184,108 +180,177 @@ fn plan_pages(
     max_pages: u32,
 ) -> Result<Vec<PagePlan>> {
     config.validate()?;
-    let mut nodes: VecDeque<FlowNode> = match root {
-        FlowNode::Stack(kids) => kids.into(),
-        other => VecDeque::from([other]),
-    };
-
-    let body_w = Length::<Positive>::from_trusted_pt(config.body_width().as_pt());
-    let body_h = Length::<Positive>::from_trusted_pt(config.body_height().as_pt());
-    let body_origin = config.body_origin()?;
-
-    let mut cursor = PageCursor::Fresh;
-    let mut pages: Vec<PagePlan> = Vec::new();
-    let mut current: Option<PagePlan> = None;
-    let mut y = NonNegative::ZERO;
-
-    while let Some(node) = nodes.pop_front() {
-        match node {
-            FlowNode::PageBreak => {
-                cursor = apply_page_break(
-                    cursor,
-                    &mut pages,
-                    &mut current,
-                    config,
-                    first_page,
-                    max_pages,
-                )?;
-                y = NonNegative::ZERO;
-            }
-            node => {
-                ensure_content_page(&mut current, config);
-                let avail = Frame {
-                    width: body_w,
-                    height: (body_h - y).clamp_non_negative(),
-                    full_height: body_h,
-                };
-                let split = ctx.located(
-                    &Location::page_index(first_page + pages.len()).with_region(Region::Body),
-                    |ctx| node.split(ctx, avail),
-                )?;
-                match split {
-                    Split::Fit { height, fragment } => {
-                        let page = current.as_mut().expect("content page open");
-                        let origin = Point::try_pt(
-                            body_origin.x().as_pt(),
-                            body_origin.y().as_pt() + y.as_pt(),
-                        )?;
-                        let spacing = fragment.spacing_after;
-                        page.placed.push(PlacedFragment { origin, fragment });
-                        y += height;
-                        if spacing > NonNegative::ZERO {
-                            let remain = (body_h - y).clamp_non_negative();
-                            if remain >= spacing {
-                                y += spacing;
-                            }
-                        }
-                        cursor = PageCursor::HasBody;
-                    }
-                    Split::Partial {
-                        head_height: _,
-                        head,
-                        tail,
-                    } => {
-                        let page = current.as_mut().expect("content page open");
-                        let origin = Point::try_pt(
-                            body_origin.x().as_pt(),
-                            body_origin.y().as_pt() + y.as_pt(),
-                        )?;
-                        page.placed.push(PlacedFragment {
-                            origin,
-                            fragment: head,
-                        });
-                        commit_page(&mut pages, &mut current, first_page, max_pages)?;
-                        nodes.push_front(tail);
-                        y = NonNegative::ZERO;
-                        cursor = PageCursor::Fresh;
-                    }
-                    Split::MoveToNextPage(tail) => {
-                        if y == NonNegative::ZERO {
-                            return Err(Error::from(GeometryKind::StalledOnFreshPage {
-                                height: body_h.as_pt(),
-                            })
-                            .in_region(Region::Body)
-                            .on_page_index(first_page + pages.len()));
-                        }
-                        commit_page(&mut pages, &mut current, first_page, max_pages)?;
-                        nodes.push_front(tail);
-                        y = NonNegative::ZERO;
-                        cursor = PageCursor::Fresh;
-                    }
-                }
-            }
-        }
-    }
-
-    finalize_eof(
-        cursor,
-        &mut pages,
-        &mut current,
+    let mut nodes = opened_root(root);
+    let frame = BodyFrame {
+        width: Length::<Positive>::from_trusted_pt(config.body_width().as_pt()),
+        height: Length::<Positive>::from_trusted_pt(config.body_height().as_pt()),
+        origin: config.body_origin()?,
         config,
         first_page,
         max_pages,
-    )?;
+    };
+    let mut pages = Vec::new();
+    let mut current = None;
+    {
+        let mut state = PlanState {
+            cursor: PageCursor::Fresh,
+            pages: &mut pages,
+            current: &mut current,
+            nodes: &mut nodes,
+            y: NonNegative::ZERO,
+        };
+        while let Some(node) = state.nodes.pop_front() {
+            match node {
+                FlowNode::PageBreak => {
+                    state.cursor = apply_page_break(
+                        state.cursor,
+                        state.pages,
+                        state.current,
+                        frame.config,
+                        frame.first_page,
+                        frame.max_pages,
+                    )?;
+                    state.y = NonNegative::ZERO;
+                }
+                node @ (FlowNode::Paragraph(_)
+                | FlowNode::Text(_)
+                | FlowNode::Spacer(_)
+                | FlowNode::KeepTogether(_)
+                | FlowNode::Anchor(_)
+                | FlowNode::Stack(_)
+                | FlowNode::Columns(_)
+                | FlowNode::Table(_)
+                | FlowNode::List(_)
+                | FlowNode::Image(_)
+                | FlowNode::Canvas(_)
+                | FlowNode::HLine(_)) => place_body_node(node, ctx, &frame, &mut state)?,
+            }
+        }
+        finalize_eof(
+            state.cursor,
+            state.pages,
+            state.current,
+            frame.config,
+            frame.first_page,
+            frame.max_pages,
+        )?;
+    }
     Ok(pages)
+}
+
+fn opened_root(root: FlowNode) -> VecDeque<FlowNode> {
+    match root {
+        FlowNode::Stack(kids) => kids.into(),
+        node @ (FlowNode::Paragraph(_)
+        | FlowNode::Text(_)
+        | FlowNode::Spacer(_)
+        | FlowNode::PageBreak
+        | FlowNode::KeepTogether(_)
+        | FlowNode::Anchor(_)
+        | FlowNode::Columns(_)
+        | FlowNode::Table(_)
+        | FlowNode::List(_)
+        | FlowNode::Image(_)
+        | FlowNode::Canvas(_)
+        | FlowNode::HLine(_)) => VecDeque::from([node]),
+    }
+}
+
+struct BodyFrame {
+    width: Length<Positive>,
+    height: Length<Positive>,
+    origin: Point,
+    config: PaginateConfig,
+    first_page: usize,
+    max_pages: u32,
+}
+
+struct PlanState<'a> {
+    cursor: PageCursor,
+    pages: &'a mut Vec<PagePlan>,
+    current: &'a mut Option<PagePlan>,
+    nodes: &'a mut VecDeque<FlowNode>,
+    y: Length<NonNegative>,
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "ensure_content_page opened the page before either split arm reads it"
+)]
+fn place_body_node(
+    node: FlowNode,
+    ctx: &mut LayoutCtx<'_>,
+    frame: &BodyFrame,
+    state: &mut PlanState<'_>,
+) -> Result<()> {
+    ensure_content_page(state.current, frame.config);
+    let avail = Frame {
+        width: frame.width,
+        height: (frame.height - state.y).clamp_non_negative(),
+        full_height: frame.height,
+    };
+    let split = ctx.located(
+        &Location::page_index(frame.first_page + state.pages.len()).with_region(Region::Body),
+        |ctx| node.split(ctx, avail),
+    )?;
+    match split {
+        Split::Fit { height, fragment } => {
+            let page = state.current.as_mut().expect("content page open");
+            let origin = Point::try_pt(
+                frame.origin.x().as_pt(),
+                frame.origin.y().as_pt() + state.y.as_pt(),
+            )?;
+            let spacing = fragment.spacing_after;
+            page.placed.push(PlacedFragment { origin, fragment });
+            state.y += height;
+            if spacing > NonNegative::ZERO {
+                let remain = (frame.height - state.y).clamp_non_negative();
+                if remain >= spacing {
+                    state.y += spacing;
+                }
+            }
+            state.cursor = PageCursor::HasBody;
+        }
+        Split::Partial { head, tail, .. } => {
+            let page = state.current.as_mut().expect("content page open");
+            let origin = Point::try_pt(
+                frame.origin.x().as_pt(),
+                frame.origin.y().as_pt() + state.y.as_pt(),
+            )?;
+            page.placed.push(PlacedFragment {
+                origin,
+                fragment: head,
+            });
+            commit_page(
+                state.pages,
+                state.current,
+                frame.first_page,
+                frame.max_pages,
+            )?;
+            state.nodes.push_front(tail);
+            state.y = NonNegative::ZERO;
+            state.cursor = PageCursor::Fresh;
+        }
+        Split::MoveToNextPage(tail) => {
+            if state.y == NonNegative::ZERO {
+                return Err(Error::from(GeometryKind::StalledOnFreshPage {
+                    height: frame.height.as_pt(),
+                })
+                .in_region(Region::Body)
+                .on_page_index(frame.first_page + state.pages.len()));
+            }
+            commit_page(
+                state.pages,
+                state.current,
+                frame.first_page,
+                frame.max_pages,
+            )?;
+            state.nodes.push_front(tail);
+            state.y = NonNegative::ZERO;
+            state.cursor = PageCursor::Fresh;
+        }
+    }
+    Ok(())
 }
 
 fn ensure_content_page(current: &mut Option<PagePlan>, config: PaginateConfig) {
@@ -390,8 +455,8 @@ fn finalize_eof(
 }
 
 fn paint_pages(pages: &[PagePlan], bands: &[PageBands], canvas: &mut dyn Canvas) -> Result<()> {
-    for (index, (page, bands)) in pages.iter().zip(bands).enumerate() {
-        paint_page(page, bands, canvas).map_err(|error| error.on_page_index(index))?;
+    for (index, (page, page_bands)) in pages.iter().zip(bands).enumerate() {
+        paint_page(page, page_bands, canvas).map_err(|error| error.on_page_index(index))?;
     }
     Ok(())
 }
@@ -459,7 +524,15 @@ mod tests {
                 CanvasCommand::DrawGlyphRun { run } => {
                     Some((run.origin.x().as_pt(), run.origin.y().as_pt()))
                 }
-                _ => None,
+                CanvasCommand::SetDocumentInfo(_)
+                | CanvasCommand::StartPage(_)
+                | CanvasCommand::FinishPage
+                | CanvasCommand::FillPath { .. }
+                | CanvasCommand::StrokePath { .. }
+                | CanvasCommand::DrawImage { .. }
+                | CanvasCommand::AnnotateLink { .. }
+                | CanvasCommand::PushTransform { .. }
+                | CanvasCommand::PopTransform => None,
             })
             .collect()
     }
@@ -471,7 +544,15 @@ mod tests {
                 CanvasCommand::DrawGlyphRun { run } => {
                     Some((run.text.clone(), run.origin.y().as_pt()))
                 }
-                _ => None,
+                CanvasCommand::SetDocumentInfo(_)
+                | CanvasCommand::StartPage(_)
+                | CanvasCommand::FinishPage
+                | CanvasCommand::FillPath { .. }
+                | CanvasCommand::StrokePath { .. }
+                | CanvasCommand::DrawImage { .. }
+                | CanvasCommand::AnnotateLink { .. }
+                | CanvasCommand::PushTransform { .. }
+                | CanvasCommand::PopTransform => None,
             })
             .collect()
     }
@@ -1151,7 +1232,15 @@ mod tests {
                 CanvasCommand::DrawGlyphRun { run } => {
                     Some((run.origin.x().as_pt(), run.origin.y().as_pt()))
                 }
-                _ => None,
+                CanvasCommand::SetDocumentInfo(_)
+                | CanvasCommand::StartPage(_)
+                | CanvasCommand::FinishPage
+                | CanvasCommand::FillPath { .. }
+                | CanvasCommand::StrokePath { .. }
+                | CanvasCommand::DrawImage { .. }
+                | CanvasCommand::AnnotateLink { .. }
+                | CanvasCommand::PushTransform { .. }
+                | CanvasCommand::PopTransform => None,
             })
         };
         let (first_x, first_y) = origin(&pages[0]).unwrap();

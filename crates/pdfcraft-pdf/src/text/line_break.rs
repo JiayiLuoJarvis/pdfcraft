@@ -566,8 +566,15 @@ fn emit_line<T: Copy>(
                 reason = "pack_lines emits hard breaks as line ends, not as span contents"
             )]
             Atom::Hard { .. } => unreachable!("hard breaks are not emitted inside a line"),
-            Atom::Blank { width, payload, .. } => {
-                segs.push(Seg::Blank { width, payload });
+            Atom::Blank {
+                width: blank_width,
+                payload,
+                ..
+            } => {
+                segs.push(Seg::Blank {
+                    width: blank_width,
+                    payload,
+                });
                 index += 1;
             }
             Atom::Ink { group, cluster, .. } => {
@@ -584,7 +591,7 @@ fn emit_line<T: Copy>(
                             last = next_cluster;
                             index += 1;
                         }
-                        _ => break,
+                        Atom::Hard { .. } | Atom::Ink { .. } | Atom::Blank { .. } => break,
                     }
                 }
                 segs.push(Seg::Glyphs {
@@ -920,7 +927,7 @@ mod tests {
         );
 
         let hard = ClusteredText::new("你\n你好");
-        let broken = break_lines(
+        let hard_broken = break_lines(
             &hard,
             LineBudget {
                 first: pos(1.0),
@@ -930,7 +937,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            broken
+            hard_broken
                 .iter()
                 .map(|line| line.text().to_owned())
                 .collect::<Vec<_>>(),

@@ -171,6 +171,12 @@ enum PlacedChild {
     },
 }
 
+struct DirectChoice {
+    layout: LayoutEvaluation,
+    degraded: bool,
+    draft: PageDraft,
+}
+
 #[derive(Clone)]
 struct HeadPlan {
     base_node_ids: BTreeSet<NodeId>,
@@ -602,9 +608,11 @@ impl<'a, O: PageOracle> Context<'a, O> {
             &best.retained,
             &kinds,
             best.overflow.clone(),
-            layout,
-            degraded,
-            best.draft.clone(),
+            DirectChoice {
+                layout,
+                degraded,
+                draft: best.draft.clone(),
+            },
         ))
     }
 
@@ -788,9 +796,7 @@ impl<'a, O: PageOracle> Context<'a, O> {
         retained: &[NodeId],
         kinds: &HashMap<NodeId, ChildKind>,
         overflow: Option<OverflowCut>,
-        direct_layout: LayoutEvaluation,
-        direct_degraded: bool,
-        direct_draft: PageDraft,
+        direct: DirectChoice,
     ) -> HeadPlan {
         let mut placed = Vec::new();
         for child_id in retained {
@@ -831,9 +837,9 @@ impl<'a, O: PageOracle> Context<'a, O> {
             placed,
             units,
             overflow,
-            direct_layout: Some(direct_layout),
-            direct_degraded,
-            direct_draft: Some(direct_draft),
+            direct_layout: Some(direct.layout),
+            direct_degraded: direct.degraded,
+            direct_draft: Some(direct.draft),
         }
     }
 

@@ -93,11 +93,11 @@ fn v5_stdcf_declares_length_32() {
     // cannot false-positive.
     let enc_start = out
         .windows(8)
-        .position(|window| window == b"/Encrypt")
+        .position(|bytes| bytes == b"/Encrypt")
         .expect("Encrypt present");
     let enc_end = out[enc_start..]
         .windows(7)
-        .position(|window| window == b"endobj")
+        .position(|bytes| bytes == b"endobj")
         .map_or(out.len(), |offset| enc_start + offset);
     let enc_dict = &out[enc_start..enc_end];
     assert!(
@@ -108,7 +108,7 @@ fn v5_stdcf_declares_length_32() {
     // (writer emits `/ID [` with a space; allow either spacing).
     let id_pos = out
         .windows(3)
-        .position(|window| window == b"/ID")
+        .position(|bytes| bytes == b"/ID")
         .expect("trailer must carry /ID");
     let after_id = &out[id_pos + 3..];
     let bracket = after_id

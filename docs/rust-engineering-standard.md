@@ -87,7 +87,7 @@ cargo deny check advisories licenses bans sources
 | STY-11 | 类型推断不跨越函数边界去猜。读者需要猜才能知道类型的 `let`、`collect()`、`parse()` 写出类型。 | G#dont-overuse-type-inference | 评审 |
 | STY-12 | 组合子链超过三四步、或要在链里处理错误时，改写成 `for` 循环。 | G#dont-use-iterator-combinator-chains… | 评审 |
 | STY-13 | 拼字符串用 `format!` / `write!`，不用 `+` 和 `push_str(&format!(..))`。 | G#prefer-format--write… | `lint:clippy::string_add`、`lint:clippy::format_push_string` |
-| STY-14 | 函数参数不超过 7 个。超过就用命名字段的 Options struct。 | G#options-structs…；CL too_many_arguments | `lint:clippy::too_many_arguments`。目标阈值是默认 7；`clippy.toml` 暂留 8，因为它立刻作用于现有门禁，生产 12 处清完后删掉该行（§16 第 5 步） |
+| STY-14 | 函数参数不超过 7 个。超过就用命名字段的 Options struct。 | G#options-structs…；CL too_many_arguments | `lint:clippy::too_many_arguments`。阈值是 clippy 默认的 7 |
 | STY-15 | 模式里不写 `ref` / `ref mut`，靠绑定模式。不写 `field: _`，用 `..`。完全绑定的 struct 模式不写 `..`。 | SG；CL | `lint:clippy::ref_patterns`、`lint:clippy::unneeded_field_pattern`、`lint:clippy::rest_pat_in_fully_bound_structs` |
 | STY-16 | 不写不必要的生命周期。路径里省略的生命周期写成 `'_`。 | API；rust_2018_idioms | `lint:rust_2018_idioms`、`lint:unused_lifetimes`、`lint:single_use_lifetimes`、`lint:redundant_lifetimes` |
 | STY-17 | 一个 crate 内不同模块形态一致：目录模块用 `mod.rs`。 | 本仓库现状（模块 DAG 脚本依赖固定路径） | `lint:clippy::self_named_module_files` |

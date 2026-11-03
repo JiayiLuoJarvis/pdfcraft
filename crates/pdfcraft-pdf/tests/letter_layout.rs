@@ -138,7 +138,16 @@ fn runs(page: &RecordedPage) -> Vec<GlyphSample> {
                 x: run.origin.x().as_pt(),
                 y: run.origin.y().as_pt(),
             }),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -208,7 +217,16 @@ fn confirmation_letter_records_body_table_image_and_footer() {
         .iter()
         .filter_map(|op| match op {
             CanvasCommand::DrawImage { image, rect } => Some((image, rect)),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect();
     assert_eq!(images.len(), 1);

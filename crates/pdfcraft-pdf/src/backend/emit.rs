@@ -182,7 +182,10 @@ fn draw_marks(surface: &mut Surface<'_>, marks: &[Mark], depth: &mut usize) -> R
                 surface.pop();
                 *depth = depth.saturating_sub(1);
             }
-            mark => draw_mark(surface, mark)?,
+            mark @ (Mark::Fill { .. }
+            | Mark::Stroke { .. }
+            | Mark::Glyphs { .. }
+            | Mark::Image { .. }) => draw_mark(surface, mark)?,
         }
     }
     Ok(())
@@ -521,8 +524,8 @@ mod tests {
         canvas.start_page(A4).unwrap();
         canvas.draw_glyph_run(&run).unwrap();
         canvas.finish_page().unwrap();
-        let bytes = canvas.finish().unwrap();
-        assert!(bytes.starts_with(b"%PDF"));
+        let pdf = canvas.finish().unwrap();
+        assert!(pdf.starts_with(b"%PDF"));
     }
 
     #[test]
@@ -562,8 +565,8 @@ mod tests {
             .unwrap();
         canvas.draw_glyph_run(&run).unwrap();
         canvas.finish_page().unwrap();
-        let bytes = canvas.finish().unwrap();
-        let text = String::from_utf8_lossy(&bytes);
+        let pdf = canvas.finish().unwrap();
+        let text = String::from_utf8_lossy(&pdf);
         // The number is the 1000-unit hmtx delta, not advance_norm.
         // krilla writes it before the next glyph, so the run has two glyphs.
         let adjustment = tj_adjustment(&text);

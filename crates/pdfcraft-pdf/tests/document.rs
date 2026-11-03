@@ -455,7 +455,16 @@ fn runs(page: &RecordedPage) -> Vec<GlyphSample> {
                 width: run.glyphs.iter().map(|g| g.advance_norm).sum::<f32>()
                     * run.font_size.as_pt(),
             }),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -709,7 +718,16 @@ fn stack_style_is_inherited_and_text_at_can_override() {
         .iter()
         .filter_map(|op| match op {
             CanvasCommand::DrawGlyphRun { run } => Some(run),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect();
     assert_eq!(glyph_runs[0].font_size.as_pt().to_bits(), 14.0f32.to_bits());
@@ -916,10 +934,10 @@ fn band_fn_calls_in_page_order_header_then_footer() {
         return;
     }
     let log = Arc::new(Mutex::new(Vec::new()));
-    let record = |log: Arc<Mutex<Vec<(u32, &'static str)>>>, side: &'static str| {
-        let log = Arc::clone(&log);
+    let record = |shared: Arc<Mutex<Vec<(u32, &'static str)>>>, side: &'static str| {
+        let calls = Arc::clone(&shared);
         BandFn::from_fn(move |query| {
-            log.lock().unwrap().push((query.number.get(), side));
+            calls.lock().unwrap().push((query.number.get(), side));
             Ok(Some(left_band(side)))
         })
     };
@@ -937,7 +955,7 @@ fn band_fn_calls_in_page_order_header_then_footer() {
 
     let header_only = Arc::new(Mutex::new(Vec::new()));
     let header_log = Arc::clone(&header_only);
-    let _rendered = two_pages(
+    let _header_only_pages = two_pages(
         Some(BandFn::from_fn(move |query| {
             header_log.lock().unwrap().push(query.number.get());
             Ok(None)
@@ -977,9 +995,9 @@ fn band_fn_error_is_located() {
     );
 
     let mut failure = Error::band_fn("boom");
-    let mut at = Location::default();
-    at.page = Some(7);
-    failure.at = Some(at);
+    let mut footer_at = Location::default();
+    footer_at.page = Some(7);
+    failure.at = Some(footer_at);
     let footer_err = font_pages(
         PageSize::A4,
         SectionSpec {
@@ -991,10 +1009,10 @@ fn band_fn_error_is_located() {
     )
     .unwrap_err();
     assert_eq!(footer_err.first().kind, ErrorKind::BandFn);
-    let at = footer_err.first().at.unwrap();
-    assert_eq!(at.section, Some(0));
-    assert_eq!(at.page, Some(7));
-    assert_eq!(at.region, Some(Region::Footer));
+    let footer_loc = footer_err.first().at.unwrap();
+    assert_eq!(footer_loc.section, Some(0));
+    assert_eq!(footer_loc.page, Some(7));
+    assert_eq!(footer_loc.region, Some(Region::Footer));
     assert_eq!(
         StdError::source(footer_err.first()).unwrap().to_string(),
         "boom"
@@ -1307,7 +1325,17 @@ fn band_text_marks_keep_fixed_lines() {
         .iter()
         .filter_map(|command| match command {
             CanvasCommand::DrawGlyphRun { run } if run.text != "A" => Some(run),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect();
     assert_eq!(commands[0].font_size.as_pt().to_bits(), 9.0f32.to_bits());
@@ -2045,8 +2073,8 @@ fn each_font_key_keeps_its_own_face() {
 
     let bytes = font_bytes();
     let mut fonts = FontRegistry::new();
-    let family = |bytes: Vec<u8>| FontFamily {
-        regular: FontFace::new(bytes, 0),
+    let family = |face_bytes: Vec<u8>| FontFamily {
+        regular: FontFace::new(face_bytes, 0),
         bold: None,
         italic: None,
         bold_italic: None,
@@ -2209,7 +2237,16 @@ fn image_rects(page: &RecordedPage) -> Vec<(u32, u32, u32, Rect)> {
                 image.pixel_height,
                 *rect,
             )),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -2342,7 +2379,7 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     ));
 
     let mut empty = Resources::default();
-    let _image = empty.add_image(Vec::new(), ImageFormat::Png);
+    let _empty = empty.add_image(Vec::new(), ImageFormat::Png);
     let empty = render(PageSize::A4, empty, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -2392,11 +2429,15 @@ fn list_item_and_overwide_image_fail() {
     );
 
     let mut wide_resources = Resources::default();
-    let logo = wide_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let wide_logo = wide_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
     let wide = render(
         PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
         wide_resources,
-        vec![sec(vec![image_block(logo, Some(101.0), Alignment::Start)])],
+        vec![sec(vec![image_block(
+            wide_logo,
+            Some(101.0),
+            Alignment::Start,
+        )])],
     )
     .err()
     .unwrap();
@@ -2679,14 +2720,19 @@ fn assert_behind_paths(ops: &[CanvasCommand]) {
     else {
         unreachable!();
     };
-    assert_eq!(paint.color(), Color::rgba(200, 0, 0, 64));
-    assert_eq!(stroke.width().as_pt().to_bits(), 0.8f32.to_bits());
+    assert_eq!(paint.color(), Color::rgba(200, 0, 0, 64), "behind stroke");
+    assert_eq!(
+        stroke.width().as_pt().to_bits(),
+        0.8f32.to_bits(),
+        "behind stroke width"
+    );
     assert_eq!(
         path.verbs(),
         &[
             PathVerb::MoveTo(Point::try_pt(0.0, 0.0).unwrap()),
             PathVerb::LineTo(Point::try_pt(40.0, 40.0).unwrap()),
-        ]
+        ],
+        "behind stroke path"
     );
     let CanvasCommand::StrokePath {
         path: frame,
@@ -2696,8 +2742,12 @@ fn assert_behind_paths(ops: &[CanvasCommand]) {
     else {
         unreachable!();
     };
-    assert_eq!(frame_paint.color(), Color::rgb(0, 0, 0));
-    assert_eq!(frame_stroke.width().as_pt().to_bits(), 0.5f32.to_bits());
+    assert_eq!(frame_paint.color(), Color::rgb(0, 0, 0), "behind frame");
+    assert_eq!(
+        frame_stroke.width().as_pt().to_bits(),
+        0.5f32.to_bits(),
+        "behind frame width"
+    );
     assert_eq!(
         frame.verbs(),
         &[
@@ -2706,7 +2756,8 @@ fn assert_behind_paths(ops: &[CanvasCommand]) {
             PathVerb::LineTo(Point::try_pt(14.0, 18.0).unwrap()),
             PathVerb::LineTo(Point::try_pt(4.0, 18.0).unwrap()),
             PathVerb::Close,
-        ]
+        ],
+        "behind frame path"
     );
 }
 
@@ -2726,25 +2777,37 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
     else {
         unreachable!();
     };
-    assert_eq!(filled, stroked);
-    assert_eq!(fill_paint.color(), Color::rgba(200, 0, 0, 40));
-    assert_eq!(stroke_paint.color(), Color::rgb(200, 0, 0));
-    assert_eq!(ellipse_stroke.width().as_pt().to_bits(), 2.0f32.to_bits());
+    assert_eq!(filled, stroked, "ellipse fill and stroke share a path");
+    assert_eq!(
+        fill_paint.color(),
+        Color::rgba(200, 0, 0, 40),
+        "ellipse fill"
+    );
+    assert_eq!(
+        stroke_paint.color(),
+        Color::rgb(200, 0, 0),
+        "ellipse stroke"
+    );
+    assert_eq!(
+        ellipse_stroke.width().as_pt().to_bits(),
+        2.0f32.to_bits(),
+        "ellipse stroke width"
+    );
     let (cx, cy, rx, ry) = ellipse_center_radii(filled).unwrap();
-    assert_eq!(cx.to_bits(), 50.0f32.to_bits());
-    assert_eq!(cy.to_bits(), 55.0f32.to_bits());
-    assert_eq!(rx.to_bits(), 10.0f32.to_bits());
-    assert_eq!(ry.to_bits(), 5.0f32.to_bits());
+    assert_eq!(cx.to_bits(), 50.0f32.to_bits(), "ellipse cx");
+    assert_eq!(cy.to_bits(), 55.0f32.to_bits(), "ellipse cy");
+    assert_eq!(rx.to_bits(), 10.0f32.to_bits(), "ellipse rx");
+    assert_eq!(ry.to_bits(), 5.0f32.to_bits(), "ellipse ry");
 
     let CanvasCommand::PushTransform { affine } = &ops[7] else {
         unreachable!();
     };
-    assert!(pt_near(affine.a, 0.0));
-    assert!(pt_near(affine.b, -1.0));
-    assert!(pt_near(affine.c, 1.0));
-    assert!(pt_near(affine.d, 0.0));
-    assert!(pt_near(affine.tx, 22.0));
-    assert!(pt_near(affine.ty, 2.0));
+    assert!(pt_near(affine.a, 0.0), "rotated a");
+    assert!(pt_near(affine.b, -1.0), "rotated b");
+    assert!(pt_near(affine.c, 1.0), "rotated c");
+    assert!(pt_near(affine.d, 0.0), "rotated d");
+    assert!(pt_near(affine.tx, 22.0), "rotated tx");
+    assert!(pt_near(affine.ty, 2.0), "rotated ty");
     let CanvasCommand::FillPath {
         path: unrotated,
         paint: turned_paint,
@@ -2752,7 +2815,11 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
     else {
         unreachable!();
     };
-    assert_eq!(turned_paint.color(), Color::rgba(0, 0, 255, 128));
+    assert_eq!(
+        turned_paint.color(),
+        Color::rgba(0, 0, 255, 128),
+        "rotated fill"
+    );
     assert_eq!(
         unrotated.verbs(),
         &[
@@ -2761,9 +2828,13 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
             PathVerb::LineTo(Point::try_pt(30.0, 20.0).unwrap()),
             PathVerb::LineTo(Point::try_pt(10.0, 20.0).unwrap()),
             PathVerb::Close,
-        ]
+        ],
+        "rotated fill path"
     );
-    assert!(matches!(ops[9], CanvasCommand::PopTransform));
+    assert!(
+        matches!(ops[9], CanvasCommand::PopTransform),
+        "rotation is popped"
+    );
 
     let CanvasCommand::StrokePath { path: flat, .. } = &ops[10] else {
         unreachable!();
@@ -2773,14 +2844,15 @@ fn assert_front_paths(page: &RecordedPage, ops: &[CanvasCommand]) {
         &[
             PathVerb::MoveTo(Point::try_pt(1.0, 2.0).unwrap()),
             PathVerb::LineTo(Point::try_pt(8.0, 9.0).unwrap()),
-        ]
+        ],
+        "flat stroke path"
     );
     let seal = runs(page)
         .into_iter()
         .find(|run| run.text == "SEAL")
         .unwrap();
-    assert!(pt_near(seal.x, 12.0));
-    assert!(pt_near(seal.y, 30.0 + baseline()));
+    assert!(pt_near(seal.x, 12.0), "seal x");
+    assert!(pt_near(seal.y, 30.0 + baseline()), "seal y");
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -3295,7 +3367,16 @@ fn links(page: &RecordedPage) -> Vec<LinkHit> {
                 height: rect.size().height().as_pt(),
                 target: target.uri_str().unwrap_or("").to_owned(),
             }),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -4241,14 +4322,14 @@ fn cell_rich_taller_than_frame_does_not_continue() {
             }],
         )]),
     );
-    let error = list.err().unwrap();
+    let list_error = list.err().unwrap();
     assert!(
         matches!(
-            error.first().kind.clone(),
+            list_error.first().kind.clone(),
             ErrorKind::UnsplittableTallerThanFrame { height, avail }
                 if pt_near(height, line() * 2.0) && pt_near(avail, line())
         ),
-        "{error:?}"
+        "{list_error:?}"
     );
 }
 
@@ -4287,7 +4368,7 @@ fn cell_page(content: Vec<CellBlock<()>>) -> RecordedPage {
     )
     .unwrap()
     .pages();
-    assert_eq!(pages.len(), 1);
+    assert_eq!(pages.len(), 1, "cell page");
     pages.into_iter().next().unwrap()
 }
 
@@ -4306,34 +4387,43 @@ fn cell_add_matches_sugar() {
         .iter()
         .find_map(|op| match op {
             CanvasCommand::DrawGlyphRun { run } => Some(run),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .unwrap();
     assert_eq!(drawn.text, "Fee 12");
     assert_eq!(drawn.font_size.as_pt().to_bits(), 9.0f32.to_bits());
 
-    let page = cell_page(vec![CellBlock::HLine(HLineSpec {
+    let hline_page = cell_page(vec![CellBlock::HLine(HLineSpec {
         color: Color::rgb(9, 9, 9),
         ..HLineSpec::default()
     })]);
-    assert_eq!(stroke_samples(&page)[0].color, Color::rgb(9, 9, 9));
+    assert_eq!(stroke_samples(&hline_page)[0].color, Color::rgb(9, 9, 9));
 
-    let page = cell_page(vec![CellBlock::Spacer(nn(12.0))]);
-    assert!(page.ops().is_empty());
+    let spacer_page = cell_page(vec![CellBlock::Spacer(nn(12.0))]);
+    assert!(spacer_page.ops().is_empty());
 
-    let page = cell_page(vec![CellBlock::List(ListSpec {
+    let bullet_page = cell_page(vec![CellBlock::List(ListSpec {
         items: vec![plain_item(vec![para("a")])],
         ..ListSpec::default()
     })]);
-    assert!(texts(&page).iter().any(|text| text == "a"));
+    assert!(texts(&bullet_page).iter().any(|text| text == "a"));
 
-    let page = cell_page(vec![CellBlock::List(ListSpec {
+    let roman_page = cell_page(vec![CellBlock::List(ListSpec {
         kind: ListKind::Ordered(Numbering::UpperRoman),
         start: NonZeroU32::new(4).unwrap(),
         items: vec![plain_item(vec![para("a")])],
         ..ListSpec::default()
     })]);
-    assert!(texts(&page).iter().any(|text| text == "IV."));
+    assert!(texts(&roman_page).iter().any(|text| text == "IV."));
 }
 
 #[cfg(feature = "backend-krilla")]

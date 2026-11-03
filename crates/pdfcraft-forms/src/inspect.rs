@@ -77,7 +77,11 @@ impl WidgetSnap {
     pub(crate) fn info(&self) -> FieldInfo {
         let options = match self.field_type {
             FieldType::ListBox | FieldType::ComboBox => Some(self.options.clone()),
-            _ => None,
+            FieldType::Text
+            | FieldType::CheckBox
+            | FieldType::Signature
+            | FieldType::RadioButton
+            | FieldType::PushButton => None,
         };
         FieldInfo {
             name: self.name.clone(),
@@ -174,6 +178,48 @@ impl WidgetSnap {
     }
 }
 
+fn open_error(err: lopdf::Error) -> Error {
+    match err {
+        err @ lopdf::Error::Decryption(_) => Error::from(ErrorKind::Encrypted).with_source(err),
+        err @ (lopdf::Error::Unimplemented(_)
+        | lopdf::Error::ObjectType { .. }
+        | lopdf::Error::DictType { .. }
+        | lopdf::Error::AlreadyEncrypted
+        | lopdf::Error::CharacterEncoding
+        | lopdf::Error::Decompress(_)
+        | lopdf::Error::Parse(_)
+        | lopdf::Error::DictKey(_)
+        | lopdf::Error::InvalidInlineImage(_)
+        | lopdf::Error::InvalidOutline(_)
+        | lopdf::Error::InvalidStream(_)
+        | lopdf::Error::InvalidObjectStream(_)
+        | lopdf::Error::InvalidOffset(_)
+        | lopdf::Error::IO(_)
+        | lopdf::Error::NoOutline
+        | lopdf::Error::NotEncrypted
+        | lopdf::Error::InvalidPassword
+        | lopdf::Error::MissingXrefEntry
+        | lopdf::Error::ObjectNotFound(_)
+        | lopdf::Error::ReferenceCycle(_)
+        | lopdf::Error::PageNumberNotFound(_)
+        | lopdf::Error::NumericCast(_)
+        | lopdf::Error::ReferenceLimit
+        | lopdf::Error::RecursionLimit
+        | lopdf::Error::TextStringDecode
+        | lopdf::Error::Xref(_)
+        | lopdf::Error::IndirectObject { .. }
+        | lopdf::Error::ObjectIdMismatch
+        | lopdf::Error::Syntax(_)
+        | lopdf::Error::ToUnicodeCMap(_)
+        | lopdf::Error::TryFromInt(_)
+        | lopdf::Error::UnsupportedSecurityHandler(_)
+        | lopdf::Error::InvalidEncodingDifferenceCode { .. }
+        | lopdf::Error::InvalidEncodingDifferenceGlyph { .. }) => {
+            Error::from(ErrorKind::NotAPdf).with_source(err)
+        }
+    }
+}
+
 /// Lists `AcroForm` widgets in `pdf`.
 ///
 /// Each widget on a page becomes one [`FieldInfo`]. Widgets that have no `/T`
@@ -193,10 +239,7 @@ pub fn list_fields(pdf: &[u8]) -> Result<Vec<FieldInfo>> {
 
 impl PdfDoc {
     pub(crate) fn open(pdf: &[u8]) -> Result<Self> {
-        let doc = Document::load_mem(pdf).map_err(|err| match err {
-            lopdf::Error::Decryption(_) => Error::from(ErrorKind::Encrypted).with_source(err),
-            other => Error::from(ErrorKind::NotAPdf).with_source(other),
-        })?;
+        let doc = Document::load_mem(pdf).map_err(open_error)?;
         if doc.is_encrypted() {
             return Err(ErrorKind::Encrypted.into());
         }
@@ -257,7 +300,18 @@ impl PdfDoc {
         };
         match self.lookup(annots.clone()) {
             Lookup::Found(Object::Array(items)) => items,
-            _ => Vec::new(),
+            Lookup::Found(
+                Object::Null
+                | Object::Boolean(_)
+                | Object::Integer(_)
+                | Object::Real(_)
+                | Object::Name(_)
+                | Object::String(_, _)
+                | Object::Dictionary(_)
+                | Object::Stream(_)
+                | Object::Reference(_),
+            )
+            | Lookup::Missing => Vec::new(),
         }
     }
 
@@ -314,7 +368,18 @@ impl PdfDoc {
         let mut fonts = match resources.get(b"Font").ok().cloned() {
             Some(obj) => match self.lookup(obj) {
                 Lookup::Found(Object::Dictionary(dict)) => dict,
-                _ => Dictionary::new(),
+                Lookup::Found(
+                    Object::Null
+                    | Object::Boolean(_)
+                    | Object::Integer(_)
+                    | Object::Real(_)
+                    | Object::Name(_)
+                    | Object::String(_, _)
+                    | Object::Array(_)
+                    | Object::Stream(_)
+                    | Object::Reference(_),
+                )
+                | Lookup::Missing => Dictionary::new(),
             },
             None => Dictionary::new(),
         };
@@ -413,7 +478,18 @@ impl PdfDoc {
         };
         match self.lookup(acro.clone()) {
             Lookup::Found(Object::Dictionary(acro)) => Ok(acro.has(b"XFA")),
-            _ => Ok(false),
+            Lookup::Found(
+                Object::Null
+                | Object::Boolean(_)
+                | Object::Integer(_)
+                | Object::Real(_)
+                | Object::Name(_)
+                | Object::String(_, _)
+                | Object::Array(_)
+                | Object::Stream(_)
+                | Object::Reference(_),
+            )
+            | Lookup::Missing => Ok(false),
         }
     }
 
@@ -434,7 +510,18 @@ impl PdfDoc {
             if let Some(resources) = found.0 {
                 return match self.lookup(resources) {
                     Lookup::Found(Object::Dictionary(dict)) => Ok(dict),
-                    _ => Err(ErrorKind::FlattenFailed {
+                    Lookup::Found(
+                        Object::Null
+                        | Object::Boolean(_)
+                        | Object::Integer(_)
+                        | Object::Real(_)
+                        | Object::Name(_)
+                        | Object::String(_, _)
+                        | Object::Array(_)
+                        | Object::Stream(_)
+                        | Object::Reference(_),
+                    )
+                    | Lookup::Missing => Err(ErrorKind::FlattenFailed {
                         reason: FlattenReason::ResourcesNotDictionary,
                     }
                     .into()),
@@ -476,8 +563,8 @@ impl PdfDoc {
             match self.lookup(item) {
                 Lookup::Found(Object::Array(pair)) => {
                     for part in pair {
-                        if let Lookup::Found(obj) = self.lookup(part) {
-                            push_option(&mut out, &obj);
+                        if let Lookup::Found(found) = self.lookup(part) {
+                            push_option(&mut out, &found);
                         }
                     }
                 }
@@ -598,7 +685,12 @@ fn collect_refs(obj: &Object, out: &mut Vec<ObjectId>) -> Result<()> {
                     stack.push((value, depth + 1));
                 }
             }
-            _ => {}
+            Object::Null
+            | Object::Boolean(_)
+            | Object::Integer(_)
+            | Object::Real(_)
+            | Object::Name(_)
+            | Object::String(_, _) => {}
         }
     }
     Ok(())
@@ -634,7 +726,12 @@ fn refs_dangle(obj: &Object, seen: &BTreeSet<ObjectId>) -> Result<bool> {
                     stack.push((value, depth + 1));
                 }
             }
-            _ => {}
+            Object::Null
+            | Object::Boolean(_)
+            | Object::Integer(_)
+            | Object::Real(_)
+            | Object::Name(_)
+            | Object::String(_, _) => {}
         }
     }
     Ok(false)

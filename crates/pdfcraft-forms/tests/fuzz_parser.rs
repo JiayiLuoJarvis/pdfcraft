@@ -228,11 +228,11 @@ fn mutated_seed_is_rejected() {
         }),
         ..FillOptions::default()
     };
-    let err = fill_and_flatten(&read_seed("f01-basic-form.pdf"), &text_field(), &options)
+    let font_err = fill_and_flatten(&read_seed("f01-basic-form.pdf"), &text_field(), &options)
         .expect_err("n01-not-a-font.bin mutant must fail");
     assert!(
-        matches!(err.kind, ErrorKind::FontNotConfigured { .. }),
+        matches!(font_err.kind, ErrorKind::FontNotConfigured { .. }),
         "mutated font input, got {:?}",
-        err.kind
+        font_err.kind
     );
 }

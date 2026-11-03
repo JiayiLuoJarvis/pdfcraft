@@ -687,7 +687,17 @@ mod tests {
 
         match &rec.commands()[0] {
             CanvasCommand::SetDocumentInfo(recorded) => assert_eq!(recorded, &info),
-            other => panic!("expected document info, got {other:?}"),
+            other @ (CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform) => {
+                panic!("expected document info, got {other:?}")
+            }
         }
 
         let CanvasCommand::FillPath { path: filled, .. } = &rec.commands()[2] else {
@@ -735,7 +745,7 @@ mod tests {
         let mut rec = RecordingCanvas::new();
         rec.start_page(A4)?;
         assert!(matches!(
-            LinkTarget::uri("").map_err(|error| error.kind),
+            LinkTarget::uri("").map_err(|rejected| rejected.kind),
             Err(ErrorKind::EmptyLink)
         ));
         assert!(matches!(rec.commands(), [CanvasCommand::StartPage(_)]));

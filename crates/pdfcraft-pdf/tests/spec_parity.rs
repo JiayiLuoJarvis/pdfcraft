@@ -45,7 +45,16 @@ fn texts(page: &pdfcraft_pdf::RecordedPage) -> Vec<&str> {
         .iter()
         .filter_map(|command| match command {
             CanvasCommand::DrawGlyphRun { run } => Some(run.text.as_str()),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -55,7 +64,16 @@ fn links(page: &pdfcraft_pdf::RecordedPage) -> Vec<&str> {
         .iter()
         .filter_map(|command| match command {
             CanvasCommand::AnnotateLink { target, .. } => target.uri_str(),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -137,7 +155,17 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         .iter()
         .find_map(|command| match command {
             CanvasCommand::DrawGlyphRun { run } if run.text == "SEAL" => Some(run),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .unwrap();
     assert!(pt_near(seal.origin.x().as_pt(), 430.0));

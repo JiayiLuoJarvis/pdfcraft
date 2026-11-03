@@ -131,7 +131,12 @@ impl Remapper<'_> {
                 }))
             }
             Object::Reference(id) => Ok(Object::Reference(self.import_ref(dest, *id)?)),
-            other => Ok(other.clone()),
+            Object::Null
+            | Object::Boolean(_)
+            | Object::Integer(_)
+            | Object::Real(_)
+            | Object::Name(_)
+            | Object::String(_, _) => Ok(object.clone()),
         }
     }
 

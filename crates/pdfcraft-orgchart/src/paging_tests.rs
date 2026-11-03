@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use crate::captions::CueSide;
 use crate::display::{build_display, ratio_facts, LineKind};
 use crate::ids::NodeId;
-use crate::layout::{FamilyRowMetrics, LayoutEngine, WrappedEngine};
+use crate::layout::{FamilyRowMetrics, LayoutEngine, LayoutInput, WrappedEngine};
 use crate::measure::{
     build_node_boxes, promote_to_page_subject, FontMetrics, InboxNode, Measurer, NodeBox,
     WrappedLine,
@@ -195,16 +195,8 @@ fn count_i32(len: usize) -> i32 {
 }
 
 impl LayoutEngine for FakeEngine {
-    fn layout(
-        &self,
-        boxes: &[NodeBox],
-        _edges: &[EdgeRef],
-        _node_order: &[NodeId],
-        _cols: usize,
-        _node_width_mm: f64,
-        _row_gap_mm: f64,
-        _printable_width_mm: f64,
-    ) -> Result<LayoutResult, Error> {
+    fn layout(&self, input: &LayoutInput<'_>) -> Result<LayoutResult, Error> {
+        let boxes = input.boxes;
         if self.limit >= 0 && count_i32(boxes.len()) <= self.limit {
             let mut nodes = Vec::new();
             let mut x = 0.0;
@@ -854,7 +846,15 @@ fn place_chart(boxes: &[NodeBox], pairs: &[(&str, &str)], cols: usize) -> Layout
         .collect();
     let order: Vec<NodeId> = boxes.iter().map(|box_| box_.id).collect();
     WrappedEngine
-        .layout(boxes, &edges, &order, cols, 42.0, ROW_GAP_MM, 800.0)
+        .layout(&LayoutInput {
+            boxes,
+            edges: &edges,
+            node_order: &order,
+            cols,
+            node_width_mm: 42.0,
+            row_gap_mm: ROW_GAP_MM,
+            printable_width_mm: 800.0,
+        })
         .expect("layout")
 }
 
@@ -1099,10 +1099,14 @@ fn a_tall_chain_stays_portrait_and_a_deep_chain_overlaps() {
         header_height_mm: 10.0,
         footer_height_mm: 10.0,
     };
-    let pages = chain_pages(&deep, geometry, 20.0);
-    assert!(pages.len() < 8, "deep chain pages {}", pages.len());
-    assert!(pages.len() >= 2);
-    let ids = id_sets(&pages);
+    let deep_pages = chain_pages(&deep, geometry, 20.0);
+    assert!(
+        deep_pages.len() < 8,
+        "deep chain pages {}",
+        deep_pages.len()
+    );
+    assert!(deep_pages.len() >= 2);
+    let ids = id_sets(&deep_pages);
     for pair in ids.windows(2) {
         assert!(pair[0].intersection(&pair[1]).next().is_some());
     }

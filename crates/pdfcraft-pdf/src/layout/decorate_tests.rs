@@ -430,13 +430,13 @@ fn band_mark_stroke_outset_checks_bottom_and_allows_the_exact_edge() {
         })),
         ..Decorations::none()
     };
-    let (result, _) = render(
+    let (kept, _) = render(
         text("A", &style),
         &mut fonts,
         margins(30.0, 0.0, 0.0),
         &exact,
     );
-    result.unwrap();
+    kept.unwrap();
 }
 
 #[test]
@@ -610,7 +610,7 @@ fn layer_ignores_alignment_and_page_bounds() {
     let b = metrics(&fonts, &style).baseline.as_pt();
     let centered = Style {
         align: TextAlign::Center,
-        ..style.clone()
+        ..style
     };
     let decorations = Decorations {
         front: Some(layer("S", 190.0, 395.0, &centered)),

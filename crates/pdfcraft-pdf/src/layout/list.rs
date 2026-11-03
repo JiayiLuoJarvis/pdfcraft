@@ -34,7 +34,7 @@ impl MarkerKind {
             MarkerKind::UpperRoman => roman(number)?,
             MarkerKind::LowerRoman => roman(number)?.to_ascii_lowercase(),
         };
-        Ok(body + ".")
+        Ok(format!("{body}."))
     }
 }
 

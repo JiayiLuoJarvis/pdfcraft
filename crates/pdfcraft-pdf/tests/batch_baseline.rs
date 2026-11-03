@@ -65,9 +65,9 @@ fn time_sample(name: &str, build: impl FnOnce() -> Result<Rendered>) -> Result<(
     let layout_ms = start.elapsed().as_secs_f64() * 1000.0;
     let pages = rendered.pages().len();
 
-    let start = Instant::now();
+    let pdf_at = Instant::now();
     let pdf = to_pdf(rendered)?;
-    let pdf_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let pdf_ms = pdf_at.elapsed().as_secs_f64() * 1000.0;
     let after = peak_rss_kib();
 
     println!(

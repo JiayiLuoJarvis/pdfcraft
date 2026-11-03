@@ -296,33 +296,34 @@ fn segment_hits(start: PointMm, end: PointMm, rect: &Rect) -> bool {
 
 fn overlaps_node(rect: &Rect, node: &PlacedNode) -> bool {
     overlaps(
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        node.x,
-        node.y,
-        node.width,
-        node.height,
+        *rect,
+        Rect {
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+        },
     )
 }
 
 fn overlaps_slot(rect: &Rect, slot: &CueSlot) -> bool {
     overlaps(
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        slot.x,
-        slot.y,
-        slot.width,
-        slot.height,
+        *rect,
+        Rect {
+            x: slot.x,
+            y: slot.y,
+            width: slot.width,
+            height: slot.height,
+        },
     )
 }
 
-fn overlaps(ax: f64, ay: f64, aw: f64, ah: f64, bx: f64, by: f64, bw: f64, bh: f64) -> bool {
+fn overlaps(a: Rect, b: Rect) -> bool {
     let eps = FIT_EPSILON_MM;
-    ax + aw > bx + eps && bx + bw > ax + eps && ay + ah > by + eps && by + bh > ay + eps
+    a.x + a.width > b.x + eps
+        && b.x + b.width > a.x + eps
+        && a.y + a.height > b.y + eps
+        && b.y + b.height > a.y + eps
 }
 
 fn separated_y(left: &PlacedNode, right: &PlacedNode) -> bool {
@@ -494,13 +495,13 @@ fn write_overflow_line(
         ));
     }
     let mut lines = box_.lines.clone();
-    let Some(last) = lines.last_mut() else {
+    let Some(tail) = lines.last_mut() else {
         return Err(Error::new(
             ErrorCode::LayoutFailed,
             format!("overflow box {} is missing its reserved line", box_.id),
         ));
     };
-    text.clone_into(&mut last.text);
+    text.clone_into(&mut tail.text);
     Ok(NodeBox {
         lines,
         ..box_.clone()

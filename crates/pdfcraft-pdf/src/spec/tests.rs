@@ -48,7 +48,15 @@ fn texts(rendered: &crate::Rendered) -> Vec<String> {
         .flat_map(crate::canvas::RecordedPage::ops)
         .filter_map(|op| match op {
             CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect()
 }
@@ -60,7 +68,15 @@ fn fonts(rendered: &crate::Rendered) -> Vec<u32> {
         .flat_map(crate::canvas::RecordedPage::ops)
         .filter_map(|op| match op {
             CanvasCommand::DrawGlyphRun { run } => Some(run.font.as_u32()),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect()
 }
@@ -72,7 +88,15 @@ fn targets(rendered: &crate::Rendered) -> Vec<String> {
         .flat_map(crate::canvas::RecordedPage::ops)
         .filter_map(|op| match op {
             CanvasCommand::AnnotateLink { target, .. } => target.uri_str().map(str::to_owned),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect()
 }

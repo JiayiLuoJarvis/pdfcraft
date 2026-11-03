@@ -89,7 +89,15 @@ pub(crate) fn runs(page: &RecordedPage) -> Vec<(String, f32, f32)> {
                 run.origin.x().as_pt(),
                 run.origin.y().as_pt(),
             )),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect()
 }
@@ -109,7 +117,15 @@ pub(crate) fn strokes(page: &RecordedPage) -> Vec<Vec<Option<(f32, f32)>>> {
         .iter()
         .filter_map(|op| match op {
             CanvasCommand::StrokePath { path, .. } => Some(path_points(path)),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect()
 }
@@ -120,7 +136,15 @@ pub(crate) fn fills(page: &RecordedPage) -> Vec<Vec<Option<(f32, f32)>>> {
         .iter()
         .filter_map(|op| match op {
             CanvasCommand::FillPath { path, .. } => Some(path_points(path)),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect()
 }

@@ -306,13 +306,13 @@ fn resolve_run(
             family.regular
         }
     };
-    let decoration = |wanted: bool, metrics: Option<EmOffset>, kind, errors: &mut ErrorBag| {
+    let decoration = |wanted: bool, metrics: Option<EmOffset>, kind, reported: &mut ErrorBag| {
         if !wanted {
             return None;
         }
         let scaled = metrics.and_then(|offset| Decoration::at(offset, paint.font_size));
         if scaled.is_none() {
-            errors.record(Error::from(ErrorKind::MissingDecorationMetrics {
+            reported.record(Error::from(ErrorKind::MissingDecorationMetrics {
                 font: family.regular.as_u32(),
                 decoration: kind,
             }));
@@ -452,7 +452,7 @@ impl AnchorRegistry {
             return None;
         }
         let outline = match outline {
-            Some(OutlineEntry { title, level: _ }) if title.is_empty() => {
+            Some(OutlineEntry { title, .. }) if title.is_empty() => {
                 errors.record(Error::from(ErrorKind::EmptyOutlineTitle));
                 return None;
             }
@@ -468,6 +468,17 @@ impl AnchorRegistry {
         });
         Some(id)
     }
+}
+
+/// Immutable inputs shared by block lowering. Anchors and errors stay separate
+/// so a child can record into its own bag.
+#[derive(Clone, Copy)]
+struct LowerEnv<'a, K: FontKey> {
+    paint: &'a InheritedPaint,
+    fonts: &'a FontTable<K>,
+    doc: DocToken,
+    images: &'a LoweredImages,
+    at: Location,
 }
 
 fn lower_section<K: FontKey + 'static>(
@@ -490,7 +501,14 @@ fn lower_section<K: FontKey + 'static>(
     } = spec;
     let mut errors = ErrorBag::default();
     let seed = InheritedPaint::seed();
-    let nodes = lower_blocks(body, &seed, fonts, doc, images, at, anchors, &mut errors);
+    let env = LowerEnv {
+        paint: &seed,
+        fonts,
+        doc,
+        images,
+        at,
+    };
+    let nodes = lower_blocks(body, &env, anchors, &mut errors);
     let header =
         header.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
     let footer =
@@ -512,14 +530,17 @@ fn lower_section<K: FontKey + 'static>(
 
 fn lower_blocks<K: FontKey>(
     blocks: Vec<Block<K>>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Vec<FlowNode> {
+    let LowerEnv {
+        paint,
+        fonts,
+        doc,
+        images,
+        ..
+    } = *env;
     let mut nodes = Vec::new();
     for block in blocks {
         match block {
@@ -531,13 +552,11 @@ fn lower_blocks<K: FontKey>(
             Block::Spacer(height) => nodes.push(FlowNode::Spacer(SpacerNode { height })),
             Block::PageBreak => nodes.push(FlowNode::PageBreak),
             Block::KeepTogether(children) => {
-                let child = lower_blocks(children, paint, fonts, doc, images, at, anchors, errors);
+                let child = lower_blocks(children, env, anchors, errors);
                 nodes.push(FlowNode::KeepTogether(KeepTogetherNode::Open(child)));
             }
             Block::Anchor { id, outline, child } => {
-                if let Some(node) = lower_anchor_block(
-                    id, outline, *child, paint, fonts, doc, images, at, anchors, errors,
-                ) {
+                if let Some(node) = lower_anchor_block(id, outline, *child, env, anchors, errors) {
                     nodes.push(node);
                 }
             }
@@ -546,27 +565,24 @@ fn lower_blocks<K: FontKey>(
                 children,
             } => {
                 let inner = paint.patch(patch);
-                nodes.extend(lower_blocks(
-                    children, &inner, fonts, doc, images, at, anchors, errors,
-                ));
+                let styled = LowerEnv {
+                    paint: &inner,
+                    ..*env
+                };
+                nodes.extend(lower_blocks(children, &styled, anchors, errors));
             }
             Block::Columns(spec) => {
-                if let Some(node) =
-                    lower_columns(spec, paint, fonts, doc, images, at, anchors, errors)
-                {
+                if let Some(node) = lower_columns(spec, env, anchors, errors) {
                     nodes.push(node);
                 }
             }
             Block::Table(spec) => {
-                if let Some(node) =
-                    lower_table(spec, paint, fonts, doc, images, at, anchors, errors)
-                {
+                if let Some(node) = lower_table(spec, env, anchors, errors) {
                     nodes.push(node);
                 }
             }
             Block::List(spec) => {
-                if let Some(node) = lower_list(spec, paint, fonts, doc, images, at, anchors, errors)
-                {
+                if let Some(node) = lower_list(spec, env, anchors, errors) {
                     nodes.push(node);
                 }
             }
@@ -639,24 +655,16 @@ fn sole_or_stack(nodes: Vec<FlowNode>) -> FlowNode {
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors lower_blocks; id/outline are Anchor-only"
-)]
 fn lower_anchor_block<K: FontKey>(
     id: String,
     outline: Option<OutlineEntry>,
     child: Block<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
-    let id = anchors.register(id, outline, at, errors)?;
-    let lowered = lower_blocks(vec![child], paint, fonts, doc, images, at, anchors, errors);
+    let id = anchors.register(id, outline, env.at, errors)?;
+    let lowered = lower_blocks(vec![child], env, anchors, errors);
     let child_node = sole_or_stack(lowered);
     Some(FlowNode::Anchor(AnchorNode {
         id,
@@ -691,7 +699,10 @@ fn push_inline_runs<K: FontKey>(
                     append_text(items, glyph, &text, active_link.as_ref(), errors);
                 }
             }
-            InlineRun::Link { target, runs } => {
+            InlineRun::Link {
+                target,
+                runs: linked,
+            } => {
                 match &target {
                     LinkTarget::Uri(uri) if uri.is_empty() => {
                         errors.record(Error::from(ErrorKind::EmptyLink));
@@ -710,7 +721,7 @@ fn push_inline_runs<K: FontKey>(
                     LinkTarget::Uri(_) | LinkTarget::Anchor(_) => {}
                 }
                 let previous = active_link.replace(target);
-                push_inline_runs(runs, paint, fonts, items, active_link, errors);
+                push_inline_runs(linked, paint, fonts, items, active_link, errors);
                 *active_link = previous;
             }
             InlineRun::Blank(spec) => {
@@ -865,11 +876,7 @@ fn lower_canvas<K: FontKey>(
 
 fn lower_columns<K: FontKey>(
     spec: ColumnsSpec<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
@@ -888,16 +895,7 @@ fn lower_columns<K: FontKey>(
             Track::Auto => ColumnWidth::Auto,
         };
         let mark = bag.mark();
-        let nodes = lower_blocks(
-            column.blocks,
-            paint,
-            fonts,
-            doc,
-            images,
-            at,
-            anchors,
-            &mut bag,
-        );
+        let nodes = lower_blocks(column.blocks, env, anchors, &mut bag);
         if bag.clean_since(mark) {
             cols.push((width, nodes));
         }
@@ -922,11 +920,7 @@ fn lower_columns<K: FontKey>(
 
 fn lower_table<K: FontKey>(
     spec: super::TableSpec<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
@@ -938,17 +932,8 @@ fn lower_table<K: FontKey>(
             .map(|cell| usize::from(cell.col_span.get()))
             .sum()
     });
-    let header = lower_table_rows(
-        spec.header,
-        paint,
-        fonts,
-        doc,
-        images,
-        at,
-        anchors,
-        &mut bag,
-    );
-    let body = lower_table_rows(spec.body, paint, fonts, doc, images, at, anchors, &mut bag);
+    let header = lower_table_rows(spec.header, env, anchors, &mut bag);
+    let body = lower_table_rows(spec.body, env, anchors, &mut bag);
     let mut blocked = !bag.is_empty() || header.is_none() || body.is_none();
     let widths = match spec.tracks {
         Some(tracks) => table_widths(tracks, cols, &mut blocked, &mut bag),
@@ -1021,11 +1006,7 @@ fn table_widths(
 
 fn lower_table_rows<K: FontKey>(
     rows: Vec<super::TableRow<K>>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<Vec<Vec<layout_table::Cell<FlowNode>>>> {
@@ -1034,7 +1015,7 @@ fn lower_table_rows<K: FontKey>(
     for row in rows {
         let mut stored = Vec::with_capacity(row.cells.len());
         for cell in row.cells {
-            match lower_cell(cell, paint, fonts, doc, images, at, anchors, errors) {
+            match lower_cell(cell, env, anchors, errors) {
                 Some(built) => stored.push(built),
                 None => ok = false,
             }
@@ -1046,28 +1027,14 @@ fn lower_table_rows<K: FontKey>(
 
 fn lower_cell<K: FontKey>(
     spec: CellSpec<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<layout_table::Cell<FlowNode>> {
     let mut bag = ErrorBag::default();
     let mut content = Vec::new();
     for block in spec.content {
-        push_cell_block(
-            block,
-            paint,
-            fonts,
-            doc,
-            images,
-            at,
-            anchors,
-            &mut content,
-            &mut bag,
-        );
+        push_cell_block(block, env, anchors, &mut content, &mut bag);
     }
     let failed = !bag.is_empty();
     errors.absorb(bag);
@@ -1087,37 +1054,18 @@ fn lower_cell<K: FontKey>(
     }
 }
 
-// Cell path threads AnchorRegistry plus a content bag.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "cell path threads AnchorRegistry plus a content bag"
-)]
 fn lower_cell_anchor<K: FontKey>(
     id: String,
     outline: Option<OutlineEntry>,
     child: CellBlock<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
-    let id = anchors.register(id, outline, at, errors)?;
+    let id = anchors.register(id, outline, env.at, errors)?;
     let mut bag = ErrorBag::default();
     let mut content = Vec::new();
-    push_cell_block(
-        child,
-        paint,
-        fonts,
-        doc,
-        images,
-        at,
-        anchors,
-        &mut content,
-        &mut bag,
-    );
+    push_cell_block(child, env, anchors, &mut content, &mut bag);
     let failed = !bag.is_empty();
     errors.absorb(bag);
     if failed {
@@ -1131,22 +1079,20 @@ fn lower_cell_anchor<K: FontKey>(
     }))
 }
 
-// Cell path threads AnchorRegistry plus a content bag.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "cell path threads AnchorRegistry plus a content bag"
-)]
 fn push_cell_block<K: FontKey>(
     block: CellBlock<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     content: &mut Vec<FlowNode>,
     bag: &mut ErrorBag,
 ) {
+    let LowerEnv {
+        paint,
+        fonts,
+        doc,
+        images,
+        ..
+    } = *env;
     match block {
         CellBlock::Text { text, font } => {
             if text.is_empty() {
@@ -1179,14 +1125,12 @@ fn push_cell_block<K: FontKey>(
             content.push(FlowNode::Spacer(SpacerNode { height }));
         }
         CellBlock::List(list) => {
-            if let Some(node) = lower_list(list, paint, fonts, doc, images, at, anchors, bag) {
+            if let Some(node) = lower_list(list, env, anchors, bag) {
                 content.push(node);
             }
         }
         CellBlock::Anchor { id, outline, child } => {
-            if let Some(node) = lower_cell_anchor(
-                id, outline, *child, paint, fonts, doc, images, at, anchors, bag,
-            ) {
+            if let Some(node) = lower_cell_anchor(id, outline, *child, env, anchors, bag) {
                 content.push(node);
             }
         }
@@ -1195,28 +1139,16 @@ fn push_cell_block<K: FontKey>(
 
 fn lower_list<K: FontKey>(
     spec: ListSpec<K>,
-    paint: &InheritedPaint,
-    fonts: &FontTable<K>,
-    doc: DocToken,
-    images: &LoweredImages,
-    at: Location,
+    env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
+    let paint = env.paint;
     let mut bag = ErrorBag::default();
     let mut items = Vec::new();
     for item in spec.items {
         let mark = bag.mark();
-        let nodes = lower_blocks(
-            item.blocks,
-            paint,
-            fonts,
-            doc,
-            images,
-            at,
-            anchors,
-            &mut bag,
-        );
+        let nodes = lower_blocks(item.blocks, env, anchors, &mut bag);
         if !bag.clean_since(mark) {
             continue;
         }
@@ -1225,7 +1157,7 @@ fn lower_list<K: FontKey>(
             None => ListItem::new(nodes),
         };
         match built {
-            Ok(item) => items.push(item),
+            Ok(built) => items.push(built),
             Err(error) => bag.record(error),
         }
     }
@@ -1845,8 +1777,10 @@ fn lower_layer_marks(
                 ..
             } => {
                 items.extend(lower_rotated(
-                    *degrees,
-                    *pivot,
+                    &Rotation {
+                        degrees: *degrees,
+                        pivot: *pivot,
+                    },
                     shapes,
                     &page,
                     doc,
@@ -1879,8 +1813,10 @@ fn lower_band_marks(
                 pivot,
                 shapes,
             } => items.extend(lower_rotated(
-                *degrees,
-                *pivot,
+                &Rotation {
+                    degrees: *degrees,
+                    pivot: *pivot,
+                },
                 shapes,
                 page,
                 doc,
@@ -1893,9 +1829,14 @@ fn lower_band_marks(
     items
 }
 
-fn lower_rotated(
+#[derive(Clone, Copy)]
+struct Rotation {
     degrees: f32,
     pivot: Point,
+}
+
+fn lower_rotated(
+    rotation: &Rotation,
     shapes: &[OwnedShape],
     page: &PageFacts,
     doc: DocToken,
@@ -1903,6 +1844,7 @@ fn lower_rotated(
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
 ) -> Vec<LayerItem> {
+    let Rotation { degrees, pivot } = *rotation;
     if shapes.is_empty() {
         return Vec::new();
     }

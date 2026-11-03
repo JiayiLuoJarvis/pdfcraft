@@ -113,7 +113,10 @@ impl ClusteredText {
     }
 
     pub(crate) fn cluster(&self, index: usize) -> Cluster<'_> {
-        assert!(index < self.clusters.len());
+        assert!(
+            index < self.clusters.len(),
+            "cluster index {index} is in range"
+        );
         Cluster { owner: self, index }
     }
 }

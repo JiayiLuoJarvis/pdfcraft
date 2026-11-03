@@ -622,9 +622,9 @@ mod tests {
             assert_eq!(laid.size().to_bits(), 10.25_f32.to_bits());
 
             let short = PdfRect::new(0.0, 0.0, 200.0, 11.0);
-            let laid = fit(face, "a", short, 10.25).unwrap();
+            let refit = fit(face, "a", short, 10.25).unwrap();
             #[expect(clippy::cast_possible_truncation, reason = "选中的字号不超过 10.25 pt")]
-            let mp = (f64::from(laid.size()) * 1000.0).round() as i64;
+            let mp = (f64::from(refit.size()) * 1000.0).round() as i64;
             assert!(mp <= 10_250);
             assert!(mp >= 7_000);
             assert!(mp == 7_000 || (10_250 - mp) % 500 == 0);

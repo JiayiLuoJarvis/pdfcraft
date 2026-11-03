@@ -105,7 +105,16 @@ impl Flowable for FlowNode {
             FlowNode::Stack(kids) | FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => kids,
             FlowNode::Anchor(node) => std::slice::from_ref(node.child.as_ref()),
             FlowNode::Columns(columns) => columns.column_stacks(),
-            _ => &[],
+            FlowNode::Paragraph(_)
+            | FlowNode::Text(_)
+            | FlowNode::Spacer(_)
+            | FlowNode::PageBreak
+            | FlowNode::KeepTogether(KeepTogetherNode::Prepared(_))
+            | FlowNode::Table(_)
+            | FlowNode::List(_)
+            | FlowNode::Image(_)
+            | FlowNode::Canvas(_)
+            | FlowNode::HLine(_) => &[],
         }
     }
 }

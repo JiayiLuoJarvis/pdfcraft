@@ -50,7 +50,14 @@ fn real(object: &lopdf::Object) -> f64 {
     match object {
         lopdf::Object::Integer(value) => f64::from(i32::try_from(*value).unwrap_or(i32::MAX)),
         lopdf::Object::Real(value) => f64::from(*value),
-        other => panic!("number {other:?}"),
+        other @ (lopdf::Object::Null
+        | lopdf::Object::Boolean(_)
+        | lopdf::Object::Name(_)
+        | lopdf::Object::String(_, _)
+        | lopdf::Object::Array(_)
+        | lopdf::Object::Dictionary(_)
+        | lopdf::Object::Stream(_)
+        | lopdf::Object::Reference(_)) => panic!("number {other:?}"),
     }
 }
 
@@ -83,22 +90,36 @@ fn annotation_objects(doc: &lopdf::Document, page_id: lopdf::ObjectId) -> Vec<&l
     let items = match annots {
         lopdf::Object::Array(items) => items.as_slice(),
         lopdf::Object::Reference(id) => {
-            let Some(object) = doc.get_object(*id).ok() else {
+            let Some(target) = doc.get_object(*id).ok() else {
                 return Vec::new();
             };
-            let Ok(items) = object.as_array() else {
+            let Ok(items) = target.as_array() else {
                 return Vec::new();
             };
             items.as_slice()
         }
-        _ => return Vec::new(),
+        lopdf::Object::Null
+        | lopdf::Object::Boolean(_)
+        | lopdf::Object::Integer(_)
+        | lopdf::Object::Real(_)
+        | lopdf::Object::Name(_)
+        | lopdf::Object::String(_, _)
+        | lopdf::Object::Dictionary(_)
+        | lopdf::Object::Stream(_) => return Vec::new(),
     };
     items
         .iter()
         .filter_map(|item| match item {
             lopdf::Object::Reference(id) => doc.get_object(*id).ok()?.as_dict().ok(),
-            lopdf::Object::Dictionary(dict) => Some(dict),
-            _ => None,
+            lopdf::Object::Dictionary(annot) => Some(annot),
+            lopdf::Object::Null
+            | lopdf::Object::Boolean(_)
+            | lopdf::Object::Integer(_)
+            | lopdf::Object::Real(_)
+            | lopdf::Object::Name(_)
+            | lopdf::Object::String(_, _)
+            | lopdf::Object::Array(_)
+            | lopdf::Object::Stream(_) => None,
         })
         .collect()
 }
@@ -111,7 +132,15 @@ fn link_target_page(doc: &lopdf::Document, annot: &lopdf::Dictionary) -> lopdf::
     let dest = annot.get(b"Dest").expect("link dest");
     let dest = match dest {
         lopdf::Object::Reference(id) => doc.get_object(*id).expect("dest object"),
-        other => other,
+        other @ (lopdf::Object::Null
+        | lopdf::Object::Boolean(_)
+        | lopdf::Object::Integer(_)
+        | lopdf::Object::Real(_)
+        | lopdf::Object::Name(_)
+        | lopdf::Object::String(_, _)
+        | lopdf::Object::Array(_)
+        | lopdf::Object::Dictionary(_)
+        | lopdf::Object::Stream(_)) => other,
     };
     let array = dest
         .as_array()

@@ -190,7 +190,7 @@ fn golden_each_constructible_op_has_stable_text() {
         ),
         (
             CanvasCommand::StrokePath {
-                path: path.clone(),
+                path,
                 paint,
                 stroke,
             },
@@ -248,10 +248,10 @@ fn golden_balance_rejects_unbalanced_logs() {
     assert!(snapshot::check_transform_balance(0, &[]).is_ok());
     let err = snapshot::check_transform_balance(0, &[push(), push(), pop()]).unwrap_err();
     assert!(err.message().contains("unbalanced"), "{err}");
-    let err = snapshot::check_transform_balance(2, &[pop()]).unwrap_err();
-    assert!(err.message().contains("page 2"), "{err}");
+    let page_err = snapshot::check_transform_balance(2, &[pop()]).unwrap_err();
+    assert!(page_err.message().contains("page 2"), "{page_err}");
     // The failure is a hard error, never a diff: no diff marker is attached.
-    assert!(!err.message().contains("@@"));
+    assert!(!page_err.message().contains("@@"));
 }
 
 #[test]

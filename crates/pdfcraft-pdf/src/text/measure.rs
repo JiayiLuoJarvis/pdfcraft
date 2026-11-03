@@ -178,8 +178,8 @@ pub(crate) fn measure_text(
         };
         let glyph_id = gid.to_u32();
         let advance_font_units = {
-            let face = fonts.face_mut(font)?;
-            if let Some(&cached) = face.advances.get(&glyph_id) {
+            let slot = fonts.face_mut(font)?;
+            if let Some(&cached) = slot.advances.get(&glyph_id) {
                 cached
             } else {
                 let width =
@@ -189,7 +189,7 @@ pub(crate) fn measure_text(
                             index,
                             message: format!("no unscaled advance for glyph {glyph_id}"),
                         }))?;
-                face.advances.insert(glyph_id, width);
+                slot.advances.insert(glyph_id, width);
                 width
             }
         };

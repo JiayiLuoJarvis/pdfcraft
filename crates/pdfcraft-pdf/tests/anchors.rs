@@ -103,7 +103,17 @@ fn xyz_destinations(rendered: &Rendered) -> Vec<(usize, f32, f32)> {
                 xyz.point().x().as_pt(),
                 xyz.point().y().as_pt(),
             )),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }
@@ -115,7 +125,16 @@ fn uri_hits(rendered: &Rendered) -> Vec<String> {
         .flat_map(pdfcraft_pdf::RecordedPage::ops)
         .filter_map(|op| match op {
             CanvasCommand::AnnotateLink { target, .. } => target.uri_str().map(str::to_owned),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
         })
         .collect()
 }

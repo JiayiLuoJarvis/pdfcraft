@@ -74,7 +74,10 @@ impl<N: Flowable> ColumnsNode<N> {
                 full_height: avail.full_height,
             };
             let (placed, fragment, tail) = match column.split(ctx, frame)? {
-                Split::Fit { height, fragment } => (height, fragment, None),
+                Split::Fit {
+                    height: split_height,
+                    fragment,
+                } => (split_height, fragment, None),
                 Split::Partial {
                     head_height,
                     head,

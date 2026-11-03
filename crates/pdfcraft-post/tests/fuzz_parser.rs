@@ -223,11 +223,20 @@ fn mutated_seed_is_rejected() {
         .expect_err("p01-valid.pdf with zeroed header must fail as a merge part");
     assert_eq!(err.kind, ErrorKind::NotAPdf, "zeroed header merge part");
 
-    let err = metadata()
+    let metadata_err = metadata()
         .apply(&corrupted)
         .expect_err("p01-valid.pdf with zeroed header must fail metadata");
-    assert_eq!(err.kind, ErrorKind::NotAPdf, "zeroed header metadata input");
+    assert_eq!(
+        metadata_err.kind,
+        ErrorKind::NotAPdf,
+        "zeroed header metadata input"
+    );
 
-    let err = split_pdfs(&corrupted).expect_err("p01-valid.pdf with zeroed header must fail split");
-    assert_eq!(err.kind, ErrorKind::NotAPdf, "zeroed header split input");
+    let split_err =
+        split_pdfs(&corrupted).expect_err("p01-valid.pdf with zeroed header must fail split");
+    assert_eq!(
+        split_err.kind,
+        ErrorKind::NotAPdf,
+        "zeroed header split input"
+    );
 }

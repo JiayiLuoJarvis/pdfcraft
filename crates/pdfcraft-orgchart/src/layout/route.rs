@@ -337,16 +337,16 @@ fn route_multi_in(
     } else {
         let use_spine = multi_row && src.y < bottom_row_y - 0.01;
         let row_bottom = row_bottoms[&src.y.to_bits()];
-        route_down_to_bus(
+        route_down_to_bus(&DownBus {
             src,
             src_bottom,
             bus_y,
             trunk_x,
-            &node_list,
-            &HashSet::from([edge.from_id, edge.to_id]),
-            if use_spine { spine_x } else { None },
-            row_bottom,
-        )
+            nodes: &node_list,
+            exclude_ids: &HashSet::from([edge.from_id, edge.to_id]),
+            spine_x: if use_spine { spine_x } else { None },
+            row_max_bottom: row_bottom,
+        })
     };
     let draw_arrow = caches.drawn_trunk_to.insert(edge.to_id);
     let mut points = path_to_bus;
@@ -563,16 +563,29 @@ fn horizontal_hits_box(y: f64, x1: f64, x2: f64, node: &PlacedNode) -> bool {
     x1.max(x2) > left && x1.min(x2) < right
 }
 
-fn route_down_to_bus(
-    src: &PlacedNode,
+#[derive(Clone, Copy)]
+struct DownBus<'a> {
+    src: &'a PlacedNode,
     src_bottom: PointMm,
     bus_y: f64,
     trunk_x: f64,
-    nodes: &[PlacedNode],
-    exclude_ids: &HashSet<NodeId>,
+    nodes: &'a [PlacedNode],
+    exclude_ids: &'a HashSet<NodeId>,
     spine_x: Option<f64>,
     row_max_bottom: f64,
-) -> Vec<PointMm> {
+}
+
+fn route_down_to_bus(route: &DownBus<'_>) -> Vec<PointMm> {
+    let DownBus {
+        src,
+        src_bottom,
+        bus_y,
+        trunk_x,
+        nodes,
+        exclude_ids,
+        spine_x,
+        row_max_bottom,
+    } = *route;
     let src_x = src_bottom.x;
     if let Some(spine_x) = spine_x {
         let exit_y = shareholder_exit_y(row_max_bottom, bus_y);

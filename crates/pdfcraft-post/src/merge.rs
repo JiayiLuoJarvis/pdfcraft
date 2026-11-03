@@ -134,7 +134,14 @@ fn kids_array(doc: &Document, pages_id: ObjectId) -> Result<Vec<Object>, Error> 
             .and_then(Object::as_array)
             .cloned()
             .map_err(|err| Error::from(ErrorKind::MergeFailed).with_source(err)),
-        _ => Err(Error::from(ErrorKind::MergeFailed)),
+        Object::Null
+        | Object::Boolean(_)
+        | Object::Integer(_)
+        | Object::Real(_)
+        | Object::Name(_)
+        | Object::String(_, _)
+        | Object::Dictionary(_)
+        | Object::Stream(_) => Err(Error::from(ErrorKind::MergeFailed)),
     }
 }
 

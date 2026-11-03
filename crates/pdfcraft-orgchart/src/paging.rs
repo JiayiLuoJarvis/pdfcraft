@@ -18,7 +18,7 @@ use crate::family::{
 };
 use crate::graph::Graph;
 use crate::ids::NodeId;
-use crate::layout::{LayoutEngine, WrappedEngine};
+use crate::layout::{LayoutEngine, LayoutInput, WrappedEngine};
 use crate::measure::{overflow_box, promote_to_page_subject, sized_cue_anchors, Measurer, NodeBox};
 #[cfg(test)]
 use crate::model::ChartRequest;
@@ -613,7 +613,15 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
         let engine = self.engine;
         let node_width = self.node_width;
         let mut relayout = |row_gap: f64| {
-            engine.layout(&boxes, &edges, &order, cols, node_width, row_gap, printable)
+            engine.layout(&LayoutInput {
+                boxes: &boxes,
+                edges: &edges,
+                node_order: &order,
+                cols,
+                node_width_mm: node_width,
+                row_gap_mm: row_gap,
+                printable_width_mm: printable,
+            })
         };
         let placed = absorb_cue_slots(&anchor_sizes, &mut relayout, geometry)?;
         let metrics =

@@ -182,9 +182,11 @@ fn draw_titles(
         font,
         face,
         MAIN_TITLE_PT,
-        header.left_mm,
-        header.width_mm,
-        header.main_top_mm,
+        &TextLine {
+            left: header.left_mm,
+            width: header.width_mm,
+            y: header.main_top_mm,
+        },
     )?;
     center_text(
         surface,
@@ -192,9 +194,11 @@ fn draw_titles(
         font,
         face,
         SUB_TITLE_PT,
-        header.left_mm,
-        header.width_mm,
-        header.sub_top_mm,
+        &TextLine {
+            left: header.left_mm,
+            width: header.width_mm,
+            y: header.sub_top_mm,
+        },
     )?;
     Ok(())
 }
@@ -304,9 +308,11 @@ fn draw_cues(
             font,
             face,
             CONT_CUE_TEXT_PT,
-            x,
-            slot.width,
-            text_y,
+            &TextLine {
+                left: x,
+                width: slot.width,
+                y: text_y,
+            },
         )?;
         center_text(
             surface,
@@ -314,9 +320,11 @@ fn draw_cues(
             font,
             face,
             CONT_CUE_TEXT_PT,
-            x,
-            slot.width,
-            next_y,
+            &TextLine {
+                left: x,
+                width: slot.width,
+                y: next_y,
+            },
         )?;
     }
     Ok(())
@@ -368,10 +376,12 @@ fn draw_node(
     };
     stroke_round(
         surface,
-        x,
-        y0,
-        node.width_mm,
-        node.height_mm,
+        &RoundBox {
+            x,
+            y: y0,
+            w: node.width_mm,
+            h: node.height_mm,
+        },
         pt_f32(width),
         dashed,
         NODE_CORNER_RADIUS_MM,
@@ -407,9 +417,11 @@ fn paint_node_lines(
                 font,
                 face,
                 line.font_size_pt,
-                x,
-                node.width_mm,
-                y,
+                &TextLine {
+                    left: x,
+                    width: node.width_mm,
+                    y,
+                },
             )?;
         }
         y += font.line_height_mm(line.font_size_pt);
@@ -578,16 +590,26 @@ fn fill_leader_arrow(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)
     surface.draw_path(&path);
 }
 
+#[derive(Clone, Copy)]
+struct TextLine {
+    left: f64,
+    width: f64,
+    y: f64,
+}
+
 fn center_text(
     surface: &mut Surface<'_>,
     text: &str,
     font: &mut FontMetrics,
     face: &Font,
     size_pt: f64,
-    left_mm: f64,
-    width_mm: f64,
-    y_mm: f64,
+    line: &TextLine,
 ) -> Result<(), Error> {
+    let TextLine {
+        left: left_mm,
+        width: width_mm,
+        y: y_mm,
+    } = *line;
     if text.is_empty() {
         return Ok(());
     }
@@ -670,16 +692,22 @@ fn stroke_cue_box(surface: &mut Surface<'_>, x: f64, y: f64, w: f64, h: f64) {
     surface.draw_path(&path);
 }
 
-fn stroke_round(
-    surface: &mut Surface<'_>,
+#[derive(Clone, Copy)]
+struct RoundBox {
     x: f64,
     y: f64,
     w: f64,
     h: f64,
+}
+
+fn stroke_round(
+    surface: &mut Surface<'_>,
+    box_: &RoundBox,
     width_pt: f32,
     dashed: bool,
     radius_mm: f64,
 ) {
+    let RoundBox { x, y, w, h } = *box_;
     let Some(path) = round_path(x, y, w, h, radius_mm) else {
         return;
     };

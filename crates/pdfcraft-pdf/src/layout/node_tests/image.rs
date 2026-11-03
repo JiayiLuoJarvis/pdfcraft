@@ -224,7 +224,15 @@ fn column_offsets_the_image() {
         .iter()
         .filter_map(|op| match op {
             CanvasCommand::DrawImage { rect, .. } => Some(rect_bits(*rect)),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect();
     let left = Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap();

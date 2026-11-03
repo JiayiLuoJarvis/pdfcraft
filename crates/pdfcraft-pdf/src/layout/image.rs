@@ -69,12 +69,12 @@ pub(crate) fn resolve_size(
     match (width, height) {
         (Some(width), Some(height)) => Ok(Size::new(width, height)),
         (Some(width), None) => {
-            let height = Positive::pt(width.as_pt() * px(px_h) / px(px_w))?;
-            Ok(Size::new(width, height))
+            let scaled_height = Positive::pt(width.as_pt() * px(px_h) / px(px_w))?;
+            Ok(Size::new(width, scaled_height))
         }
         (None, Some(height)) => {
-            let width = Positive::pt(height.as_pt() * px(px_w) / px(px_h))?;
-            Ok(Size::new(width, height))
+            let scaled_width = Positive::pt(height.as_pt() * px(px_w) / px(px_h))?;
+            Ok(Size::new(scaled_width, height))
         }
         (None, None) => Size::try_pt(px(px_w), px(px_h)),
     }

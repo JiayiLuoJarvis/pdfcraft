@@ -1,5 +1,4 @@
 msrv = "1.98"
-too-many-arguments-threshold = 8
 allow-dbg-in-tests = false
 allow-expect-in-tests = true
 allow-panic-in-tests = true

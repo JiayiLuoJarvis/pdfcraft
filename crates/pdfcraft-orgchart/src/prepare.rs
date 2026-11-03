@@ -362,7 +362,7 @@ mod tests {
                 holding("root", "c1", 100.0),
                 holding("__other__:root", "root", 30.0),
             ],
-            options: request.options.clone(),
+            options: request.options,
         };
         assert_eq!(once, expected);
         assert_eq!(twice, once);
@@ -389,7 +389,7 @@ mod tests {
         request.options.top_n = Some(1);
         let folded = prepare_request(&request).expect("fold");
         let expected = ChartRequest {
-            options: request.options.clone(),
+            options: request.options,
             ..ChartRequest::new(
                 "root",
                 vec![
@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(
             folded,
             ChartRequest {
-                options: request.options.clone(),
+                options: request.options,
                 ..ChartRequest::new(
                     "root",
                     vec![

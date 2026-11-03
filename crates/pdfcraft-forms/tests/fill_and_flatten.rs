@@ -272,7 +272,20 @@ fn rejects_a_font_size_that_is_not_positive() {
             field_name: None,
             reason: ArgumentReason::FontSize { value },
         } => assert!(!value.is_finite()),
-        other => panic!("unexpected {other:?}"),
+        other @ (ErrorKind::NotAPdf
+        | ErrorKind::Encrypted
+        | ErrorKind::HasXfa
+        | ErrorKind::UnknownField { .. }
+        | ErrorKind::IllegalChoice { .. }
+        | ErrorKind::InvalidCheckbox { .. }
+        | ErrorKind::InvalidArgument { .. }
+        | ErrorKind::MissingGlyph { .. }
+        | ErrorKind::BoxOverflow { .. }
+        | ErrorKind::FontNotConfigured { .. }
+        | ErrorKind::SignatureNotWritable { .. }
+        | ErrorKind::WidgetUnsupported { .. }
+        | ErrorKind::FlattenFailed { .. }
+        | _) => panic!("unexpected {other:?}"),
     }
 }
 
@@ -290,7 +303,20 @@ fn rejects_a_font_size_above_256_pt_before_opening_the_pdf() {
                 field_name: None,
                 reason: ArgumentReason::FontSize { value: got },
             } => assert_eq!(got.to_bits(), value.to_bits()),
-            other => panic!("unexpected {other:?}"),
+            other @ (ErrorKind::NotAPdf
+            | ErrorKind::Encrypted
+            | ErrorKind::HasXfa
+            | ErrorKind::UnknownField { .. }
+            | ErrorKind::IllegalChoice { .. }
+            | ErrorKind::InvalidCheckbox { .. }
+            | ErrorKind::InvalidArgument { .. }
+            | ErrorKind::MissingGlyph { .. }
+            | ErrorKind::BoxOverflow { .. }
+            | ErrorKind::FontNotConfigured { .. }
+            | ErrorKind::SignatureNotWritable { .. }
+            | ErrorKind::WidgetUnsupported { .. }
+            | ErrorKind::FlattenFailed { .. }
+            | _) => panic!("unexpected {other:?}"),
         }
     }
     for value in [256.0_f32, 0.0001] {
@@ -491,7 +517,20 @@ fn rejects_non_finite_line_below_on_a_known_name_when_missing_is_ignore() {
             assert_eq!(name, "employee_name");
             assert!(value.is_nan());
         }
-        other => panic!("unexpected {other:?}"),
+        other @ (ErrorKind::NotAPdf
+        | ErrorKind::Encrypted
+        | ErrorKind::HasXfa
+        | ErrorKind::UnknownField { .. }
+        | ErrorKind::IllegalChoice { .. }
+        | ErrorKind::InvalidCheckbox { .. }
+        | ErrorKind::InvalidArgument { .. }
+        | ErrorKind::MissingGlyph { .. }
+        | ErrorKind::BoxOverflow { .. }
+        | ErrorKind::FontNotConfigured { .. }
+        | ErrorKind::SignatureNotWritable { .. }
+        | ErrorKind::WidgetUnsupported { .. }
+        | ErrorKind::FlattenFailed { .. }
+        | _) => panic!("unexpected {other:?}"),
     }
 }
 
@@ -547,11 +586,12 @@ fn draws_an_absolute_line_and_rejects_a_missing_page() {
         page_index: 9,
         ..line
     };
-    let options = FillOptions {
+    let missing_page = FillOptions {
         absolute_lines: &[missing],
         ..FillOptions::default()
     };
-    let err = fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &options).unwrap_err();
+    let err =
+        fill_and_flatten(&fixture("basic_form.pdf"), &HashMap::new(), &missing_page).unwrap_err();
     assert_eq!(
         err.kind,
         ErrorKind::FlattenFailed {
@@ -807,7 +847,10 @@ fn font_file2_lengths(pdf: &[u8]) -> Vec<usize> {
             let dictionary = object.as_dict().ok()?;
             let id = dictionary.get(b"FontFile2").ok()?.as_reference().ok()?;
             let stream = doc.get_object(id).ok()?.as_stream().ok()?;
-            assert!(stream.dict.get(b"Filter").is_err());
+            assert!(
+                stream.dict.get(b"Filter").is_err(),
+                "subset font is uncompressed"
+            );
             Some(stream.content.len())
         })
         .collect()

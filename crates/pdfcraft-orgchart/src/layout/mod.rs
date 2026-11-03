@@ -38,23 +38,33 @@ pub(crate) struct FamilyRowMetrics {
     pub max_nondirect_rows: usize,
 }
 
+/// One placement problem for [`LayoutEngine::layout`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LayoutInput<'a> {
+    /// Nodes to place.
+    pub(crate) boxes: &'a [NodeBox],
+    /// Parent and child links among those nodes.
+    pub(crate) edges: &'a [EdgeRef],
+    /// Rank order. Ids absent from `boxes` are ignored.
+    pub(crate) node_order: &'a [NodeId],
+    /// Column budget for the subject's direct row.
+    pub(crate) cols: usize,
+    /// Node width, in millimetres.
+    pub(crate) node_width_mm: f64,
+    /// Gap between rows, in millimetres.
+    pub(crate) row_gap_mm: f64,
+    /// Width the placement must fit, in millimetres.
+    pub(crate) printable_width_mm: f64,
+}
+
 /// Places boxes and reports how many rows each family uses.
 pub(crate) trait LayoutEngine {
-    /// Place `boxes` inside `printable_width_mm`.
+    /// Place [`LayoutInput::boxes`] inside [`LayoutInput::printable_width_mm`].
     ///
     /// # Errors
     ///
     /// Returns [`crate::ErrorCode::LayoutFailed`] when a bus or a gap schedule is illegal.
-    fn layout(
-        &self,
-        boxes: &[NodeBox],
-        edges: &[EdgeRef],
-        node_order: &[NodeId],
-        cols: usize,
-        node_width_mm: f64,
-        row_gap_mm: f64,
-        printable_width_mm: f64,
-    ) -> Result<LayoutResult, Error>;
+    fn layout(&self, input: &LayoutInput<'_>) -> Result<LayoutResult, Error>;
 
     /// Row counts for the same inputs, without placing coordinates.
     ///
@@ -77,16 +87,16 @@ pub(crate) trait LayoutEngine {
 pub(crate) struct WrappedEngine;
 
 impl LayoutEngine for WrappedEngine {
-    fn layout(
-        &self,
-        boxes: &[NodeBox],
-        edges: &[EdgeRef],
-        node_order: &[NodeId],
-        cols: usize,
-        node_width_mm: f64,
-        row_gap_mm: f64,
-        printable_width_mm: f64,
-    ) -> Result<LayoutResult, Error> {
+    fn layout(&self, input: &LayoutInput<'_>) -> Result<LayoutResult, Error> {
+        let LayoutInput {
+            boxes,
+            edges,
+            node_order,
+            cols,
+            node_width_mm,
+            row_gap_mm,
+            printable_width_mm,
+        } = *input;
         let Some(prepared) = prepare(boxes, edges, node_order)? else {
             return Ok(LayoutResult::empty());
         };
@@ -96,8 +106,8 @@ impl LayoutEngine for WrappedEngine {
         let spacing = spacing_of(node_width_mm, row_gap_mm, printable_width_mm);
         let plans = build_plans(&prepared, cols, &box_by_id, &mut child_widths, spacing)?;
         let laid_out = place_layers(&plans, &box_by_id, &child_widths, spacing)?;
-        let edges = route_edges(&prepared.page_edges, &laid_out)?;
-        LayoutResult::from_parts(laid_out.into_values().collect(), edges, Vec::new())
+        let routed = route_edges(&prepared.page_edges, &laid_out)?;
+        LayoutResult::from_parts(laid_out.into_values().collect(), routed, Vec::new())
     }
 
     fn family_row_metrics(
@@ -315,11 +325,11 @@ fn fixup_shallow_gaps(
             for ((parent_id, band), band_schedules) in
                 parents.iter().zip(bands.iter()).zip(schedules.iter())
             {
-                let width = group_band_width_mm(band, band_schedules, box_by_id, spacing)?;
+                let band_width = group_band_width_mm(band, band_schedules, box_by_id, spacing)?;
                 child_widths
                     .entry(*parent_id)
-                    .and_modify(|previous| *previous = previous.max(width))
-                    .or_insert(width);
+                    .and_modify(|previous| *previous = previous.max(band_width))
+                    .or_insert(band_width);
             }
         }
     }

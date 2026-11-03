@@ -131,7 +131,7 @@ impl JustifyGate {
             Self::Open(_) if inventory.is_empty() => Self::Blocked {
                 reason: LineInhibit::NoSlots,
             },
-            other => other,
+            Self::Open(_) | Self::Blocked { .. } => self,
         }
     }
 }

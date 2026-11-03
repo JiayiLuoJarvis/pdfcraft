@@ -68,13 +68,13 @@ fn encrypted_input_is_rejected_for_stamp_and_metadata() {
     .apply(&enc)
     .expect_err("encrypted combo input");
     assert_eq!(err.kind, ErrorKind::Encrypted);
-    let err = SetMetadata {
+    let metadata_err = SetMetadata {
         title: Some("Stamped".into()),
         ..SetMetadata::default()
     }
     .apply(&enc)
     .expect_err("encrypted metadata input");
-    assert_eq!(err.kind, ErrorKind::Encrypted);
+    assert_eq!(metadata_err.kind, ErrorKind::Encrypted);
 }
 
 #[test]

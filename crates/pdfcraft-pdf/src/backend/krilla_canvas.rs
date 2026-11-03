@@ -211,7 +211,7 @@ impl KrillaCanvas {
         Err(self.failure.clone().unwrap_or(error))
     }
 
-    fn ensure_ok(&mut self) -> Result<()> {
+    fn ensure_ok(&self) -> Result<()> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }

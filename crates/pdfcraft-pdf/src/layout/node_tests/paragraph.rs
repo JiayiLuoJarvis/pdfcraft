@@ -71,7 +71,12 @@ fn hits(fragment: &Fragment) -> Vec<Hit> {
                 height: rect.size().height().as_pt(),
                 target: target.uri_str().unwrap_or("").to_owned(),
             }),
-            _ => None,
+            FragmentCommand::Glyphs(_)
+            | FragmentCommand::Fill { .. }
+            | FragmentCommand::Stroke { .. }
+            | FragmentCommand::Image { .. }
+            | FragmentCommand::PushTransform { .. }
+            | FragmentCommand::PopTransform => None,
         })
         .collect()
 }
@@ -89,7 +94,12 @@ fn glyph_spans(fragment: &Fragment) -> Vec<(String, f32, f32)> {
                     .sum();
                 Some((run.text.clone(), run.origin.x().as_pt(), width))
             }
-            _ => None,
+            FragmentCommand::Fill { .. }
+            | FragmentCommand::Stroke { .. }
+            | FragmentCommand::Image { .. }
+            | FragmentCommand::Link { .. }
+            | FragmentCommand::PushTransform { .. }
+            | FragmentCommand::PopTransform => None,
         })
         .collect()
 }
@@ -141,15 +151,26 @@ fn centered_fill_blank_starts_at_the_frame_x() {
     };
     let glyph = fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Glyphs(run) if run.text == "A" => Some(run.origin.x().as_pt()),
-        _ => None,
+        FragmentCommand::Glyphs(_)
+        | FragmentCommand::Fill { .. }
+        | FragmentCommand::Stroke { .. }
+        | FragmentCommand::Image { .. }
+        | FragmentCommand::Link { .. }
+        | FragmentCommand::PushTransform { .. }
+        | FragmentCommand::PopTransform => None,
     });
     assert_eq!(glyph.map(f32::to_bits), Some(0.0f32.to_bits()));
     let end = fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
             PathVerb::LineTo(point) => point.x().as_pt(),
-            _ => f32::NAN,
+            PathVerb::MoveTo(_) | PathVerb::CubicTo { .. } | PathVerb::Close => f32::NAN,
         }),
-        _ => None,
+        FragmentCommand::Glyphs(_)
+        | FragmentCommand::Fill { .. }
+        | FragmentCommand::Image { .. }
+        | FragmentCommand::Link { .. }
+        | FragmentCommand::PushTransform { .. }
+        | FragmentCommand::PopTransform => None,
     });
     assert_eq!(end.map(f32::to_bits), Some(120.0f32.to_bits()));
 }
@@ -508,7 +529,15 @@ fn offset_and_paint_move_the_link_rect() {
                 rect.origin().y().as_pt(),
                 target.uri_str().unwrap_or("").to_owned(),
             )),
-            _ => None,
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
         })
         .collect();
     assert_eq!(painted.len(), 1);
@@ -578,7 +607,14 @@ fn merged_underline_uses_the_first_segment_and_draws_1pt() {
                     drawn.push((from.y().as_pt(), stroke.width().as_pt()));
                 }
             }
-            _ => {}
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => {}
         }
     }
     assert_eq!(drawn.len(), 1, "{drawn:?}");
@@ -703,9 +739,14 @@ fn justify_fill_line_stays_start_and_fill_still_eats_width() {
     let end = fragment.commands.iter().find_map(|command| match command {
         FragmentCommand::Stroke { path, .. } => path.verbs().last().map(|verb| match verb {
             PathVerb::LineTo(point) => point.x().as_pt(),
-            _ => f32::NAN,
+            PathVerb::MoveTo(_) | PathVerb::CubicTo { .. } | PathVerb::Close => f32::NAN,
         }),
-        _ => None,
+        FragmentCommand::Glyphs(_)
+        | FragmentCommand::Fill { .. }
+        | FragmentCommand::Image { .. }
+        | FragmentCommand::Link { .. }
+        | FragmentCommand::PushTransform { .. }
+        | FragmentCommand::PopTransform => None,
     });
     assert!(pt_near(end.unwrap_or(f32::NAN), 120.0));
 }

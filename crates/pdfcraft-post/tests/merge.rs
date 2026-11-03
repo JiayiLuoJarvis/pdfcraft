@@ -92,9 +92,9 @@ fn encrypted_part_is_rejected_not_silently_merged() {
     let err =
         merge_pdfs([enc.as_slice(), plain.as_slice()], false).expect_err("encrypted first part");
     assert_eq!(err.kind, ErrorKind::Encrypted);
-    let err =
+    let later =
         merge_pdfs([plain.as_slice(), enc.as_slice()], true).expect_err("encrypted later part");
-    assert_eq!(err.kind, ErrorKind::Encrypted);
+    assert_eq!(later.kind, ErrorKind::Encrypted);
 }
 
 #[test]

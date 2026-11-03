@@ -335,13 +335,13 @@ fn append_layer_item(
             for child in items {
                 let child = append_layer_item(commands, ctx, child)?;
                 let child = if transformed {
-                    child.map(|bounds| bounds.transformed(affine)).transpose()?
+                    child.map(|edge| edge.transformed(affine)).transpose()?
                 } else {
                     child
                 };
                 if let Some(child) = child {
                     bounds = Some(match bounds {
-                        Some(bounds) => bounds.union(child),
+                        Some(existing) => existing.union(child),
                         None => child,
                     });
                 }

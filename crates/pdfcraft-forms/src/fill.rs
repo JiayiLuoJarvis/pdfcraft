@@ -296,7 +296,7 @@ fn check_font_size_named(size: f32, field_name: Option<String>) -> Result<()> {
     }
     #[expect(clippy::cast_precision_loss, reason = "256_000 在 f64 里是精确值")]
     if mp > layout::MAX_START_MP as f64 {
-        return Err(bad_font_size_named(size, field_name.clone()));
+        return Err(bad_font_size_named(size, field_name));
     }
     Ok(())
 }
