@@ -84,7 +84,7 @@ No Watermark or input limits in this stack.
 
 ## Contributing
 
-MSRV is **1.92** (follows krilla 0.8.2). Policy: [`docs/msrv.md`](docs/msrv.md).
+MSRV is **1.98**. Policy: [`docs/msrv.md`](docs/msrv.md).
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
 Internal product decisions for maintainers: [`docs/提案书.md`](docs/提案书.md).

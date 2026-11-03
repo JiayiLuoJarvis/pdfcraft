@@ -1,46 +1,38 @@
-# Microsoft Pragmatic Rust Guidelines disposition 矩阵（Wave 0）
+# Microsoft Pragmatic Rust Guidelines disposition
 
-裁决：提案书 > workspace-crates-spec > AGENTS（Google-wins 写法层 + 本矩阵增量层）> 设计稿未确认部分。
-Google 写法冲突仍 Google-wins；产品语义冲突提案书仍最高。本矩阵是设计与静态质量增量层，不做第二套格式手册。
+本表只做映射：每个 M-ID 对应 [`rust-engineering-standard.md`](rust-engineering-standard.md) 的哪条规则，或为何不适用。规则正文与执行方式（lint、脚本、评审）只写在工程规范里。优先级：提案书 > workspace-crates-spec > 工程规范 > 本表。
 
 指南版本：Microsoft Pragmatic Rust Guidelines 2026.6，快照日期 2026-10-27，
 来源 <https://microsoft.github.io/rust-guidelines/guidelines/checklist/index.html>。
-快照 ID 列表见 `.omo/evidence/ms-rust-guidelines-incremental/task-1-ms-checklist-snapshot.md`
-（主仓路径；快照 N=90，本文件 M-* 行数须等于 N）。
+快照 N=90，本文件 M-* 行数须等于 N。
 
-配置注：lint 级别变更属于门禁行为变更，先记 disposition 行再改 `Cargo.toml` `[lints]`；
-本波（T1）只写文档，不改任何产品 Rust 文件。
+disposition 取值：`done`（已满足，规则在规范里）、`adopt`（规则已写进规范，代码尚待清理，见规范 §16）、`N/A`、`defer`（见文末），ADAPT 表示有理由的偏离（理由写在证据列）。
 
-disposition 枚举只用：`done` | `adopt` | `N/A` | `defer`。
-其中 `adopt` 表示本计划后续波要做（T3 起），`defer` 表示明确延后（见 `## Deferred`），
-ADAPT 表示有理由的偏离（只用于双路径与已锁定的 N/A 形状，证据列写清）。
-
-expect-toolchain 耐久注：`#[expect(..., reason)]` 只在当前 toolchain/MSRV 下被 deny-probe 验证；
-每次 toolchain 或 MSRV 升级 PR 须重跑 T3 口径的 deny-probe，清理过期 expect。本条为硬性要求。
+lint 级别的改动先改规范与根 `[workspace.lints]`，本表同一 PR 更新对应行。
 
 ## Universal
 
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
-| M-UPSTREAM-GUIDELINES | Follow the upstream guidelines | adopt | Google-wins 写法层已落地（见 google disposition）；Rust API Guidelines 按 spec 稳定度跟进 |
-| M-STATIC-VERIFICATION | Use static verification | adopt | fmt/clippy/test/doc/DAG/deny 现有；Wave-1 enabled set（T5）：仅 pdf+forms 加 `missing_debug_implementations = "warn"`（`[lints.rust]`）与 `allow_attributes_without_reason = "warn"`（`[lints.clippy]`，rust 表名已废弃），post/orgchart 不动；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-5-lints.log`。cargo-deny check advisories（0.20.2，fail-closed，zero ignore，yanked=deny）与 cargo audit 同等覆盖 RustSec 公告：CI deny job 无 continue-on-error、无 `\|\| true`，`deny.toml [advisories]` 仅 `yanked = "deny"`（ignore 计数 0），本地 `cargo deny check advisories --show-stats` 为 `0 errors, 0 warnings, 0 notes`；deny 的 `--audit-compatible-output` 语义说明其 advisories 检查查同一 RustSec 库、同一 Cargo.lock 图，未命中即非零退出，故 deny-fail-closed 等价 audit-fail-closed，不另加 cargo-audit job。安全 triage 默认：未来公告走升级受影响依赖，或记有时限的显式 `[advisories] ignore` 例外（deny-exception，带理由），绝不弱化 CI job；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-12-audit.log` |
-| M-LINT-OVERRIDE-EXPECT | Lint overrides should use expect | adopt | 现状 allow 约 46 处、expect 0；T3 清单 + T4 起按 probe 迁移；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-3-allow-inventory.log`（36 处清单 + deny-probe）、`.omo/evidence/ms-rust-guidelines-incremental/task-4-expect-pdf-forms.log`（pdf+forms 转 expect，3 处 target-conditional 死代码回退 keep 见永久 allow-list）、`.omo/evidence/ms-rust-guidelines-incremental/task-8-forms.log`、`task-9-post.log`（post 仅 keep 一处）、`task-10-orgchart.log` |
-| M-PUBLIC-DEBUG | Public types are Debug | adopt | T6/T8/T9/T10 补齐；先开 missing_debug_implementations warn（pdf+forms 先行）；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-6-pdf-debug-inline.log`（pdf 零缺口审计）、`task-8-forms.log`、`task-9-post.log`、`task-10-orgchart.log` |
+| M-UPSTREAM-GUIDELINES | Follow the upstream guidelines | done | 规范 §0 的来源顺序：Style Guide、API Guidelines、本指南、Google |
+| M-STATIC-VERIFICATION | Use static verification | done | 规范 TOOL-5（门禁）、DEP-6（cargo-deny fail closed）、§15（lint 取舍）。cargo-deny 的 advisories 检查与 cargo-audit 查同一 RustSec 库与同一 `Cargo.lock`，不另加 cargo-audit job；公告的处理是升级依赖，或在 `deny.toml` 记带理由的显式例外，不弱化 CI job |
+| M-LINT-OVERRIDE-EXPECT | Lint overrides should use expect | adopt | 规范 LINT-2、TRK-9，执行 `lint:clippy::allow_attributes`。部分 target 才成立的覆盖用 `cfg_attr(.., expect(..))`。现存生产 `allow` 11 处（规范 §16） |
+| M-PUBLIC-DEBUG | Public types are Debug | done | 规范 API-7，`lint:missing_debug_implementations`（四包 deny） |
 | M-PUBLIC-DISPLAY | Public types meant to be read are Display | done | 各包 Error/错误面已有 Display；行为不变 |
 | M-SMALLER-CRATES | If in doubt, split the crate | N/A | 锁定：四包结构见 workspace-crates-spec，不拆分（Google 小包条同步 N/A） |
-| M-WEASEL-WORDS | Names are free of weasel words | adopt | 后续波顺手清理，不做全仓改名运动 |
-| M-SHORT-NAMES | Names of items are short | adopt | 同上；提案书锁定的公开名不改 |
+| M-WEASEL-WORDS | Names are free of weasel words | adopt | 规范 STY-4（评审）；不做全仓改名运动，提案书锁定的公开名不改 |
+| M-SHORT-NAMES | Names of items are short | adopt | 规范 STY-4（评审） |
 | M-REGULAR-FN | Prefer regular over associated functions | done | 无违规模式；调用点人体工学保持 |
-| M-DOCUMENTED-MAGIC | Magic values are documented | adopt | 后续文档波补注释；不改数值语义 |
+| M-DOCUMENTED-MAGIC | Magic values are documented | adopt | 规范 DOC-6、TRK-2（评审） |
 | M-LOG-STRUCTURED | Use structured logging with message templates | N/A | 锁定：纯库无日志框架，不引入 tracing/log |
 
 ## Libs/Interop
 
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
-| M-TYPES-SEND | Types are Send | adopt | 后续波确认公共类型 Send/Sync；无线程池设计，不改结构 |
+| M-TYPES-SEND | Types are Send | adopt | 规范 ERR-2：编译期断言；现只有 pdf `spec` 有 `assert_send_sync`，其余三包待补 |
 | M-ESCAPE-HATCHES | Native escape hatches | adopt | 后端密封保持；转义口只按需加 |
-| M-DONT-LEAK-TYPES | Don't leak external types | done | krilla/lopdf/skrifa 不进公共签名；F1 有 no-leak probe |
+| M-DONT-LEAK-TYPES | Don't leak external types | done | 规范 API-11：krilla / lopdf / skrifa / hayro / image 不进公共签名（评审） |
 | M-FOREIGN-REEXPORTS | Items come from their original crate | done | 无跨包重导出；四包互不依赖 |
 | M-IMPL-ASREF | Accept impl AsRef where feasible | defer | 见 Deferred t-ms-asref；`&[u8]` 现状保持 |
 | M-IMPL-RANGEBOUNDS | Accept impl RangeBounds where feasible | defer | 同上；无区间 API 需求 |
@@ -53,7 +45,7 @@ expect-toolchain 耐久注：`#[expect(..., reason)]` 只在当前 toolchain/MSR
 | M-SIMPLE-ABSTRACTIONS | Abstractions don't visibly nest | done | 分层调用扁平；无新增嵌套抽象 |
 | M-AVOID-WRAPPERS | Avoid smart pointers and wrappers in APIs | done | Arc 只在论证处（Error source、FontBytes），见 Google disposition |
 | M-DI-HIERARCHY | Prefer types over generics, generics over dyn traits | done | Google 类型节已 done；无 dyn 扩张 |
-| M-ERRORS-CANONICAL-STRUCTS | Errors are canonical structs | N/A | 锁定 ADAPT：Error+ErrorKind/Location 与 orgchart ErrorCode 保持；不加 Backtrace，不私有化 Kind（Clone 模型优先） |
+| M-ERRORS-CANONICAL-STRUCTS | Errors are canonical structs | N/A | ADAPT，规范 ERR-1、ERR-7、ERR-8：`Error` + 公开 `ErrorKind` / `Location` 与 orgchart `ErrorCode` 保持；不加 `Backtrace`，不私有化 kind。理由是批量调用方需要按 kind 穷尽匹配 |
 | M-FROM-ERROR | Canonical error conversion uses From, not map_err | done | Error::new 配 From<ErrorKind>（pdf/forms/post），见 Google disposition |
 | M-INIT-BUILDER | Complex type construction has builders | N/A | 锁定：DocumentSpec 用结构体字面量 + Default，不复活 builder DSL |
 | M-INIT-CASCADED | Complex type initialization hierarchies are cascaded | N/A | 同上；无级联初始化层级 |
@@ -71,13 +63,13 @@ expect-toolchain 耐久注：`#[expect(..., reason)]` 只在当前 toolchain/MSR
 | --- | --- | --- | --- |
 | M-MOCKABLE-SYSCALLS | I/O and system calls are mockable | N/A | 无系统调用面；字体/文件注入走现有参数 |
 | M-TEST-UTIL | Test utilities are feature gated | done | test-utils feature 门；集成测试不用测试依赖反转生产 DAG |
-| M-INTEGRATION-TESTS | Integration tests live under tests/ | done | 各包 tests/ 现有；RecordingCanvas/pdftotext/parity 格局保持 |
-| M-STRONG-TYPES | Use the proper type family | done | Positive/NonNegative/Finite 品牌长度类型保持 |
-| M-STRONG-TYPES-GUARD | Newtypes guard their invariants | done | 构造期校验保持；坐标断言全过 |
+| M-INTEGRATION-TESTS | Integration tests live under tests/ | done | 规范 TST-1、TST-2 |
+| M-STRONG-TYPES | Use the proper type family | adopt | 规范 API-1、API-2；orgchart 页层字符串键与魔法前缀待改（规范 TRK-4） |
+| M-STRONG-TYPES-GUARD | Newtypes guard their invariants | done | 规范 API-1、ARC-3 |
 | M-BUILD-RESULT | Builders validate in final build() | N/A | 无 builder；M-INIT-BUILDER 联动 N/A |
 | M-NO-GLOB-REEXPORTS | Don't glob re-export items | done | 生产 src 零 glob 重导出；crate-root 用显式 pub use 列表 |
-| M-AVOID-STATICS | Avoid statics | done | 无生产 static 可变状态；无全局锁 |
-| M-LOG-NOT-PRINT | Production code uses telemetry, not println | done | 生产 src 零 println!/dbg!；F 波有 grep probe |
+| M-AVOID-STATICS | Avoid statics | done | 规范 ARC-5；无生产 static 可变状态 |
+| M-LOG-NOT-PRINT | Production code uses telemetry, not println | done | 规范 ARC-7、PAN-7：`print_stdout`、`print_stderr`、`dbg_macro` 进 `[workspace.lints]`；生产零命中 |
 
 ## Libs/Building
 
@@ -85,7 +77,7 @@ expect-toolchain 耐久注：`#[expect(..., reason)]` 只在当前 toolchain/MSR
 | --- | --- | --- | --- |
 | M-OOBE | Libraries work out of the box | done | 默认 feature 可用；字体注入有文档说明 |
 | M-SYS-CRATES | Native -sys crates compile without dependencies | N/A | 无 -sys 包 |
-| M-FEATURES-ADDITIVE | Features are additive | done | feature 只做加法；cargo-hack 延后（见 Deferred t-ms-hack） |
+| M-FEATURES-ADDITIVE | Features are additive | done | 规范 DEP-5；`ci:feature-matrix` 已跑 `cargo hack --each-feature`，但只覆盖 pdf（规范 §16 缺口） |
 
 ## Macros
 
@@ -125,8 +117,8 @@ expect-toolchain 耐久注：`#[expect(..., reason)]` 只在当前 toolchain/MSR
 | M-UNSOUND | All code must be sound | done | 同上；miri 记 N/A（forbid 下空转） |
 | M-PANIC-IS-STOP | Panic means stop the program | done | 唯一公共 panic 是 Errors::first（有 Panics 文档）；不做 panic 续行 |
 | M-PANIC-ON-BUG | Detected programming bugs are panics, not errors | done | 缺字/越界等编程错误走 panic 或 Result 按现有模型；行为不变 |
-| M-PANIC-CONTINUATION | Panic continuation is last resort | done | 零 catch_unwind；F 波 grep probe |
-| M-PANIC-MESSAGE | Custom panics have a helpful message | done | expect 带上下文；生产零裸 unwrap |
+| M-PANIC-CONTINUATION | Panic continuation is last resort | done | 规范 PAN-7：零 `catch_unwind`（评审） |
+| M-PANIC-MESSAGE | Custom panics have a helpful message | adopt | 规范 PAN-2、PAN-3：`unwrap_used`、`expect_used`、`panic`、`unreachable` 四包 deny，已证明不变量逐处 `#[expect(reason)]`。pdf 现存生产 `expect` 27 处、`unreachable` 2 处待登记或消除（规范 §16） |
 
 ## Performance
 
@@ -149,36 +141,36 @@ expect-toolchain 耐久注：`#[expect(..., reason)]` 只在当前 toolchain/MSR
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
 | M-CARGO-WORKSPACE | Common settings come from the workspace Cargo.toml | done | 版本/依赖钉在根 workspace.dependencies，成员用 workspace=true |
-| M-CRATES-IN-WORKSPACE | The workspace lists and versions all crates | done | 四包 0.1.0 同仓；deny 配套 |
+| M-CRATES-IN-WORKSPACE | The workspace lists and versions all crates | done | 四包同仓，版本各自独立（规范 VER-4） |
 | M-CRATES-FLAT-FOLDER | All crates are siblings in one folder | done | crates/ 下四包平级 |
-| M-LATEST-EDITION | New crates target latest edition | N/A | 锁定：保持 edition 2021 / MSRV 1.92（跟 krilla 0.8.2）；升级须单独 PR |
-| M-MSRV | MSRV is conservatively updated | done | MSRV 1.92 文档化；CI 同 toolchain；升级 PR 重跑坐标与 expect probe |
+| M-LATEST-EDITION | New crates target latest edition | N/A | 锁定 edition 2021（规范 TOOL-1、§17）；升级须单独 PR |
+| M-MSRV | MSRV is conservatively updated | done | 规范 TOOL-1、TOOL-2 与 [`msrv.md`](msrv.md)：MSRV = CI 工具链 = clippy `msrv` = 1.98 |
 
 ## Docs
 
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
-| M-FIRST-DOC-SENTENCE | First sentence is one line; approx. 15 words | adopt | T7/T8/T9/T10 文档波；约 15 词首句；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-7-pdf-docs.log`、`task-8-forms.log`、`task-9-post.log`、`task-10-orgchart.log` |
-| M-MODULE-DOCS | Has comprehensive module documentation | adopt | 公共模块补 //!；同上；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-7-pdf-docs.log`、`task-8-forms.log`、`task-9-post.log` |
-| M-CANONICAL-DOCS | Documentation has canonical sections | adopt | Errors/Panics/Example 按现有 lint 级别补齐；不加 Parameters 表；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-7-pdf-docs.log`（Errors 计数 78→78 非减）、`task-8-forms.log`（missing_errors_doc/missing_panics_doc allow→warn）、`task-9-post.log` |
-| M-DOC-INLINE | Mark pub use items with doc(inline) | adopt | crate-root 与有意 intra-crate pub use 加 doc(inline)；禁 glob；T6 起；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-6-pdf-debug-inline.log`、`task-8-forms.log`、`task-9-post.log`、`task-10-orgchart.log` |
+| M-FIRST-DOC-SENTENCE | First sentence is one line; approx. 15 words | done | 规范 DOC-2（首句靠评审） |
+| M-MODULE-DOCS | Has comprehensive module documentation | done | 规范 DOC-2：公共模块 `//!`，`missing_docs` 四包 deny |
+| M-CANONICAL-DOCS | Documentation has canonical sections | done | 规范 DOC-3：`missing_errors_doc`、`missing_panics_doc` 四包 deny；不加 Parameters 表 |
+| M-DOC-INLINE | Mark pub use items with doc(inline) | done | 规范 API-10：crate 根与有意的 intra-crate `pub use` 加 `#[doc(inline)]`；禁 glob 重导出 |
 
 ## AI
 
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
-| M-DESIGN-FOR-AI | Design with AI use in mind | adopt | 本矩阵 + Google disposition 即机器可读规则；AGENTS 指针 |
-| M-SINGLE-ITEM-PATH | Items are only visible through one path | adopt | ADAPT：双路径（crate-root + 模块路径）保留，加 doc(inline)，禁新增无 disposition 行的双路径；家族清单与无新增证明见 `## 路径审计`；证据 `.omo/evidence/ms-rust-guidelines-incremental/task-11-paths.log` |
-| M-NO-META-DESIGN-DOCUMENTATION | Avoid meta design documentation | adopt | rustdoc 只写终态行为；合规表留在 docs/，不进 rustdoc |
-| M-TAUTOLOGICAL-TESTS | Tests do not assert ground truth | done | 排版断言 RecordingCanvas 坐标；压缩字节不断言 |
-| M-RUST-SHAPED | Rust code solves Rust problems | done | 无跨语言范式移植；错误/迭代照 Rust 惯用法 |
+| M-DESIGN-FOR-AI | Design with AI use in mind | done | 工程规范带规则号与执行方式；AGENTS 只放指针 |
+| M-SINGLE-ITEM-PATH | Items are only visible through one path | adopt | 规范 API-10。ADAPT：pdf 的双路径（crate 根 + 模块路径）保留并加 `doc(inline)`，禁止新增未登记的双路径；家族清单见 `## 路径审计` |
+| M-NO-META-DESIGN-DOCUMENTATION | Avoid meta design documentation | done | 规范 DOC-4 |
+| M-TAUTOLOGICAL-TESTS | Tests do not assert ground truth | done | 规范 TST-2 |
+| M-RUST-SHAPED | Rust code solves Rust problems | adopt | 规范 §14（Python 音译识别 PY-1 到 PY-22）与 §13（取巧写法）；现存反例见 §13 表 |
 
-## 路径审计（M-SINGLE-ITEM-PATH ADAPT，T11）
+## 路径审计（M-SINGLE-ITEM-PATH ADAPT）
 
 MS 原意：每个条目只经一条路径可见，避免 `crate::X` 与 `crate::mod::X` 并存造成文档与导入分叉。
-本仓 ADAPT：`pdfcraft-pdf` 的 crate-root 重导出 + 定义模块路径均为已发布公共面，删任一方向都是 breaking，故双路径保留、两边都加 `#[doc(inline)]`；其余三包模块全私有，本就单路径。禁止新增无本节 ADAPT 行的双路径；F1 可 grep 复核。
+本仓 ADAPT：`pdfcraft-pdf` 的 crate-root 重导出 + 定义模块路径均为已发布公共面，删任一方向都是 breaking，故双路径保留、两边都加 `#[doc(inline)]`；其余三包模块全私有，本就单路径。禁止新增无本节 ADAPT 行的双路径。
 
-### 双路径家族清单（F1-greppable）
+### 双路径家族清单
 
 只有 `pdfcraft-pdf` 有双路径（`pub mod error/geom/limits/canvas/fonts/spec` + crate-root `pub use`）。`pdfcraft-forms`、`pdfcraft-post`、`pdfcraft-orgchart` 的全部 `mod` 均为私有（无 `pub mod`），条目只经 crate-root 可见，零双路径。
 
@@ -194,46 +186,30 @@ MS 原意：每个条目只经一条路径可见，避免 `crate::X` 与 `crate:
 
 单路径（非家族，不列为双路径）：`crate::to_pdf`（`lib.rs` 定义）、`crate::Result` 别名（forms/post各自定义，单路径）、spec 仅模块路径类型（`Block` 等）、forms/post/orgchart 全条目（模块私有）。
 
-### 本波无新增双路径证明（T11）
-
-工作树 `git diff` 在六处路经文件（四包 `lib.rs` + `pdf/src/spec/mod.rs` + `pdf/src/limits.rs`）中只增加 `#[doc(inline)]` 属性行，零新增 `pub use` 条目（`git diff -- <上列文件>` 无 `+pub use` 新增项名行；见 `task-11-paths.log` 粘贴）。已提交分支 `merge-base HEAD origin/main == HEAD`，故分支已提交部分亦无新增。
-
-###  reviewer 检查清单
+### 评审检查清单
 
 1. 新增 `pub use` 是否复用了已在别处 `pub` 的条目名——是则必须同 diff 更新上表，否则打回。
 2. `#[doc(inline)]` 是否只加在 intra-crate 本地类型 `pub use` 上（不用于 std/第三方）。
 3. 是否删除了上表任一既有路径（禁止；双向保留）。
 
-## 永久 allow-list（起点骨架，后续波按 probe 同步）
+## 现存 lint 例外（规范 LINT-2）
 
-- forms `format_push_string`：提案书 §10 填充语义要求，keep allow（reason 必备）。
-- post `struct_excessive_bools`（EncryptionConfig）：镜像 PDF 安全位，keep。
-- orgchart `struct_field_names` / `many_single_char_names` / `float_cmp`：领域 justify 后 keep。
-- feature 门控 `dead_code`（如 no-default 下的 from_raw/ResolvedFont/resolve）：keep，基线红不借本主题修。
-- target-conditional `dead_code`（T4 实测 `#[expect]` 在 `--all-targets` 下无法两边同时满足，keep `allow`；见 T4 log `task-4-expect-pdf-forms.log` DEVIATION）：
-  - pdf `canvas.rs:390` `with_transform`：一侧 target 死、另一侧活，expect 必空一边（T4 复现 exit 101）。
-  - pdf `geom.rs:1057` `Affine::apply`：`rotated` 烘焙路径外只有单测用，expect 必空一边。
-  - pdf `geom.rs:1186` `Path::rotated`：layer 走 Canvas CTM，只有 geom 单测用，expect 必空一边。
-- workspace `module_name_repetitions`：按需 keep。
-- forms `missing_errors_doc` / `missing_panics_doc`：T8 由 allow 收紧为 warn（clippy/test/doc 三门禁绿，见 task-8-forms.log）。
-- 其余 allow 一律经 T3 deny-probe 后转 expect；keep 集与本节双向 diff 为空（F1 验）。
+现存的 `#[allow]` 在规范 §16 第 3 步改成代码位置上的 `#[expect(lint, reason)]`。只在部分 target 成立的用 `#[cfg_attr(<条件>, expect(..))]`。改完后例外只存在于代码里，本表不再维护清单。
 
-## Known gate gaps（基线同现，不掩盖）
+| 位置 | lint | 处理 |
+| --- | --- | --- |
+| forms | `format_push_string` | 先按规范 STY-13 改 `write!`；确属提案书 §10 要求时登记 `expect`，`reason` 写明哪一条 |
+| post `EncryptionConfig` | `struct_excessive_bools` | 登记 `expect`：镜像 PDF 安全位（规范 API-3 例外） |
+| orgchart | `struct_field_names`、`many_single_char_names`、`float_cmp` | 逐处复核；`float_cmp` 按规范 DET-3 优先改 newtype |
+| pdf `canvas.rs` `with_transform`、`geom.rs` `Affine::apply`、`Path::rotated` | `dead_code`（部分 target） | `cfg_attr` 加 `expect`，条件写成实际死掉的那组 target |
+| pdf no-default 下的 `from_raw`、`ResolvedFont`、`resolve` | `dead_code`（feature 门控） | 按 feature 门控定义本身，而不是压 lint |
 
-以下组合不是本主题引入；它们是 AGENTS.md 默认门禁之外的已知红项。本文的绿只指默认组合。
+## 已知门禁红项与缺口
 
-- **no-default-features**：pdf 的 `--no-default-features` clippy/test 在基座即 exit 101
- （3 个 dead-code：`from_raw`、`ResolvedFont`、`resolve`；test 另因 examples/tests 的 `to_pdf` 未解析）。
-- **字体/CJK**：未设 `PDFCRAFT_*` 时字体用例提前返回；DejaVu 下 pdf 269 passed / 9 failed / 1 ignored
- （失败名与基座一致）；forms CJK 条件测试在 DejaVu 下跳过，`fill_and_flatten.rs` 的
-  `FontFile2` 字节断言与 `fills_chinese_text` ignore 保持基线行为。CI 的 NotoSansCJK 才能覆盖。
-- Google 延后项 t5/t7/t9（CheckBox bool、文档语言 enum 非穷尽、文档小项）不由本计划重开为 adopt，
-  只在此披露。
+见规范 §16 末尾。
 
 ## Deferred
 
-- **t-ms-asref**：公共 `AsRef` 签名。触发：某调用点具名举证非加法不可，且不破坏推断；否则保持 `&[u8]`/`Into`。
-- **t-ms-perf**：容量/复用/收缩（M-THROUGHPUT/M-HOTPATH/M-MEM-REUSE/M-BOX-DST/M-SHRINK-TO-FIT/M-FAST-HASHER/M-INITIAL-CAPACITY）。触发：profile 热点证据；否则只记 defer。
-- **t-ms-hack**：cargo-hack。触发：feature 矩阵变多；现按 AGENTS 延后。
-- **t-ms-restriction**：MS restriction lint 整块试跑。触发：scratch 分支报告制，不直接进 Cargo.toml。
-- **Google t5/t7/t9**：OUT（见 Known gate gaps），本计划不实现。
+- **t-ms-asref**：公共 `AsRef` 签名。触发：某调用点具名举证非加法不可，且不破坏推断；否则保持 `&[u8]` / `Into`。
+- **t-ms-perf**：容量、复用、收缩（M-THROUGHPUT、M-HOTPATH、M-MEM-REUSE、M-BOX-DST、M-SHRINK-TO-FIT、M-FAST-HASHER、M-INITIAL-CAPACITY）。触发：profile 热点证据。
+- **Google t5 / t7 / t9**：见 [Google disposition](google-rust-style-disposition.md) 延后项。

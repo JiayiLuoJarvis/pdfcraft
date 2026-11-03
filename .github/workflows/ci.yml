@@ -29,7 +29,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
-          toolchain: "1.92"
+          toolchain: "1.98"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -61,7 +61,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
-          toolchain: "1.92"
+          toolchain: "1.98"
 
       - name: Install cargo-deny
         run: |
@@ -103,7 +103,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
-          toolchain: "1.92"
+          toolchain: "1.98"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -203,7 +203,7 @@ jobs:
         run: cargo doc -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --no-deps
 
   minrust:
-    name: minrust (1.92 cargo check)
+    name: minrust (1.98 cargo check)
     runs-on: ubuntu-latest
     needs: basics
     steps:
@@ -214,11 +214,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
-          toolchain: "1.92"
+          toolchain: "1.98"
 
       - uses: Swatinem/rust-cache@v2
 
-      # Pinned floor: the workspace must check on exactly rust-version 1.92
+      # Pinned floor: the workspace must check on exactly rust-version 1.98
       # with the committed lockfile.
       - name: minrust check
         run: cargo check --workspace --locked
@@ -283,7 +283,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
-          toolchain: "1.92"
+          toolchain: "1.98"
 
       - uses: Swatinem/rust-cache@v2
 

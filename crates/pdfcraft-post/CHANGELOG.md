@@ -7,6 +7,12 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 while remaining `0.x`. See the [workspace changelog](../../CHANGELOG.md) for
 cross-crate history.
 
+## [Unreleased]
+
+### Changed
+
+- MSRV is now 1.98 (was 1.92).
+
 ## [0.2.0] - 2026-10-30
 
 ### Breaking

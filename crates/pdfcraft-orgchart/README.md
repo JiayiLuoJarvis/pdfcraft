@@ -13,7 +13,7 @@ subject. Outbound investments sit below. Measurement uses
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
 | API | [docs.rs/pdfcraft-orgchart](https://docs.rs/pdfcraft-orgchart) |
-| MSRV | 1.92 |
+| MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
 | Status | `0.1.1`. The API can break before `1.0` |
 
@@ -110,7 +110,7 @@ testing).
 
 ## Compatibility
 
-- **Rust**: MSRV 1.92 (edition 2021)
+- **Rust**: MSRV 1.98 (edition 2021)
 - **`unsafe`**: forbidden in this crate
 - **SemVer**: `0.x` — breaking changes may land without a `1.0` bump; read
   `CHANGELOG.md`

@@ -9,6 +9,10 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Changed
+
+- MSRV is now 1.98 (was 1.92).
+
 ## [0.3.0] - 2026-11-02
 
 ### Breaking

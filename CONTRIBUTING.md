@@ -9,48 +9,37 @@ Thank you for considering a contribution.
    Callers should never need those files — their docs are
    [`crates/pdfcraft-pdf/README.md`](crates/pdfcraft-pdf/README.md) and
    [`crates/pdfcraft-pdf/docs/guide.md`](crates/pdfcraft-pdf/docs/guide.md).
-2. Follow [`AGENTS.md`](AGENTS.md) for modules, layering, coding standards, and
-   what not to touch. For style layers, see
-   [`docs/ms-rust-guidelines-disposition.md`](docs/ms-rust-guidelines-disposition.md).
+2. For **how to write code**, follow
+   [`docs/rust-engineering-standard.md`](docs/rust-engineering-standard.md).
+   It is the single source for style, panics, errors, API shape, architecture,
+   determinism, dependencies, semver, tests, docs, and lints. Each rule names
+   its source (Rust Style Guide, Rust API Guidelines, Microsoft Pragmatic Rust
+   Guidelines, Google Rust style guide) and how it is enforced.
+3. [`AGENTS.md`](AGENTS.md) covers product constraints, layout, and what not to
+   touch.
 
-## Standards we follow
+## Standards in one paragraph
 
-- Formatting and lints: [Rust Style Guide](https://doc.rust-lang.org/style-guide/),
-  plus this repo’s `rustfmt.toml` / `clippy.toml` / `Cargo.toml` `[lints]`.
-- Public API shape (`spec` types):
-  [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/).
-- Small, single-concern PRs; no drive-by refactors.
-- Exact dependency pins (`=x.y.z`); add `krilla` / `skrifa` /
-  `unicode-segmentation` only in the PR that first needs them.
+Lints live in the root `Cargo.toml` `[workspace.lints]`; override one only at
+the site with `#[expect(lint, reason = "...")]`, never `#[allow]`. Production
+code has no `unwrap`; a panic is allowed only for a proven internal invariant
+and is registered with `#[expect(clippy::expect_used, reason = "...")]`.
+Rustdoc, comments, and error messages are in English. The font/PDF stack is
+`=`-pinned; leaf utilities use caret requirements and `Cargo.lock` keeps builds
+reproducible. One concern per PR.
 
 ## Before opening a PR
 
-```bash
-python3 scripts/check_pdfcraft_pdf_modules.py
-cargo fmt --all -- --check
-cargo clippy -p pdfcraft-pdf --all-targets --features test-utils -- -D warnings
-cargo test -p pdfcraft-pdf --features test-utils
-cargo doc -p pdfcraft-pdf --no-deps
-cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart --all-targets -- -D warnings
-cargo test -p pdfcraft-forms
-cargo doc -p pdfcraft-forms --no-deps
-cargo test -p pdfcraft-orgchart
-cargo doc -p pdfcraft-orgchart --no-deps
-cargo clippy -p pdfcraft-post --all-targets -- -D warnings
-cargo test -p pdfcraft-post
-cargo doc -p pdfcraft-post --no-deps
-```
+Run the gate in section TOOL-5 of the engineering standard. CI runs the same
+commands with `RUSTFLAGS=-D warnings` and `RUSTDOCFLAGS=-D warnings`. Forms
+fill tests call `pdftotext`, so have it installed.
 
-CI also sets `RUSTFLAGS=-D warnings` and `RUSTDOCFLAGS=-D warnings`.
-Forms fill tests call `pdftotext`, so have it installed before running
-`cargo test -p pdfcraft-forms`.
-
-MSRV is **1.92** (driven by krilla 0.8.2). CI uses the same toolchain and
-treats Rust/rustdoc warnings as errors. Package layout:
-[`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md).
+The toolchain and MSRV are **1.98**; see [`docs/msrv.md`](docs/msrv.md).
+Package layout: [`docs/workspace-crates-spec.md`](docs/workspace-crates-spec.md).
 
 Integration tests compare coordinates with `pdfcraft_pdf::canvas::pt_near`.
 That function is always public. Feature `test-utils` only re-exports it
 at the crate root.
 
-User-visible behavior belongs in `CHANGELOG.md`.
+User-visible behavior belongs in the crate's `CHANGELOG.md`. A breaking change
+bumps the `y` in `0.y.z` first.

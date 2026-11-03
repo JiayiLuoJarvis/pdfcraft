@@ -14,7 +14,7 @@ checks, and choices, then removes every widget annotation and the catalog
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
 | API | [docs.rs/pdfcraft-forms](https://docs.rs/pdfcraft-forms) |
-| MSRV | 1.92 |
+| MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
 | Status | `0.1.0`. The API can break before `1.0` |
 
@@ -118,7 +118,7 @@ Deep dive: **[docs/guide.md](docs/guide.md)** (values, fit/wrap, errors, testing
 
 ## Compatibility
 
-- **Rust**: MSRV 1.92 (edition 2021)
+- **Rust**: MSRV 1.98 (edition 2021)
 - **`unsafe`**: forbidden in this crate
 - **SemVer**: `0.x` — breaking changes may land without a `1.0` bump; read
   `CHANGELOG.md`

@@ -16,7 +16,7 @@ part of the public API. Body links use `LinkTarget::Uri` or `LinkTarget::Anchor`
 | Guide | [docs/guide.md](docs/guide.md) |
 | Migration | [inline styles](docs/migrate-inline.md), [table rows](docs/migrate-table-row.md), [band marks](docs/migrate-band-marks.md) |
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
-| MSRV | 1.92 |
+| MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
 | Status | `0.3.0`. The API can break before `1.0` |
 
@@ -184,7 +184,7 @@ feature flag here.
 
 ## Compatibility
 
-- **Rust**: MSRV 1.92 (edition 2021)
+- **Rust**: MSRV 1.98 (edition 2021)
 - **`unsafe`**: forbidden in this crate
 - **SemVer**: `0.x` — breaking changes may land without a `1.0` bump; read
   `CHANGELOG.md`

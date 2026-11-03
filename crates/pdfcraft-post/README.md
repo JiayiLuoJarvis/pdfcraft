@@ -14,7 +14,7 @@ krilla.
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
 | API | [docs.rs/pdfcraft-post](https://docs.rs/pdfcraft-post) |
-| MSRV | 1.92 |
+| MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
 | Status | `0.2.0`. The API can break before `1.0` |
 
@@ -128,7 +128,7 @@ errors, testing).
 
 ## Compatibility
 
-- **Rust**: MSRV 1.92 (edition 2021)
+- **Rust**: MSRV 1.98 (edition 2021)
 - **`unsafe`**: forbidden in this crate
 - **SemVer**: `0.x` — breaking changes may land without a `1.0` bump; read
   `CHANGELOG.md`

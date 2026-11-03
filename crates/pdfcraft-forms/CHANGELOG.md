@@ -16,6 +16,8 @@ cross-crate history.
 
 ### Changed
 
+- MSRV is now 1.98 (was 1.92).
+
 - `missing_docs`, `missing_debug_implementations`, `missing_errors_doc`, and
   `missing_panics_doc` lints flipped from `warn` to `deny` in this crate's
   manifest. Undocumented public items now fail the build.

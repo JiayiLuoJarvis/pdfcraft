@@ -702,8 +702,8 @@ pub struct PageBandQuery {
     pub section_count: NonZeroU32,
     /// Final page width and height.
     ///
-    /// A [`PageSize::Paper`](crate::PageSize::Paper) value includes orientation.
-    /// [`PageSize::Custom`](crate::PageSize::Custom) is already final.
+    /// A [`PageSize::Paper`] value includes orientation.
+    /// [`PageSize::Custom`] is already final.
     pub size: Size,
 }
 
@@ -743,7 +743,7 @@ impl<K> BandFn<K> {
     ///
     /// # Errors
     ///
-    /// This function does not return [`Result`](std::result::Result). A missing
+    /// This function does not return [`Result`]. A missing
     /// font is reported by [`layout_spec`] for the section, with no page number.
     ///
     /// # Panics

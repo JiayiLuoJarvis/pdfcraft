@@ -9,9 +9,79 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.92"
+rust-version = "1.98"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/JiayiLuoJarvis/pdfcraft"
+
+# Rules, sources, and rationale: docs/rust-engineering-standard.md. Members opt in with
+# `[lints] workspace = true`; Cargo forbids adding lints beside that key, so a crate-local
+# exception is a site-level `#[expect(lint, reason = "...")]`, never a crate table.
+[workspace.lints.rust]
+missing_debug_implementations = "deny"
+missing_docs = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+let_underscore_drop = "deny"
+non_ascii_idents = "deny"
+redundant_lifetimes = "deny"
+single_use_lifetimes = "deny"
+trivial_numeric_casts = "deny"
+unnameable_types = "deny"
+unreachable_pub = "deny"
+unsafe_code = "forbid"
+unused_import_braces = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# pedantic members raised to deny
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
+# restriction picks
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+clone_on_ref_ptr = "deny"
+dbg_macro = "deny"
+exit = "deny"
+expect_used = "deny"
+float_cmp_const = "deny"
+fn_to_numeric_cast_any = "deny"
+format_push_string = "deny"
+get_unwrap = "deny"
+iter_over_hash_type = "deny"
+let_underscore_must_use = "deny"
+let_underscore_untyped = "deny"
+lossy_float_literal = "deny"
+mem_forget = "deny"
+missing_assert_message = "deny"
+needless_raw_strings = "deny"
+panic = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+pub_without_shorthand = "deny"
+rc_mutex = "deny"
+ref_patterns = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+self_named_module_files = "deny"
+shadow_unrelated = "deny"
+str_to_string = "deny"
+string_add = "deny"
+todo = "deny"
+unimplemented = "deny"
+unneeded_field_pattern = "deny"
+unreachable = "deny"
+unwrap_used = "deny"
+verbose_file_reads = "deny"
+wildcard_enum_match_arm = "deny"
+# nursery picks
+needless_pass_by_ref_mut = "deny"
+redundant_clone = "deny"
+# cargo picks
+cargo_common_metadata = "deny"
+negative_feature_names = "deny"
+redundant_feature_names = "deny"
+wildcard_dependencies = "deny"
 
 [workspace.dependencies]
 # Pin policy: the font/PDF stack (krilla, skrifa, read-fonts, lopdf, png) stays `=`-pinned because measurement (skrifa 0.48) and drawing (krilla's bundled skrifa 0.42) share one glyph pipeline: `emit::check_upem` rejects faces whose units-per-em disagree, and the fixture `TJ` adjustment test locks both sides' hmtx, so any silent move of that stack would shift coordinates or glyphs. Only leaf utilities with no effect on metrics (`getrandom`, `unicode-segmentation`) use caret requirements so `cargo update` can freshen them.

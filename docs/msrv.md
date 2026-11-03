@@ -1,40 +1,40 @@
 # MSRV policy
 
-Current MSRV: **1.92**.
+Current MSRV: **1.98**. It equals the CI toolchain and `clippy.toml msrv`
+(engineering standard TOOL-1).
 
-The floor follows krilla 0.8.2, which needs 1.92. That is higher than what
-skrifa 0.48.0 and unicode-segmentation 1.13.3 ask for (1.85), so krilla sets
-the bar while we depend on it. We don't promise stable-minus-two during that
-time. See `docs/pdfcraft-design.md` Key Decisions for the original rationale.
+krilla 0.8.2 needs 1.92, so the dependency floor is lower. The workspace runs
+one toolchain for building, linting, and documenting, so the lint set in
+`[workspace.lints]` is priced and enforced on exactly the version callers are
+told to use. We don't promise stable-minus-two.
 
-CI enforces the floor in the `minrust` job, which runs `cargo check` on
-toolchain 1.92. The `basics` gate (fmt / doc-links / readme identity)
-runs first and the `test` job (fmt / clippy / test / doc) runs on the
-stable toolchain; `minimal-versions`, `semver-checks`, and
-`feature-matrix` cover the rest on main / manual runs.
+CI runs every Rust job on 1.98 (`basics`, `deny`, `test`, `minrust`,
+`feature-matrix`); `minimal-versions` runs on nightly, `semver-checks` uses
+its action's toolchain. `minrust` checks the workspace with `--locked` on the
+floor.
 
-## Bumping the floor
+## Bumping the toolchain
 
-Bump MSRV in one PR, and touch exactly these 7 files:
+Bump in one PR (TOOL-2) and change every place the version appears:
 
-- `README.md` (MSRV statement)
-- `CONTRIBUTING.md` (MSRV statement)
-- root `Cargo.toml` (`[workspace.package] rust-version`)
-- `crates/pdfcraft-pdf/Cargo.toml`, `crates/pdfcraft-forms/Cargo.toml`,
-  `crates/pdfcraft-orgchart/Cargo.toml`, `crates/pdfcraft-post/Cargo.toml`
-  (each inherits `rust-version.workspace = true`, so confirm the inheritance
-  still holds rather than editing a version string)
+- root `Cargo.toml` `[workspace.package] rust-version` (members inherit it)
+- `clippy.toml` `msrv`
+- `.github/workflows/ci.yml`: each `toolchain:` and the `minrust` job name
+- `README.md`, `CONTRIBUTING.md`, this file
+- `crates/*/README.md` (the MSRV row and the Rust line)
 
-Bump only when krilla's own MSRV moves, or when the workspace agrees to drop
-an older toolchain for a concrete reason. Never sneak a bump into a feature
-or dependency PR.
+Find stragglers with `rg -n '1\.98' --glob '!target' --glob '!*CHANGELOG.md'`.
 
-## After a bump
+In the same PR:
 
-Re-run the coordinate and glyph tests, since the same PR may move the
-font/PDF stack. See the AGENTS.md dependency section for the rule that
-krilla/skrifa pin changes ship in their own PR with those tests re-run:
+- Re-price `[workspace.lints]` on the new toolchain with
+  `python3 scripts/price_lints.py` (engineering standard LINT-3). Clear new
+  lint and rustdoc hits. Drop `#[expect]` attributes that the new toolchain
+  reports as unfulfilled.
+- Re-run the coordinate and glyph tests:
+  `cargo test -p pdfcraft-pdf --features backend-krilla,test-utils`,
+  `cargo test -p pdfcraft-forms`, `cargo test -p pdfcraft-orgchart`.
+- Record the bump under `Changed` in each crate's CHANGELOG; the next release
+  of each crate bumps the `y` in `0.y.z` (VER-1).
 
-- `cargo test -p pdfcraft-pdf --features backend-krilla,test-utils`
-- `cargo test -p pdfcraft-forms`
-- `cargo test -p pdfcraft-orgchart`
+Never fold a bump into a feature or dependency PR.
