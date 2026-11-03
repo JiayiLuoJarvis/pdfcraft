@@ -17,15 +17,23 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ### Breaking
 
-- **Breaking.** `pdfcraft-pdf` `0.5.0`. `ListSpec` adds `item_gap`. Struct
-  literals need `item_gap: NonNegative::ZERO` or `..ListSpec::default()`. The
-  field is extra space between adjacent items, added to the previous item's
-  trailing spacing. A gap that does not fit is dropped and is not carried onto
-  the next page. See
+- **Breaking.** `pdfcraft-pdf` `0.5.0`. List options and horizontal inset.
+  `ListSpec` adds `item_gap`, `marker_format`, `marker_font`, and `marker_align`
+  (use `..ListSpec::default()` or name them). `nest_indent` is renamed
+  `body_indent` with the same meaning; there is no alias. `Block` and
+  `CellBlock` each gain exhaustive `Inset { left, right, children }`; matches
+  need a new arm. Details and migration notes live in
   [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 
 ### Changed
 
+- `pdfcraft-pdf` `0.5.0`. List items may hold every block except a page break.
+  Markers align to the first text baseline of the item's first block (no text
+  baseline → marker top at the item top). `Limits` caps total nesting depth at
+  16 by default (setter ceiling 64). `Block::Inset` / `CellBlock::Inset` shift
+  children and narrow the frame; oversize insets fail with
+  `GeometryKind::InsetWiderThanFrame`. See
+  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 - Four crates raise `0.y` for MSRV 1.98 (engineering standard VER-1):
   `pdfcraft-pdf` `0.4.0`, `pdfcraft-forms` `0.2.0`, `pdfcraft-orgchart` `0.2.0`,
   `pdfcraft-post` `0.3.0`. See [`docs/msrv.md`](docs/msrv.md) and

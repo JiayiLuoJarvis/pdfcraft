@@ -7,6 +7,7 @@ errors, limits, and testing.
 | --- | --- |
 | [crate README](../README.md) | Install and quick start |
 | This guide | How-to for real documents |
+| [lists.md](lists.md) | Caller guide: correct and recommended list / inset usage (Chinese, with examples) |
 | [migrate-inline.md](migrate-inline.md) | Required edits from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
 | [migrate-table-row.md](migrate-table-row.md) | Required edits from `header: Vec<Vec<CellSpec>>` / `border_width` + `border_color` |
 | [migrate-band-marks.md](migrate-band-marks.md) | Move page-coordinate footer marks into a footer band |
@@ -405,6 +406,8 @@ silently.
 
 ## Lists
 
+Caller-oriented recipes (Chinese, with fuller examples): [lists.md](lists.md).
+
 ```rust
 use std::num::NonZeroU32;
 use pdfcraft_pdf::spec::{ListItemSpec, ListKind, ListSpec, MarkerAlign, MarkerFormat};
@@ -445,12 +448,19 @@ the left or right edge of the marker column. The width is the final string.
 A marker wider than `marker_width` is an error.
 
 Markers appear on the first fragment of an item. Continuations keep the hanging
-indent and do not reprint the marker. Bullets, generated numbers, and custom
-markers use `marker_font` when it is set, and otherwise the first face that
-registered successfully. They stay on that family's regular face. Size and
-color follow `Block::Styled`. An unknown `marker_font` key fails with
-`UnregisteredFont`. A missing glyph fails the document. Automatic outline
-numbering (`1.1.1`) is not provided. Nest lists instead.
+indent and do not reprint the marker. The marker baseline matches the first
+text baseline of the item's first block: a paragraph's first line, a table's
+first physical row (the header when present), the topmost first line among
+columns, or a nested list's first marker. An image, canvas, horizontal rule,
+or spacer taller than zero has no text baseline, so the marker's line box sits
+on the item top. Put blank space before the list, or use `item_gap`, when you
+want vertical gap without moving the marker relative to the first text block.
+Bullets, generated numbers, and custom markers use `marker_font` when it is
+set, and otherwise the first face that registered successfully. They stay on
+that family's regular face. Size and color follow `Block::Styled`. An unknown
+`marker_font` key fails with `UnregisteredFont`. A missing glyph fails the
+document. Automatic outline numbering (`1.1.1`) is not provided. Nest lists
+instead.
 
 ---
 
@@ -575,10 +585,10 @@ times the default.
 Overflow → `ErrorKind::LimitExceeded` + `LimitKind`.
 
 Nesting depth is the deepest level in the whole document. Section body blocks
-are level 0. Keep-together groups, styled groups, anchors, columns, list
-items, table cells, and links each add one level. It is checked before fonts
-and images are read. Unoptimized builds may need a larger thread stack when
-the cap is raised above 16.
+are level 0. Keep-together groups, styled groups, anchors, insets, columns,
+list items, table cells, and links each add one level. It is checked before
+fonts and images are read. Unoptimized builds may need a larger thread stack
+when the cap is raised above 16.
 
 ---
 

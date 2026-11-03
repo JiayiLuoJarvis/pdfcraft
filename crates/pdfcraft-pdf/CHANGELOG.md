@@ -52,6 +52,8 @@ cross-crate history.
   that is still too wide for the narrowed frame reports its own error. An inset
   counts as one block and one nesting level. Header and footer bands are not
   built from blocks, so they have no inset.
+- `docs/lists.md` is a caller guide for list and inset usage, with recommended
+  patterns and examples.
 
 ### Changed
 

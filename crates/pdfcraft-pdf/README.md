@@ -14,6 +14,7 @@ part of the public API. Body links use `LinkTarget::Uri` or `LinkTarget::Anchor`
 | | |
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
+| Lists | [docs/lists.md](docs/lists.md) — recommended list / inset usage for callers |
 | Migration | [inline styles](docs/migrate-inline.md), [table rows](docs/migrate-table-row.md), [band marks](docs/migrate-band-marks.md) |
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.98 |
@@ -126,7 +127,7 @@ cargo run -p pdfcraft-pdf --example band_fn # BAND_FN_CASE selects the sample �
 ```
 
 1. **Flow body** — paragraphs, spacers, page breaks, keep-together, styled
-   scopes, columns, tables, lists, images, horizontal rules.
+   scopes, insets, columns, tables, lists, images, horizontal rules.
 2. **Bands** — header/footer slots; band height is the top/bottom margin.
 3. **Layers** — `behind` / `front` marks in page coordinates (seals, watermarks,
    paths).

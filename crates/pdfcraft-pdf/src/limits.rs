@@ -108,12 +108,12 @@ impl Limits {
     /// Deepest nesting of body blocks and inline links in the whole document. Default 16.
     ///
     /// Blocks placed directly in a section body are at depth 0. Each keep-together
-    /// group, styled group, anchor, column, list item, table cell, and link adds
-    /// one level for its contents. A document deeper than this cap fails with
-    /// [`ErrorKind::LimitExceeded`] and [`LimitKind::NestingDepth`] before layout,
-    /// and does not overflow the stack. The default lays out on a 2 MiB thread
-    /// stack in an unoptimized build. Unoptimized builds may need a larger thread
-    /// stack for higher caps.
+    /// group, styled group, anchor, inset, column, list item, table cell, and
+    /// link adds one level for its contents. A document deeper than this cap
+    /// fails with [`ErrorKind::LimitExceeded`] and [`LimitKind::NestingDepth`]
+    /// before layout, and does not overflow the stack. The default lays out on a
+    /// 2 MiB thread stack in an unoptimized build. Unoptimized builds may need a
+    /// larger thread stack for higher caps.
     #[must_use]
     pub const fn max_nesting_depth(&self) -> u32 {
         self.nesting_depth
