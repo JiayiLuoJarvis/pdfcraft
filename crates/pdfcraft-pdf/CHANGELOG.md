@@ -9,6 +9,31 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+### Breaking
+
+- `ListSpec` adds the public field `item_gap`. A struct literal must set
+  `item_gap: NonNegative::ZERO` or end with `..ListSpec::default()`.
+- `ListSpec.nest_indent` is now `body_indent`. The meaning is unchanged. It is
+  the body column's left edge, measured from the list's left edge. `None`
+  still uses `marker_width`. Replace the field name. There is no alias.
+- `ListSpec` adds `marker_format`, `marker_font`, and `marker_align`. A struct
+  literal must set them or end with `..ListSpec::default()`. The defaults are
+  `MarkerFormat::DotSuffix`, `None`, and `MarkerAlign::Start`.
+
+### Added
+
+- `ListSpec::item_gap` is extra space between adjacent items. It is added to
+  the previous item's trailing spacing. A gap that does not fit in the
+  remaining height is dropped and is not carried onto the next page.
+- `MarkerFormat` sets the suffix or parentheses of a generated number
+  (`1.`, `1、`, `1)`, `(1)`, `1`). Bullets and custom markers ignore it.
+  `MarkerAlign` places the marker on the left or right edge of the marker
+  column. `marker_font` draws bullets, numbers, and custom markers with that
+  family's regular face. `None` keeps the first registered face. Size and
+  color still follow `Block::Styled`. Bold and italic do not.
+
 ## [0.4.0] - 2026-11-03
 
 ### Changed

@@ -193,7 +193,7 @@ fn ratio(weight: f32, blocks: Vec<Block<()>>) -> Result<ColumnSpec<()>> {
 fn bullets() -> Result<Block<()>> {
     Ok(Block::List(ListSpec {
         marker_width: pos(16.0)?,
-        nest_indent: Some(pos(20.0)?),
+        body_indent: Some(pos(20.0)?),
         items: vec![
             ListItemSpec {
                 marker: None,

@@ -10,7 +10,7 @@ use crate::layout::line_run;
 use crate::layout::nesting::ItemBody;
 use crate::layout::style::GlyphStyle;
 
-/// Ordered marker numbering. Each label gets a trailing `.`.
+/// Ordered marker numbering. [`MarkerAffix`] wraps the body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MarkerKind {
     Decimal,
@@ -20,13 +20,34 @@ pub(crate) enum MarkerKind {
     LowerRoman,
 }
 
+/// Suffix or parentheses around an ordered marker body.
+///
+/// Bullets and custom markers do not use this.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum MarkerAffix {
+    #[default]
+    DotSuffix,
+    IdeographicComma,
+    ClosingParen,
+    Parens,
+    Bare,
+}
+
+/// Marker position inside the marker column.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum MarkerAlign {
+    #[default]
+    Start,
+    End,
+}
+
 const MIN_MARKER_NUMBER: u64 = 1;
 const MAX_ALPHA_MARKER: u64 = 26;
 const MAX_ROMAN_MARKER: u64 = 3999;
 
 impl MarkerKind {
     /// Letters stop at Z and roman numerals at 3999; past that is [`GeometryKind::MarkerOutOfRange`].
-    pub(crate) fn label(self, number: u64) -> Result<String> {
+    pub(crate) fn label(self, number: u64, affix: MarkerAffix) -> Result<String> {
         let body = match self {
             MarkerKind::Decimal => number.to_string(),
             MarkerKind::UpperAlpha => alpha(number)?.to_string(),
@@ -34,7 +55,13 @@ impl MarkerKind {
             MarkerKind::UpperRoman => roman(number)?,
             MarkerKind::LowerRoman => roman(number)?.to_ascii_lowercase(),
         };
-        Ok(format!("{body}."))
+        Ok(match affix {
+            MarkerAffix::DotSuffix => format!("{body}."),
+            MarkerAffix::IdeographicComma => format!("{body}\u{3001}"),
+            MarkerAffix::ClosingParen => format!("{body})"),
+            MarkerAffix::Parens => format!("({body})"),
+            MarkerAffix::Bare => body,
+        })
     }
 }
 
@@ -96,8 +123,11 @@ impl ListKind {
 pub(crate) struct ListSpec<N> {
     pub(crate) kind: ListKind,
     pub(crate) marker_width: Length<Positive>,
-    pub(crate) nest_indent: Option<Length<Positive>>,
+    pub(crate) body_indent: Option<Length<Positive>>,
     pub(crate) marker_style: GlyphStyle,
+    pub(crate) item_gap: Length<NonNegative>,
+    pub(crate) affix: MarkerAffix,
+    pub(crate) align: MarkerAlign,
     pub(crate) items: Vec<ListItem<N>>,
 }
 
@@ -141,13 +171,15 @@ pub(crate) struct ListNode<N> {
     marker_width: Length<Positive>,
     indent: Length<Positive>,
     marker_style: GlyphStyle,
+    item_gap: Length<NonNegative>,
+    align: MarkerAlign,
     items: VecDeque<PendingItem<N>>,
 }
 
 impl<N: Flowable> ListNode<N> {
     pub(crate) fn new(spec: ListSpec<N>) -> Result<Self> {
         let marker_width = spec.marker_width;
-        let indent = spec.nest_indent.unwrap_or(marker_width);
+        let indent = spec.body_indent.unwrap_or(marker_width);
         if indent.as_pt() < marker_width.as_pt() {
             return Err(GeometryKind::ListIndent {
                 indent: indent.as_pt(),
@@ -165,7 +197,7 @@ impl<N: Flowable> ListNode<N> {
                 (Some(custom), _) => custom,
                 (None, ListKind::Bullet) => ListKind::BULLET_MARKER.to_owned(),
                 (None, ListKind::Ordered { style, .. }) => {
-                    let label = style.label(next)?;
+                    let label = style.label(next, spec.affix)?;
                     next += 1;
                     label
                 }
@@ -179,6 +211,8 @@ impl<N: Flowable> ListNode<N> {
             marker_width,
             indent,
             marker_style: spec.marker_style,
+            item_gap: spec.item_gap,
+            align: spec.align,
             items,
         })
     }
@@ -242,10 +276,14 @@ impl<N: Flowable> ListNode<N> {
                     Some(self.marker_width),
                 )?;
                 let baseline = first_baseline(&fragment).unwrap_or(marker.metrics.baseline.as_pt());
+                let marker_x = match self.align {
+                    MarkerAlign::Start => 0.0,
+                    MarkerAlign::End => (self.marker_width - marker.width).as_pt(),
+                };
                 line_run::append_commands(
                     &mut commands,
                     &marker.pieces,
-                    0.0,
+                    marker_x,
                     y.as_pt() + baseline,
                     0.0,
                 )?;
@@ -267,13 +305,16 @@ impl<N: Flowable> ListNode<N> {
             }
             if self.items.is_empty() {
                 trailing_spacing = spacing;
-            } else if spacing > NonNegative::ZERO && avail.height >= spacing {
-                y += spacing;
-                avail.height = avail.height.sub_exact(spacing);
-            } else if spacing > NonNegative::ZERO && ctx.natural {
-                // Measurement must count gaps that will not fit a fresh frame.
-                y += spacing;
-                avail.height = NonNegative::ZERO;
+            } else {
+                let gap = spacing + self.item_gap;
+                if gap > NonNegative::ZERO && avail.height >= gap {
+                    y += gap;
+                    avail.height = avail.height.sub_exact(gap);
+                } else if gap > NonNegative::ZERO && ctx.natural {
+                    // Counting the gap uses up the frame, so the next item stays off this page.
+                    y += gap;
+                    avail.height = NonNegative::ZERO;
+                }
             }
         }
 

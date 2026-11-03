@@ -532,6 +532,39 @@ pub enum CellBlock<K> {
     },
 }
 
+/// Suffix or parentheses on a generated ordered-list number.
+///
+/// Bullets and custom markers ignore this. Each variant combines with every
+/// [`Numbering`] value. Letters still stop at Z and roman numerals at 3999.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use]
+#[non_exhaustive]
+pub enum MarkerFormat {
+    /// `1.`, `C.`, `iv.`
+    #[default]
+    DotSuffix,
+    /// `1、`, `A、`. The comma is U+3001.
+    IdeographicComma,
+    /// `1)`, `a)`.
+    ClosingParen,
+    /// `(1)`, `(iv)`.
+    Parens,
+    /// `1`, `z`.
+    Bare,
+}
+
+/// Where a list marker sits in the marker column.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use]
+#[non_exhaustive]
+pub enum MarkerAlign {
+    /// The left edge of the marker column.
+    #[default]
+    Start,
+    /// The right edge of the marker column, so `9.` and `10.` share that edge.
+    End,
+}
+
 /// Bulleted or numbered list settings.
 #[derive(Debug)]
 #[must_use]
@@ -542,8 +575,26 @@ pub struct ListSpec<K> {
     pub start: NonZeroU32,
     /// Hanging marker-column width.
     pub marker_width: Length<Positive>,
-    /// Extra nested-body inset. `None` uses `marker_width`.
-    pub nest_indent: Option<Length<Positive>>,
+    /// Body column left edge, measured from the list's left edge.
+    ///
+    /// `None` uses `marker_width`. The value must not be less than `marker_width`.
+    pub body_indent: Option<Length<Positive>>,
+    /// Space between adjacent items. The default is zero.
+    ///
+    /// The value is added to the previous item's trailing spacing. Nothing is
+    /// added before the first item or after the last item. When the gap does not
+    /// fit in the remaining height, it is dropped. It is not carried to the next
+    /// page.
+    pub item_gap: Length<NonNegative>,
+    /// Suffix or parentheses for generated numbers. Bullets ignore this.
+    pub marker_format: MarkerFormat,
+    /// Face for bullets, generated numbers, and custom markers.
+    ///
+    /// `None` uses the first registered face. `Some` uses that family's regular
+    /// face. Size and color still follow [`Block::Styled`]. Bold and italic do not.
+    pub marker_font: Option<K>,
+    /// Marker position in the marker column.
+    pub marker_align: MarkerAlign,
     /// List items in order.
     pub items: Vec<ListItemSpec<K>>,
 }
@@ -554,7 +605,11 @@ impl<K> Default for ListSpec<K> {
             kind: ListKind::Bullet,
             start: NonZeroU32::MIN,
             marker_width: Length::from_trusted_pt(18.0),
-            nest_indent: None,
+            body_indent: None,
+            item_gap: NonNegative::ZERO,
+            marker_format: MarkerFormat::default(),
+            marker_font: None,
+            marker_align: MarkerAlign::default(),
             items: Vec::new(),
         }
     }
@@ -576,8 +631,9 @@ pub enum ListKind {
 pub struct ListItemSpec<K> {
     /// Custom marker. `None` uses the list's generated marker.
     ///
-    /// Generated and custom markers use the first registered face. They take
-    /// size and color from [`Block::Styled`] and nothing else.
+    /// Bullets, generated numbers, and custom markers use [`ListSpec::marker_font`]
+    /// when it is set, and otherwise the first registered face. They take size
+    /// and color from [`Block::Styled`] and stay on the regular face.
     pub marker: Option<String>,
     /// Item blocks.
     pub blocks: Vec<Block<K>>,

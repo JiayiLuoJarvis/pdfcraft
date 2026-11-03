@@ -161,7 +161,12 @@ struct ResolvedFamily {
 }
 
 impl ResolvedFamily {
-    /// List markers draw with the first registered face and never pick another.
+    /// Regular face of the first font that registered.
+    ///
+    /// List markers use this when `marker_font` is unset. A set `marker_font`
+    /// uses that key's regular face instead. The bold and italic slots stay
+    /// empty, so resolving a marker with [`InheritedPaint::plain`] cannot
+    /// switch face.
     fn first_face() -> Self {
         Self {
             regular: FontId::from_raw(0),
@@ -1168,7 +1173,15 @@ fn lower_list<K: FontKey>(
             start: spec.start,
         },
     };
-    let marker_style = resolve_run(&ResolvedFamily::first_face(), paint.plain(), &mut bag);
+    let marker_family = match spec.marker_font {
+        None => Some(ResolvedFamily::first_face()),
+        Some(key) => family_of(env.fonts, key, &mut bag).copied(),
+    };
+    let Some(marker_family) = marker_family else {
+        errors.absorb(bag);
+        return None;
+    };
+    let marker_style = resolve_run(&marker_family, paint.plain(), &mut bag);
     let failed = !bag.is_empty();
     errors.absorb(bag);
     if failed {
@@ -1177,8 +1190,11 @@ fn lower_list<K: FontKey>(
     let layout_spec = LayoutListSpec {
         kind,
         marker_width: spec.marker_width,
-        nest_indent: spec.nest_indent,
+        body_indent: spec.body_indent,
         marker_style,
+        item_gap: spec.item_gap,
+        affix: types::marker_affix(spec.marker_format),
+        align: types::marker_align(spec.marker_align),
         items,
     };
     match ListNode::new(layout_spec) {

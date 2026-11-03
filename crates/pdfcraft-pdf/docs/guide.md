@@ -202,7 +202,7 @@ let resources = Resources::with_fonts(FontRegistry::single(FontFamily {
 | PNG pixel errors | Fail in `layout_spec` (`ErrorKind::Image`) |
 | JPEG / GIF / WebP pixel errors | May fail in `to_pdf` (`ErrorKind::Backend`, no page attached) |
 
-Each run names its face. The library does not pick a face from the script of the text. List markers use the first face that registered successfully.
+Each run names its face. The library does not pick a face from the script of the text. List markers use `marker_font` when it is set, and otherwise the first face that registered successfully. They use that family's regular face.
 
 Text shaping scope: horizontal Chinese and Latin. No bidi, vertical writing,
 kerning, or ligatures. `Alignment` is Start / Center / End / Justify.
@@ -310,7 +310,7 @@ let paragraph = ParagraphSpec {
 | Topic | Rule |
 | --- | --- |
 | `InlineRun::Text` | `{ text, font, style }`. `RunStyle` fields left `None` inherit. `Some(false)` turns off an inherited flag. |
-| Inheritance | Seed (12 pt, black, regular, no lines, no tracking), then each `Block::Styled`, then `ParagraphSpec` size and color, then the run. Bands, layers, and canvas text start from the seed. Table cell text and list markers use the regular face and inherit only size and color. |
+| Inheritance | Seed (12 pt, black, regular, no lines, no tracking), then each `Block::Styled`, then `ParagraphSpec` size and color, then the run. Bands, layers, and canvas text start from the seed. Table cell text and list markers use the regular face and inherit only size and color. A list's `marker_font` selects which family. Bold and italic do not change the marker face. |
 | Underline / strikethrough | Position scales with the run's size. Thickness is 1 pt. Adjacent runs on one line with the same size and color share one stroke, placed from the first segment. Spaces inside the line are covered. A blank keeps its own stroke. |
 | `tracking` | Extra space after each cluster followed by more text on the line. It counts toward line breaking. Negative values may not push a glyph's advance below zero (`ErrorKind::NegativeTracking`). |
 | Mixed sizes | Each face on a line is scaled by its own size. The line box takes the largest ascent, the deepest descent, and the largest leading, then the larger of that natural height and the largest size times the line-height factor. A line of only blanks uses the first text run's resolved face at the paragraph size. A paragraph with no text runs does not read a font. |
@@ -394,31 +394,50 @@ silently.
 
 ```rust
 use std::num::NonZeroU32;
-use pdfcraft_pdf::spec::{ListItemSpec, ListKind, ListSpec};
-use pdfcraft_pdf::Positive;
+use pdfcraft_pdf::spec::{ListItemSpec, ListKind, ListSpec, MarkerAlign, MarkerFormat};
+use pdfcraft_pdf::{NonNegative, Numbering, Positive};
 
 ListSpec {
-    kind: ListKind::Decimal, // also bullet / alpha / roman helpers on the enum
+    kind: ListKind::Ordered(Numbering::Decimal),
     start: NonZeroU32::new(1).unwrap(),
     marker_width: Positive::pt(18.0).unwrap(),
-    nest_indent: None, // defaults to marker_width
+    body_indent: None, // defaults to marker_width
+    item_gap: NonNegative::pt(6.0).unwrap(),
+    marker_format: MarkerFormat::ClosingParen, // 1)  2)  also DotSuffix, Parens, Bare, IdeographicComma
+    marker_font: None, // Some(key) uses that family's regular face
+    marker_align: MarkerAlign::End, // 9) and 10) share the marker column's right edge
     items: vec![
         ListItemSpec {
             marker: None, // automatic label
             blocks: vec![Block::paragraph((), "First")],
         },
         ListItemSpec {
-            marker: Some("*".into()), // custom; does not advance the counter
+            marker: Some("*".into()), // custom; does not advance the counter or take marker_format
             blocks: vec![Block::paragraph((), "Aside")],
         },
     ],
 }
 ```
 
+`item_gap` adds space only between adjacent items. The value is added to the
+previous item's trailing spacing. The default is 0. A gap that does not fit
+on the page is dropped. The next page does not start with that blank.
+
+`body_indent` is the body column's left edge, measured from the list's left
+edge. `None` uses `marker_width`. A smaller value fails.
+
+`marker_format` changes the generated number (`1.`, `1、`, `1)`, `(1)`, `1`).
+Bullets and custom markers ignore it. `marker_align` places every marker on
+the left or right edge of the marker column. The width is the final string.
+A marker wider than `marker_width` is an error.
+
 Markers appear on the first fragment of an item. Continuations keep the hanging
-indent and do not reprint the marker. Generated and custom markers use the first
-face that registered successfully. Automatic outline numbering (`1.1.1`) is
-not provided. Nest lists instead.
+indent and do not reprint the marker. Bullets, generated numbers, and custom
+markers use `marker_font` when it is set, and otherwise the first face that
+registered successfully. They stay on that family's regular face. Size and
+color follow `Block::Styled`. An unknown `marker_font` key fails with
+`UnregisteredFont`. A missing glyph fails the document. Automatic outline
+numbering (`1.1.1`) is not provided. Nest lists instead.
 
 ---
 

@@ -1,14 +1,18 @@
 //! Public value types used by [`super::DocumentSpec`].
 
+use super::{MarkerAlign, MarkerFormat};
 use crate::canvas::{DocumentInfo, ImageRegistry, OutlineItem, RecordedPage, RecordingCanvas};
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible};
 use crate::fonts::FontStore;
 use crate::geom::{Length, Positive};
 use crate::layout::column_width::{ColumnWidth, Ratio as LayoutRatio};
-use crate::layout::list::MarkerKind;
+use crate::layout::list::{MarkerAffix, MarkerAlign as LayoutMarkerAlign, MarkerKind};
 use crate::layout::style::{Style, TextAlign};
 
-/// Marker numbering of an ordered list. Each label ends with `.`.
+/// Marker numbering of an ordered list.
+///
+/// This is the label body. [`super::MarkerFormat`] adds the suffix or
+/// parentheses. The examples on each variant use [`super::MarkerFormat::DotSuffix`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Numbering {
     /// 1. 2. 3.
@@ -30,6 +34,23 @@ pub(crate) fn numbering_kind(numbering: Numbering) -> MarkerKind {
         Numbering::LowerAlpha => MarkerKind::LowerAlpha,
         Numbering::UpperRoman => MarkerKind::UpperRoman,
         Numbering::LowerRoman => MarkerKind::LowerRoman,
+    }
+}
+
+pub(crate) fn marker_affix(format: MarkerFormat) -> MarkerAffix {
+    match format {
+        MarkerFormat::DotSuffix => MarkerAffix::DotSuffix,
+        MarkerFormat::IdeographicComma => MarkerAffix::IdeographicComma,
+        MarkerFormat::ClosingParen => MarkerAffix::ClosingParen,
+        MarkerFormat::Parens => MarkerAffix::Parens,
+        MarkerFormat::Bare => MarkerAffix::Bare,
+    }
+}
+
+pub(crate) fn marker_align(align: MarkerAlign) -> LayoutMarkerAlign {
+    match align {
+        MarkerAlign::Start => LayoutMarkerAlign::Start,
+        MarkerAlign::End => LayoutMarkerAlign::End,
     }
 }
 

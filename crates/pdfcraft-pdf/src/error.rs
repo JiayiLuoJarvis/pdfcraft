@@ -643,7 +643,7 @@ pub enum GeometryKind {
     EmptyListMarker,
     /// A nested list indent is narrower than the marker column.
     ListIndent {
-        /// The nest indent.
+        /// The body indent.
         indent: f32,
         /// The marker column width.
         marker_width: f32,

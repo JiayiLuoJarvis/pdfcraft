@@ -1,12 +1,15 @@
 use std::num::NonZeroU32;
 
-use crate::error::{Error, ErrorKind, GeometryKind};
+use crate::canvas::{pt_near, CanvasCommand, RecordedPage};
+use crate::error::{Error, ErrorBag, ErrorKind, GeometryKind};
 use crate::geom::{Color, NonNegative, Positive};
 use crate::layout::column_width::ColumnWidth;
 use crate::layout::decorate::Decorations;
-use crate::layout::flow::FlowNode;
-use crate::layout::frame::{Fragment, FragmentCommand};
-use crate::layout::list::{first_baseline, ListItem, ListKind, ListNode, ListSpec, MarkerKind};
+use crate::layout::flow::{FlowNode, KeepTogetherNode};
+use crate::layout::frame::{natural_height, Fragment, FragmentCommand, Frame, LayoutCtx};
+use crate::layout::list::{
+    first_baseline, ListItem, ListKind, ListNode, ListSpec, MarkerAffix, MarkerAlign, MarkerKind,
+};
 use crate::layout::style::{GlyphStyle, Style};
 use crate::layout::table::{TableNode, TableSpec};
 use crate::layout::test_util::{bits, fonts_and_style, metrics, page, render, runs, text, texts};
@@ -20,8 +23,11 @@ fn spec(
     ListSpec {
         kind,
         marker_width: Positive::pt(marker_width).unwrap(),
-        nest_indent: None,
+        body_indent: None,
         marker_style: GlyphStyle::plain(style),
+        item_gap: NonNegative::ZERO,
+        affix: MarkerAffix::DotSuffix,
+        align: MarkerAlign::Start,
         items,
     }
 }
@@ -33,8 +39,55 @@ fn ordered(style: MarkerKind, start: u32) -> ListKind {
     }
 }
 
+fn parens(mut built: ListSpec<FlowNode>) -> ListSpec<FlowNode> {
+    built.affix = MarkerAffix::Parens;
+    built
+}
+
+fn marker_right(page: &RecordedPage, text: &str) -> f32 {
+    page.ops()
+        .iter()
+        .find_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } if run.text == text => {
+                let width = run
+                    .glyphs
+                    .iter()
+                    .map(|glyph| glyph.advance_norm)
+                    .sum::<f32>()
+                    * run.font_size.as_pt();
+                Some(run.origin.x().as_pt() + width)
+            }
+            CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform => None,
+        })
+        .unwrap_or_else(|| panic!("missing glyph run {text}"))
+}
+
 fn item(s: &str, style: &Style) -> ListItem<FlowNode> {
     ListItem::new(vec![text(s, style)]).unwrap()
+}
+
+fn gap_list(
+    kind: ListKind,
+    gap: f32,
+    style: &Style,
+    items: Vec<ListItem<FlowNode>>,
+) -> ListNode<FlowNode> {
+    let mut built = spec(kind, 20.0, style, items);
+    built.item_gap = NonNegative::pt(gap).unwrap();
+    ListNode::new(built).unwrap()
+}
+
+fn y_of(drawn: &[(String, f32, f32)], label: &str) -> f32 {
+    drawn.iter().find(|run| run.0 == label).unwrap().2
 }
 
 #[test]
@@ -122,12 +175,12 @@ fn nested_list_indents_by_its_own_marker_width() {
 }
 
 #[test]
-fn nest_indent_moves_the_body_column() {
+fn body_indent_moves_the_body_column() {
     let Some((mut fonts, style)) = fonts_and_style() else {
         return;
     };
     let mut s = spec(ListKind::Bullet, 14.0, &style, vec![item("A", &style)]);
-    s.nest_indent = Some(Positive::pt(30.0).unwrap());
+    s.body_indent = Some(Positive::pt(30.0).unwrap());
     let list = ListNode::new(s).unwrap();
     let (result, rec) = render(
         FlowNode::List(list),
@@ -145,7 +198,7 @@ fn upper_roman_custom_marker_does_not_consume_the_counter() {
     let Some((mut fonts, style)) = fonts_and_style() else {
         return;
     };
-    let list = ListNode::new(spec(
+    let list = ListNode::new(parens(spec(
         ordered(MarkerKind::UpperRoman, 4),
         30.0,
         &style,
@@ -154,7 +207,7 @@ fn upper_roman_custom_marker_does_not_consume_the_counter() {
             ListItem::custom("(x)", vec![text("b", &style)]).unwrap(),
             item("c", &style),
         ],
-    ))
+    )))
     .unwrap();
     let (result, rec) = render(
         FlowNode::List(list),
@@ -163,7 +216,10 @@ fn upper_roman_custom_marker_does_not_consume_the_counter() {
         &Decorations::none(),
     );
     result.unwrap();
-    assert_eq!(texts(&rec.pages()[0]), ["IV.", "a", "(x)", "b", "V.", "c"]);
+    assert_eq!(
+        texts(&rec.pages()[0]),
+        ["(IV)", "a", "(x)", "b", "(V)", "c"]
+    );
 }
 
 #[test]
@@ -171,7 +227,7 @@ fn decimal_custom_marker_between_autos_does_not_consume() {
     let Some((mut fonts, style)) = fonts_and_style() else {
         return;
     };
-    let list = ListNode::new(spec(
+    let list = ListNode::new(parens(spec(
         ordered(MarkerKind::Decimal, 1),
         20.0,
         &style,
@@ -180,7 +236,7 @@ fn decimal_custom_marker_between_autos_does_not_consume() {
             ListItem::custom("(x)", vec![text("b", &style)]).unwrap(),
             item("c", &style),
         ],
-    ))
+    )))
     .unwrap();
     let (result, rec) = render(
         FlowNode::List(list),
@@ -189,7 +245,7 @@ fn decimal_custom_marker_between_autos_does_not_consume() {
         &Decorations::none(),
     );
     result.unwrap();
-    assert_eq!(texts(&rec.pages()[0]), ["1.", "a", "(x)", "b", "2.", "c"]);
+    assert_eq!(texts(&rec.pages()[0]), ["(1)", "a", "(x)", "b", "(2)", "c"]);
 }
 
 #[test]
@@ -197,7 +253,7 @@ fn leading_custom_marker_does_not_consume_the_first_number() {
     let Some((mut fonts, style)) = fonts_and_style() else {
         return;
     };
-    let list = ListNode::new(spec(
+    let list = ListNode::new(parens(spec(
         ordered(MarkerKind::Decimal, 1),
         20.0,
         &style,
@@ -206,7 +262,7 @@ fn leading_custom_marker_does_not_consume_the_first_number() {
             item("b", &style),
             item("c", &style),
         ],
-    ))
+    )))
     .unwrap();
     let (result, rec) = render(
         FlowNode::List(list),
@@ -215,26 +271,210 @@ fn leading_custom_marker_does_not_consume_the_first_number() {
         &Decorations::none(),
     );
     result.unwrap();
-    assert_eq!(texts(&rec.pages()[0]), ["(x)", "a", "1.", "b", "2.", "c"]);
+    assert_eq!(texts(&rec.pages()[0]), ["(x)", "a", "(1)", "b", "(2)", "c"]);
+}
+
+const MARKER_LABELS: &[(MarkerKind, u64, MarkerAffix, &str)] = &[
+    (MarkerKind::Decimal, 1, MarkerAffix::DotSuffix, "1."),
+    (
+        MarkerKind::Decimal,
+        1,
+        MarkerAffix::IdeographicComma,
+        "1\u{3001}",
+    ),
+    (MarkerKind::Decimal, 1, MarkerAffix::ClosingParen, "1)"),
+    (MarkerKind::Decimal, 1, MarkerAffix::Parens, "(1)"),
+    (MarkerKind::Decimal, 1, MarkerAffix::Bare, "1"),
+    (MarkerKind::Decimal, 12, MarkerAffix::DotSuffix, "12."),
+    (
+        MarkerKind::Decimal,
+        12,
+        MarkerAffix::IdeographicComma,
+        "12\u{3001}",
+    ),
+    (MarkerKind::Decimal, 12, MarkerAffix::ClosingParen, "12)"),
+    (MarkerKind::Decimal, 12, MarkerAffix::Parens, "(12)"),
+    (MarkerKind::Decimal, 12, MarkerAffix::Bare, "12"),
+    (MarkerKind::UpperAlpha, 3, MarkerAffix::DotSuffix, "C."),
+    (
+        MarkerKind::UpperAlpha,
+        1,
+        MarkerAffix::IdeographicComma,
+        "A\u{3001}",
+    ),
+    (MarkerKind::UpperAlpha, 26, MarkerAffix::DotSuffix, "Z."),
+    (
+        MarkerKind::UpperAlpha,
+        26,
+        MarkerAffix::IdeographicComma,
+        "Z\u{3001}",
+    ),
+    (MarkerKind::UpperAlpha, 26, MarkerAffix::ClosingParen, "Z)"),
+    (MarkerKind::UpperAlpha, 26, MarkerAffix::Parens, "(Z)"),
+    (MarkerKind::UpperAlpha, 26, MarkerAffix::Bare, "Z"),
+    (MarkerKind::LowerAlpha, 1, MarkerAffix::ClosingParen, "a)"),
+    (MarkerKind::LowerAlpha, 26, MarkerAffix::DotSuffix, "z."),
+    (
+        MarkerKind::LowerAlpha,
+        26,
+        MarkerAffix::IdeographicComma,
+        "z\u{3001}",
+    ),
+    (MarkerKind::LowerAlpha, 26, MarkerAffix::ClosingParen, "z)"),
+    (MarkerKind::LowerAlpha, 26, MarkerAffix::Parens, "(z)"),
+    (MarkerKind::LowerAlpha, 26, MarkerAffix::Bare, "z"),
+    (
+        MarkerKind::UpperRoman,
+        1994,
+        MarkerAffix::DotSuffix,
+        "MCMXCIV.",
+    ),
+    (
+        MarkerKind::UpperRoman,
+        3999,
+        MarkerAffix::DotSuffix,
+        "MMMCMXCIX.",
+    ),
+    (
+        MarkerKind::UpperRoman,
+        3999,
+        MarkerAffix::IdeographicComma,
+        "MMMCMXCIX\u{3001}",
+    ),
+    (
+        MarkerKind::UpperRoman,
+        3999,
+        MarkerAffix::ClosingParen,
+        "MMMCMXCIX)",
+    ),
+    (
+        MarkerKind::UpperRoman,
+        3999,
+        MarkerAffix::Parens,
+        "(MMMCMXCIX)",
+    ),
+    (MarkerKind::UpperRoman, 3999, MarkerAffix::Bare, "MMMCMXCIX"),
+    (MarkerKind::LowerRoman, 4, MarkerAffix::Parens, "(iv)"),
+    (
+        MarkerKind::LowerRoman,
+        3999,
+        MarkerAffix::DotSuffix,
+        "mmmcmxcix.",
+    ),
+    (
+        MarkerKind::LowerRoman,
+        3999,
+        MarkerAffix::IdeographicComma,
+        "mmmcmxcix\u{3001}",
+    ),
+    (
+        MarkerKind::LowerRoman,
+        3999,
+        MarkerAffix::ClosingParen,
+        "mmmcmxcix)",
+    ),
+    (
+        MarkerKind::LowerRoman,
+        3999,
+        MarkerAffix::Parens,
+        "(mmmcmxcix)",
+    ),
+    (MarkerKind::LowerRoman, 3999, MarkerAffix::Bare, "mmmcmxcix"),
+];
+
+#[test]
+fn labels_for_each_marker_kind_and_affix() {
+    for &(kind, number, affix, expected) in MARKER_LABELS {
+        assert_eq!(kind.label(number, affix).unwrap(), expected);
+    }
 }
 
 #[test]
-fn labels_for_each_marker_kind() {
-    assert_eq!(MarkerKind::Decimal.label(12).unwrap(), "12.");
-    assert_eq!(MarkerKind::UpperAlpha.label(3).unwrap(), "C.");
-    assert_eq!(MarkerKind::LowerAlpha.label(26).unwrap(), "z.");
-    assert_eq!(MarkerKind::UpperRoman.label(1994).unwrap(), "MCMXCIV.");
-    assert_eq!(MarkerKind::LowerRoman.label(3999).unwrap(), "mmmcmxcix.");
+fn bullet_ignores_marker_affix() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let mut built = spec(ListKind::Bullet, 20.0, &style, vec![item("A", &style)]);
+    built.affix = MarkerAffix::Parens;
+    let list = ListNode::new(built).unwrap();
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    assert_eq!(texts(&rec.pages()[0]), ["\u{2022}", "A"]);
+}
+
+#[test]
+fn marker_align_end_shares_the_marker_column_right_edge() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let marker_width = 36.0;
+    let mut built = spec(
+        ordered(MarkerKind::Decimal, 9),
+        marker_width,
+        &style,
+        vec![item("a", &style), item("b", &style)],
+    );
+    built.align = MarkerAlign::End;
+    let list = ListNode::new(built).unwrap();
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    let page = &rec.pages()[0];
+    assert!(
+        pt_near(marker_right(page, "9."), marker_width),
+        "9. right edge"
+    );
+    assert!(
+        pt_near(marker_right(page, "10."), marker_width),
+        "10. right edge"
+    );
+    let xs: Vec<f32> = runs(page).iter().map(|run| run.1).collect();
+    assert_eq!(xs[1].to_bits(), marker_width.to_bits());
+    assert_eq!(xs[3].to_bits(), marker_width.to_bits());
+}
+
+#[test]
+fn marker_align_start_places_the_marker_at_x_zero() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let mut built = spec(
+        ordered(MarkerKind::Decimal, 9),
+        36.0,
+        &style,
+        vec![item("a", &style), item("b", &style)],
+    );
+    built.align = MarkerAlign::Start;
+    let list = ListNode::new(built).unwrap();
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    let xs: Vec<f32> = runs(&rec.pages()[0]).iter().map(|run| run.1).collect();
+    assert_eq!(xs[0].to_bits(), 0.0f32.to_bits());
+    assert_eq!(xs[2].to_bits(), 0.0f32.to_bits());
 }
 
 #[test]
 fn labels_past_z_or_3999_are_errors() {
     assert_eq!(
-        MarkerKind::UpperAlpha.label(27),
+        MarkerKind::UpperAlpha.label(27, MarkerAffix::Parens),
         Err(GeometryKind::MarkerOutOfRange { number: 27 }.into())
     );
     assert_eq!(
-        MarkerKind::LowerRoman.label(4000),
+        MarkerKind::LowerRoman.label(4000, MarkerAffix::DotSuffix),
         Err(GeometryKind::MarkerOutOfRange { number: 4000 }.into())
     );
     let Some((_, style)) = fonts_and_style() else {
@@ -360,4 +600,273 @@ fn item_allows_hline() {
         NonNegative::ZERO,
     );
     ListItem::new(vec![FlowNode::HLine(line)]).unwrap();
+}
+
+#[test]
+fn item_gap_shifts_the_next_item_by_the_line_height_plus_the_gap() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let list = gap_list(
+        ordered(MarkerKind::Decimal, 1),
+        6.0,
+        &style,
+        vec![item("A", &style), item("B", &style)],
+    );
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    let first = m.baseline.as_pt();
+    let second = m.line_height.as_pt() + 6.0 + first;
+    assert_eq!(
+        runs(&rec.pages()[0]).iter().map(bits).collect::<Vec<_>>(),
+        [
+            ("1.", 0.0f32.to_bits(), first.to_bits()),
+            ("A", 20.0f32.to_bits(), first.to_bits()),
+            ("2.", 0.0f32.to_bits(), second.to_bits()),
+            ("B", 20.0f32.to_bits(), second.to_bits()),
+        ]
+    );
+}
+
+#[test]
+fn item_gap_is_only_between_items() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let h = m.line_height.as_pt();
+    let base = m.baseline.as_pt();
+    let gap = 6.0;
+
+    {
+        let one = FlowNode::Stack(vec![
+            FlowNode::List(gap_list(
+                ListKind::Bullet,
+                gap,
+                &style,
+                vec![item("A", &style)],
+            )),
+            text("TAIL", &style),
+        ]);
+        let (result, rec) = render(one, &mut fonts, page(200.0, 400.0), &Decorations::none());
+        result.unwrap();
+        let drawn = runs(&rec.pages()[0]);
+        assert_eq!(y_of(&drawn, "A").to_bits(), base.to_bits());
+        assert_eq!(y_of(&drawn, "TAIL").to_bits(), (h + base).to_bits());
+    }
+
+    let three = FlowNode::Stack(vec![
+        FlowNode::List(gap_list(
+            ListKind::Bullet,
+            gap,
+            &style,
+            vec![item("A", &style), item("B", &style), item("C", &style)],
+        )),
+        text("TAIL", &style),
+    ]);
+    let (three_result, three_rec) =
+        render(three, &mut fonts, page(200.0, 400.0), &Decorations::none());
+    three_result.unwrap();
+    let three_drawn = runs(&three_rec.pages()[0]);
+    let b = h + gap + base;
+    let c = h + gap + h + gap + base;
+    let tail = h + gap + h + gap + h + base;
+    assert_eq!(y_of(&three_drawn, "A").to_bits(), base.to_bits());
+    assert_eq!(y_of(&three_drawn, "B").to_bits(), b.to_bits());
+    assert_eq!(y_of(&three_drawn, "C").to_bits(), c.to_bits());
+    assert_eq!(y_of(&three_drawn, "TAIL").to_bits(), tail.to_bits());
+}
+
+#[test]
+fn item_gap_is_dropped_when_the_page_cannot_hold_it() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let h = m.line_height.as_pt();
+    let base = m.baseline.as_pt();
+    let list = gap_list(
+        ordered(MarkerKind::Decimal, 1),
+        6.0,
+        &style,
+        vec![item("A", &style), item("B", &style)],
+    );
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, h),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    let pages = rec.pages();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(
+        runs(&pages[0]).iter().map(bits).collect::<Vec<_>>(),
+        [
+            ("1.", 0.0f32.to_bits(), base.to_bits()),
+            ("A", 20.0f32.to_bits(), base.to_bits()),
+        ]
+    );
+    assert_eq!(
+        runs(&pages[1]).iter().map(bits).collect::<Vec<_>>(),
+        [
+            ("2.", 0.0f32.to_bits(), base.to_bits()),
+            ("B", 20.0f32.to_bits(), base.to_bits()),
+        ]
+    );
+}
+
+#[test]
+fn dropped_item_gap_packs_the_next_item_on_the_same_page() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let h = m.line_height.as_pt();
+    let base = m.baseline.as_pt();
+    let list = gap_list(
+        ordered(MarkerKind::Decimal, 1),
+        h + 1.0,
+        &style,
+        vec![item("A", &style), item("B", &style)],
+    );
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(200.0, h + h),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    let pages = rec.pages();
+    assert_eq!(pages.len(), 1);
+    let second = h + base;
+    assert_eq!(
+        runs(&pages[0]).iter().map(bits).collect::<Vec<_>>(),
+        [
+            ("1.", 0.0f32.to_bits(), base.to_bits()),
+            ("A", 20.0f32.to_bits(), base.to_bits()),
+            ("2.", 0.0f32.to_bits(), second.to_bits()),
+            ("B", 20.0f32.to_bits(), second.to_bits()),
+        ]
+    );
+}
+
+#[test]
+fn natural_height_counts_item_gaps_that_do_not_fit() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let h = m.line_height.as_pt();
+    let gap = 6.0;
+    let list = gap_list(
+        ListKind::Bullet,
+        gap,
+        &style,
+        vec![item("A", &style), item("B", &style), item("C", &style)],
+    );
+    let node = FlowNode::KeepTogether(KeepTogetherNode::Open(vec![FlowNode::List(list)]));
+    let mut errors = ErrorBag::default();
+    let mut ctx = LayoutCtx {
+        natural: false,
+        fonts: &mut fonts,
+        errors: &mut errors,
+    };
+    let full = Frame {
+        width: Positive::pt(200.0).unwrap(),
+        height: NonNegative::pt(h).unwrap(),
+        full_height: Positive::pt(h).unwrap(),
+    };
+    let err = natural_height(node, &mut ctx, full).unwrap_err();
+    assert_eq!(
+        err,
+        Error::from(ErrorKind::UnsplittableTallerThanFrame {
+            height: h + gap + h + gap + h,
+            avail: h,
+        })
+    );
+}
+
+#[test]
+fn item_gap_applies_to_bullets_and_numbers() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let second = m.line_height.as_pt() + 6.0 + m.baseline.as_pt();
+    for kind in [ListKind::Bullet, ordered(MarkerKind::Decimal, 1)] {
+        let list = gap_list(
+            kind,
+            6.0,
+            &style,
+            vec![item("A", &style), item("B", &style)],
+        );
+        let (result, rec) = render(
+            FlowNode::List(list),
+            &mut fonts,
+            page(200.0, 400.0),
+            &Decorations::none(),
+        );
+        result.unwrap();
+        let drawn = runs(&rec.pages()[0]);
+        assert_eq!(y_of(&drawn, "A").to_bits(), m.baseline.as_pt().to_bits());
+        assert_eq!(y_of(&drawn, "B").to_bits(), second.to_bits());
+    }
+}
+
+#[test]
+fn nested_list_uses_its_own_item_gap() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = metrics(&fonts, &style);
+    let h = m.line_height.as_pt();
+    let base = m.baseline.as_pt();
+    let inner_gap = 6.0;
+    let outer_gap = 20.0;
+    let mut inner = spec(
+        ListKind::Bullet,
+        16.0,
+        &style,
+        vec![item("a", &style), item("b", &style)],
+    );
+    inner.item_gap = NonNegative::pt(inner_gap).unwrap();
+    let inner = ListNode::new(inner).unwrap();
+    let outer = gap_list(
+        ordered(MarkerKind::Decimal, 1),
+        outer_gap,
+        &style,
+        vec![
+            ListItem::new(vec![text("out", &style), FlowNode::List(inner)]).unwrap(),
+            item("tail", &style),
+        ],
+    );
+    let (result, rec) = render(
+        FlowNode::List(outer),
+        &mut fonts,
+        page(200.0, 400.0),
+        &Decorations::none(),
+    );
+    result.unwrap();
+    let drawn = runs(&rec.pages()[0]);
+    assert_eq!(
+        texts(&rec.pages()[0]),
+        ["1.", "out", "\u{2022}", "a", "\u{2022}", "b", "2.", "tail"]
+    );
+    assert_eq!(y_of(&drawn, "out").to_bits(), base.to_bits());
+    assert_eq!(y_of(&drawn, "a").to_bits(), (h + base).to_bits());
+    assert_eq!(
+        y_of(&drawn, "b").to_bits(),
+        (h + h + inner_gap + base).to_bits()
+    );
+    assert_eq!(
+        y_of(&drawn, "tail").to_bits(),
+        (h + h + inner_gap + h + outer_gap + base).to_bits()
+    );
 }

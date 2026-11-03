@@ -15,6 +15,15 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## 2026-11-03
 
+### Breaking
+
+- **Breaking.** `pdfcraft-pdf` `0.5.0`. `ListSpec` adds `item_gap`. Struct
+  literals need `item_gap: NonNegative::ZERO` or `..ListSpec::default()`. The
+  field is extra space between adjacent items, added to the previous item's
+  trailing spacing. A gap that does not fit is dropped and is not carried onto
+  the next page. See
+  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+
 ### Changed
 
 - Four crates raise `0.y` for MSRV 1.98 (engineering standard VER-1):

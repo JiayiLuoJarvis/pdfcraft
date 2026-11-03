@@ -21,6 +21,8 @@ use std::error::Error as StdError;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::{Arc, Mutex};
 
+use skrifa::{FontRef, MetadataProvider};
+
 use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::spec::ImageSpec;
@@ -28,16 +30,16 @@ use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
     CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily,
     FontRegistry, HLineSpec, InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec,
-    PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec,
-    TextRun,
+    MarkerFormat, PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow,
+    TableSpec, TextRun,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
-    ErrorKind, GeometryKind, ImageFormat, Ink, Length, LinkTarget, Location, MarginPreset, Margins,
-    NonNegative, Numbering, PageSize, Paper, Path, PathVerb, Pen, Point, Positive, Ratio,
-    RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
+    ErrorKind, GeometryKind, GlyphRun, ImageFormat, Ink, Length, LinkTarget, Location,
+    MarginPreset, Margins, NonNegative, Numbering, PageSize, Paper, Path, PathVerb, Pen, Point,
+    Positive, Ratio, RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
 };
 
 #[expect(
@@ -152,6 +154,48 @@ fn bold_resources() -> Resources<()> {
         italic: None,
         bold_italic: None,
     }))
+}
+
+fn lay_fonts<K>(fonts: FontRegistry<K>, body: Vec<Block<K>>) -> Result<Rendered>
+where
+    K: Copy + Eq + std::hash::Hash + std::fmt::Debug + 'static,
+{
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::with_fonts(fonts),
+        limits: pdfcraft_pdf::Limits::default(),
+        info: pdfcraft_pdf::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            body,
+            ..SectionSpec::default()
+        }],
+    })
+}
+
+fn regular_family(bytes: Vec<u8>) -> FontFamily {
+    FontFamily {
+        regular: FontFace::new(bytes, 0),
+        bold: None,
+        italic: None,
+        bold_italic: None,
+    }
+}
+
+fn keyed_para<K>(font: K, text: &str) -> Block<K> {
+    Block::Paragraph(ParagraphSpec {
+        runs: vec![InlineRun::Text {
+            text: text.into(),
+            font,
+            style: RunStyle::default(),
+        }],
+        ..ParagraphSpec::default()
+    })
+}
+
+fn cmap_maps(bytes: &[u8], scalar: char) -> bool {
+    let font = FontRef::new(bytes)
+        .unwrap_or_else(|_| FontRef::from_index(bytes, 0).expect("test font bytes must be a face"));
+    font.charmap().map(scalar).is_some()
 }
 
 fn font_pages(page: PageSize, section: SectionSpec<()>) -> Result<Rendered> {
@@ -296,7 +340,7 @@ fn ordered_list(numbering: Numbering, start: u32, items: Vec<ListItemSpec<()>>) 
     })
 }
 
-fn plain_item(blocks: Vec<Block<()>>) -> ListItemSpec<()> {
+fn plain_item<K>(blocks: Vec<Block<K>>) -> ListItemSpec<K> {
     ListItemSpec {
         marker: None,
         blocks,
@@ -1733,14 +1777,35 @@ fn custom_marker_wider_than_marker_width_errors() {
 }
 
 #[test]
-fn nest_indent_shifts_the_inner_list() {
+fn ordered_list_item_gap_shifts_the_next_body() {
     if skip_without_font() {
         return;
     }
     let pages = font_pages(
         PageSize::A4,
         sec(vec![Block::List(ListSpec {
-            nest_indent: Some(pos(30.0)),
+            kind: ListKind::Ordered(Numbering::Decimal),
+            item_gap: nn(10.0),
+            items: vec![plain_item(vec![para("one")]), plain_item(vec![para("two")])],
+            ..ListSpec::default()
+        })]),
+    )
+    .unwrap()
+    .pages();
+    let first = glyph(&pages[0], "one").y;
+    let second = glyph(&pages[0], "two").y;
+    assert!(pt_near(second, first + line() + 10.0));
+}
+
+#[test]
+fn body_indent_shifts_the_inner_list() {
+    if skip_without_font() {
+        return;
+    }
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![Block::List(ListSpec {
+            body_indent: Some(pos(30.0)),
             items: vec![plain_item(vec![
                 para("outer"),
                 bullet_list(vec![plain_item(vec![para("child")])]),
@@ -1752,6 +1817,220 @@ fn nest_indent_shifts_the_inner_list() {
     .pages();
     assert!(pt_near(glyph(&pages[0], "outer").x, 30.0));
     assert!(pt_near(glyph(&pages[0], "child").x, 48.0));
+}
+
+#[test]
+fn marker_font_draws_the_number_with_that_regular_face() {
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    enum FaceKey {
+        Body,
+        Marker,
+    }
+
+    if skip_without_font() {
+        return;
+    }
+    let bytes = font_bytes();
+    let mut fonts = FontRegistry::new();
+    fonts.register(FaceKey::Body, regular_family(bytes.clone()));
+    fonts.register(FaceKey::Marker, regular_family(bytes));
+    let page = &lay_fonts(
+        fonts,
+        vec![Block::List(ListSpec {
+            kind: ListKind::Ordered(Numbering::Decimal),
+            marker_font: Some(FaceKey::Marker),
+            items: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
+            ..ListSpec::default()
+        })],
+    )
+    .unwrap()
+    .pages()[0];
+    assert_eq!(glyph(page, "1.").font, 1);
+    assert_eq!(glyph(page, "one").font, 0);
+}
+
+#[test]
+fn styled_bold_keeps_the_marker_on_the_regular_face() {
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    enum FaceKey {
+        Body,
+        Marker,
+    }
+
+    if skip_without_font() {
+        return;
+    }
+    let bytes = font_bytes();
+    let mut fonts = FontRegistry::new();
+    fonts.register(
+        FaceKey::Body,
+        FontFamily {
+            regular: FontFace::new(bytes.clone(), 0),
+            bold: Some(FontFace::new(bytes.clone(), 0)),
+            italic: None,
+            bold_italic: None,
+        },
+    );
+    fonts.register(FaceKey::Marker, regular_family(bytes));
+    let page = &lay_fonts(
+        fonts,
+        vec![Block::Styled {
+            style: RunStyle {
+                bold: Some(true),
+                font_size: Some(pos(16.0)),
+                color: Some(Color::rgb(10, 20, 30)),
+                ..RunStyle::default()
+            },
+            children: vec![Block::List(ListSpec {
+                kind: ListKind::Ordered(Numbering::Decimal),
+                marker_font: Some(FaceKey::Marker),
+                items: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
+                ..ListSpec::default()
+            })],
+        }],
+    )
+    .unwrap()
+    .pages()[0];
+    let marker = drawn(page, "1.");
+    let body = drawn(page, "one");
+    assert_eq!(marker.font.as_u32(), 2);
+    assert_eq!(body.font.as_u32(), 1);
+    assert!(
+        pt_near(marker.font_size.as_pt(), 16.0),
+        "marker size follows Styled"
+    );
+    assert_eq!(marker.color, Color::rgb(10, 20, 30));
+}
+
+#[test]
+fn unregistered_marker_font_fails() {
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    enum FaceKey {
+        Body,
+        Marker,
+    }
+
+    if skip_without_font() {
+        return;
+    }
+    let mut fonts = FontRegistry::new();
+    fonts.register(FaceKey::Body, regular_family(font_bytes()));
+    let error = lay_fonts(
+        fonts,
+        vec![Block::List(ListSpec {
+            kind: ListKind::Ordered(Numbering::Decimal),
+            marker_font: Some(FaceKey::Marker),
+            items: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
+            ..ListSpec::default()
+        })],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind.clone(),
+        ErrorKind::UnregisteredFont {
+            key: "Marker".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn ideographic_comma_marker_needs_u3001() {
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    enum FaceKey {
+        Latin,
+        Cjk,
+    }
+
+    let Some(latin_path) = std::env::var_os("PDFCRAFT_FORMS_FONT") else {
+        eprintln!("skip ideographic comma marker: PDFCRAFT_FORMS_FONT is unset");
+        return;
+    };
+    let Some(cjk_path) = std::env::var_os("PDFCRAFT_CJK_FONT") else {
+        eprintln!("skip ideographic comma marker: PDFCRAFT_CJK_FONT is unset");
+        return;
+    };
+    let latin = std::fs::read(&latin_path).unwrap_or_else(|error| {
+        panic!(
+            "read PDFCRAFT_FORMS_FONT {}: {error}",
+            std::path::Path::new(&latin_path).display()
+        )
+    });
+    let cjk = std::fs::read(&cjk_path).unwrap_or_else(|error| {
+        panic!(
+            "read PDFCRAFT_CJK_FONT {}: {error}",
+            std::path::Path::new(&cjk_path).display()
+        )
+    });
+    let comma = '\u{3001}';
+    assert!(
+        !cmap_maps(&latin, comma),
+        "PDFCRAFT_FORMS_FONT contains U+3001; the missing-glyph premise is wrong"
+    );
+    assert!(
+        cmap_maps(&cjk, comma),
+        "PDFCRAFT_CJK_FONT lacks U+3001; the success premise is wrong"
+    );
+
+    let mut latin_only = FontRegistry::new();
+    latin_only.register(FaceKey::Latin, regular_family(latin.clone()));
+    let missing = lay_fonts(
+        latin_only,
+        vec![Block::List(ListSpec {
+            kind: ListKind::Ordered(Numbering::Decimal),
+            marker_format: MarkerFormat::IdeographicComma,
+            items: vec![plain_item(vec![keyed_para(FaceKey::Latin, "one")])],
+            ..ListSpec::default()
+        })],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        missing.first().kind.clone(),
+        ErrorKind::MissingGlyph {
+            font: 0,
+            scalar: comma
+        }
+    );
+
+    let mut both = FontRegistry::new();
+    both.register(FaceKey::Latin, regular_family(latin));
+    both.register(FaceKey::Cjk, regular_family(cjk));
+    let page = &lay_fonts(
+        both,
+        vec![Block::List(ListSpec {
+            kind: ListKind::Ordered(Numbering::Decimal),
+            marker_format: MarkerFormat::IdeographicComma,
+            marker_font: Some(FaceKey::Cjk),
+            items: vec![plain_item(vec![keyed_para(FaceKey::Latin, "one")])],
+            ..ListSpec::default()
+        })],
+    )
+    .unwrap()
+    .pages()[0];
+    let marker = drawn(page, &format!("1{comma}"));
+    assert_eq!(marker.font.as_u32(), 1);
+    assert_eq!(glyph(page, "one").font, 0);
+}
+
+fn drawn<'a>(page: &'a RecordedPage, text: &str) -> &'a GlyphRun {
+    page.ops()
+        .iter()
+        .find_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } if run.text == text => Some(run),
+            CanvasCommand::DrawGlyphRun { .. }
+            | CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing glyph run {text}"))
 }
 
 #[test]

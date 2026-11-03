@@ -1,6 +1,6 @@
 # 迁到行内样式
 
-这份说明记录从 `FontFamily.normal`、`InlineRun::Bold`、`TextStyle` 迁到当前行内样式。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.4.0`。`pdfcraft-forms` 和 `pdfcraft-orgchart` 的类型不变。
+这份说明记录从 `FontFamily.normal`、`InlineRun::Bold`、`TextStyle` 迁到当前行内样式。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.5.0`。`pdfcraft-forms` 和 `pdfcraft-orgchart` 的类型不变。
 
 按下面的顺序改。每一步都对应一类编译错误。改完再看文末的排版变化。那些变化能编译通过，但 PDF 上的线宽和行高会不一样。
 
