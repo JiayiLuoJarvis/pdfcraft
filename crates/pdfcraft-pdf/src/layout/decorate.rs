@@ -252,7 +252,7 @@ fn measure_layer(
     };
     let mut commands = Vec::new();
     for item in content(page, ctx.errors)? {
-        let _ = append_layer_item(&mut commands, ctx, item)?;
+        append_layer_item(&mut commands, ctx, item)?;
     }
     if commands.is_empty() {
         return Ok(None);

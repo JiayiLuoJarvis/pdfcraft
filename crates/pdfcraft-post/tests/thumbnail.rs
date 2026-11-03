@@ -4,12 +4,12 @@
 //! empty/encrypted/non-PDF inputs, and quality/size sanity.
 
 #![cfg(feature = "thumbnail")]
-#![allow(
+#![expect(
     clippy::similar_names,
     reason = "fixture builder uses page/pages ids like tests/common"
 )]
 
-#[allow(
+#[expect(
     dead_code,
     reason = "shared helpers may be unused in some test targets"
 )]

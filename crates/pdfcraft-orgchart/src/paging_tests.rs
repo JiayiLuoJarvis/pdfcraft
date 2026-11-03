@@ -59,9 +59,9 @@ fn chart(holders: usize, investments: usize) -> ChartRequest {
 }
 
 fn pages_of(request: &ChartRequest) -> Vec<PageSpec> {
-    let graph = crate::graph::validate(request).expect("graph");
+    drop(crate::graph::validate(request).expect("graph"));
     let display = build_display(request).expect("display");
-    let facts = ratio_facts(request).expect("facts");
+    drop(ratio_facts(request).expect("facts"));
     let inbox: Vec<InboxNode<'_>> = request
         .nodes
         .iter()
@@ -79,7 +79,6 @@ fn pages_of(request: &ChartRequest) -> Vec<PageSpec> {
     let mut measurer = FakeMeasurer;
     let boxes =
         build_node_boxes(&inbox, &mut measurer, 38.0, &request.subject_id, 257.0).expect("boxes");
-    let _ = (facts, graph);
     paginate(request, &boxes, PageGeometry::default(), &mut measurer).expect("pages")
 }
 

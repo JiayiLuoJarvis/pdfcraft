@@ -1,6 +1,6 @@
 //! Integration tests for pdfcraft-post.
 
-#[allow(
+#[expect(
     dead_code,
     reason = "shared helpers may be unused in some test targets"
 )]

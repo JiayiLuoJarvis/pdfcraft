@@ -1900,10 +1900,6 @@ fn lower_band_marks(
     items
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "rotation lowering shares the complete image and page boundary context"
-)]
 fn lower_rotated(
     degrees: f32,
     pivot: Point,

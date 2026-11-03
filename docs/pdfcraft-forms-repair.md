@@ -731,7 +731,7 @@ head 的字节操作保持现在的 `zero_head_times`（`font.rs` 约 206–238 
 
 `Face::load` 仍检查：集合、`FontRef::from_index`、`glyf`、upem 0。非有限的 ascent/descent 在这里失败（`FontFault::Width`），免得 `place` 的 NaN 比较漏过。`index != 0` 的单字体仍是 skrifa 错误当 `source`。
 
-`embed` 的对象顺序保持现在的 `font::embed`，方便对照 basic 夹具：FontFile2 流（不压缩）、FontDescriptor、CIDFontType2、ToUnicode、Type0。`/W` 按 gid 的 `BTreeMap` 序。ToUnicode 用 `push_str` / `format!`，禁止 `let _ = writeln!`。`used` 为空则 `paint` 不调用 `embed`，也不占字体资源名。
+`embed` 的对象顺序保持现在的 `font::embed`，方便对照 basic 夹具：FontFile2 流（不压缩）、FontDescriptor、CIDFontType2、ToUnicode、Type0。`/W` 按 gid 的 `BTreeMap` 序。ToUnicode 用 `write!` 写入 `String`，不丢弃 `Result`。`used` 为空则 `paint` 不调用 `embed`，也不占字体资源名。
 
 ```rust
 struct Content {

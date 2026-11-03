@@ -118,6 +118,12 @@ pub fn fill_and_flatten<S: std::hash::BuildHasher>(
     doc.save()
 }
 
+fn sorted_pairs<V, S: std::hash::BuildHasher>(map: &HashMap<String, V, S>) -> Vec<(&String, &V)> {
+    let mut pairs: Vec<_> = map.iter().collect();
+    pairs.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    pairs
+}
+
 fn plan<'s, 'f, S: std::hash::BuildHasher>(
     snaps: &'s [WidgetSnap],
     fields: &'f HashMap<String, FieldValue, S>,
@@ -160,7 +166,7 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
                 .into());
             }
         }
-        for (name, size) in map {
+        for (name, size) in sorted_pairs(map) {
             if first.contains_key(name.as_str()) {
                 check_font_size_named(*size, Some(name.clone()))?;
             }
@@ -175,7 +181,7 @@ fn plan<'s, 'f, S: std::hash::BuildHasher>(
                 .into());
             }
         }
-        for (name, offset) in map {
+        for (name, offset) in sorted_pairs(map) {
             if first.contains_key(name.as_str()) && !offset.is_finite() {
                 return Err(ErrorKind::InvalidArgument {
                     field_name: Some(name.clone()),

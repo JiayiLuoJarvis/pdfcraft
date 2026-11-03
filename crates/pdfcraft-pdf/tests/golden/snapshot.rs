@@ -49,7 +49,6 @@
 //! input: the corrupt-scratch probe covers the only hostile case that matters
 //! here (a golden that no longer matches the log must fail naming the file).
 
-use std::fmt::Write as _;
 use std::path::{Path as FsPath, PathBuf};
 
 use pdfcraft_pdf::geom::Affine;
@@ -136,7 +135,7 @@ pub(crate) fn fmt_norm6(value: f32) -> String {
     format!("{value:.6}")
 }
 
-#[allow(
+#[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "(0.0..=2^24) integral upem is exactly representable"
@@ -204,15 +203,25 @@ fn fmt_path(path: &Path) -> String {
     verbs.join(" ")
 }
 
+fn write_log(out: &mut String, args: std::fmt::Arguments<'_>) {
+    #[expect(
+        clippy::expect_used,
+        reason = "fmt::Write for String returns Ok after push_str"
+    )]
+    std::fmt::Write::write_fmt(out, args).expect("writing into a String cannot fail");
+}
+
 fn fmt_glyphs(run: &GlyphRun, font_slot: usize) -> String {
     let mut out = String::new();
-    let _ = write!(
-        out,
-        "glyphs font={font_slot} size={} color={} origin={} text={:?} glyphs=",
-        fmt_pt3(run.font_size.as_pt()),
-        fmt_color(run.color),
-        fmt_point(run.origin),
-        run.text
+    write_log(
+        &mut out,
+        format_args!(
+            "glyphs font={font_slot} size={} color={} origin={} text={:?} glyphs=",
+            fmt_pt3(run.font_size.as_pt()),
+            fmt_color(run.color),
+            fmt_point(run.origin),
+            run.text
+        ),
     );
     let mut first = true;
     for glyph in &run.glyphs {
@@ -220,13 +229,15 @@ fn fmt_glyphs(run: &GlyphRun, font_slot: usize) -> String {
             out.push(',');
         }
         first = false;
-        let _ = write!(
-            out,
-            "{}:{}:{}..{}",
-            glyph.glyph_id,
-            fmt_norm6(glyph.advance_norm),
-            glyph.byte_range.start,
-            glyph.byte_range.end
+        write_log(
+            &mut out,
+            format_args!(
+                "{}:{}:{}..{}",
+                glyph.glyph_id,
+                fmt_norm6(glyph.advance_norm),
+                glyph.byte_range.start,
+                glyph.byte_range.end
+            ),
         );
     }
     out
@@ -456,20 +467,25 @@ pub(crate) fn serialize_pages(
     }
     for (slot, raw) in slots.fonts.iter().enumerate() {
         let meta = &fonts[*raw as usize];
-        let _ = writeln!(
-            out,
-            "font {slot} sha256={} upem={}",
-            meta.sha256_hex,
-            fmt_upem(meta.upem)
+        write_log(
+            &mut out,
+            format_args!(
+                "font {slot} sha256={} upem={}\n",
+                meta.sha256_hex,
+                fmt_upem(meta.upem)
+            ),
         );
     }
     for (slot, raw) in slots.images.iter().enumerate() {
         let (width, height) = image_dims(pages, *raw);
-        let _ = writeln!(out, "image {slot} {width}x{height}");
+        write_log(&mut out, format_args!("image {slot} {width}x{height}\n"));
     }
     for (index, page) in pages.iter().enumerate() {
         check_transform_balance(index, page.ops())?;
-        let _ = writeln!(out, "page {index} {}", fmt_size(page.size()));
+        write_log(
+            &mut out,
+            format_args!("page {index} {}\n", fmt_size(page.size())),
+        );
         for op in page.ops() {
             out.push_str(&fmt_page_op(op, &slots, fonts)?);
             out.push('\n');
@@ -673,10 +689,6 @@ pub(crate) fn write_actual(text: &str, name: &str) -> Result<PathBuf, GoldenErro
 ///
 /// Panics with the [`GoldenError`] message when the golden is missing,
 /// unreadable, invalidly named, or different from the log.
-#[allow(
-    dead_code,
-    reason = "todo 8 bless entry point; self-tests cover verify/bless cores"
-)]
 pub(crate) fn assert_golden(
     pages: &[RecordedPage],
     info: Option<&DocumentInfo>,

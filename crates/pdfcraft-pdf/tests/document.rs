@@ -23,6 +23,10 @@ use pdfcraft_pdf::{
     RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
 };
 
+#[expect(
+    dead_code,
+    reason = "each integration binary uses a subset of the shared font helpers"
+)]
 #[path = "common/mod.rs"]
 mod common;
 
@@ -902,7 +906,7 @@ fn band_fn_calls_in_page_order_header_then_footer() {
             Ok(Some(left_band(side)))
         })
     };
-    let _ = two_pages(
+    let _rendered = two_pages(
         Some(record(Arc::clone(&log), "header")),
         Some(record(Arc::clone(&log), "footer")),
     );
@@ -916,7 +920,7 @@ fn band_fn_calls_in_page_order_header_then_footer() {
 
     let header_only = Arc::new(Mutex::new(Vec::new()));
     let header_log = Arc::clone(&header_only);
-    let _ = two_pages(
+    let _rendered = two_pages(
         Some(BandFn::from_fn(move |query| {
             header_log.lock().unwrap().push(query.number.get());
             Ok(None)
@@ -2170,7 +2174,7 @@ fn mixed_bold_and_indent_write_a_pdf() {
 #[test]
 fn load_image_without_decoder_is_an_image_error() {
     let mut resources = Resources::default();
-    let _ = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let _image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
     let err = render(PageSize::A4, resources, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -2311,7 +2315,7 @@ fn three_pages_of_one_image_share_one_xobject() {
 #[test]
 fn garbage_empty_and_foreign_handles_are_image_errors() {
     let mut garbage = Resources::default();
-    let _ = garbage.add_image(b"not a png".to_vec(), ImageFormat::Png);
+    let _image = garbage.add_image(b"not a png".to_vec(), ImageFormat::Png);
     let garbage = render(PageSize::A4, garbage, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -2321,7 +2325,7 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     ));
 
     let mut empty = Resources::default();
-    let _ = empty.add_image(Vec::new(), ImageFormat::Png);
+    let _image = empty.add_image(Vec::new(), ImageFormat::Png);
     let empty = render(PageSize::A4, empty, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -2393,7 +2397,7 @@ fn list_item_and_overwide_image_fail() {
 #[test]
 fn damaged_png_pixels_fail_at_load() {
     let mut resources = Resources::default();
-    let _ = resources.add_image(BAD_IDAT.to_vec(), ImageFormat::Png);
+    let _image = resources.add_image(BAD_IDAT.to_vec(), ImageFormat::Png);
     let err = render(PageSize::A4, resources, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -4908,7 +4912,7 @@ fn pdftotext_of(pdf: &[u8]) -> String {
         .arg("-")
         .output()
         .expect("pdftotext");
-    let _ = std::fs::remove_file(&path);
+    std::fs::remove_file(&path).ok();
     assert!(
         output.status.success(),
         "{}",

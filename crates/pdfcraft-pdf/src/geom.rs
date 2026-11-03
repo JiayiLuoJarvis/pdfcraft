@@ -1262,7 +1262,13 @@ impl Path {
     /// Positive is clockwise on the page, matching krilla `Transform::from_rotate`.
     /// Fails when the angle is not finite or a rotated coordinate is not finite.
     /// Layer `Rotated` marks use the canvas CTM; this bake stays for geom tests.
-    #[allow(dead_code, reason = "geom unit tests; layer rotation uses Canvas CTM")]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "geom unit tests; layer rotation uses the canvas CTM"
+        )
+    )]
     pub(crate) fn rotated(&self, degrees: f32, about: Point) -> Result<Self, Error> {
         let affine = Affine::rotate_cw_about(degrees, about)?;
         self.map_points(|point| affine.apply(point))

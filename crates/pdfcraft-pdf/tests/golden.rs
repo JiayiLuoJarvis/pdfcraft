@@ -6,17 +6,12 @@
 //! glyph test needs `PDFCRAFT_PDF_FONT`/`PDFCRAFT_CJK_FONT` and the image test
 //! needs `backend-krilla`; both skip otherwise.
 
-#![allow(
-    clippy::missing_panics_doc,
-    reason = "test assertions may panic; shared across golden self-tests"
-)]
-#![allow(
-    clippy::must_use_candidate,
-    reason = "test helpers return values for assertions, not for callers"
-)]
-
 #[path = "golden/sha256.rs"]
 mod sha256;
+#[expect(
+    dead_code,
+    reason = "self-tests call bless and verify directly; assert_golden stays for golden_docs"
+)]
 #[path = "golden/snapshot.rs"]
 mod snapshot;
 
@@ -131,7 +126,7 @@ fn scratch_case(name: &str) -> PathBuf {
         "pdfcraft-golden-selftest-{}-{name}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -289,7 +284,7 @@ fn golden_corrupt_expectation_fails_naming_the_file() {
     );
     assert!(err.message().contains("mismatch"), "{err}");
     assert!(err.message().lines().count() <= 45);
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -300,7 +295,7 @@ fn golden_bless_then_verify_passes() {
     let name = "golden_selftest_bless";
     snapshot::bless_golden_in_dir(&pages, Some(&info), &[], &dir, name).unwrap();
     snapshot::verify_golden(&pages, Some(&info), &[], &dir, name).unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -310,7 +305,7 @@ fn golden_write_actual_captures_bytes() {
     assert!(snapshot::write_actual("x", "../evil").is_err());
     let path = snapshot::write_actual("line one\n", &name).unwrap();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "line one\n");
-    let _ = std::fs::remove_file(&path);
+    std::fs::remove_file(&path).ok();
 }
 
 fn test_font_bytes() -> Option<Vec<u8>> {

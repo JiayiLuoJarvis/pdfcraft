@@ -52,9 +52,9 @@ fn nid(request: &ChartRequest, protocol: &str) -> crate::ids::NodeId {
 }
 
 #[test]
-#[allow(
+#[expect(
     clippy::float_cmp,
-    reason = "exact-value assertions on deterministic ratios"
+    reason = "the assertion checks that a stored ratio was copied unchanged"
 )]
 fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
     let request = cone();

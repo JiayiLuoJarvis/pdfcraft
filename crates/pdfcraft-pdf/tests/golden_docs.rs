@@ -20,13 +20,17 @@
 #[path = "golden/sha256.rs"]
 mod sha256;
 
-#[allow(
+#[expect(
     dead_code,
     reason = "this target only blesses/verifies via assert_golden; self-test helpers stay for golden.rs"
 )]
 #[path = "golden/snapshot.rs"]
 mod snapshot;
 
+#[expect(
+    dead_code,
+    reason = "each integration binary uses a subset of the shared font helpers"
+)]
 #[path = "common/mod.rs"]
 mod common;
 

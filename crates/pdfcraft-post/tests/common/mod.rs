@@ -1,6 +1,6 @@
 //! Shared fixture helpers for integration tests.
 
-#![allow(
+#![expect(
     clippy::similar_names,
     reason = "fixture helpers use short similar names"
 )]

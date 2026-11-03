@@ -743,10 +743,6 @@ fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {
     surface.draw_path(&path);
 }
 
-#[allow(
-    clippy::many_single_char_names,
-    reason = "x/y/w/h are rectangle geometry params"
-)]
 fn round_path(
     x_mm: f64,
     y_mm: f64,

@@ -265,10 +265,6 @@ fn cid_font(
     Ok(dict)
 }
 
-#[allow(
-    clippy::format_push_string,
-    reason = "规格要求 push_str / format!，不用丢弃 write! 的 Result"
-)]
 fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     let mut body = String::from(
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /QuireForms def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
@@ -278,9 +274,12 @@ fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
         .map(|(gid, (scalar, _))| (*gid, *scalar))
         .collect();
     for chunk in entries.chunks(100) {
-        body.push_str(&format!("{} beginbfchar\n", chunk.len()));
+        write_cmap(&mut body, format_args!("{} beginbfchar\n", chunk.len()));
         for (gid, scalar) in chunk {
-            body.push_str(&format!("<{gid:04X}> <{}>\n", utf16_hex(*scalar)));
+            write_cmap(
+                &mut body,
+                format_args!("<{gid:04X}> <{}>\n", utf16_hex(*scalar)),
+            );
         }
         body.push_str("endbfchar\n");
     }
@@ -288,17 +287,21 @@ fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     body
 }
 
-#[allow(
-    clippy::format_push_string,
-    reason = "规格要求 push_str / format!，不用丢弃 write! 的 Result"
-)]
 fn utf16_hex(scalar: char) -> String {
     let mut buf = [0_u16; 2];
     let mut hex = String::new();
     for unit in scalar.encode_utf16(&mut buf) {
-        hex.push_str(&format!("{unit:04X}"));
+        write_cmap(&mut hex, format_args!("{unit:04X}"));
     }
     hex
+}
+
+fn write_cmap(body: &mut String, args: std::fmt::Arguments<'_>) {
+    #[expect(
+        clippy::expect_used,
+        reason = "fmt::Write for String returns Ok after push_str"
+    )]
+    std::fmt::Write::write_fmt(body, args).expect("writing into a String cannot fail");
 }
 
 fn name(value: &str) -> Object {

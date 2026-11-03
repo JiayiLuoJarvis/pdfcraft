@@ -93,7 +93,7 @@ pub(crate) fn node_height_limit_mm(printable_height_mm: f64) -> f64 {
 
 /// A4 page. Landscape swaps the page edges and keeps the margin and bands.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(
+#[expect(
     clippy::struct_field_names,
     reason = "mm keeps page lengths distinct from points"
 )]

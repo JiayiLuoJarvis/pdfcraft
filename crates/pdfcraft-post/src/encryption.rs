@@ -17,7 +17,7 @@ use crate::metadata::{open_pdf, save_pdf};
 /// Permission fields mirror the PDF security handler bits one-for-one, so the
 /// bool count is intentional.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(
+#[expect(
     clippy::struct_excessive_bools,
     reason = "mirrors PDF security handler bits one-for-one"
 )]

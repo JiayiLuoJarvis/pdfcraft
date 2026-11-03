@@ -1,6 +1,6 @@
 //! Integration tests for `split_pdfs`.
 
-#[allow(
+#[expect(
     dead_code,
     reason = "shared helpers may be unused in some test targets"
 )]

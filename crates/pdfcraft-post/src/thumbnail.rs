@@ -64,18 +64,30 @@ impl Default for ThumbnailOptions {
 /// resolved, the `thumbnail` feature is disabled, or rendering or JPEG
 /// encoding fails.
 #[must_use = "dropping the thumbnail discards the only copy"]
-pub fn first_page_jpeg(pdf: &[u8], opts: &ThumbnailOptions) -> Result<Option<Vec<u8>>, Error> {
-    let Some((width_pt, height_pt)) = first_page_size(pdf)? else {
-        return Ok(None);
-    };
+pub fn first_page_jpeg(
+    pdf: &[u8],
+    #[cfg_attr(
+        not(feature = "thumbnail"),
+        expect(
+            unused_variables,
+            reason = "the page is checked, then rendering is compiled out"
+        )
+    )]
+    opts: &ThumbnailOptions,
+) -> Result<Option<Vec<u8>>, Error> {
     #[cfg(feature = "thumbnail")]
     {
+        let Some((width_pt, height_pt)) = first_page_size(pdf)? else {
+            return Ok(None);
+        };
         render_first_page_jpeg(pdf, width_pt, height_pt, opts).map(Some)
     }
     #[cfg(not(feature = "thumbnail"))]
     {
-        let _ = (width_pt, height_pt, opts);
-        Err(Error::from(ErrorKind::ThumbnailFailed))
+        match first_page_size(pdf)? {
+            None => Ok(None),
+            Some(_) => Err(Error::from(ErrorKind::ThumbnailFailed)),
+        }
     }
 }
 

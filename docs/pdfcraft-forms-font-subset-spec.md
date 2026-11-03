@@ -76,7 +76,7 @@ let file = Stream::new(Dictionary::new(), self.bytes.to_vec()).with_compression(
 ### 1.3 已有合同里要守住的句子
 
 - 内容流：一行一个 `Tj`，glyph id 按 `{gid:04X}` 连成十六进制串（repair R4）。
-- `/W` 按 `BTreeMap` 的 gid 序。ToUnicode 用 `push_str` / `format!`。
+- `/W` 按 `BTreeMap` 的 gid 序。ToUnicode 用 `write!` 写入 `String`，正文与原先 `format!` 相同。
 - `embed` 的对象顺序：FontFile2、FontDescriptor、CIDFontType2、ToUnicode、Type0。
 - `record` 用 `or_insert`，第一次写入的 `(char, units)` 获胜。
 - `used` 为空则 `paint` 不调用 `embed`。

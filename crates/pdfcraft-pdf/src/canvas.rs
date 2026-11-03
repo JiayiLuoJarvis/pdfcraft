@@ -211,8 +211,8 @@ pub(crate) trait ImageRegistry: Any + Send + Sync + fmt::Debug {
 
 /// Registry for builds without a decoder. Every image fails.
 #[cfg_attr(
-    feature = "backend-krilla",
-    allow(
+    all(feature = "backend-krilla", not(test)),
+    expect(
         dead_code,
         reason = "only constructed when feature backend-krilla is off"
     )
@@ -377,9 +377,12 @@ pub(crate) trait Canvas {
 }
 
 /// Runs `draw` under `affine`, always popping when push succeeded.
-#[allow(
-    dead_code,
-    reason = "object-safe helper; draw_fragment uses depth unwind"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "unit tests call it; draw_fragment unwinds the transform stack itself"
+    )
 )]
 pub(crate) fn with_transform(
     canvas: &mut dyn Canvas,
@@ -559,8 +562,8 @@ impl Canvas for RecordingCanvas {
 }
 
 #[cfg_attr(
-    not(feature = "backend-krilla"),
-    allow(dead_code, reason = "only the krilla backend replays a recording")
+    all(not(feature = "backend-krilla"), not(test)),
+    expect(dead_code, reason = "only the krilla backend replays a recording")
 )]
 pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Result<(), Error> {
     for command in recording.commands() {

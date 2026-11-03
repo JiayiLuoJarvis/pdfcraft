@@ -17,6 +17,10 @@ use pdfcraft_pdf::{
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::{ErrorKind, ImageFormat};
 
+#[expect(
+    dead_code,
+    reason = "each integration binary uses a subset of the shared font helpers"
+)]
 #[path = "common/mod.rs"]
 mod common;
 

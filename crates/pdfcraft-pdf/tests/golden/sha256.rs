@@ -6,7 +6,7 @@
 //! fixture fonts in `tests/golden`; it is not a security boundary.
 
 /// SHA-256 of `bytes`.
-#[allow(
+#[expect(
     clippy::many_single_char_names,
     reason = "a..h are the FIPS 180-4 working-variable names"
 )]

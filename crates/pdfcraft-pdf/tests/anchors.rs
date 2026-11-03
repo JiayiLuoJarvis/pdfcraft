@@ -11,6 +11,10 @@ use pdfcraft_pdf::{
     PageSize, Region, Rendered, Result, Track,
 };
 
+#[expect(
+    dead_code,
+    reason = "each integration binary uses a subset of the shared font helpers"
+)]
 #[path = "common/mod.rs"]
 mod common;
 

@@ -66,17 +66,21 @@ pub(crate) fn whole_chart_subtitle(subject_name: &str, has_investments: bool) ->
     }
 }
 
-/// Shareholder-side subtitle. `index` is unused and kept so call sites match investment pages.
+/// Shareholder-side subtitle.
+///
+/// The page index is accepted so overview and continuation pages share one call
+/// shape. The subtitle does not change with that index.
 #[must_use]
-pub(crate) fn shareholder_overview(subject_name: &str, index: usize) -> String {
-    let _ = index;
+pub(crate) fn shareholder_overview(subject_name: &str, _index: usize) -> String {
     whole_chart_subtitle(subject_name, false)
 }
 
-/// Investment-side subtitle. `index` is unused.
+/// Investment-side subtitle.
+///
+/// The page index is accepted so overview and continuation pages share one call
+/// shape. The subtitle does not change with that index.
 #[must_use]
-pub(crate) fn investment_overview(subject_name: &str, index: usize) -> String {
-    let _ = index;
+pub(crate) fn investment_overview(subject_name: &str, _index: usize) -> String {
     format!("{subject_name} → 对外投资")
 }
 

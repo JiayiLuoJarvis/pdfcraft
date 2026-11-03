@@ -8,6 +8,10 @@ use pdfcraft_pdf::spec::{
 use pdfcraft_pdf::ImageFormat;
 use pdfcraft_pdf::{layout_spec, DocumentSpec, ErrorKind, LimitKind, Limits, PageSize};
 
+#[expect(
+    dead_code,
+    reason = "each integration binary uses a subset of the shared font helpers"
+)]
 #[path = "common/mod.rs"]
 mod common;
 
@@ -79,7 +83,7 @@ fn font_byte_limit_rejects_before_parse() {
 #[test]
 fn image_byte_limit_rejects_before_decode() {
     let mut resources = Resources::default();
-    let _ = resources.add_image(vec![1, 2], ImageFormat::Png);
+    let _image = resources.add_image(vec![1, 2], ImageFormat::Png);
     let err = lay(
         resources,
         tighten(|limits| limits.set_max_image_bytes(1).unwrap()),

@@ -1,12 +1,12 @@
 //! Place nodes on layer coordinates.
 
 use crate::ids::NodeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::error::{Error, ErrorCode};
 use crate::measure::NodeBox;
 use crate::page::PlacedNode;
-use crate::units::{FAMILY_GAP_MM, FIT_EPSILON_MM, NODE_SPACING_MM};
+use crate::units::FIT_EPSILON_MM;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SiblingGap {
@@ -40,7 +40,7 @@ pub(crate) struct LayerPlan {
 }
 
 #[derive(Clone, Copy)]
-#[allow(
+#[expect(
     clippy::struct_field_names,
     reason = "mm-suffixed fields share the spacing unit"
 )]
@@ -85,7 +85,6 @@ pub(crate) fn place_layers(
     child_family_width_by_parent: &HashMap<NodeId, f64>,
     spacing: Spacing,
 ) -> Result<HashMap<NodeId, PlacedNode>, Error> {
-    let pitch = spacing.node_width_mm + spacing.node_spacing_mm;
     let slot_geometries: Vec<Option<PlanSlotGeometry>> = plans
         .iter()
         .map(|plan| parent_slot_geometry(plan, child_family_width_by_parent, box_by_id, spacing))
@@ -107,14 +106,7 @@ pub(crate) fn place_layers(
     {
         content_width = content_width.max(width);
     }
-    let xs = assign_xs(
-        plans,
-        &slot_geometries,
-        content_width,
-        pitch,
-        box_by_id,
-        spacing,
-    )?;
+    let xs = assign_xs(plans, &slot_geometries, content_width, box_by_id, spacing)?;
     Ok(assign_ys(plans, &xs, box_by_id, spacing))
 }
 
@@ -302,13 +294,11 @@ fn assign_xs(
     plans: &[LayerPlan],
     slot_geometries: &[Option<PlanSlotGeometry>],
     content_width: f64,
-    pitch: f64,
     box_by_id: &HashMap<NodeId, NodeBox>,
     spacing: Spacing,
 ) -> Result<HashMap<NodeId, f64>, Error> {
-    let _ = pitch;
     let mut xs = HashMap::new();
-    let mut remaining: HashSet<usize> = (0..plans.len()).collect();
+    let mut remaining: BTreeSet<usize> = (0..plans.len()).collect();
     while !remaining.is_empty() {
         let ready: Vec<usize> = remaining
             .iter()
@@ -756,6 +746,5 @@ fn assign_ys(
             }
         }
     }
-    let _ = (NODE_SPACING_MM, FAMILY_GAP_MM);
     laid_out
 }

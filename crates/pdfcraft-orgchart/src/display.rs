@@ -319,9 +319,9 @@ fn hug_for(role: DisplayRole) -> Result<LabelHug, Error> {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::float_cmp,
-    reason = "exact-value assertions on deterministic ratios"
+    reason = "the assertion checks that a stored ratio was copied unchanged"
 )]
 mod tests {
     use super::{build_display, company_fill, ratio_facts, LabelHug, LineKind};

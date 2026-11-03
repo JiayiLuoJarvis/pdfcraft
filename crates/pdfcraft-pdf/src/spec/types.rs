@@ -106,23 +106,19 @@ pub struct Rendered {
     pub(crate) recording: RecordingCanvas,
     #[cfg_attr(
         not(feature = "backend-krilla"),
-        allow(dead_code, reason = "only to_pdf reads fonts when the backend is on")
+        expect(dead_code, reason = "only to_pdf reads fonts when the backend is on")
     )]
     pub(crate) fonts: FontStore,
     #[cfg_attr(
         not(feature = "backend-krilla"),
-        allow(dead_code, reason = "only to_pdf reads images when the backend is on")
+        expect(dead_code, reason = "only to_pdf reads images when the backend is on")
     )]
     pub(crate) images: Box<dyn ImageRegistry>,
     #[cfg_attr(
         not(feature = "backend-krilla"),
-        allow(dead_code, reason = "only to_pdf reads info when the backend is on")
+        expect(dead_code, reason = "only to_pdf reads info when the backend is on")
     )]
     pub(crate) info: DocumentInfo,
-    #[cfg_attr(
-        not(feature = "backend-krilla"),
-        allow(dead_code, reason = "only to_pdf reads outline when the backend is on")
-    )]
     pub(crate) outline: Vec<OutlineItem>,
 }
 

@@ -313,9 +313,18 @@ pub(crate) fn draw_fragment(
         }
         Ok(())
     })();
+    let mut unwind_error = None;
     while depth > 0 {
-        let _ = canvas.pop_transform();
+        if let Err(error) = canvas.pop_transform() {
+            if unwind_error.is_none() {
+                unwind_error = Some(error);
+            }
+        }
         depth -= 1;
     }
-    drawn
+    match (drawn, unwind_error) {
+        (Err(draw_error), _) => Err(draw_error),
+        (Ok(()), Some(error)) => Err(error),
+        (Ok(()), None) => Ok(()),
+    }
 }

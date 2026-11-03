@@ -33,4 +33,4 @@ cross-crate history.
 
 ### Fixed
 
-- Nothing crate-specific in this cycle.
+- When more than one `font_size_overrides` or `line_below` entry is invalid, the error names the lexicographically first field.
