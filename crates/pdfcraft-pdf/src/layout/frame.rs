@@ -205,6 +205,7 @@ pub(crate) enum NodeKind {
     PageBreak,
     KeepTogether,
     Anchor,
+    Inset,
     Stack,
     Columns,
     Table,

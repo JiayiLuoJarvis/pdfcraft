@@ -238,6 +238,20 @@ fn bullets() -> Result<Block<()>> {
                     0.0,
                 )?],
             },
+            ListItemSpec {
+                marker: None,
+                blocks: vec![
+                    paragraph(vec![text("Ship to")], Alignment::Start, 0.0)?,
+                    Block::Inset {
+                        left: NonNegative::pt(12.0)?,
+                        right: NonNegative::ZERO,
+                        children: vec![
+                            paragraph(vec![text("Acme Corp")], Alignment::Start, 0.0)?,
+                            paragraph(vec![text("1 Market Street")], Alignment::Start, 0.0)?,
+                        ],
+                    },
+                ],
+            },
         ],
         ..ListSpec::default()
     }))

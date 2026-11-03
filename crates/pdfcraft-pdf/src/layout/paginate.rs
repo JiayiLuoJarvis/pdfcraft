@@ -217,6 +217,7 @@ fn plan_pages(
                 | FlowNode::Spacer(_)
                 | FlowNode::KeepTogether(_)
                 | FlowNode::Anchor(_)
+                | FlowNode::Inset(_)
                 | FlowNode::Stack(_)
                 | FlowNode::Columns(_)
                 | FlowNode::Table(_)
@@ -241,12 +242,14 @@ fn plan_pages(
 fn opened_root(root: FlowNode) -> VecDeque<FlowNode> {
     match root {
         FlowNode::Stack(kids) => kids.into(),
+        // Inset stays one node. Opening it the way Stack is opened would drop the narrowed frame.
         node @ (FlowNode::Paragraph(_)
         | FlowNode::Text(_)
         | FlowNode::Spacer(_)
         | FlowNode::PageBreak
         | FlowNode::KeepTogether(_)
         | FlowNode::Anchor(_)
+        | FlowNode::Inset(_)
         | FlowNode::Columns(_)
         | FlowNode::Table(_)
         | FlowNode::List(_)

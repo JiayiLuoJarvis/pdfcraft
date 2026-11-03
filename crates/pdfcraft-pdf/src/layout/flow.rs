@@ -13,6 +13,7 @@ use crate::layout::frame::{
 };
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
+use crate::layout::inset::InsetNode;
 use crate::layout::list::ListNode;
 use crate::layout::paragraph::{ParagraphNode, TextNode};
 use crate::layout::table::TableNode;
@@ -51,6 +52,7 @@ pub(crate) enum FlowNode {
     PageBreak,
     KeepTogether(KeepTogetherNode),
     Anchor(AnchorNode),
+    Inset(InsetNode<FlowNode>),
     Stack(Vec<FlowNode>),
     Columns(ColumnsNode<FlowNode>),
     Table(TableNode<FlowNode>),
@@ -69,6 +71,7 @@ impl Flowable for FlowNode {
             FlowNode::Spacer(node) => node.split(avail)?.map(FlowNode::Spacer),
             FlowNode::KeepTogether(node) => split_keep_together(ctx, avail, node)?,
             FlowNode::Anchor(node) => split_anchor(ctx, avail, node)?,
+            FlowNode::Inset(node) => node.split(ctx, avail)?.map(FlowNode::Inset),
             FlowNode::Stack(kids) => split_stack(ctx, avail, kids)?,
             FlowNode::Columns(node) => node.split(ctx, avail)?.map(FlowNode::Columns),
             FlowNode::Table(node) => node.split(ctx, avail)?.map(FlowNode::Table),
@@ -90,6 +93,7 @@ impl Flowable for FlowNode {
             FlowNode::PageBreak => NodeKind::PageBreak,
             FlowNode::KeepTogether(_) => NodeKind::KeepTogether,
             FlowNode::Anchor(_) => NodeKind::Anchor,
+            FlowNode::Inset(_) => NodeKind::Inset,
             FlowNode::Stack(_) => NodeKind::Stack,
             FlowNode::Columns(_) => NodeKind::Columns,
             FlowNode::Table(_) => NodeKind::Table,
@@ -104,6 +108,7 @@ impl Flowable for FlowNode {
         match self {
             FlowNode::Stack(kids) | FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => kids,
             FlowNode::Anchor(node) => std::slice::from_ref(node.child.as_ref()),
+            FlowNode::Inset(node) => std::slice::from_ref(node.child.as_ref()),
             FlowNode::Columns(columns) => columns.column_stacks(),
             FlowNode::Paragraph(_)
             | FlowNode::Text(_)
@@ -441,6 +446,10 @@ fn census(roots: &[FlowNode]) -> Census {
                 pending.extend(kids.iter().rev());
             }
             FlowNode::Anchor(node) => {
+                census.blocks = census.blocks.saturating_add(1);
+                pending.push(node.child.as_ref());
+            }
+            FlowNode::Inset(node) => {
                 census.blocks = census.blocks.saturating_add(1);
                 pending.push(node.child.as_ref());
             }

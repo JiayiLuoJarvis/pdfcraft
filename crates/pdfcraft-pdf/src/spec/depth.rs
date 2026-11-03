@@ -45,7 +45,9 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
             Block::Paragraph(paragraph) => {
                 stack.extend(paragraph.runs.iter().map(|run| (Node::Run(run), depth)));
             }
-            Block::KeepTogether(children) | Block::Styled { children, .. } => {
+            Block::KeepTogether(children)
+            | Block::Styled { children, .. }
+            | Block::Inset { children, .. } => {
                 stack.extend(children.iter().map(|child| (Node::Block(child), inner)));
             }
             Block::Anchor { child, .. } => stack.push((Node::Block(child), inner)),
@@ -79,6 +81,9 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
             }
             CellBlock::List(list) => push_items(list, inner, stack),
             CellBlock::Anchor { child, .. } => stack.push((Node::Cell(child), inner)),
+            CellBlock::Inset { children, .. } => {
+                stack.extend(children.iter().map(|child| (Node::Cell(child), inner)));
+            }
             CellBlock::Text { .. }
             | CellBlock::HLine(_)
             | CellBlock::Image(_)
@@ -120,7 +125,9 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                     Block::Paragraph(paragraph) => {
                         stack.extend(paragraph.runs.into_iter().map(Owned::Run));
                     }
-                    Block::KeepTogether(children) | Block::Styled { children, .. } => {
+                    Block::KeepTogether(children)
+                    | Block::Styled { children, .. }
+                    | Block::Inset { children, .. } => {
                         stack.extend(children.into_iter().map(Owned::Block));
                     }
                     Block::Anchor { child, .. } => stack.push(Owned::Block(*child)),
@@ -157,6 +164,9 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                         }
                     }
                     CellBlock::Anchor { child, .. } => stack.push(Owned::Cell(*child)),
+                    CellBlock::Inset { children, .. } => {
+                        stack.extend(children.into_iter().map(Owned::Cell));
+                    }
                     CellBlock::Text { .. }
                     | CellBlock::HLine(_)
                     | CellBlock::Image(_)

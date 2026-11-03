@@ -82,13 +82,14 @@ layout/columns       → error, geom, layout/column_width, layout/frame, layout/
 layout/table         → error, geom, layout/column_width, layout/frame, layout/nesting
 layout/list          → error, geom, layout/frame, layout/line_run, layout/nesting, layout/style
 layout/image         → canvas, error, geom, layout/frame, layout/style
+layout/inset         → error, geom, layout/frame
 layout/hline         → error, geom, layout/frame, layout/style
-layout/flow          → error, geom, limits, layout/columns, layout/frame, layout/hline, layout/image, layout/list, layout/paragraph, layout/table
+layout/flow          → error, geom, limits, layout/columns, layout/frame, layout/hline, layout/image, layout/inset, layout/list, layout/paragraph, layout/table
 layout/decorate      → canvas, error, geom, layout/flow, layout/frame, layout/line_run, layout/nesting, layout/style
 layout/paginate      → canvas, error, geom, limits, layout/decorate, layout/flow, layout/frame
 ```
 
-`spec` 使用的 layout 子模块有 `column_width`、`columns`、`decorate`、`flow`、`frame`、`hline`、`image`、`list`、`paginate`、`paragraph`、`style`、`table`。
+`spec` 使用的 layout 子模块有 `column_width`、`columns`、`decorate`、`flow`、`frame`、`hline`、`image`、`inset`、`list`、`paginate`、`paragraph`、`style`、`table`。
 
 方向是 `paginate` → `decorate` → `flow` → 各叶子节点 → `frame`。叶子节点不使用 `flow`。`decorate` 的生产代码不使用 `paginate`。
 

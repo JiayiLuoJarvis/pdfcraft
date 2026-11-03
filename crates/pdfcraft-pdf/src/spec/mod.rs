@@ -222,6 +222,24 @@ pub enum Block<K> {
         /// Wrapped flow content. Destination is the first placed fragment of this child.
         child: Box<Self>,
     },
+    /// Shifts `children` right by `left` and narrows their frame by `left + right`.
+    ///
+    /// Draws nothing and adds no vertical space. A split keeps these insets on
+    /// the continuation. A list marker aligned to this block uses the first
+    /// baseline of its children. `left` does not move that baseline. Empty
+    /// `children` is an empty block.
+    ///
+    /// `left + right` greater than or equal to the frame being laid out fails
+    /// with [`GeometryKind::InsetWiderThanFrame`](crate::GeometryKind::InsetWiderThanFrame).
+    /// The check uses that frame, not the page width.
+    Inset {
+        /// Space added at the left of the frame. Zero is identity.
+        left: Length<NonNegative>,
+        /// Space removed from the right of the frame. Zero leaves the right edge.
+        right: Length<NonNegative>,
+        /// Blocks laid out in the narrowed frame, top to bottom.
+        children: Vec<Self>,
+    },
     /// Side-by-side columns.
     Columns(ColumnsSpec<K>),
     /// A table.
@@ -531,6 +549,19 @@ pub enum CellBlock<K> {
         /// Wrapped cell content.
         child: Box<Self>,
     },
+    /// Same shift as [`Block::Inset`], inside a cell.
+    ///
+    /// Draws nothing and adds no vertical space. `left` is added after the
+    /// cell's own padding. Children follow the same table cell rules as the
+    /// cell itself.
+    Inset {
+        /// Space added at the left of the cell content box.
+        left: Length<NonNegative>,
+        /// Space removed from the right of the cell content box.
+        right: Length<NonNegative>,
+        /// Cell blocks laid out in the narrowed box.
+        children: Vec<Self>,
+    },
 }
 
 /// Suffix or parentheses on a generated ordered-list number.
@@ -577,7 +608,8 @@ pub enum MarkerAlign {
 /// or a spacer taller than zero has no text baseline, so the marker's line
 /// box sits on the item top. A zero-height spacer, an empty stack, and an
 /// empty keep-together group are skipped. [`Block::Styled`] passes the rule
-/// through to its children. A continuation fragment draws no marker.
+/// through to its children. An inset contributes its child's first baseline.
+/// The sideways shift does not move it. A continuation fragment draws no marker.
 #[derive(Debug)]
 #[must_use]
 pub struct ListSpec<K> {

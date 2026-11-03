@@ -174,6 +174,30 @@ fn anchor_link_resolves_to_xyz_at_body_origin() {
 }
 
 #[test]
+fn inset_shifts_anchor_x() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = lay(vec![
+        Block::Inset {
+            left: NonNegative::pt(20.0).unwrap(),
+            right: NonNegative::ZERO,
+            children: vec![anchor("sec", None, para("Section"))],
+        },
+        Block::Paragraph(ParagraphSpec {
+            runs: vec![link_anchor("sec", "jump")],
+            ..ParagraphSpec::default()
+        }),
+    ])
+    .unwrap();
+    let hits = xyz_destinations(&rendered);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].0, 0);
+    assert!(pt_near(hits[0].1, 68.0));
+    assert!(pt_near(hits[0].2, 48.0));
+}
+
+#[test]
 fn spacer_anchor_is_a_valid_destination() {
     if skip_without_font() {
         return;

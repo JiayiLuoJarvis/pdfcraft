@@ -55,6 +55,7 @@ layout/flow layout/columns
 layout/flow layout/frame
 layout/flow layout/hline
 layout/flow layout/image
+layout/flow layout/inset
 layout/flow layout/list
 layout/flow layout/paragraph
 layout/flow layout/table
@@ -73,6 +74,9 @@ layout/image geom
 layout/image layout/atomic
 layout/image layout/frame
 layout/image layout/style
+layout/inset error
+layout/inset geom
+layout/inset layout/frame
 layout/justify geom
 layout/justify layout/line_run
 layout/justify text
@@ -134,6 +138,7 @@ spec layout/flow
 spec layout/frame
 spec layout/hline
 spec layout/image
+spec layout/inset
 spec layout/list
 spec layout/paginate
 spec layout/paragraph

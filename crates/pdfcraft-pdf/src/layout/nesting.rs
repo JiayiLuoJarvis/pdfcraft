@@ -43,7 +43,10 @@ fn rule(container: Container, kind: NodeKind) -> Rule {
         )
         | (NodeKind::Columns | NodeKind::Table | NodeKind::List, Column | ListItem)
         | (NodeKind::Image | NodeKind::Canvas, Column | TableCell | ListItem) => Rule::Allow,
-        (NodeKind::Stack | NodeKind::Anchor, Column | TableCell | ListItem | Band)
+        (
+            NodeKind::Stack | NodeKind::Anchor | NodeKind::Inset,
+            Column | TableCell | ListItem | Band,
+        )
         | (NodeKind::KeepTogether, Column | ListItem)
         | (NodeKind::Columns, Band) => Rule::Nested,
         (NodeKind::List, TableCell) => Rule::ListBodies,
@@ -84,6 +87,7 @@ fn kind_name(kind: NodeKind) -> &'static str {
         NodeKind::PageBreak => "page break",
         NodeKind::KeepTogether => "keep together",
         NodeKind::Anchor => "anchor",
+        NodeKind::Inset => "inset",
         NodeKind::Stack => "stack",
         NodeKind::Columns => "columns",
         NodeKind::Table => "table",

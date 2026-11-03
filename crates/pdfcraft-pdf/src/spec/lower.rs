@@ -21,6 +21,7 @@ use crate::layout::flow::{self, AnchorNode, FlowNode, KeepTogetherNode, SpacerNo
 use crate::layout::frame::LayoutCtx;
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
+use crate::layout::inset::InsetNode;
 use crate::layout::list::{
     ListItem, ListKind as LayoutListKind, ListNode, ListSpec as LayoutListSpec,
 };
@@ -573,6 +574,18 @@ fn lower_blocks<K: FontKey>(
                 if let Some(node) = lower_anchor_block(id, outline, *child, env, anchors, errors) {
                     nodes.push(node);
                 }
+            }
+            Block::Inset {
+                left,
+                right,
+                children,
+            } => {
+                let child = sole_or_stack(lower_blocks(children, env, anchors, errors));
+                nodes.push(FlowNode::Inset(InsetNode {
+                    left,
+                    right,
+                    child: Box::new(child),
+                }));
             }
             Block::Styled {
                 style: patch,
@@ -1147,6 +1160,21 @@ fn push_cell_block<K: FontKey>(
             if let Some(node) = lower_cell_anchor(id, outline, *child, env, anchors, bag) {
                 content.push(node);
             }
+        }
+        CellBlock::Inset {
+            left,
+            right,
+            children,
+        } => {
+            let mut lowered = Vec::new();
+            for child in children {
+                push_cell_block(child, env, anchors, &mut lowered, bag);
+            }
+            content.push(FlowNode::Inset(InsetNode {
+                left,
+                right,
+                child: Box::new(sole_or_stack(lowered)),
+            }));
         }
     }
 }
@@ -2047,7 +2075,9 @@ fn validate_band_marks<K>(marks: &[BandMark<K>], images: &LoweredImages, errors:
 fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for block in blocks {
         match block {
-            Block::KeepTogether(children) | Block::Styled { children, .. } => {
+            Block::KeepTogether(children)
+            | Block::Styled { children, .. }
+            | Block::Inset { children, .. } => {
                 validate_blocks(children, images, errors);
             }
             Block::Anchor { child, .. } => {
@@ -2096,6 +2126,9 @@ fn validate_cell_blocks<K>(blocks: &[CellBlock<K>], images: &LoweredImages, erro
             | CellBlock::Canvas(_) => {}
             CellBlock::Anchor { child, .. } => {
                 validate_cell_blocks(std::slice::from_ref(child.as_ref()), images, errors);
+            }
+            CellBlock::Inset { children, .. } => {
+                validate_cell_blocks(children, images, errors);
             }
         }
     }

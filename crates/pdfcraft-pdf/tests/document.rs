@@ -24,14 +24,12 @@ use std::sync::{Arc, Mutex};
 use skrifa::{FontRef, MetadataProvider};
 
 use pdfcraft_pdf::canvas::pt_near;
-#[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::spec::ImageSpec;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
     CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily,
-    FontRegistry, HLineSpec, InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec,
-    MarkerFormat, PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow,
-    TableSpec, TextRun,
+    FontRegistry, HLineSpec, ImageSpec, InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind,
+    ListSpec, MarkerFormat, PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
+    TableRow, TableSpec, TextRun,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -345,6 +343,22 @@ fn plain_item<K>(blocks: Vec<Block<K>>) -> ListItemSpec<K> {
         marker: None,
         blocks,
     }
+}
+
+fn inset_block(left: f32, right: f32, children: Vec<Block<()>>) -> Block<()> {
+    Block::Inset {
+        left: nn(left),
+        right: nn(right),
+        children,
+    }
+}
+
+fn inset_tower(levels: usize) -> Block<()> {
+    let mut block = Block::Spacer(nn(1.0));
+    for _ in 0..levels {
+        block = inset_block(0.0, 0.0, vec![block]);
+    }
+    block
 }
 
 fn marked_item(marker: &str, blocks: Vec<Block<()>>) -> ListItemSpec<()> {
@@ -2019,14 +2033,19 @@ fn kept(levels: usize) -> Block<()> {
     block
 }
 
-/// A list, columns, and keep-together, in turn, each one level deeper than the last.
+/// A list, columns, keep-together, and inset, in turn, each one level deeper than the last.
 fn heavy(levels: usize) -> Block<()> {
     let mut block = para("x");
     for level in 0..levels {
-        block = match level % 3 {
+        block = match level % 4 {
             0 => bullet_list(vec![plain_item(vec![block])]),
             1 => gap_columns(0.0, vec![auto_col(vec![block]), fixed_col(4.0, vec![])]),
-            _ => Block::KeepTogether(vec![block]),
+            2 => Block::KeepTogether(vec![block]),
+            _ => Block::Inset {
+                left: NonNegative::ZERO,
+                right: NonNegative::ZERO,
+                children: vec![block],
+            },
         };
     }
     block
@@ -2252,7 +2271,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
         ],
     );
     for level in 0..TOO_DEEP {
-        block = match level % 7 {
+        block = match level % 9 {
             0 => Block::KeepTogether(vec![block]),
             1 => styled(None, None, vec![block]),
             2 => Block::Anchor {
@@ -2260,8 +2279,13 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
                 outline: None,
                 child: Box::new(block),
             },
-            3 => gap_columns(0.0, vec![auto_col(vec![block])]),
-            4 => grid(
+            3 => Block::Inset {
+                left: NonNegative::ZERO,
+                right: NonNegative::ZERO,
+                children: vec![block],
+            },
+            4 => gap_columns(0.0, vec![auto_col(vec![block])]),
+            5 => grid(
                 vec![TableRow {
                     cells: vec![cell(vec![CellBlock::Anchor {
                         id: String::new(),
@@ -2274,13 +2298,26 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
                 }],
                 vec![],
             ),
-            5 => grid(
+            6 => grid(
                 vec![],
                 vec![TableRow {
                     cells: vec![cell(vec![CellBlock::List(ListSpec {
                         items: vec![plain_item(vec![block])],
                         ..ListSpec::default()
                     })])],
+                }],
+            ),
+            7 => grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![CellBlock::Inset {
+                        left: NonNegative::ZERO,
+                        right: NonNegative::ZERO,
+                        children: vec![CellBlock::List(ListSpec {
+                            items: vec![plain_item(vec![block])],
+                            ..ListSpec::default()
+                        })],
+                    }])],
                 }],
             ),
             _ => bullet_list(vec![plain_item(vec![block])]),
@@ -5837,4 +5874,447 @@ fn inch_preset_on_a_narrow_page_is_invalid_geometry() {
         })
     );
     assert_eq!(location(error.first()), (Some(0), None, None, None));
+}
+
+fn run_bits(page: &RecordedPage) -> Vec<(String, u32, u32)> {
+    runs(page)
+        .into_iter()
+        .map(|run| (run.text, run.x.to_bits(), run.y.to_bits()))
+        .collect()
+}
+
+#[test]
+fn inset_wraps_at_the_narrowed_width_and_shifts_each_line() {
+    if skip_without_font() {
+        return;
+    }
+    let words = "MM ".repeat(24);
+    let words = words.trim_end();
+    let at = |width: f32, body: Vec<Block<()>>| {
+        runs(
+            &font_pages(
+                PageSize::custom(Size::try_pt(width, 800.0).unwrap()),
+                sec(body),
+            )
+            .unwrap()
+            .pages()[0],
+        )
+    };
+    let narrow = at(80.0, vec![para(words)]);
+    let wide = at(130.0, vec![para(words)]);
+    let shifted = at(130.0, vec![inset_block(20.0, 30.0, vec![para(words)])]);
+    assert!(
+        narrow.len() > wide.len(),
+        "80 pt must wrap more than 130 pt"
+    );
+    assert_eq!(narrow.len(), shifted.len());
+    for (plain, moved) in narrow.iter().zip(&shifted) {
+        assert_eq!(moved.text, plain.text);
+        assert!(pt_near(moved.x, plain.x + 20.0), "{}", plain.text);
+        assert!(pt_near(moved.y, plain.y), "{}", plain.text);
+    }
+}
+
+#[test]
+fn inset_keeps_the_shift_on_the_next_page() {
+    if skip_without_font() {
+        return;
+    }
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(200.0, 40.0).unwrap()),
+        sec(vec![inset_block(20.0, 30.0, vec![para("A\nB\nC")])]),
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2, "three lines on a two-line page");
+    for page in &pages {
+        for run in runs(page) {
+            assert!(pt_near(run.x, 20.0), "{}", run.text);
+        }
+    }
+    assert_eq!(glyph(&pages[1], "C").text, "C");
+}
+
+#[test]
+fn zero_inset_matches_the_bare_paragraph() {
+    if skip_without_font() {
+        return;
+    }
+    let bare = font_pages(PageSize::A4, sec(vec![para("A\nB")]))
+        .unwrap()
+        .pages();
+    let wrapped = font_pages(
+        PageSize::A4,
+        sec(vec![inset_block(0.0, 0.0, vec![para("A\nB")])]),
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(run_bits(&bare[0]), run_bits(&wrapped[0]));
+}
+
+#[test]
+fn inset_wider_than_the_frame_names_both_sides() {
+    let error = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![inset_block(400.0, 400.0, vec![])])],
+    )
+    .unwrap_err();
+    let ErrorKind::InvalidGeometry(GeometryKind::InsetWiderThanFrame { left, right, avail }) =
+        error.first().kind.clone()
+    else {
+        panic!("expected InsetWiderThanFrame, got {:?}", error.first().kind);
+    };
+    assert!(pt_near(left, 400.0));
+    assert!(pt_near(right, 400.0));
+    assert_eq!(
+        avail.to_bits(),
+        PageSize::A4.resolve().width().as_pt().to_bits()
+    );
+    assert_eq!(
+        error.first().to_string(),
+        format!(
+            "invalid geometry: inset left {left} plus right {right} leaves no room in width {avail} (section 0, page 1, body)"
+        )
+    );
+
+    let wide = render(
+        PageSize::custom(Size::try_pt(100.0, 80.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![inset_block(10.0, 10.0, vec![])])],
+    );
+    assert!(wide.is_ok(), "the same empty inset fits a wider frame");
+}
+
+#[test]
+fn inset_in_a_narrow_column_uses_the_column_width() {
+    if skip_without_font() {
+        return;
+    }
+    let page = PageSize::custom(Size::try_pt(200.0, 200.0).unwrap());
+    assert!(font_pages(page, sec(vec![inset_block(30.0, 20.0, vec![para("ok")])])).is_ok());
+    let error = font_pages(
+        page,
+        sec(vec![gap_columns(
+            0.0,
+            vec![
+                fixed_col(40.0, vec![inset_block(30.0, 20.0, vec![para("ok")])]),
+                auto_col(vec![para("side")]),
+            ],
+        )]),
+    )
+    .unwrap_err();
+    let ErrorKind::InvalidGeometry(GeometryKind::InsetWiderThanFrame { left, right, avail }) =
+        error.first().kind.clone()
+    else {
+        panic!("expected InsetWiderThanFrame, got {:?}", error.first().kind);
+    };
+    assert!(pt_near(left, 30.0));
+    assert!(pt_near(right, 20.0));
+    assert!(pt_near(avail, 40.0), "avail {avail}");
+}
+
+#[test]
+fn inset_reports_unbreakable_content_against_the_narrowed_width() {
+    let error = render(
+        PageSize::custom(Size::try_pt(100.0, 80.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![inset_block(
+            30.0,
+            20.0,
+            vec![Block::Canvas(CanvasSpec {
+                size: Size::try_pt(80.0, 10.0).unwrap(),
+                align: Alignment::Start,
+                marks: Vec::new(),
+            })],
+        )])],
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.first().kind.clone(),
+        ErrorKind::UnbreakableWiderThanFrame {
+            text: None,
+            width: 80.0,
+            avail: 50.0,
+        }
+    );
+}
+
+#[test]
+fn list_item_address_shifts_under_one_marker() {
+    if skip_without_font() {
+        return;
+    }
+    let pages = font_pages(
+        PageSize::A4,
+        sec(vec![ordered_list(
+            Numbering::Decimal,
+            1,
+            vec![plain_item(vec![
+                para("Ship"),
+                inset_block(20.0, 0.0, vec![para("Street")]),
+            ])],
+        )]),
+    )
+    .unwrap()
+    .pages();
+    let page = &pages[0];
+    let marker = glyph(page, "1.");
+    let ship = glyph(page, "Ship");
+    let street = glyph(page, "Street");
+    assert!(pt_near(marker.x, 0.0));
+    assert!(pt_near(ship.x, 18.0));
+    assert!(pt_near(street.x, 38.0));
+    assert!(pt_near(marker.y, ship.y));
+    assert!(street.y > ship.y, "the address sits under the label");
+}
+
+#[test]
+fn inset_around_a_list_shifts_the_marker_with_the_body() {
+    if skip_without_font() {
+        return;
+    }
+    let page = &font_pages(
+        PageSize::A4,
+        sec(vec![inset_block(
+            12.0,
+            0.0,
+            vec![ordered_list(
+                Numbering::Decimal,
+                1,
+                vec![plain_item(vec![para("Subsidiary")])],
+            )],
+        )]),
+    )
+    .unwrap()
+    .pages()[0];
+    assert!(pt_near(glyph(page, "1.").x, 12.0));
+    assert!(pt_near(glyph(page, "Subsidiary").x, 30.0));
+    assert!(pt_near(glyph(page, "1.").y, glyph(page, "Subsidiary").y));
+}
+
+#[test]
+fn inset_item_marker_uses_the_child_baseline() {
+    if skip_without_font() {
+        return;
+    }
+    let page = &font_pages(
+        PageSize::A4,
+        sec(vec![ordered_list(
+            Numbering::Decimal,
+            1,
+            vec![plain_item(vec![inset_block(20.0, 0.0, vec![para("Line")])])],
+        )]),
+    )
+    .unwrap()
+    .pages()[0];
+    assert!(pt_near(glyph(page, "Line").x, 38.0));
+    assert!(pt_near(glyph(page, "1.").y, glyph(page, "Line").y));
+}
+
+#[test]
+fn cell_inset_draws_after_the_cell_padding() {
+    if skip_without_font() {
+        return;
+    }
+    let page = &font_pages(
+        PageSize::A4,
+        sec(vec![Block::Table(TableSpec {
+            body: vec![TableRow {
+                cells: vec![CellSpec {
+                    content: vec![CellBlock::Inset {
+                        left: nn(8.0),
+                        right: NonNegative::ZERO,
+                        children: vec![CellBlock::Paragraph(ParagraphSpec::text((), "Net"))],
+                    }],
+                    ..CellSpec::default()
+                }],
+            }],
+            cell_padding: nn(6.0),
+            tracks: Some(vec![Track::Fixed(pos(160.0))]),
+            ..TableSpec::default()
+        })]),
+    )
+    .unwrap()
+    .pages()[0];
+    assert!(pt_near(glyph(page, "Net").x, 14.0));
+}
+
+#[test]
+fn inset_page_break_in_body_is_nested_page_break() {
+    assert_eq!(
+        first_kind(render(
+            PageSize::A4,
+            Resources::default(),
+            vec![sec(vec![inset_block(0.0, 0.0, vec![Block::PageBreak])])],
+        )),
+        ErrorKind::InvalidGeometry(GeometryKind::NestedPageBreak)
+    );
+}
+
+#[test]
+fn inset_page_break_reports_the_enclosing_container() {
+    assert_eq!(
+        first_kind(render(
+            PageSize::A4,
+            Resources::default(),
+            vec![sec(vec![gap_columns(
+                0.0,
+                vec![
+                    auto_col(vec![inset_block(0.0, 0.0, vec![Block::PageBreak])]),
+                    fixed_col(10.0, vec![Block::Spacer(nn(1.0))]),
+                ],
+            )])],
+        )),
+        ErrorKind::InvalidCellContent {
+            container: "column",
+            node: "page break",
+        }
+    );
+    assert_eq!(
+        first_kind(render(
+            PageSize::A4,
+            Resources::default(),
+            vec![sec(vec![bullet_list(vec![plain_item(vec![inset_block(
+                0.0,
+                0.0,
+                vec![Block::PageBreak],
+            )])])])],
+        )),
+        ErrorKind::InvalidCellContent {
+            container: "list item",
+            node: "page break",
+        }
+    );
+    let _laid = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![gap_columns(
+            0.0,
+            vec![
+                auto_col(vec![inset_block(
+                    0.0,
+                    0.0,
+                    vec![grid(
+                        vec![],
+                        vec![TableRow {
+                            cells: vec![cell(vec![CellBlock::Spacer(nn(4.0))])],
+                        }],
+                    )],
+                )]),
+                fixed_col(20.0, vec![Block::Spacer(nn(1.0))]),
+            ],
+        )])],
+    )
+    .expect("a column may hold an inset around a table");
+}
+
+#[test]
+fn cell_inset_list_item_columns_report_the_table_cell() {
+    if skip_without_font() {
+        return;
+    }
+    assert_eq!(
+        first_kind(render(
+            PageSize::A4,
+            font_resources(),
+            vec![sec(vec![grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![CellBlock::Inset {
+                        left: nn(0.0),
+                        right: nn(0.0),
+                        children: vec![CellBlock::List(ListSpec {
+                            items: vec![plain_item(vec![gap_columns(
+                                0.0,
+                                vec![
+                                    auto_col(vec![Block::Spacer(nn(1.0))]),
+                                    fixed_col(10.0, vec![Block::Spacer(nn(1.0))]),
+                                ],
+                            )])],
+                            ..ListSpec::default()
+                        })],
+                    }])],
+                }],
+            )])],
+        )),
+        ErrorKind::InvalidCellContent {
+            container: "table cell",
+            node: "columns",
+        }
+    );
+}
+
+#[test]
+fn inset_unknown_image_is_reported() {
+    let stolen = {
+        let mut other = Resources::<()>::default();
+        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+    };
+    let err = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![inset_block(
+            0.0,
+            0.0,
+            vec![Block::Image(ImageSpec {
+                image: stolen,
+                width: None,
+                height: None,
+                align: Alignment::Start,
+            })],
+        )])],
+    )
+    .unwrap_err();
+    assert_eq!(err.len(), 1);
+    assert_eq!(err.first().kind, ErrorKind::UnknownImage { id: 0 });
+}
+
+#[test]
+fn inset_counts_one_nesting_level() {
+    assert!(render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![inset_tower(16)])],
+    )
+    .is_ok());
+    assert_eq!(
+        first_kind(render(
+            PageSize::A4,
+            Resources::default(),
+            vec![sec(vec![inset_tower(17)])],
+        )),
+        depth_error(17, 16)
+    );
+}
+
+#[test]
+fn inset_counts_as_one_block_then_its_child() {
+    let limits = |max: u32| {
+        let mut limits = pdfcraft_pdf::Limits::default();
+        limits.set_max_blocks(max).unwrap();
+        limits
+    };
+    assert!(lay_limited(
+        Resources::default(),
+        limits(1),
+        vec![sec(vec![inset_block(0.0, 0.0, vec![])])],
+    )
+    .is_ok());
+    assert_eq!(
+        first_kind(lay_limited(
+            Resources::default(),
+            limits(1),
+            vec![sec(vec![inset_block(
+                0.0,
+                0.0,
+                vec![Block::Spacer(nn(1.0))]
+            )])],
+        )),
+        ErrorKind::LimitExceeded {
+            kind: LimitKind::Blocks,
+            value: 2,
+            max: 1,
+        }
+    );
 }

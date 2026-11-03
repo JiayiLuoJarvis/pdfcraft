@@ -21,6 +21,10 @@ cross-crate history.
 - `ListSpec` adds `marker_format`, `marker_font`, and `marker_align`. A struct
   literal must set them or end with `..ListSpec::default()`. The defaults are
   `MarkerFormat::DotSuffix`, `None`, and `MarkerAlign::Start`.
+- `Block` and `CellBlock` each gain an `Inset { left, right, children }`
+  variant. Both enums are exhaustive, so a `match` that listed every variant
+  needs a new arm. Add `Block::Inset { .. }` and `CellBlock::Inset { .. }`,
+  or a wildcard.
 
 ### Added
 
@@ -38,6 +42,16 @@ cross-crate history.
   default is 16 and the setter accepts up to 64. The check runs before fonts
   and images are read, so input nested too deeply fails with an error and does
   not overflow the stack.
+- `Block::Inset` and `CellBlock::Inset` shift their children right by `left`
+  and lay them out in a frame narrowed by `left + right`. They paint nothing
+  and add no vertical space. A continuation page keeps the same insets. The
+  first text baseline is the child's, so a horizontal shift does not move a
+  list marker that aligns to that block. `left + right` greater than or equal
+  to the frame fails with `GeometryKind::InsetWiderThanFrame { left, right, avail }`.
+  The three fields are points. The check uses the frame being laid out. A child
+  that is still too wide for the narrowed frame reports its own error. An inset
+  counts as one block and one nesting level. Header and footer bands are not
+  built from blocks, so they have no inset.
 
 ### Changed
 

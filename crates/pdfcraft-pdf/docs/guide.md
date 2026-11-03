@@ -254,6 +254,7 @@ available.
 | `Columns(ColumnsSpec)` | Side-by-side columns (not newspaper snaking) |
 | `Table(TableSpec)` | Table; may split with repeating header |
 | `List(ListSpec)` | Bulleted or numbered list |
+| `Inset { left, right, children }` | Shift children right by `left` and narrow the frame by `left + right` |
 | `Image(ImageSpec)` | Raster block (atomic; not split mid-image) |
 | `HLine(HLineSpec)` | Horizontal rule |
 
@@ -262,14 +263,22 @@ available.
 ### Nesting rules (v1)
 
 - Columns may nest stacks of blocks; stacks may contain columns again.
-- Table cells may hold text, paragraphs, rules, images, spacers, and lists.
+- Table cells may hold text, paragraphs, rules, images, spacers, lists, and insets.
 - Table cells may **not** hold nested tables, columns, or keep-together groups.
   This also applies inside each item of a list in a cell.
 - List items may hold every block except page breaks: paragraphs, tables,
-  columns, images, canvases, keep-together groups, and nested lists.
+  columns, images, canvases, insets, keep-together groups, and nested lists.
 - A rejected block reports the innermost container that forbids it. A page
   break in a list item in a cell reports `"list item"`. Columns there report
   `"table cell"`.
+- `Inset` draws nothing and adds no vertical space. `left` and `right` are
+  non-negative. `left + right` greater than or equal to the frame being laid
+  out fails with `GeometryKind::InsetWiderThanFrame`. A child that is still
+  too wide for the narrowed frame reports its own error, such as
+  `UnbreakableWiderThanFrame` for an image. An inset counts as one nesting
+  level and one block. A list marker aligned to an inset uses the child's
+  first baseline. The sideways shift does not move it. Header and footer
+  bands are not built from `Block`, so they have no inset.
 
 ---
 

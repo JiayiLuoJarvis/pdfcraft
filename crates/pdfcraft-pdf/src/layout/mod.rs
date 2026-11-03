@@ -12,6 +12,7 @@ pub(crate) mod flow;
 pub(crate) mod frame;
 pub(crate) mod hline;
 pub(crate) mod image;
+pub(crate) mod inset;
 pub(crate) mod justify;
 pub(crate) mod line_run;
 pub(crate) mod list;

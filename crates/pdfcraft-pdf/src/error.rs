@@ -661,6 +661,17 @@ pub enum GeometryKind {
         /// The frame width.
         avail: f32,
     },
+    /// `left + right` leaves no positive width in the frame offered at layout.
+    ///
+    /// All three fields are PDF points.
+    InsetWiderThanFrame {
+        /// Requested left inset, in pt.
+        left: f32,
+        /// Requested right inset, in pt.
+        right: f32,
+        /// Width of the frame that rejected the inset, in pt.
+        avail: f32,
+    },
 }
 
 impl fmt::Display for GeometryKind {
@@ -724,6 +735,12 @@ impl fmt::Display for GeometryKind {
             ),
             Self::ListIndentWiderThanFrame { indent, avail } => {
                 write!(f, "list indent {indent} leaves no room in width {avail}")
+            }
+            Self::InsetWiderThanFrame { left, right, avail } => {
+                write!(
+                    f,
+                    "inset left {left} plus right {right} leaves no room in width {avail}"
+                )
             }
         }
     }
@@ -1282,6 +1299,15 @@ mod tests {
         assert_eq!(
             Error::from(GeometryKind::ZeroLengthSegment).to_string(),
             "invalid geometry: segment starts and ends at the same point"
+        );
+        assert_eq!(
+            Error::from(GeometryKind::InsetWiderThanFrame {
+                left: 20.0,
+                right: 30.0,
+                avail: 40.0,
+            })
+            .to_string(),
+            "invalid geometry: inset left 20 plus right 30 leaves no room in width 40"
         );
     }
 

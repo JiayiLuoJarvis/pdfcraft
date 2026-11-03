@@ -3,6 +3,7 @@
 mod columns;
 mod hline;
 mod image;
+mod inset;
 mod list;
 mod paragraph;
 mod table;
