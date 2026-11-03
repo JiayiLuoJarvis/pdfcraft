@@ -263,9 +263,13 @@ available.
 
 - Columns may nest stacks of blocks; stacks may contain columns again.
 - Table cells may hold text, paragraphs, rules, images, spacers, and lists.
-- Table cells may **not** hold nested tables or columns.
-- List items may hold paragraphs, rules, spacers, and nested lists.
-- List items may **not** hold tables, columns, images, or page breaks.
+- Table cells may **not** hold nested tables, columns, or keep-together groups.
+  This also applies inside each item of a list in a cell.
+- List items may hold every block except page breaks: paragraphs, tables,
+  columns, images, canvases, keep-together groups, and nested lists.
+- A rejected block reports the innermost container that forbids it. A page
+  break in a list item in a cell reports `"list item"`. Columns there report
+  `"table cell"`.
 
 ---
 
@@ -557,8 +561,15 @@ times the default.
 | Body blocks | 100_000 |
 | Table cells | 50_000 |
 | Paragraph UTF-8 bytes | 1_000_000 |
+| Nesting depth | 16 |
 
 Overflow → `ErrorKind::LimitExceeded` + `LimitKind`.
+
+Nesting depth is the deepest level in the whole document. Section body blocks
+are level 0. Keep-together groups, styled groups, anchors, columns, list
+items, table cells, and links each add one level. It is checked before fonts
+and images are read. Unoptimized builds may need a larger thread stack when
+the cap is raised above 16.
 
 ---
 

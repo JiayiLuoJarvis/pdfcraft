@@ -34,6 +34,7 @@ use crate::limits::Limits;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+use super::depth;
 use super::token::DocToken;
 use super::types::{self, Rendered, Track};
 use super::{
@@ -63,6 +64,10 @@ use super::{
 /// parser failures stay reachable through [`std::error::Error::source`].
 /// A header or footer function's `Err` is included. A panic in that function
 /// is not caught.
+///
+/// A document nested deeper than [`Limits::max_nesting_depth`] fails with only
+/// [`ErrorKind::LimitExceeded`] and [`LimitKind::NestingDepth`](crate::LimitKind::NestingDepth),
+/// before fonts and images are read. Input nested too deeply does not overflow the stack.
 pub fn layout_spec<K>(spec: DocumentSpec<K>) -> Result<Rendered>
 where
     K: Copy + Eq + std::hash::Hash + std::fmt::Debug + 'static,
@@ -76,6 +81,10 @@ where
     } = spec;
     if sections.is_empty() {
         sections.push(SectionSpec::default());
+    }
+    if let Err(error) = depth::check_depth(&sections, limits.max_nesting_depth()) {
+        depth::dismantle(sections);
+        return Err(crate::error::Errors::from(error));
     }
 
     let doc = DocToken::next();

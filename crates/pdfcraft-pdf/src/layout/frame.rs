@@ -202,6 +202,9 @@ pub(crate) trait Flowable: Sized {
 
     /// Children the nesting rules look into: stack and open keep-together members, column stacks.
     fn nested(&self) -> &[Self];
+
+    /// Item bodies of a list node, one stack per item. Empty for every other node.
+    fn list_bodies(&self) -> Vec<&Self>;
 }
 
 /// Full-frame natural height. Non-Fit splits become [`ErrorKind::UnsplittableTallerThanFrame`].

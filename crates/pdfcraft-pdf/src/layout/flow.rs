@@ -117,6 +117,14 @@ impl Flowable for FlowNode {
             | FlowNode::HLine(_) => &[],
         }
     }
+
+    fn list_bodies(&self) -> Vec<&Self> {
+        let mut bodies = Vec::new();
+        if let FlowNode::List(list) = self {
+            list.append_bodies(&mut bodies);
+        }
+        bodies
+    }
 }
 
 fn fragment_is_effective(fragment: &Fragment) -> bool {

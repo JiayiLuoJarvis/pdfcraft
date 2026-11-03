@@ -24,42 +24,54 @@ impl Container {
     }
 }
 
-/// Rejects nodes `container` may not hold, recursing into stacks and keep-together groups.
+/// What `container` does with one child node.
+enum Rule {
+    Allow,
+    /// Allow, and check the node's [`Flowable::nested`] children under the same container.
+    Nested,
+    /// Allow, and check every list item body under the same container.
+    ListBodies,
+    Deny,
+}
+
+fn rule(container: Container, kind: NodeKind) -> Rule {
+    use Container::{Band, Column, ListItem, TableCell};
+    match (kind, container) {
+        (
+            NodeKind::Paragraph | NodeKind::Spacer | NodeKind::HLine,
+            Column | TableCell | ListItem | Band,
+        )
+        | (NodeKind::Columns | NodeKind::Table | NodeKind::List, Column | ListItem)
+        | (NodeKind::Image | NodeKind::Canvas, Column | TableCell | ListItem) => Rule::Allow,
+        (NodeKind::Stack | NodeKind::Anchor, Column | TableCell | ListItem | Band)
+        | (NodeKind::KeepTogether, Column | ListItem)
+        | (NodeKind::Columns, Band) => Rule::Nested,
+        (NodeKind::List, TableCell) => Rule::ListBodies,
+        (NodeKind::KeepTogether | NodeKind::Table, TableCell | Band)
+        | (NodeKind::Columns, TableCell)
+        | (NodeKind::List | NodeKind::Image | NodeKind::Canvas, Band)
+        | (NodeKind::PageBreak, Column | TableCell | ListItem | Band) => Rule::Deny,
+    }
+}
+
+/// Rejects nodes `container` may not hold, recursing where [`rule`] says so.
 pub(crate) fn check_content<N: Flowable>(container: Container, nodes: &[N]) -> Result<()> {
     for node in nodes {
         let kind = node.kind();
-        let allowed = match kind {
-            NodeKind::Paragraph | NodeKind::Spacer | NodeKind::HLine => true,
-            NodeKind::Stack | NodeKind::Anchor => {
-                check_content(container, node.nested())?;
-                true
-            }
-            NodeKind::KeepTogether => {
-                if container == Container::Column {
-                    check_content(container, node.nested())?;
+        match rule(container, kind) {
+            Rule::Allow => {}
+            Rule::Nested => check_content(container, node.nested())?,
+            Rule::ListBodies => {
+                for body in node.list_bodies() {
+                    check_content(container, std::slice::from_ref(body))?;
                 }
-                container == Container::Column
             }
-            NodeKind::Columns => match container {
-                Container::Column => true,
-                Container::Band => {
-                    check_content(container, node.nested())?;
-                    true
-                }
-                Container::TableCell | Container::ListItem => false,
-            },
-            NodeKind::Table => container == Container::Column,
-            NodeKind::List => container != Container::Band,
-            NodeKind::Image | NodeKind::Canvas => {
-                matches!(container, Container::Column | Container::TableCell)
+            Rule::Deny => {
+                return Err(Error::from(ErrorKind::InvalidCellContent {
+                    container: container.name(),
+                    node: kind_name(kind),
+                }));
             }
-            NodeKind::PageBreak => false,
-        };
-        if !allowed {
-            return Err(Error::from(ErrorKind::InvalidCellContent {
-                container: container.name(),
-                node: kind_name(kind),
-            }));
         }
     }
     Ok(())

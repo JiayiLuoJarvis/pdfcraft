@@ -37,7 +37,7 @@ use pdfcraft_pdf::spec::{
 use pdfcraft_pdf::to_pdf;
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
-    ErrorKind, GeometryKind, GlyphRun, ImageFormat, Ink, Length, LinkTarget, Location,
+    ErrorKind, GeometryKind, GlyphRun, ImageFormat, Ink, Length, LimitKind, LinkTarget, Location,
     MarginPreset, Margins, NonNegative, Numbering, PageSize, Paper, Path, PathVerb, Pen, Point,
     Positive, Ratio, RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
 };
@@ -1934,6 +1934,371 @@ fn unregistered_marker_font_fails() {
     );
 }
 
+fn cell_list(blocks: Vec<Block<()>>) -> Block<()> {
+    grid(
+        vec![],
+        vec![TableRow {
+            cells: vec![cell(vec![CellBlock::List(ListSpec {
+                items: vec![plain_item(blocks)],
+                ..ListSpec::default()
+            })])],
+        }],
+    )
+}
+
+fn first_kind(result: Result<Rendered>) -> ErrorKind {
+    result.err().unwrap().first().kind.clone()
+}
+
+#[test]
+fn item_table_splits_rows_across_pages_at_the_body_indent() {
+    if skip_without_font() {
+        return;
+    }
+    let rows: Vec<TableRow<()>> = (0..6)
+        .map(|row| text_row(&[format!("row{row}").as_str()]))
+        .collect();
+    let pages = font_pages(
+        PageSize::custom(Size::try_pt(300.0, line() * 3.0 + 1.0).unwrap()),
+        SectionSpec {
+            margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
+            body: vec![Block::List(ListSpec {
+                kind: ListKind::Ordered(Numbering::Decimal),
+                body_indent: Some(pos(30.0)),
+                items: vec![plain_item(vec![grid(vec![], rows)])],
+                ..ListSpec::default()
+            })],
+            ..SectionSpec::default()
+        },
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(texts(&pages[0]), ["1.", "row0", "row1", "row2"]);
+    assert_eq!(texts(&pages[1]), ["row3", "row4", "row5"]);
+    assert!(pt_near(glyph(&pages[0], "1.").x, 0.0));
+    for (page, row) in [(0, "row0"), (0, "row2"), (1, "row3"), (1, "row5")] {
+        assert!(pt_near(glyph(&pages[page], row).x, 30.0), "{row} x");
+    }
+}
+
+fn depth_limits(max: u32) -> pdfcraft_pdf::Limits {
+    let mut limits = pdfcraft_pdf::Limits::default();
+    limits.set_max_nesting_depth(max).unwrap();
+    limits
+}
+
+fn lay_limited(
+    resources: Resources<()>,
+    limits: pdfcraft_pdf::Limits,
+    sections: Vec<SectionSpec<()>>,
+) -> Result<Rendered> {
+    layout_spec(DocumentSpec {
+        page_size: PageSize::A4,
+        resources,
+        limits,
+        info: pdfcraft_pdf::spec::DocumentInfo::default(),
+        sections,
+    })
+}
+
+fn depth_error(value: u64, max: u64) -> ErrorKind {
+    ErrorKind::LimitExceeded {
+        kind: LimitKind::NestingDepth,
+        value,
+        max,
+    }
+}
+
+/// `levels` keep-together groups around one paragraph, so the text sits at depth `levels`.
+fn kept(levels: usize) -> Block<()> {
+    let mut block = para("x");
+    for _ in 0..levels {
+        block = Block::KeepTogether(vec![block]);
+    }
+    block
+}
+
+/// A list, columns, and keep-together, in turn, each one level deeper than the last.
+fn heavy(levels: usize) -> Block<()> {
+    let mut block = para("x");
+    for level in 0..levels {
+        block = match level % 3 {
+            0 => bullet_list(vec![plain_item(vec![block])]),
+            1 => gap_columns(0.0, vec![auto_col(vec![block]), fixed_col(4.0, vec![])]),
+            _ => Block::KeepTogether(vec![block]),
+        };
+    }
+    block
+}
+
+fn linked(levels: usize) -> Block<()> {
+    let mut run = text_run("x");
+    for _ in 0..levels {
+        run = link_run("https://example.com", vec![run]);
+    }
+    runs_para(vec![run])
+}
+
+#[test]
+fn nesting_depth_sixteen_passes_and_seventeen_fails() {
+    if skip_without_font() {
+        return;
+    }
+    for block in [kept(16), heavy(16)] {
+        let pages = font_pages(PageSize::A4, sec(vec![block])).unwrap().pages();
+        assert_eq!(texts(&pages[0]).last().map(String::as_str), Some("x"));
+    }
+    let error = font_pages(PageSize::A4, sec(vec![para("top"), kept(17)]))
+        .err()
+        .unwrap();
+    assert_eq!(error.len(), 1);
+    assert_eq!(error.first().kind, depth_error(17, 16));
+    assert_eq!(location(error.first()), (Some(0), None, None, None));
+    assert_eq!(
+        error.first().to_string(),
+        "nesting depth 17 exceeds maximum 16 (section 0)"
+    );
+}
+
+#[test]
+fn nesting_depth_follows_the_configured_cap() {
+    if skip_without_font() {
+        return;
+    }
+    let pages = lay_limited(
+        font_resources(),
+        depth_limits(10),
+        vec![sec(vec![kept(10)])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(texts(&pages[0]), ["x"]);
+    assert_eq!(
+        first_kind(lay_limited(
+            font_resources(),
+            depth_limits(10),
+            vec![sec(vec![kept(11)])]
+        )),
+        depth_error(11, 10)
+    );
+    let mut limits = pdfcraft_pdf::Limits::default();
+    assert_eq!(
+        limits.set_max_nesting_depth(65).unwrap_err().kind,
+        depth_error(65, 64)
+    );
+    assert_eq!(limits.max_nesting_depth(), 16);
+}
+
+#[test]
+fn nested_links_count_toward_nesting_depth() {
+    assert_eq!(
+        first_kind(render(
+            PageSize::A4,
+            Resources::default(),
+            vec![sec(vec![linked(17)])]
+        )),
+        depth_error(17, 16)
+    );
+}
+
+#[test]
+fn mixed_nesting_counts_one_level_per_container() {
+    let styled_list = Block::Styled {
+        style: RunStyle::default(),
+        children: vec![bullet_list(vec![plain_item(vec![runs_para(vec![
+            link_run(
+                "https://example.com",
+                vec![link_run("https://example.com", vec![text_run("x")])],
+            ),
+        ])])])],
+    };
+    let anchored_cell = CellBlock::Anchor {
+        id: "deep".into(),
+        outline: None,
+        child: Box::new(CellBlock::Paragraph(ParagraphSpec {
+            runs: vec![link_run("https://example.com", vec![text_run("x")])],
+            ..ParagraphSpec::default()
+        })),
+    };
+    let columns_table = gap_columns(
+        0.0,
+        vec![
+            auto_col(vec![grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![anchored_cell])],
+                }],
+            )]),
+            fixed_col(4.0, vec![]),
+        ],
+    );
+    let error = lay_limited(
+        Resources::default(),
+        depth_limits(3),
+        vec![
+            sec(vec![para("shallow")]),
+            sec(vec![styled_list]),
+            sec(vec![columns_table]),
+        ],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.len(), 1);
+    assert_eq!(error.first().kind, depth_error(4, 3));
+    assert_eq!(location(error.first()), (Some(1), None, None, None));
+}
+
+#[test]
+fn nesting_depth_sixty_four_lays_out_on_an_eight_mib_stack() {
+    if skip_without_font() {
+        return;
+    }
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let pages = lay_limited(
+                font_resources(),
+                depth_limits(64),
+                vec![sec(vec![heavy(64)])],
+            )
+            .unwrap()
+            .pages();
+            assert_eq!(texts(&pages[0]).last().map(String::as_str), Some("x"));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+const TOO_DEEP: usize = 100_000;
+
+fn assert_too_deep(block: Block<()>) {
+    let kind = first_kind(render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![block])],
+    ));
+    assert!(
+        matches!(
+            kind,
+            ErrorKind::LimitExceeded {
+                kind: LimitKind::NestingDepth,
+                max: 16,
+                ..
+            }
+        ),
+        "{kind:?}"
+    );
+}
+
+#[test]
+fn very_deep_keep_together_fails_without_overflowing_the_stack() {
+    assert_too_deep(kept(TOO_DEEP));
+}
+
+#[test]
+fn very_deep_links_fail_without_overflowing_the_stack() {
+    assert_too_deep(linked(TOO_DEEP));
+}
+
+#[test]
+fn very_deep_lists_columns_and_cell_anchors_fail_without_overflowing_the_stack() {
+    let mut block = para("x");
+    for level in 0..TOO_DEEP {
+        block = match level % 3 {
+            0 => bullet_list(vec![plain_item(vec![block])]),
+            1 => gap_columns(0.0, vec![auto_col(vec![block])]),
+            _ => grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![CellBlock::Anchor {
+                        id: String::new(),
+                        outline: None,
+                        child: Box::new(CellBlock::List(ListSpec {
+                            items: vec![plain_item(vec![block])],
+                            ..ListSpec::default()
+                        })),
+                    }])],
+                }],
+            ),
+        };
+    }
+    assert_too_deep(block);
+}
+
+#[test]
+fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
+    let deep_link = |levels: usize| {
+        let mut run = text_run("x");
+        for _ in 0..levels {
+            run = link_run("https://example.com", vec![run]);
+        }
+        run
+    };
+    let mut block = gap_columns(
+        0.0,
+        vec![
+            auto_col(vec![runs_para(vec![deep_link(TOO_DEEP / 4)])]),
+            auto_col(vec![grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                        runs: vec![deep_link(TOO_DEEP / 4)],
+                        ..ParagraphSpec::default()
+                    })])],
+                }],
+            )]),
+        ],
+    );
+    for level in 0..TOO_DEEP {
+        block = match level % 7 {
+            0 => Block::KeepTogether(vec![block]),
+            1 => styled(None, None, vec![block]),
+            2 => Block::Anchor {
+                id: String::new(),
+                outline: None,
+                child: Box::new(block),
+            },
+            3 => gap_columns(0.0, vec![auto_col(vec![block])]),
+            4 => grid(
+                vec![TableRow {
+                    cells: vec![cell(vec![CellBlock::Anchor {
+                        id: String::new(),
+                        outline: None,
+                        child: Box::new(CellBlock::List(ListSpec {
+                            items: vec![plain_item(vec![block])],
+                            ..ListSpec::default()
+                        })),
+                    }])],
+                }],
+                vec![],
+            ),
+            5 => grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![CellBlock::List(ListSpec {
+                        items: vec![plain_item(vec![block])],
+                        ..ListSpec::default()
+                    })])],
+                }],
+            ),
+            _ => bullet_list(vec![plain_item(vec![block])]),
+        };
+    }
+    assert_too_deep(block);
+}
+
+#[test]
+fn nesting_depth_is_checked_before_fonts_are_read() {
+    let resources = Resources::with_fonts(FontRegistry::single(regular_family(vec![0, 1, 2])));
+    let error = render(PageSize::A4, resources, vec![sec(vec![kept(17)])])
+        .err()
+        .unwrap();
+    assert_eq!(error.len(), 1);
+    assert_eq!(error.first().kind, depth_error(17, 16));
+}
+
 #[test]
 fn ideographic_comma_marker_needs_u3001() {
     #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -2685,28 +3050,37 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
 
 #[cfg(feature = "backend-krilla")]
 #[test]
-fn list_item_and_overwide_image_fail() {
-    let mut listed_resources = Resources::default();
-    let logo = listed_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
-    let listed = render(
+fn list_item_image_is_drawn_at_the_body_indent() {
+    if skip_without_font() {
+        return;
+    }
+    let mut resources = font_resources();
+    let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let rendered = render(
         PageSize::A4,
-        listed_resources,
-        vec![sec(vec![bullet_list(vec![plain_item(vec![image_block(
-            logo,
-            None,
-            Alignment::Start,
-        )])])])],
+        resources,
+        vec![SectionSpec {
+            margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
+            body: vec![bullet_list(vec![plain_item(vec![image_block(
+                logo,
+                Some(10.0),
+                Alignment::Start,
+            )])])],
+            ..SectionSpec::default()
+        }],
     )
-    .err()
     .unwrap();
+    let images = image_rects(&rendered.pages()[0]);
+    assert_eq!(images.len(), 1);
     assert_eq!(
-        listed.first().kind.clone(),
-        ErrorKind::InvalidCellContent {
-            container: "list item",
-            node: "image"
-        }
+        rect_bits(images[0].3),
+        rect_bits(Rect::try_pt(18.0, 0.0, 10.0, 10.0).unwrap())
     );
+}
 
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn overwide_image_fails() {
     let mut wide_resources = Resources::default();
     let wide_logo = wide_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
     let wide = render(
@@ -4870,33 +5244,19 @@ fn cell_list_marker_at_cell_x() {
 }
 
 #[test]
-fn cell_list_item_rejects_forbidden_kids() {
+fn cell_list_item_reports_the_innermost_forbidding_container() {
     if skip_without_font() {
         return;
     }
-    let reject = |node: &'static str, block: Block<()>| {
-        let result = font_pages(
-            PageSize::A4,
-            sec(vec![grid(
-                vec![],
-                vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::List(ListSpec {
-                        items: vec![plain_item(vec![block])],
-                        ..ListSpec::default()
-                    })])],
-                }],
-            )]),
-        );
+    let reject = |container: &'static str, node: &'static str, block: Block<()>| {
         assert_eq!(
-            result.err().map(|error| error.first().kind.clone()),
-            Some(ErrorKind::InvalidCellContent {
-                container: "list item",
-                node,
-            })
+            first_kind(font_pages(PageSize::A4, sec(vec![cell_list(vec![block])]))),
+            ErrorKind::InvalidCellContent { container, node }
         );
     };
-    reject("table", grid(vec![], vec![text_row(&["a"])]));
+    reject("table cell", "table", grid(vec![], vec![text_row(&["a"])]));
     reject(
+        "table cell",
         "columns",
         gap_columns(
             12.0,
@@ -4906,38 +5266,34 @@ fn cell_list_item_rejects_forbidden_kids() {
             ],
         ),
     );
-    reject("page break", Block::PageBreak);
-    reject("keep together", Block::KeepTogether(vec![]));
+    reject("table cell", "keep together", Block::KeepTogether(vec![]));
+    reject("list item", "page break", Block::PageBreak);
+    reject(
+        "list item",
+        "page break",
+        Block::KeepTogether(vec![Block::PageBreak]),
+    );
 }
 
 #[cfg(feature = "backend-krilla")]
 #[test]
-fn cell_list_item_rejects_an_image() {
+fn cell_list_item_may_hold_an_image() {
     if skip_without_font() {
         return;
     }
     let mut resources = font_resources();
     let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
-    let result = render(
+    let rendered = render(
         PageSize::A4,
         resources,
-        vec![sec(vec![grid(
-            vec![],
-            vec![TableRow {
-                cells: vec![cell(vec![CellBlock::List(ListSpec {
-                    items: vec![plain_item(vec![image_block(logo, None, Alignment::Start)])],
-                    ..ListSpec::default()
-                })])],
-            }],
-        )])],
-    );
-    assert_eq!(
-        result.err().map(|error| error.first().kind.clone()),
-        Some(ErrorKind::InvalidCellContent {
-            container: "list item",
-            node: "image",
-        })
-    );
+        vec![sec(vec![cell_list(vec![image_block(
+            logo,
+            Some(10.0),
+            Alignment::Start,
+        )])])],
+    )
+    .unwrap();
+    assert_eq!(image_rects(&rendered.pages()[0]).len(), 1);
 }
 
 #[test]

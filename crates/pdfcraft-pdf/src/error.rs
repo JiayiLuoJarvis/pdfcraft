@@ -230,6 +230,8 @@ pub enum LimitKind {
     ParagraphBytes,
     /// Pages committed during pagination.
     Pages,
+    /// Total nesting depth of body blocks and inline links.
+    NestingDepth,
 }
 
 impl fmt::Display for LimitKind {
@@ -243,6 +245,7 @@ impl fmt::Display for LimitKind {
             Self::TableCells => "table cells",
             Self::ParagraphBytes => "paragraph bytes",
             Self::Pages => "pages",
+            Self::NestingDepth => "nesting depth",
         })
     }
 }
@@ -398,7 +401,10 @@ pub enum ErrorKind {
     },
     /// `node` is not allowed inside `container`.
     InvalidCellContent {
-        /// Container that rejected the node, such as `"table cell"`.
+        /// Innermost enclosing container that forbids the node, such as `"table cell"`.
+        ///
+        /// A page break in a list item inside a table cell reports `"list item"`.
+        /// Columns in that list item report `"table cell"`.
         container: &'static str,
         /// Rejected node kind, such as `"columns"`.
         node: &'static str,

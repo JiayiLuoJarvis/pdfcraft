@@ -2,7 +2,8 @@
 //!
 //! Put a [`Limits`] value on [`DocumentSpec::limits`](crate::DocumentSpec::limits).
 //! Defaults (32 MiB fonts/images, 40M pixels, 8192 edge, 10 000 pages, 100 000
-//! blocks, 50 000 table cells, 1 000 000 paragraph bytes) suit batch generation.
+//! blocks, 50 000 table cells, 1 000 000 paragraph bytes, 16
+//! nesting depth) suit batch generation.
 //! Setters reject `0` and any value above four times that default. Overflow is
 //! [`ErrorKind::LimitExceeded`] with a [`LimitKind`]. [`LimitKind`] is defined
 //! in [`crate::error`] and re-exported here.
@@ -20,6 +21,7 @@ const DEFAULT_PAGES: u32 = 10_000;
 const DEFAULT_BLOCKS: u32 = 100_000;
 const DEFAULT_TABLE_CELLS: u32 = 50_000;
 const DEFAULT_PARAGRAPH_BYTES: usize = 1_000_000;
+const DEFAULT_NESTING_DEPTH: u32 = 16;
 
 /// Resource and document-size caps.
 ///
@@ -35,6 +37,7 @@ pub struct Limits {
     blocks: u32,
     table_cells: u32,
     paragraph_bytes: usize,
+    nesting_depth: u32,
 }
 
 impl Default for Limits {
@@ -48,6 +51,7 @@ impl Default for Limits {
             blocks: DEFAULT_BLOCKS,
             table_cells: DEFAULT_TABLE_CELLS,
             paragraph_bytes: DEFAULT_PARAGRAPH_BYTES,
+            nesting_depth: DEFAULT_NESTING_DEPTH,
         }
     }
 }
@@ -99,6 +103,20 @@ impl Limits {
     #[must_use]
     pub const fn max_paragraph_bytes(&self) -> usize {
         self.paragraph_bytes
+    }
+
+    /// Deepest nesting of body blocks and inline links in the whole document. Default 16.
+    ///
+    /// Blocks placed directly in a section body are at depth 0. Each keep-together
+    /// group, styled group, anchor, column, list item, table cell, and link adds
+    /// one level for its contents. A document deeper than this cap fails with
+    /// [`ErrorKind::LimitExceeded`] and [`LimitKind::NestingDepth`] before layout,
+    /// and does not overflow the stack. The default lays out on a 2 MiB thread
+    /// stack in an unoptimized build. Unoptimized builds may need a larger thread
+    /// stack for higher caps.
+    #[must_use]
+    pub const fn max_nesting_depth(&self) -> u32 {
+        self.nesting_depth
     }
 
     /// Sets the font-bytes cap.
@@ -205,6 +223,24 @@ impl Limits {
             admit_usize(bytes, DEFAULT_PARAGRAPH_BYTES, LimitKind::ParagraphBytes)?;
         Ok(())
     }
+
+    /// Sets the total nesting-depth cap described on [`Self::max_nesting_depth`].
+    ///
+    /// Unoptimized builds may need a larger thread stack above the default.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::LimitExceeded`] with [`LimitKind::NestingDepth`] when `depth` is 0
+    /// (`max` is 0) or greater than four times the default.
+    pub fn set_max_nesting_depth(&mut self, depth: u32) -> Result<(), Error> {
+        admit(
+            u64::from(depth),
+            u64::from(DEFAULT_NESTING_DEPTH),
+            LimitKind::NestingDepth,
+        )?;
+        self.nesting_depth = depth;
+        Ok(())
+    }
 }
 
 fn admit(value: u64, default: u64, kind: LimitKind) -> Result<u64, Error> {
@@ -305,6 +341,12 @@ mod tests {
             u64::try_from(DEFAULT_PARAGRAPH_BYTES).unwrap(),
             |limits, value| limits.set_max_paragraph_bytes(usize::try_from(value).unwrap()),
             |limits| u64::try_from(limits.max_paragraph_bytes()).unwrap(),
+        );
+        rejects(
+            LimitKind::NestingDepth,
+            u64::from(DEFAULT_NESTING_DEPTH),
+            |limits, value| limits.set_max_nesting_depth(u32::try_from(value).unwrap()),
+            |limits| u64::from(limits.max_nesting_depth()),
         );
     }
 

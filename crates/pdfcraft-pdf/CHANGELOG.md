@@ -33,6 +33,21 @@ cross-crate history.
   column. `marker_font` draws bullets, numbers, and custom markers with that
   family's regular face. `None` keeps the first registered face. Size and
   color still follow `Block::Styled`. Bold and italic do not.
+- `LimitKind::NestingDepth` and `Limits::{max_nesting_depth,
+  set_max_nesting_depth}` cap the total nesting depth of the document. The
+  default is 16 and the setter accepts up to 64. The check runs before fonts
+  and images are read, so input nested too deeply fails with an error and does
+  not overflow the stack.
+
+### Changed
+
+- List items may hold every block except a page break, including tables,
+  columns, images, canvases, and keep-together groups. Documents that used to
+  fail with `InvalidCellContent` for those blocks now lay out. A list inside a
+  table cell still keeps the cell's rules in every item. `InvalidCellContent`
+  now names the innermost container that forbids the node, so columns in a
+  list item in a cell report `"table cell"`, and a page break there reports
+  `"list item"`.
 
 ## [0.4.0] - 2026-11-03
 

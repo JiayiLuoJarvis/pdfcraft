@@ -2,16 +2,18 @@ use std::num::NonZeroU32;
 
 use crate::canvas::{pt_near, CanvasCommand, RecordedPage};
 use crate::error::{Error, ErrorBag, ErrorKind, GeometryKind};
-use crate::geom::{Color, NonNegative, Positive};
+use crate::geom::{Color, NonNegative, Positive, Size};
+use crate::layout::canvas::CanvasNode;
 use crate::layout::column_width::ColumnWidth;
+use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::Decorations;
-use crate::layout::flow::{FlowNode, KeepTogetherNode};
+use crate::layout::flow::{AnchorNode, FlowNode, KeepTogetherNode};
 use crate::layout::frame::{natural_height, Fragment, FragmentCommand, Frame, LayoutCtx};
 use crate::layout::list::{
     first_baseline, ListItem, ListKind, ListNode, ListSpec, MarkerAffix, MarkerAlign, MarkerKind,
 };
-use crate::layout::style::{GlyphStyle, Style};
-use crate::layout::table::{TableNode, TableSpec};
+use crate::layout::style::{GlyphStyle, Style, TextAlign};
+use crate::layout::table::{Cell, TableNode, TableSpec};
 use crate::layout::test_util::{bits, fonts_and_style, metrics, page, render, runs, text, texts};
 
 fn spec(
@@ -558,10 +560,8 @@ fn image_command_has_no_baseline() {
     assert_eq!(first_baseline(&fragment), None);
 }
 
-#[test]
-fn item_rejects_table_page_break_and_image() {
-    let table = TableNode::new(TableSpec::new(vec![ColumnWidth::Auto])).unwrap();
-    let image = FlowNode::Image(
+fn image_node() -> FlowNode {
+    FlowNode::Image(
         crate::layout::image::ImageNode::new(
             crate::canvas::DecodedImage {
                 id: crate::canvas::ImageId::from_raw(0),
@@ -570,30 +570,136 @@ fn item_rejects_table_page_break_and_image() {
             },
             Some(Positive::pt(10.0).unwrap()),
             Some(Positive::pt(10.0).unwrap()),
-            crate::layout::style::TextAlign::Start,
+            TextAlign::Start,
         )
         .unwrap(),
+    )
+}
+
+fn canvas_node() -> FlowNode {
+    let side = Positive::pt(10.0).unwrap();
+    FlowNode::Canvas(CanvasNode::new(Size::new(side, side), TextAlign::Start, Vec::new()).unwrap())
+}
+
+fn one_cell_table(s: &str, style: &Style) -> FlowNode {
+    let mut table = TableSpec::new(vec![ColumnWidth::Auto]);
+    table.body = vec![vec![Cell::new(vec![text(s, style)]).unwrap()]];
+    FlowNode::Table(TableNode::new(table).unwrap())
+}
+
+fn two_columns(left: Vec<FlowNode>, right: Vec<FlowNode>) -> FlowNode {
+    FlowNode::Columns(
+        ColumnsNode::new(
+            NonNegative::pt(10.0).unwrap(),
+            vec![
+                (ColumnWidth::Auto, left),
+                (ColumnWidth::Fixed(Positive::pt(80.0).unwrap()), right),
+            ],
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn item_holds_tables_columns_images_canvases_groups_and_nested_lists() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let innermost = ListNode::new(spec(
+        ordered(MarkerKind::LowerAlpha, 1),
+        16.0,
+        &style,
+        vec![item("deep", &style)],
+    ))
+    .unwrap();
+    let bullets = ListNode::new(spec(
+        ListKind::Bullet,
+        16.0,
+        &style,
+        vec![ListItem::new(vec![text("mid", &style), FlowNode::List(innermost)]).unwrap()],
+    ))
+    .unwrap();
+    let content = vec![
+        one_cell_table("cell", &style),
+        two_columns(vec![text("left", &style)], vec![text("right", &style)]),
+        image_node(),
+        canvas_node(),
+        FlowNode::KeepTogether(KeepTogetherNode::Open(vec![text("kept", &style)])),
+        FlowNode::List(bullets),
+    ];
+    let list = ListNode::new(spec(
+        ordered(MarkerKind::Decimal, 1),
+        20.0,
+        &style,
+        vec![ListItem::new(content).unwrap()],
+    ))
+    .unwrap();
+    let (result, rec) = render(
+        FlowNode::List(list),
+        &mut fonts,
+        page(300.0, 400.0),
+        &Decorations::none(),
     );
-    for (node, name) in [
-        (FlowNode::Table(table), "table"),
-        (FlowNode::PageBreak, "page break"),
-        (image, "image"),
-    ] {
+    result.unwrap();
+    assert_eq!(
+        texts(&rec.pages()[0]),
+        ["1.", "cell", "left", "right", "kept", "\u{2022}", "mid", "a.", "deep"]
+    );
+}
+
+#[test]
+fn item_rejects_page_breaks_inside_groups_stacks_and_anchors() {
+    let wrapped = [
+        FlowNode::PageBreak,
+        FlowNode::Stack(vec![FlowNode::PageBreak]),
+        FlowNode::KeepTogether(KeepTogetherNode::Open(vec![FlowNode::PageBreak])),
+        FlowNode::Anchor(AnchorNode {
+            id: "a".to_owned(),
+            child: Box::new(FlowNode::PageBreak),
+            marked: false,
+        }),
+    ];
+    for node in wrapped {
         assert_eq!(
             ListItem::new(vec![node]).unwrap_err(),
             Error::from(ErrorKind::InvalidCellContent {
                 container: "list item",
-                node: name
+                node: "page break"
             })
         );
     }
 }
 
 #[test]
+fn column_may_hold_a_list_whose_item_holds_a_table() {
+    let Some((_, style)) = fonts_and_style() else {
+        return;
+    };
+    let list = ListNode::new(spec(
+        ListKind::Bullet,
+        20.0,
+        &style,
+        vec![ListItem::new(vec![one_cell_table("cell", &style)]).unwrap()],
+    ))
+    .unwrap();
+    ColumnsNode::new(
+        NonNegative::ZERO,
+        vec![
+            (ColumnWidth::Auto, vec![FlowNode::List(list)]),
+            (
+                ColumnWidth::Fixed(Positive::pt(80.0).unwrap()),
+                vec![text("x", &style)],
+            ),
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
 fn item_allows_hline() {
     let line = crate::layout::hline::HLineNode::new(
         None,
-        crate::layout::style::TextAlign::Center,
+        TextAlign::Center,
         Positive::pt(1.0).unwrap(),
         Color::rgb(0, 0, 0),
         NonNegative::ZERO,

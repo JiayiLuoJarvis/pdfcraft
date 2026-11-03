@@ -17,6 +17,7 @@
 //!
 //! See the crate README and `docs/guide.md` for end-to-end usage.
 
+mod depth;
 mod latin;
 mod lower;
 mod token;
@@ -636,6 +637,10 @@ pub struct ListItemSpec<K> {
     /// and color from [`Block::Styled`] and stay on the regular face.
     pub marker: Option<String>,
     /// Item blocks.
+    ///
+    /// Any block except [`Block::PageBreak`], at any depth inside the item, is
+    /// allowed. A list inside a table cell also keeps the cell's rules for every
+    /// item: no tables, columns, or keep-together groups.
     pub blocks: Vec<Block<K>>,
 }
 
