@@ -346,8 +346,6 @@ cargo deny check advisories licenses bans sources
 
 字体覆盖：未设 `PDFCRAFT_*` 时，字体相关用例提前返回，本地「全绿」不等于字体全覆盖（TST-6 要求改为显式跳过并说明）。forms 的 CJK 用例只有 CI 的 NotoSansCJK 能覆盖，`fills_chinese_text` 仍是 `#[ignore]`。
 
-已知门禁红项（基线即红，与本规范无关，第 1.5 步修）：`cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils` 在 HEAD `a9456d1` 上失败。原因是 examples / tests 未按 feature 门控 `to_pdf`（E0425、E0432），另有 `ImageFormat`、`ImageSpec` 两个未使用的 import。
-
 ## 17. 明确不采纳
 
 - G 的 chrome / fuchsia 专属条：小 crate、扁平布局、`chromium::import!`、async、起线程、`fuchsia_sync::Mutex`。G#reporting-errors 中允许 `catch_unwind` 粗粒度恢复的部分。

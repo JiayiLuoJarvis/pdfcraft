@@ -50,6 +50,8 @@
 //! # Example
 //!
 //! ```no_run
+//! # #[cfg(feature = "backend-krilla")]
+//! # {
 //! use pdfcraft_pdf::spec::{
 //!     Block, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources, SectionSpec,
 //! };
@@ -76,6 +78,7 @@
 //! let pdf = to_pdf(rendered)?;
 //! assert!(pdf.starts_with(b"%PDF"));
 //! # Ok(())
+//! # }
 //! # }
 //! ```
 //!

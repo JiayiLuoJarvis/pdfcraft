@@ -4866,6 +4866,7 @@ fn paragraph_center_and_end_align_each_visual_line() {
     assert!(pt_near(d.x + d.width, page_w));
 }
 
+#[cfg(feature = "backend-krilla")]
 fn canvas_label() -> Block<()> {
     let label = "送貨";
     Block::Canvas(CanvasSpec {
@@ -4901,6 +4902,7 @@ fn canvas_label() -> Block<()> {
     })
 }
 
+#[cfg(feature = "backend-krilla")]
 fn pdftotext_of(pdf: &[u8]) -> String {
     let path = std::env::temp_dir().join(format!("pdfcraft-canvas-{}.pdf", std::process::id()));
     std::fs::write(&path, pdf).unwrap();
@@ -4919,6 +4921,7 @@ fn pdftotext_of(pdf: &[u8]) -> String {
 }
 
 #[test]
+#[cfg(feature = "backend-krilla")]
 fn canvas_round_trip_paints_the_label() {
     if skip_without_font() {
         return;

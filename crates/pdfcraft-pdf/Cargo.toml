@@ -63,3 +63,7 @@ required-features = ["backend-krilla"]
 [[example]]
 name = "band_fn"
 required-features = ["backend-krilla"]
+
+[[example]]
+name = "anchors"
+required-features = ["backend-krilla"]

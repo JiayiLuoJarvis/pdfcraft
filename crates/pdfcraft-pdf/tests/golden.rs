@@ -24,12 +24,16 @@ use std::path::PathBuf;
 
 use pdfcraft_pdf::spec::{
     Alignment, Block, CanvasMark, CanvasSpec, DocumentInfo, FontFace, FontFamily, FontRegistry,
-    HLineSpec, ImageSpec, LayerMark, LayerShape, PageWhen, Resources, SectionSpec,
+    HLineSpec, LayerMark, LayerShape, PageWhen, Resources, SectionSpec,
 };
 use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, Color, DocumentSpec, ImageFormat, Ink, LinkTarget, Margins,
-    NonNegative, PageSize, Path, Pen, Point, Positive, Rect, Size,
+    layout_spec, CanvasCommand, Color, DocumentSpec, Ink, LinkTarget, Margins, NonNegative,
+    PageSize, Path, Pen, Point, Positive, Rect, Size,
 };
+#[cfg(feature = "backend-krilla")]
+use pdfcraft_pdf::spec::ImageSpec;
+#[cfg(feature = "backend-krilla")]
+use pdfcraft_pdf::ImageFormat;
 use snapshot::{FontMeta, GoldenError};
 
 fn pt(x: f32, y: f32) -> Point {
