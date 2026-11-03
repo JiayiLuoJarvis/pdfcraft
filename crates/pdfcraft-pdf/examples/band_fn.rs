@@ -269,7 +269,7 @@ fn sections_for(
             Some(when_page("footer", |query| query.number.get() != 2)),
         )],
         _ => {
-            return Err(pdfcraft_pdf::Errors::from(pdfcraft_pdf::Error::band_fn(
+            return Err(pdfcraft_pdf::Errors::from(Error::band_fn(
                 "BAND_FN_CASE must be first, last, odd-even, odd-even-marks, skip, count, sections, link, too-tall, fail, or footer-skip",
             )));
         }
