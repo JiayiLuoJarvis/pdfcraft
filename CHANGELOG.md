@@ -25,6 +25,12 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
   [`crates/pdfcraft-pdf/docs/migrate-0.6.md`](crates/pdfcraft-pdf/docs/migrate-0.6.md).
   Full notes:
   [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+- **Breaking.** `pdfcraft-orgchart` `0.3.0`. Callers compile with `Chart::new`
+  and draw with `to_pdf`. `validate_request`, `generate_pdf`, and
+  `document_title` are gone. `Font` replaces `FontBytes`. `ChartStyle`
+  replaces `ChartOptions`. `Error` fields are read with `code()`,
+  `message()`, and `subject()`. Full notes:
+  [`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md).
 
 ### Added
 
@@ -38,6 +44,15 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 - `pdfcraft-pdf` `0.6.0`. Cell style inheritance, empty cell paragraphs,
   HLine height without built-in spacing, and earlier `LineHeight` / `Angle`
   validation. Details in the crate changelog.
+- `pdfcraft-orgchart` `0.3.0`. `Chart::new` checks the request, folds, then
+  checks the folded chart. A node id may start with `__overflow__:`.
+  Details in the crate changelog.
+
+### Fixed
+
+- `pdfcraft-orgchart` `0.3.0`. `to_pdf` on the same `Chart` returns identical
+  PDF bytes. Placed nodes are drawn in `NodeId` order. Details in the crate
+  changelog.
 
 ## 2026-11-03
 

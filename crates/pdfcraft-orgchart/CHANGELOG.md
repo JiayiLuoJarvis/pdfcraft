@@ -9,6 +9,8 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-04
+
 ### Breaking
 
 - Compile with `Chart::new(request)?` and draw with `chart.to_pdf(&font)?`.

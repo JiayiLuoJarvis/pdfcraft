@@ -10,7 +10,7 @@
 
 本文是 **reference**。实现文件名不钉死。内部类型、模块和所有权见 [`pdfcraft-orgchart-structure-spec.md`](pdfcraft-orgchart-structure-spec.md)。冲突时：协议、文案、错误码、常量、分页与装箱的可观察结果以本文为准；代码形状以结构规格为准。
 
-**完整度判定。** 有了本文 + 源包测试，可以实现并验收整包到 `generate_pdf`。layout / paging 的内部搜索与启发式（家族开槽、bus 错开、overflow 链择优）以实现对照 `paging.py` / `layout/*` 为主。规格钉住输入输出、页角色、文案、错误码与数值常量，避免发明产品规则。
+**完整度判定。** 有了本文 + 源包测试，可以实现并验收整包到 `Chart::new` / `to_pdf`。layout / paging 的内部搜索与启发式（家族开槽、bus 错开、overflow 链择优）以实现对照 `paging.py` / `layout/*` 为主。规格钉住输入输出、页角色、文案、错误码与数值常量，避免发明产品规则。
 
 ## 0. 迁移姿态（非机械翻译）
 

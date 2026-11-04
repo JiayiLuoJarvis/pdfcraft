@@ -172,7 +172,7 @@ pub(crate) trait PageOracle {
 
 `search_family_pages` 改为泛型 `O: PageOracle`，删除 `&mut dyn FnMut`。`paging` 的会话实现这个 trait。泛型是为了让借用检查器看见独占的 `&mut`，不是为了抽象给调用方。
 
-`PageDraft`、`AttachmentTask`、`FamilyEdge`、`OverflowNode` 的身份字段全部改成 `NodeId`。协议 id 字符串只在需要格式化 `__overflow__:` / 错误信息时向 `Graph` 要。
+`PageDraft`、`AttachmentTask`、`FamilyEdge`、`OverflowNode` 的身份字段全部改成 `NodeId`。overflow 身份是 `NodeOrigin::Overflow`。调用方字符串只留在 `NodeOrigin::Caller` 和错误文案里。
 
 ## 6. 分页会话
 
@@ -185,19 +185,21 @@ pub(crate) trait PageOracle {
 生产入口：
 
 ```text
-prepare_request
-  → validate          得到 Graph
+Chart::new
+  → prepare_graph     协议检查，再按 top_n 折叠，得到 Graph
+  → recheck           在新 arena 上重跑协议规则
+to_pdf
   → display
-  → FontMetrics::open 一次
+  → FontMetrics::from_font 一次
   → build_node_boxes(&mut metrics)
   → paginate(&mut session)   session 持有 &mut metrics
   → 页眉、比例、页脚 ensure_glyphs（应命中字形缓存）
   → render
 ```
 
-`paginate` 不再内部构造测宽器。`generate_pdf` 把同一份 `FontMetrics` 交进去。overflow 框、升格重折行、虚框尺寸都走这份度量。
+`paginate` 不再内部构造测宽器。`to_pdf` 把同一份 `FontMetrics` 交进去。overflow 框、升格重折行、虚框尺寸都走这份度量。
 
-固定测宽器（现在的 `FallbackMeasurer`：每字 2 mm，行高 5 mm）只作为 crate 内测试替身，给分页结构测试注入。它不出现在公共 API，`generate_pdf` 不调用它。分页测试继续用它，这样页数、标题、角色的断言与字体文件无关，业务断言保持稳定。
+固定测宽器（现在的 `FallbackMeasurer`：每字 2 mm，行高 5 mm）只作为 crate 内测试替身，给分页结构测试注入。它不出现在公共 API，`to_pdf` 不调用它。分页测试继续用它，这样页数、标题、角色的断言与字体文件无关，业务断言保持稳定。
 
 `clone_pack` 删除。需要克隆的布局结果 `#[derive(Clone)]`。
 
@@ -226,7 +228,7 @@ prepare_request
 
 行为规格：拒绝 `ttcf`、缺字 `MISSING_GLYPH`、行高 = hhea ascent + descent 的绝对值比例尺 + `LINE_GAP_PT`、与绘制同一 glyph id。这些不变。
 
-`FontBytes.data` 是共享的 `Arc<Vec<u8>>`。`FontMetrics` 存下这份 `Arc`。`render` 把这份 `Arc` 克隆进 krilla `Data`。不按页、不按字符串复制字体内容。
+`Font` 持有共享的 `Arc<Vec<u8>>`。`FontMetrics` 存下这份 `Arc`。`render` 把这份 `Arc` 克隆进 krilla `Data`。不按页、不按字符串复制字体内容。
 
 ```rust
 pub(crate) struct FontMetrics {
@@ -240,7 +242,7 @@ pub(crate) struct FontMetrics {
 
 `glyph_run(&mut self, text)`：已缓存的字符直接用；本字符串里未缓存的字符，构造**一次** `FontRef` 补齐。禁止每个 `string_width_mm` 都 `FontRef::from_index`。
 
-`Measurer` 的方法改为 `&mut self`。测试替身忽略可变借用。不要在 `FontMetrics` 上用 `RefCell` 假装共享；调用链从 `generate_pdf` 起就是独占的。
+`Measurer` 的方法改为 `&mut self`。测试替身忽略可变借用。不要在 `FontMetrics` 上用 `RefCell` 假装共享；调用链从 `to_pdf` 起就是独占的。
 
 `wrap_text` 的切分规则不变：先 `ensure_glyphs`；不超宽或禁止折行则整段；ASCII（`char::is_ascii`，空格断开）成块，其余逐字。`as u32 < 128` 换成 `is_ascii()`，边界与现在相同（ASCII 空格仍单独处理）。折行结果必须与改前在同一度量下逐字相同。缓存只减少解析次数。
 
@@ -276,15 +278,17 @@ pub(crate) struct FontMetrics {
 
 | 现有文件 | 去向 | 继续断言 |
 | --- | --- | --- |
-| `tests/validate_request.rs`、`tests/document_title.rs`、`tests/prepare.rs` | 留在 `tests/`，只靠公共 API | 错误码字符串、折叠后的 id / 名称 / 比例、幂等 |
-| `tests/generate_pdf.rs` | 留在 `tests/` | `%PDF`、小图的「股权架构图」「主体公司」。`pdftotext` 启动失败则测试失败，禁止 `return` 当成成功 |
+| `tests/chart_new.rs`、`tests/chart_title.rs`、`tests/prepare.rs` | 留在 `tests/`，只靠公共 API | 错误码字符串、折叠后的 id / 名称 / 比例、幂等 |
+| `tests/to_pdf.rs` | 留在 `tests/` | `%PDF`、小图的「股权架构图」「主体公司」。`pdftotext` 启动失败则测试失败，禁止 `return` 当成成功 |
+| `tests/page_observations.rs` | 留在 `tests/` | 页文案、`MediaBox`、虚线操作数、链接注释 |
+| `tests/stroke_color.rs` | 留在 `tests/` | 节点描边为黑，边与箭头填充为字节 51 |
 | `tests/captions.rs`、`tests/display.rs` | `src` 内 `#[cfg(test)]` | 中文字面量。`as_str()` 改为匹配枚举 |
 | `tests/measuring.rs` | `src/measure.rs` 旁 | 缺字、`ttcf`、`NODE_TOO_TALL`、折行、升格重折行。度量仍是真实字体 |
 | `tests/paging.rs` | `src/paging.rs` 旁 | 页数、主副标题、角色、附件号。继续注入固定测宽器，不改成思源字体，避免把算法测试和字形捆在一起 |
 
 新增一条，锁住 §1 允许的那处行为修正：
 
-- 用真实字体走 `generate_pdf`，图必须发生附页升格或 overflow（固定测宽器测试里已有这类形状，换成 `FontMetrics`）。
+- 用真实字体走 `to_pdf`，图必须发生附页升格或 overflow（固定测宽器测试里已有这类形状，换成 `FontMetrics`）。
 - 断言升格主体或 overflow 框的折行，与直接调用 `promote_to_page_subject` / `overflow_box`（同一 `FontMetrics`）一致。
 - 不断言压缩内容流，不断言与「2 mm/字旧实现」的像素或字节相同。
 
@@ -298,13 +302,13 @@ pub(crate) struct FontMetrics {
 
 - 模块改为 `pub(crate)`，删 `LaidOutNode` 和内部枚举的 `as_str`。
 - 按 §11 搬测试。固定测宽器留在 paging 测试里。
-- `generate_pdf` 仍暂时调用现在的 `paginate`。这一步不改测宽，避免和搬测试混在同一个 diff 里难以对照。
-- 验收：现有断言全绿；`cargo doc -p pdfcraft-orgchart --no-deps` 的对外页面只有 §2 的类型和三个函数。
+- `to_pdf` 仍暂时调用现在的 `paginate`。这一步不改测宽，避免和搬测试混在同一个 diff 里难以对照。
+- 验收：现有断言全绿；`cargo doc -p pdfcraft-orgchart --no-deps` 的对外页面只有 §2 的类型和函数。
 
 ### 12.2 字体与生产测宽
 
 - 按 §8 改 `FontMetrics`：一份 `Arc` 字节、字形缓存、`Measurer` 使用 `&mut self`。
-- `generate_pdf` 把这份度量传入分页。overflow、虚框、升格走它。
+- `to_pdf` 把这份度量传入分页。overflow、虚框、升格走它。
 - 加上 §11 的真实字体升格/overflow 测试。
 - 分页结构测试仍注入固定测宽器，断言不改。
 - 验收：小图 `pdftotext` 与现在相同。多页测试在固定测宽器下与现在相同。真实字体测试证明生产路径没有使用 2 mm/字。
