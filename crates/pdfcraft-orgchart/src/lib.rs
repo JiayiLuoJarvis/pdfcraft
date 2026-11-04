@@ -1,23 +1,24 @@
 //! Equity and outbound-investment charts.
 //!
-//! Build a [`ChartRequest`] (subject, nodes, holding edges, options). Call
-//! [`validate_request`] to check the protocol, [`document_title`] for a string
-//! you can store as PDF document info, and [`generate_pdf`] to draw the chart.
-//! Shareholders sit above the subject. Outbound investments sit below.
+//! Build a [`ChartRequest`], compile it with [`Chart::new`], and draw with
+//! [`Chart::to_pdf`]. Shareholders sit above the subject. Outbound investments
+//! sit below.
 //!
 //! This crate does not depend on `pdfcraft-pdf` or `pdfcraft-forms`.
 //!
 //! # Pipeline
 //!
 //! ```text
-//! ChartRequest + FontBytes → validate_request (optional)
-//!                         → generate_pdf → PDF bytes
-//! ChartRequest → document_title → String (caller stores PDF info)
+//! ChartRequest → Chart::new → Chart
+//! Font::new
+//! Chart::to_pdf(&Font) → PDF bytes
+//! Chart::title → String (caller stores PDF info)
 //! ```
 //!
-//! [`generate_pdf`] folds (`top_n`), validates again, measures with skrifa,
-//! paginates, and draws with krilla. It does **not** write a document info
-//! dictionary. Use [`document_title`] yourself if you need `/Title`.
+//! [`Chart::new`] checks the protocol, folds `top_n`, and checks the folded
+//! chart again. It does not open a font. [`Chart::to_pdf`] measures with
+//! skrifa, paginates, and draws with krilla. It does **not** write a document
+//! info dictionary. Use [`Chart::title`] if you need `/Title`.
 //!
 //! # Drawing
 //!
@@ -31,9 +32,10 @@
 //!
 //! # Fonts
 //!
-//! Pass face bytes as [`FontBytes`]. [`FontBytes::new`] wraps owned bytes.
-//! [`FontBytes::from_shared`] reuses an `Arc<Vec<u8>>`. Paths are not accepted.
-//! A font collection is rejected. Measurement and drawing use the same face.
+//! [`Font::new`] parses one face. [`Font::from_shared`] reuses an
+//! `Arc<Vec<u8>>`. Paths are not accepted. A font collection is rejected.
+//! Measurement and drawing use the same face. The same [`Font`] can draw more
+//! than one chart.
 //!
 //! # Modules
 //!
@@ -42,23 +44,19 @@
 //!
 //! | Item | Role |
 //! | --- | --- |
-//! | [`ChartRequest`] / [`ChartOptions`] | Chart values and caps |
-//! | [`Node`] / [`Edge`] / [`NodeType`] | Parties and holding edges |
-//! | [`FontBytes`] | Shared TrueType / OpenType face bytes |
-//! | [`validate_request`] | Protocol check (no font open) |
-//! | [`document_title`] | Title string for caller-owned PDF info |
-//! | [`generate_pdf`] | Draw chart → PDF bytes |
-//! | [`Error`] / [`ErrorCode`] | Stable failure codes |
+//! | [`ChartRequest`] / [`ChartStyle`] | Chart values, fold limit, and size caps |
+//! | [`Node`] / [`Edge`] / [`PaidIn`] / [`NodeType`] | Parties, holding edges, and paid-in capital |
+//! | [`Font`] | One parsed TrueType / OpenType face |
+//! | [`Chart`] | Compiled chart. [`Chart::new`], [`Chart::to_pdf`], [`Chart::title`] |
+//! | [`Error`] / [`ErrorCode`] / [`ErrorSubject`] | Stable failure codes and what they point at |
 //!
 //! # Example
 //!
 //! ```no_run
-//! use pdfcraft_orgchart::{
-//!     document_title, generate_pdf, validate_request, ChartRequest, Edge, FontBytes, Node,
-//! };
+//! use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
 //!
 //! # fn main() -> Result<(), pdfcraft_orgchart::Error> {
-//! let font = FontBytes::new(std::fs::read("face.ttf").expect("font"));
+//! let font = Font::new(std::fs::read("face.ttf").expect("font"))?;
 //! let request = ChartRequest::new(
 //!     "root",
 //!     vec![
@@ -68,9 +66,9 @@
 //!     ],
 //!     vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
 //! );
-//! validate_request(&request)?;
-//! let _title = document_title(&request)?;
-//! let pdf = generate_pdf(&request, &font)?;
+//! let chart = Chart::new(request)?;
+//! let _title = chart.title();
+//! let pdf = chart.to_pdf(&font)?;
 //! assert!(pdf.starts_with(b"%PDF"));
 //! # Ok(())
 //! # }
@@ -96,13 +94,10 @@ mod test_font;
 mod units;
 
 #[doc(inline)]
-pub use chart::{generate_pdf, validate_request};
+pub use chart::Chart;
 #[doc(inline)]
-pub use error::{Error, ErrorCode};
+pub use error::{Error, ErrorCode, ErrorSubject};
 #[doc(inline)]
-pub use font::FontBytes;
+pub use font::Font;
 #[doc(inline)]
-pub use request::{
-    document_title, ChartOptions, ChartRequest, Edge, Node, NodeType, MAX_MARGIN_MM, MAX_NODES,
-    MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,
-};
+pub use request::{ChartRequest, ChartStyle, Edge, Node, NodeType, PaidIn};

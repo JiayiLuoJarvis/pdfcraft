@@ -43,10 +43,7 @@ pub(crate) fn render(pages: &[PageSpec], font: &mut FontMetrics) -> Result<Vec<u
         draw_page(&mut document, page, pages.len(), font, &face, index)?;
     }
     document.finish().map_err(|error| {
-        Error::new(
-            ErrorCode::FontError,
-            format!("failed to finish PDF: {error}"),
-        )
+        Error::new(ErrorCode::FontError, "failed to finish PDF").with_source(error)
     })
 }
 
@@ -81,7 +78,7 @@ fn draw_page(
             let box_ = box_by_id.get(&node.id).copied().ok_or_else(|| {
                 Error::new(
                     ErrorCode::LayoutFailed,
-                    format!("placed node {} has no measured box", node.protocol_id),
+                    format!("placed node #{} has no measured box", node.id),
                 )
             })?;
             draw_node(&mut surface, node, box_, origin_x, origin_y, font, face)?;
@@ -119,7 +116,7 @@ fn draw_page(
             .layout
             .nodes
             .iter()
-            .find(|node| node.protocol_id == link.node_id)
+            .find(|node| node.id == link.node_id)
         {
             if let Some(rect) = rect_pt(
                 node.x + origin_x,

@@ -131,9 +131,7 @@ fn cut_relation_and_chrome() {
         invests_relation("主体", "乙公司", Some(4.2)),
         "主体投资乙公司 4.20%"
     );
-    assert_eq!(main_title("主体", None), "主体股权架构图");
-    assert_eq!(main_title("主体", Some("自定义")), "自定义");
-    assert_eq!(main_title("主体", Some("")), "");
+    assert_eq!(main_title("主体"), "主体股权架构图");
     assert_eq!(equity_chart_title("主体"), "股权架构图: 主体");
     assert_eq!(investment_chart_title("主体"), "对外投资: 主体");
     assert_eq!(continuation_title(2, "主体"), "续页2: 主体");

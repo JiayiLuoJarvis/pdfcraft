@@ -1,12 +1,12 @@
 //! Charts the packer keeps on one sheet, and the overview budget for wide holder sets.
 
-use super::test_support::{fake_pages, id_sets, set_of, FakeMeasurer};
+use super::test_support::{caller, fake_pages, id_sets, node_id, set_of, FakeMeasurer};
 use crate::content::{build_display, ratio_facts};
 use crate::graph::NodeId;
 use crate::page::{build_node_boxes, InboxNode, PageSpec};
 use crate::paginate::paginate_request as paginate;
 use crate::units::{PageGeometry, SHAREHOLDER_STUB_MIN_MM};
-use crate::{document_title, ChartRequest, Edge, Node};
+use crate::{ChartRequest, Edge, Node};
 
 fn company(id: &str, name: &str) -> Node {
     Node::new(id, name)
@@ -44,15 +44,15 @@ fn pages_of(request: &ChartRequest) -> Vec<PageSpec> {
             let id = NodeId::from_index(index);
             InboxNode {
                 id,
-                protocol_id: node.id.as_str(),
+                origin: caller(index, &node.id),
                 lines: &display.get(id).expect("lines").lines,
                 is_company: crate::content::company_fill(node),
             }
         })
         .collect();
     let mut measurer = FakeMeasurer;
-    let boxes =
-        build_node_boxes(&inbox, &mut measurer, 38.0, &request.subject_id, 257.0).expect("boxes");
+    let subject = node_id(request, &request.subject_id);
+    let boxes = build_node_boxes(&inbox, &mut measurer, 38.0, subject, 257.0).expect("boxes");
     paginate(request, &boxes, PageGeometry::default(), &mut measurer).expect("pages")
 }
 
@@ -83,13 +83,15 @@ fn a_fork_that_fits_is_one_landscape_page() {
 
 #[test]
 fn multi_holder_bus_keeps_one_arrow_on_the_trunk() {
-    let pages = pages_of(&chart(2, 0));
+    let request = chart(2, 0);
+    let root = node_id(&request, "root");
+    let pages = pages_of(&request);
     assert_eq!(pages.len(), 1);
     let subject = pages[0]
         .layout
         .nodes
         .iter()
-        .find(|node| node.protocol_id == "root")
+        .find(|node| node.id == root)
         .expect("subject");
     let into_subject: Vec<_> = pages[0]
         .layout
@@ -117,7 +119,7 @@ fn multi_holder_bus_keeps_one_arrow_on_the_trunk() {
         .layout
         .nodes
         .iter()
-        .filter(|node| node.protocol_id != "root")
+        .filter(|node| node.id != root)
         .map(|node| node.y + node.height)
         .fold(f64::NEG_INFINITY, f64::max);
     assert!(
@@ -167,17 +169,6 @@ fn empty_cones_fall_back_to_subject_page() {
     assert_eq!(pages[0].main_title, "股权架构图: 主体");
     assert_eq!(pages[0].sub_title, "各股东/合伙人 → 主体");
     assert_eq!(id_sets(&pages), vec![set_of(&["root"])]);
-}
-
-#[test]
-fn options_title_does_not_override_page_header() {
-    let mut request = ChartRequest::new("root", vec![Node::new("root", "主体")], vec![]);
-    request.options.title = Some("自定义标题".to_owned());
-    let pages = fake_pages(&request, 10).expect("pages");
-    assert_eq!(pages[0].main_title, "股权架构图: 主体");
-    assert_eq!(document_title(&request).expect("title"), "自定义标题");
-    assert_eq!(pages[0].sub_title, "各股东/合伙人 → 主体");
-    assert!(pages[0].cont_cues.is_empty());
 }
 
 #[test]

@@ -7,7 +7,7 @@ use super::{
     make_draft, AttachmentCut, AttachmentTask, ChildKind, Context, HeadPlan, PageDraft, PageOracle,
     PlacedChild, SearchPage, SearchPlan, TaskKind,
 };
-use crate::error::{Error, ErrorCode};
+use crate::error::Error;
 use crate::graph::NodeId;
 
 impl<O: PageOracle> Context<'_, O> {
@@ -142,13 +142,12 @@ impl<O: PageOracle> Context<'_, O> {
             .collect();
         let overflow_node = head.overflow.as_ref().map(|cut| cut.node.clone());
         let draft = make_draft(task, node_ids, &cuts, overflow_node)?;
-        let layout = if inlined.is_empty()
-            && head.direct_layout.is_some()
-            && head.direct_draft.as_ref() == Some(&draft)
-        {
-            head.direct_layout
-                .clone()
-                .ok_or_else(|| Error::new(ErrorCode::LayoutFailed, "direct layout missing"))?
+        let layout = if inlined.is_empty() && head.direct_draft.as_ref() == Some(&draft) {
+            if let Some(layout) = head.direct_layout.clone() {
+                layout
+            } else {
+                self.evaluate(&draft)?
+            }
         } else {
             self.evaluate(&draft)?
         };

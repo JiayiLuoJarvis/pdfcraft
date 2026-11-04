@@ -148,7 +148,7 @@ layout/paginate      → canvas, error, geom, limits, layout/decorate, layout/fl
 error                       无内部依赖
 units                       无内部依赖
 captions                    无内部依赖
-request   → error, captions                            captions 只供 document_title 用，PR 3 删除
+request   → error
 font      → error, units
 graph     → request, captions, error
 content   → graph, request, captions, error
@@ -166,7 +166,7 @@ lib       → chart, error, font, request                只做重导出
 
 ```text
 graph     arena  check  ratio  fold
-font      mod（FontBytes、FontMetrics、Measurer、wrap_text）  fixed（仅测试）
+font      mod（Font、FontMetrics、Measurer、wrap_text）  fixed（仅测试）
 content   lines
 page      model  boxes
 paginate  cues  family/{mod,score,solve,head,inline,chain}  session/{mod,fit,assemble,titles}

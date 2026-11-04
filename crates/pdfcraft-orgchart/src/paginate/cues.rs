@@ -4,6 +4,7 @@ use crate::captions::{cont_cue_lines, overflow_detail_line, penetration_title, C
 use crate::content::RatioFact;
 use crate::error::{Error, ErrorCode};
 use crate::font::Measurer;
+use crate::graph::NodeId;
 use crate::page::{
     ContCue, CueSlot, LaidOutEdge, LayoutResult, NodeBox, NodePageLink, PageSpec, PlacedNode,
     PointMm,
@@ -18,13 +19,13 @@ pub(crate) struct PendingCue {
     pub(crate) target_index: usize,
     pub(crate) direct_count: usize,
     pub(crate) side: CueSide,
-    pub(crate) anchor_id: String,
+    pub(crate) anchor_id: NodeId,
 }
 
 pub(crate) struct PendingLink {
     pub(crate) source_index: usize,
     pub(crate) target_index: usize,
-    pub(crate) node_id: String,
+    pub(crate) node_id: NodeId,
 }
 
 pub(crate) struct UnnumberedPage {
@@ -46,7 +47,7 @@ struct Rect {
 }
 
 pub(crate) struct CueAnchorSize {
-    pub(crate) anchor_id: String,
+    pub(crate) anchor_id: NodeId,
     pub(crate) side: CueSide,
     pub(crate) width_mm: f64,
     pub(crate) height_mm: f64,
@@ -107,11 +108,7 @@ fn nodes_only(layout: LayoutResult) -> Result<LayoutResult, Error> {
 fn required_row_gap(anchors: &[CueAnchorSize], layout: &LayoutResult) -> f64 {
     let mut required = 0.0_f64;
     for anchor in anchors {
-        let Some(node) = layout
-            .nodes
-            .iter()
-            .find(|node| node.protocol_id == anchor.anchor_id)
-        else {
+        let Some(node) = layout.nodes.iter().find(|node| node.id == anchor.anchor_id) else {
             continue;
         };
         let zone = clearance(preferred_rect(anchor, node));
@@ -146,14 +143,8 @@ fn place_all(
 ) -> Option<Vec<CueSlot>> {
     let mut ordered: Vec<&CueAnchorSize> = anchors.iter().collect();
     ordered.sort_by(|left, right| {
-        let left_node = layout
-            .nodes
-            .iter()
-            .find(|node| node.protocol_id == left.anchor_id);
-        let right_node = layout
-            .nodes
-            .iter()
-            .find(|node| node.protocol_id == right.anchor_id);
+        let left_node = layout.nodes.iter().find(|node| node.id == left.anchor_id);
+        let right_node = layout.nodes.iter().find(|node| node.id == right.anchor_id);
         let left_key = left_node.map_or((f64::INFINITY, f64::INFINITY), |node| (node.y, node.x));
         let right_key = right_node.map_or((f64::INFINITY, f64::INFINITY), |node| (node.y, node.x));
         left_key
@@ -167,7 +158,7 @@ fn place_all(
         let node = layout
             .nodes
             .iter()
-            .find(|node| node.protocol_id == anchor.anchor_id)?;
+            .find(|node| node.id == anchor.anchor_id)?;
         let slot = place_one(anchor, node, layout, &placed, geometry)?;
         placed.push(slot);
     }
@@ -189,7 +180,7 @@ fn place_one(
     for (rect, needs_leader) in candidates {
         if candidate_ok(&rect, anchor, layout, placed, geometry) {
             return Some(CueSlot {
-                anchor_id: anchor.anchor_id.clone(),
+                anchor_id: anchor.anchor_id,
                 side: anchor.side,
                 x: rect.x,
                 y: rect.y,
@@ -251,7 +242,7 @@ fn candidate_ok(
     }
     let mut slots = placed.to_vec();
     slots.push(CueSlot {
-        anchor_id: anchor.anchor_id.clone(),
+        anchor_id: anchor.anchor_id,
         side: anchor.side,
         x: rect.x,
         y: rect.y,
@@ -337,10 +328,10 @@ fn overlaps_x(left: &PlacedNode, right: &PlacedNode) -> bool {
     left.x + left.width > right.x + eps && right.x + right.width > left.x + eps
 }
 
-pub(crate) fn direct_count(boxes: &[NodeBox], direct_ids: &[&str]) -> usize {
+pub(crate) fn direct_count(boxes: &[NodeBox], direct_ids: &[NodeId]) -> usize {
     boxes
         .iter()
-        .filter(|box_| direct_ids.contains(&box_.protocol_id.as_str()))
+        .filter(|box_| direct_ids.contains(&box_.id))
         .count()
 }
 
@@ -363,11 +354,11 @@ pub(crate) fn finalize_pages(
             target_page: cue.target_index + 1,
             direct_count: cue.direct_count,
             side: cue.side,
-            anchor_id: cue.anchor_id.clone(),
+            anchor_id: cue.anchor_id,
         });
     }
     let mut links_by_source: Vec<Vec<NodePageLink>> = vec![Vec::new(); page_count];
-    let mut detail_by_source: Vec<Vec<(String, String)>> = vec![Vec::new(); page_count];
+    let mut detail_by_source: Vec<Vec<(NodeId, String)>> = vec![Vec::new(); page_count];
     for link in links {
         require_forward(
             link.source_index,
@@ -376,10 +367,9 @@ pub(crate) fn finalize_pages(
             "node page link",
         )?;
         let target_page = link.target_index + 1;
-        detail_by_source[link.source_index]
-            .push((link.node_id.clone(), overflow_detail_line(target_page)));
+        detail_by_source[link.source_index].push((link.node_id, overflow_detail_line(target_page)));
         links_by_source[link.source_index].push(NodePageLink {
-            node_id: link.node_id.clone(),
+            node_id: link.node_id,
             target_page,
         });
     }
@@ -389,7 +379,7 @@ pub(crate) fn finalize_pages(
         for box_ in &page.boxes {
             if let Some((_, text)) = detail_by_source[index]
                 .iter()
-                .find(|(id, _)| id == &box_.protocol_id)
+                .find(|(id, _)| *id == box_.id)
             {
                 boxes.push(write_overflow_line(box_, text, measurer)?);
             } else {
@@ -440,7 +430,7 @@ fn require_numbered_line_fits(
             return Err(Error::new(
                 ErrorCode::LayoutFailed,
                 format!(
-                    "continuation cue text exceeds its slot width for {}",
+                    "continuation cue text exceeds its slot width for node #{}",
                     cue.anchor_id
                 ),
             ));
@@ -517,17 +507,9 @@ mod tests {
     use crate::page::{LayoutResult, PlacedNode};
     use crate::units::PageGeometry;
 
-    fn node(
-        index: usize,
-        protocol_id: &str,
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-    ) -> PlacedNode {
+    fn node(index: usize, x: f64, y: f64, width: f64, height: f64) -> PlacedNode {
         PlacedNode {
             id: NodeId::from_index(index),
-            protocol_id: protocol_id.to_owned(),
             x,
             y,
             width,
@@ -537,7 +519,7 @@ mod tests {
 
     fn placed_slot(nodes: Vec<PlacedNode>) -> crate::page::CueSlot {
         let anchor = CueAnchorSize {
-            anchor_id: "anchor".to_owned(),
+            anchor_id: NodeId::from_index(0),
             side: CueSide::Shareholder,
             width_mm: 30.0,
             height_mm: 14.0,
@@ -555,7 +537,7 @@ mod tests {
 
     #[test]
     fn a_cue_above_its_anchor_does_not_need_a_leader() {
-        let slot = placed_slot(vec![node(0, "anchor", 100.0, 80.0, 40.0, 20.0)]);
+        let slot = placed_slot(vec![node(0, 100.0, 80.0, 40.0, 20.0)]);
         assert!(!slot.needs_leader);
         assert!(slot.y < 80.0);
     }
@@ -563,8 +545,8 @@ mod tests {
     #[test]
     fn a_cue_beside_its_anchor_needs_a_leader() {
         let slot = placed_slot(vec![
-            node(0, "anchor", 100.0, 80.0, 40.0, 20.0),
-            node(1, "block", 105.0, 63.0, 30.0, 14.0),
+            node(0, 100.0, 80.0, 40.0, 20.0),
+            node(1, 105.0, 63.0, 30.0, 14.0),
         ]);
         assert!(slot.needs_leader);
         assert!(slot.x + slot.width < 100.0);

@@ -2,7 +2,7 @@
 
 use super::{build_display, company_fill, ratio_facts, DisplayRole, LabelHug, LineKind};
 use crate::graph;
-use crate::{ChartRequest, Edge, Node, NodeType};
+use crate::{ChartRequest, Edge, Node, NodeType, PaidIn};
 
 fn edge(from: &str, to: &str, ratio: f64) -> Edge {
     Edge {
@@ -22,38 +22,7 @@ fn id_of(request: &ChartRequest, protocol: &str) -> graph::NodeId {
     reason = "the assertion checks that a stored ratio was copied unchanged"
 )]
 fn cones_keep_their_fields_and_leave_ratio_out_of_the_box() {
-    let request = ChartRequest::new(
-        "root",
-        vec![
-            Node {
-                legal_person: Some("李四".to_owned()),
-                ratio: Some(10.0),
-                paid_in_amount: Some("1万".to_owned()),
-                currency: Some("USD".to_owned()),
-                location: Some("上海".to_owned()),
-                approval_date: Some("2020-01-01".to_owned()),
-                ..Node::new("root", "主体")
-            },
-            Node {
-                legal_person: Some("  王五  ".to_owned()),
-                ratio: Some(40.0),
-                paid_in_amount: Some("9万".to_owned()),
-                currency: Some("HKD".to_owned()),
-                location: Some("北京".to_owned()),
-                approval_date: Some("2019-01-01".to_owned()),
-                ..Node::new("s", "股东甲")
-            },
-            Node {
-                legal_person: Some("赵六".to_owned()),
-                paid_in_amount: Some("100万".to_owned()),
-                currency: Some("CNY".to_owned()),
-                location: Some("  深圳  ".to_owned()),
-                approval_date: Some("2024-06-01".to_owned()),
-                ..Node::new("c", "子公司")
-            },
-        ],
-        vec![edge("s", "root", 40.0), edge("root", "c", 51.2)],
-    );
+    let request = cone();
     let display = build_display(&request).expect("display");
     let pairs = |protocol: &str| {
         let id = id_of(&request, protocol);
@@ -105,37 +74,37 @@ fn cones_keep_their_fields_and_leave_ratio_out_of_the_box() {
     let facts = ratio_facts(&request).expect("facts");
     let holder = facts
         .iter()
-        .find(|fact| fact.protocol_id == "s")
+        .find(|fact| fact.node_id == id_of(&request, "s"))
         .expect("s");
     assert_eq!(holder.text, "40.00%");
     assert_eq!(holder.ratio, 40.0);
     assert_eq!(holder.hug, LabelHug::Bottom);
     assert!(holder.preferred_parent.is_none());
-    let child = facts
-        .iter()
-        .find(|fact| fact.protocol_id == "c")
-        .expect("c");
+    let child = facts.iter().find(|fact| fact.node_id == c).expect("c");
     assert_eq!(child.text, "51.20%");
     assert_eq!(child.hug, LabelHug::Top);
     let parent = child.preferred_parent.as_ref().expect("edge");
-    assert_eq!(parent.from_id, "root");
-    assert_eq!(parent.to_id, "c");
-    assert!(facts.iter().all(|fact| fact.protocol_id != "root"));
+    let root = id_of(&request, "root");
+    assert_eq!(parent.from_id, root);
+    assert_eq!(parent.to_id, c);
+    assert!(facts.iter().all(|fact| fact.node_id != root));
 }
 
 #[test]
-fn currency_without_amount_adds_no_detail_line() {
+fn blank_paid_in_adds_no_detail_line() {
     let request = ChartRequest::new(
         "root",
         vec![
             Node::new("root", "主体"),
             Node {
-                currency: Some("CNY".to_owned()),
                 legal_person: Some("不应出现".to_owned()),
-                ..Node::new("c1", "只有币种")
+                ..Node::new("c1", "只有名称")
             },
             Node {
-                paid_in_amount: Some("   ".to_owned()),
+                paid_in: Some(PaidIn {
+                    amount: "   ".to_owned(),
+                    currency: Some("   ".to_owned()),
+                }),
                 location: Some("  ".to_owned()),
                 ..Node::new("c2", "空白实缴")
             },
@@ -152,7 +121,7 @@ fn currency_without_amount_adds_no_detail_line() {
             .iter()
             .map(|line| line.text.as_str())
             .collect::<Vec<_>>(),
-        vec!["只有币种"]
+        vec!["只有名称"]
     );
     let c2 = id_of(&request, "c2");
     assert_eq!(
@@ -169,12 +138,13 @@ fn currency_without_amount_adds_no_detail_line() {
     assert_eq!(
         facts
             .iter()
-            .find(|fact| fact.protocol_id == "c2")
+            .find(|fact| fact.node_id == c2)
             .expect("c2")
             .text,
         "0.00%"
     );
-    assert!(facts.iter().all(|fact| fact.protocol_id != "root"));
+    let root = id_of(&request, "root");
+    assert!(facts.iter().all(|fact| fact.node_id != root));
 }
 
 #[test]
@@ -202,23 +172,29 @@ fn cone() -> ChartRequest {
     let mut root = Node::new("root", "主体");
     root.legal_person = Some("李四".to_owned());
     root.ratio = Some(10.0);
-    root.paid_in_amount = Some("1万".to_owned());
-    root.currency = Some("USD".to_owned());
+    root.paid_in = Some(PaidIn {
+        amount: "1万".to_owned(),
+        currency: Some("USD".to_owned()),
+    });
     root.location = Some("上海".to_owned());
     root.approval_date = Some("2020-01-01".to_owned());
 
     let mut holder = Node::new("s", "股东甲");
     holder.legal_person = Some("  王五  ".to_owned());
     holder.ratio = Some(40.0);
-    holder.paid_in_amount = Some("9万".to_owned());
-    holder.currency = Some("HKD".to_owned());
+    holder.paid_in = Some(PaidIn {
+        amount: "9万".to_owned(),
+        currency: Some("HKD".to_owned()),
+    });
     holder.location = Some("北京".to_owned());
     holder.approval_date = Some("2019-01-01".to_owned());
 
     let mut child = Node::new("c", "子公司");
     child.legal_person = Some("赵六".to_owned());
-    child.paid_in_amount = Some("100万".to_owned());
-    child.currency = Some("CNY".to_owned());
+    child.paid_in = Some(PaidIn {
+        amount: "100万".to_owned(),
+        currency: Some("CNY".to_owned()),
+    });
     child.location = Some("  深圳  ".to_owned());
     child.approval_date = Some("2024-06-01".to_owned());
 
@@ -297,14 +273,15 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
     assert!(child.lines.iter().all(|line| !line.text.contains("赵六")));
 
     let facts = ratio_facts(&request).expect("facts");
+    let graph = graph::validate(&request).expect("valid");
     let by_id: std::collections::HashMap<_, _> = facts
         .iter()
-        .map(|fact| (fact.protocol_id.as_str(), fact))
+        .map(|fact| (graph.label(fact.node_id), fact))
         .collect();
     assert_eq!(
         by_id
             .keys()
-            .copied()
+            .map(String::as_str)
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from(["s", "c"])
     );
@@ -317,21 +294,23 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
     assert_eq!(child_fact.text, "51.20%");
     assert_eq!(child_fact.hug, LabelHug::Top);
     let parent = child_fact.preferred_parent.as_ref().expect("parent edge");
-    assert_eq!(parent.from_id, "root");
-    assert_eq!(parent.to_id, "c");
+    assert_eq!(parent.from_id, nid(&request, "root"));
+    assert_eq!(parent.to_id, nid(&request, "c"));
 }
 
 #[test]
-fn currency_without_amount_and_blank_amount_add_no_detail_line() {
-    let mut only_currency = Node::new("c1", "只有币种");
-    only_currency.currency = Some("CNY".to_owned());
-    only_currency.legal_person = Some("不应出现".to_owned());
+fn a_blank_paid_in_amount_adds_no_detail_line() {
+    let mut name_only = Node::new("c1", "只有名称");
+    name_only.legal_person = Some("不应出现".to_owned());
     let mut blank_paid = Node::new("c2", "空白实缴");
-    blank_paid.paid_in_amount = Some("   ".to_owned());
+    blank_paid.paid_in = Some(PaidIn {
+        amount: "   ".to_owned(),
+        currency: Some("CNY".to_owned()),
+    });
     blank_paid.location = Some("  ".to_owned());
     let request = ChartRequest::new(
         "root",
-        vec![Node::new("root", "主体"), only_currency, blank_paid],
+        vec![Node::new("root", "主体"), name_only, blank_paid],
         vec![
             Edge {
                 ratio: Some(10.0),
@@ -353,12 +332,13 @@ fn currency_without_amount_and_blank_amount_add_no_detail_line() {
             .map(|line| line.text.as_str())
             .collect::<Vec<_>>()
     };
-    assert_eq!(texts("c1"), ["只有币种"]);
+    assert_eq!(texts("c1"), ["只有名称"]);
     assert_eq!(texts("c2"), ["空白实缴"]);
     let facts = ratio_facts(&request).expect("facts");
+    let graph = graph::validate(&request).expect("valid");
     let by_id: std::collections::HashMap<_, _> = facts
         .iter()
-        .map(|fact| (fact.protocol_id.as_str(), fact.text.as_str()))
+        .map(|fact| (graph.label(fact.node_id), fact.text.as_str()))
         .collect();
     assert_eq!(by_id["c2"], "0.00%");
     assert!(!by_id.contains_key("root"));

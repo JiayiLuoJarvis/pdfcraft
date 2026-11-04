@@ -7,7 +7,7 @@ use super::{
 use crate::captions::CueSide;
 use crate::content::{company_fill, LineKind, LogicalLine};
 use crate::font::{wrap_text, Measurer};
-use crate::graph::NodeId;
+use crate::graph::{NodeId, NodeOrigin};
 use crate::{ErrorCode, Node, NodeType};
 
 fn chars_f64(text: &str) -> f64 {
@@ -76,9 +76,17 @@ fn inbox<'a>(
 ) -> InboxNode<'a> {
     InboxNode {
         id: NodeId::from_index(index),
-        protocol_id: protocol,
+        origin: caller(index, protocol),
         lines,
         is_company: company_fill(node),
+    }
+}
+
+fn caller(index: usize, id: &str) -> NodeOrigin {
+    NodeOrigin::Caller {
+        index,
+        id: id.to_owned(),
+        stands_in_for: None,
     }
 }
 
@@ -99,7 +107,7 @@ fn detail_line_wraps_when_wider_than_the_box() {
         &[inbox(0, "n1", &lines, &node)],
         &mut measurer,
         10.0,
-        "other",
+        NodeId::from_index(99),
         257.0,
     )
     .expect("boxes");
@@ -124,7 +132,7 @@ fn subject_lines_keep_their_font_sizes() {
         &[inbox(0, "n1", &lines, &node)],
         &mut measurer,
         default_node_width_mm(),
-        "n1",
+        NodeId::from_index(0),
         257.0,
     )
     .expect("boxes");
@@ -165,7 +173,7 @@ fn subject_box_is_larger_than_an_ordinary_peer() {
         ],
         &mut measurer,
         default_node_width_mm(),
-        "root",
+        NodeId::from_index(0),
         257.0,
     )
     .expect("boxes");
@@ -182,8 +190,7 @@ fn promote_keeps_detail_and_widens() {
     let mut measurer = FakeMeasurer::new(2.0, 5.0);
     let ordinary = NodeBox {
         id: NodeId::from_index(0),
-        protocol_id: "cf3".to_owned(),
-        is_overflow: false,
+        origin: caller(0, "cf3"),
         width_mm: 38.0,
         height_mm: 2.0 * 1.5 + 10.0 + 5.0,
         lines: vec![
@@ -231,8 +238,7 @@ fn promote_rejoins_a_wrapped_name() {
     assert!(parts.len() > 1);
     let ordinary = NodeBox {
         id: NodeId::from_index(0),
-        protocol_id: "long".to_owned(),
-        is_overflow: false,
+        origin: caller(0, "long"),
         width_mm: 38.0,
         height_mm: 2.0 * 1.5 + 5.0 * f64::from(u32::try_from(parts.len()).unwrap_or(u32::MAX)),
         lines: parts
@@ -300,11 +306,12 @@ fn blank_legal_person_does_not_force_company_shade() {
             )
         })
         .collect();
-    let boxes = build_node_boxes(&inbox, &mut measurer, 38.0, "blank", 257.0).expect("boxes");
+    let boxes =
+        build_node_boxes(&inbox, &mut measurer, 38.0, NodeId::from_index(0), 257.0).expect("boxes");
     let shade = |id: &str| {
         boxes
             .iter()
-            .find(|box_| box_.protocol_id == id)
+            .find(|box_| box_.origin.to_string() == id)
             .expect(id)
             .is_company
     };
@@ -330,12 +337,19 @@ fn a_wrapped_name_taller_than_the_portrait_limit_is_node_too_tall() {
         &[inbox(0, "n1", &lines, &node)],
         &mut measurer,
         10.0,
-        "n1",
+        NodeId::from_index(0),
         printable_h,
     )
     .expect_err("too tall");
-    assert_eq!(error.code, ErrorCode::NodeTooTall);
-    assert!(error.message.contains("max_node_height"));
+    assert_eq!(error.code(), ErrorCode::NodeTooTall);
+    assert!(error.message().contains("max_node_height"));
+    assert_eq!(
+        error.subject(),
+        Some(&crate::ErrorSubject::Node {
+            index: 0,
+            id: "n1".to_owned(),
+        })
+    );
 }
 
 #[test]
@@ -343,8 +357,7 @@ fn cue_slots_budget_three_widest_digits() {
     let boxes = vec![
         NodeBox {
             id: NodeId::from_index(0),
-            protocol_id: "s1".to_owned(),
-            is_overflow: false,
+            origin: caller(0, "s1"),
             width_mm: 10.0,
             height_mm: 12.0,
             lines: vec![WrappedLine {
@@ -357,8 +370,7 @@ fn cue_slots_budget_three_widest_digits() {
         },
         NodeBox {
             id: NodeId::from_index(1),
-            protocol_id: "root".to_owned(),
-            is_overflow: false,
+            origin: caller(1, "root"),
             width_mm: 40.0,
             height_mm: 16.0,
             lines: vec![WrappedLine {
@@ -371,12 +383,15 @@ fn cue_slots_budget_three_widest_digits() {
         },
     ];
     let sized = sized_cue_anchors(
-        &[("s1", CueSide::Shareholder), ("root", CueSide::Investment)],
+        &[
+            (NodeId::from_index(0), CueSide::Shareholder),
+            (NodeId::from_index(1), CueSide::Investment),
+        ],
         &boxes,
         &mut DigitMeasurer,
     )
     .expect("cues");
-    assert_eq!(sized[0].anchor_id, "s1");
+    assert_eq!(sized[0].anchor_id, NodeId::from_index(0));
     assert_eq!(sized[0].side, CueSide::Shareholder);
     assert_eq!(sized[1].side, CueSide::Investment);
     assert!((sized[0].width_mm - 36.0).abs() < 0.0001);
@@ -389,28 +404,37 @@ fn cue_slots_budget_three_widest_digits() {
 fn a_missing_anchor_and_an_overflow_id_are_layout_failed() {
     let boxes = [NodeBox {
         id: NodeId::from_index(0),
-        protocol_id: "s1".to_owned(),
-        is_overflow: false,
+        origin: caller(0, "s1"),
         width_mm: 10.0,
         height_mm: 12.0,
         lines: vec![],
         is_subject: false,
         is_company: true,
     }];
+    let overflow_box = NodeBox {
+        id: NodeId::from_index(1),
+        origin: NodeOrigin::Overflow {
+            subject: NodeId::from_index(2),
+            first_moved: NodeId::from_index(0),
+            moved_count: 1,
+        },
+        ..boxes[0].clone()
+    };
+    let boxes = [boxes[0].clone(), overflow_box];
     let missing = sized_cue_anchors(
-        &[("gone", CueSide::Shareholder)],
+        &[(NodeId::from_index(7), CueSide::Shareholder)],
         &boxes,
         &mut DigitMeasurer,
     )
     .expect_err("missing");
-    assert_eq!(missing.code, ErrorCode::LayoutFailed);
+    assert_eq!(missing.code(), ErrorCode::LayoutFailed);
     let overflow = sized_cue_anchors(
-        &[("__overflow__:root:s2", CueSide::Shareholder)],
+        &[(NodeId::from_index(1), CueSide::Shareholder)],
         &boxes,
         &mut DigitMeasurer,
     )
     .expect_err("overflow");
-    assert_eq!(overflow.code, ErrorCode::LayoutFailed);
+    assert_eq!(overflow.code(), ErrorCode::LayoutFailed);
 }
 
 #[test]
@@ -418,7 +442,11 @@ fn overflow_box_reserves_a_blank_second_name_row() {
     let mut measurer = FakeMeasurer::new(2.0, 5.0);
     let box_ = overflow_box(
         NodeId::from_index(9),
-        "__overflow__:root:s",
+        NodeOrigin::Overflow {
+            subject: NodeId::from_index(0),
+            first_moved: NodeId::from_index(1),
+            moved_count: 2,
+        },
         "其他股东(2家)",
         &mut measurer,
         38.0,

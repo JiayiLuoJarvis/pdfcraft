@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use super::test_support::{
-    chain, fake_pages, id_sets, plain_box, set_of, FakeEngine, FakeMeasurer,
+    caller, chain, fake_pages, id_sets, node_id, plain_box, set_of, FakeEngine, FakeMeasurer,
 };
 use crate::content::build_display;
 use crate::font::{FallbackMeasurer, FontMetrics};
@@ -11,12 +11,12 @@ use crate::graph::NodeId;
 use crate::page::{build_node_boxes, promote_to_page_subject, InboxNode, NodeBox, PageSpec};
 use crate::paginate::{paginate_request as paginate, paginate_request_with as paginate_with};
 use crate::units::PageGeometry;
-use crate::{ChartRequest, Edge, ErrorCode, FontBytes, Node};
+use crate::{ChartRequest, Edge, ErrorCode, Node};
 
 #[test]
 fn never_fits_chain_is_layout_failed() {
     let error = fake_pages(&chain(&["a1", "a2"], false), -1).expect_err("fails");
-    assert_eq!(error.code, ErrorCode::LayoutFailed);
+    assert_eq!(error.code(), ErrorCode::LayoutFailed);
 }
 
 #[test]
@@ -37,8 +37,8 @@ fn a_page_draft_without_a_measured_box_is_layout_failed() {
         &mut FallbackMeasurer,
     )
     .expect_err("missing box");
-    assert_eq!(error.code, ErrorCode::LayoutFailed);
-    assert_eq!(error.message, "page draft node a2 has no measured box");
+    assert_eq!(error.code(), ErrorCode::LayoutFailed);
+    assert_eq!(error.message(), "page draft node a2 has no measured box");
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
     let Some(bytes) = hc_font() else {
         return;
     };
-    let mut font = FontMetrics::open(&bytes).expect("font");
+    let mut font = FontMetrics::from_font(&bytes);
     let pages = match paginate_with(
         &request,
         &boxes,
@@ -83,31 +83,26 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
         &mut font,
     ) {
         Ok(pages) => pages,
-        Err(error) if error.code == ErrorCode::MissingGlyph => return,
+        Err(error) if error.code() == ErrorCode::MissingGlyph => return,
         Err(error) => panic!("pages: {error}"),
     };
+    let root = node_id(&request, "root");
     let promoted = pages
         .iter()
         .flat_map(|page| page.boxes.iter())
-        .find(|box_| box_.is_subject && box_.protocol_id != "root")
+        .find(|box_| box_.is_subject && box_.id != root)
         .expect("annex subject");
-    let source_name = request
-        .nodes
-        .iter()
-        .find(|node| node.id == promoted.protocol_id)
-        .expect("source")
-        .name
-        .clone();
+    let source_node = &request.nodes[promoted.id.index()];
     let source = plain_box(
         promoted.id.index(),
-        &promoted.protocol_id,
-        &source_name,
+        &source_node.id,
+        &source_node.name,
         false,
     );
-    let mut again = FontMetrics::open(&bytes).expect("font");
+    let mut again = FontMetrics::from_font(&bytes);
     let expected = match promote_to_page_subject(&source, 38.0, &mut again) {
         Ok(lines) => lines,
-        Err(error) if error.code == ErrorCode::MissingGlyph => return,
+        Err(error) if error.code() == ErrorCode::MissingGlyph => return,
         Err(error) => panic!("promote: {error}"),
     };
     assert_eq!(promoted.lines, expected.lines);
@@ -116,14 +111,14 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
     assert_ne!(promoted.lines.len(), fallback.lines.len());
 }
 
-fn hc_font() -> Option<FontBytes> {
+fn hc_font() -> Option<crate::Font> {
     crate::test_font::env_font()
 }
 
 #[test]
 fn investment_chain_never_fits_is_layout_failed() {
     let error = fake_pages(&chain(&["v1"], true), -1).expect_err("fails");
-    assert_eq!(error.code, ErrorCode::LayoutFailed);
+    assert_eq!(error.code(), ErrorCode::LayoutFailed);
 }
 
 #[test]
@@ -179,7 +174,7 @@ fn chain_pages(ids: &[&str], geometry: PageGeometry, height_mm: f64) -> Vec<Page
         .enumerate()
         .map(|(index, node)| InboxNode {
             id: NodeId::from_index(index),
-            protocol_id: node.id.as_str(),
+            origin: caller(index, &node.id),
             lines: &display.get(NodeId::from_index(index)).expect("lines").lines,
             is_company: true,
         })
@@ -189,7 +184,7 @@ fn chain_pages(ids: &[&str], geometry: PageGeometry, height_mm: f64) -> Vec<Page
         &inbox,
         &mut measurer,
         38.0,
-        &request.subject_id,
+        node_id(&request, &request.subject_id),
         geometry.printable_height_mm(),
     )
     .expect("boxes");

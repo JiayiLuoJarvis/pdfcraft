@@ -43,7 +43,7 @@ lint 级别的改动先改规范与根 `[workspace.lints]`，本表同一 PR 更
 | M-ID | 标题 | disposition | 证据/验收 |
 | --- | --- | --- | --- |
 | M-SIMPLE-ABSTRACTIONS | Abstractions don't visibly nest | done | 分层调用扁平；无新增嵌套抽象 |
-| M-AVOID-WRAPPERS | Avoid smart pointers and wrappers in APIs | done | Arc 只在论证处（Error source、FontBytes），见 Google disposition |
+| M-AVOID-WRAPPERS | Avoid smart pointers and wrappers in APIs | done | Arc 只在论证处（Error source、`FontFace.bytes`、orgchart `Font`），见 Google disposition |
 | M-DI-HIERARCHY | Prefer types over generics, generics over dyn traits | done | Google 类型节已 done；无 dyn 扩张 |
 | M-ERRORS-CANONICAL-STRUCTS | Errors are canonical structs | N/A | ADAPT，规范 ERR-1、ERR-7、ERR-8：`Error` + 公开 `ErrorKind` / `Location` 与 orgchart `ErrorCode` 保持；不加 `Backtrace`，不私有化 kind。理由是批量调用方需要按 kind 穷尽匹配 |
 | M-FROM-ERROR | Canonical error conversion uses From, not map_err | done | Error::new 配 From<ErrorKind>（pdf/forms/post），见 Google disposition |

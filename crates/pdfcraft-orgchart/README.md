@@ -2,9 +2,9 @@
 
 **Draw equity and outbound-investment charts to PDF.**
 
-Build a `ChartRequest` (subject, nodes, holding edges, options), pass one font
-face as `FontBytes`, and call `generate_pdf`. Shareholders sit above the
-subject. Outbound investments sit below. Measurement uses
+Build a `ChartRequest`, compile it with `Chart::new`, and draw with
+`chart.to_pdf`. Pass one parsed `Font`. Shareholders sit above the subject.
+Outbound investments sit below. Measurement uses
 [skrifa](https://crates.io/crates/skrifa). Drawing uses
 [krilla](https://crates.io/crates/krilla). This crate does not depend on
 `pdfcraft-pdf` or `pdfcraft-forms`.
@@ -15,7 +15,7 @@ subject. Outbound investments sit below. Measurement uses
 | API | [docs.rs/pdfcraft-orgchart](https://docs.rs/pdfcraft-orgchart) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.2.0`. The API can break before `1.0` |
+| Status | `0.3.0`. The API can break before `1.0` |
 
 ---
 
@@ -23,7 +23,7 @@ subject. Outbound investments sit below. Measurement uses
 
 ```toml
 [dependencies]
-pdfcraft-orgchart = "0.2.0"
+pdfcraft-orgchart = "0.3.0"
 ```
 
 ---
@@ -31,12 +31,10 @@ pdfcraft-orgchart = "0.2.0"
 ## Quick start
 
 ```rust
-use pdfcraft_orgchart::{
-    document_title, generate_pdf, validate_request, ChartRequest, Edge, FontBytes, Node,
-};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
 
 fn main() -> Result<(), pdfcraft_orgchart::Error> {
-    let font = FontBytes::new(std::fs::read("face.ttf").expect("font"));
+    let font = Font::new(std::fs::read("face.ttf").expect("font"))?;
     let request = ChartRequest::new(
         "root",
         vec![
@@ -46,9 +44,9 @@ fn main() -> Result<(), pdfcraft_orgchart::Error> {
         ],
         vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
     );
-    validate_request(&request)?;
-    let _title = document_title(&request)?;
-    let pdf = generate_pdf(&request, &font)?;
+    let chart = Chart::new(request)?;
+    let _title = chart.title();
+    let pdf = chart.to_pdf(&font)?;
     assert!(pdf.starts_with(b"%PDF"));
     std::fs::write("out/equity_chart.pdf", pdf).expect("write");
     Ok(())
@@ -66,21 +64,20 @@ cargo run -p pdfcraft-orgchart --example equity_chart
 ## How it works
 
 ```text
-ChartRequest (+ FontBytes) ──validate_request──► Ok (optional)
-                           ──generate_pdf──────► PDF bytes
-ChartRequest ──document_title──► String (you write /Info)
+ChartRequest ──Chart::new──► Chart
+Font::new
+Chart::to_pdf(&Font) ──► PDF bytes
+Chart::title ──► String (you write /Info)
 ```
 
-1. **Assemble** — nodes, edges (`from_id` holds `to_id`), options.
-2. **Validate** — protocol and optional `top_n` fold without opening a font.
-3. **Draw** — fold again, measure, paginate, emit PDF.
+1. **Assemble** nodes, edges (`holder` holds `held`), and `ChartStyle`.
+2. **Compile** the protocol and the optional `top_n` fold. This does not open a font.
+3. **Draw** by measuring, paginating, and emitting PDF bytes.
 
-Fonts: one face, shared as `Arc<Vec<u8>>`. `FontBytes::new` wraps owned bytes. `FontBytes::from_shared` reuses an `Arc`. Collections are rejected.  
-Title: `generate_pdf` does not write document info. Use `document_title` if you
-need a `/Title` string.
+Fonts: one face, shared as `Arc<Vec<u8>>` inside `Font`. `Font::new` parses owned bytes. `Font::from_shared` reuses an `Arc`. Collections are rejected.
+`to_pdf` does not write document info. `chart.title()` is `{subject name}股权架构图` if you need a `/Title` string.
 
-Deep dive: **[docs/guide.md](docs/guide.md)** (options, display rules, errors,
-testing).
+Deep dive: **[docs/guide.md](docs/guide.md)** (style, display rules, errors, testing).
 
 ---
 
@@ -88,14 +85,11 @@ testing).
 
 | Item | Role |
 | --- | --- |
-| `ChartRequest` / `ChartOptions` | Chart values, `top_n`, size caps |
-| `Node` / `Edge` / `NodeType` | Parties and holding edges |
-| `FontBytes` | Shared face bytes. `new` wraps owned bytes. `from_shared` reuses an `Arc`. |
-| `validate_request` | Protocol check |
-| `document_title` | Title string for caller-owned PDF info |
-| `generate_pdf` | Draw chart → `Vec<u8>` |
+| `ChartRequest` / `ChartStyle` | Chart values, `top_n`, size caps |
+| `Node` / `Edge` / `PaidIn` / `NodeType` | Parties, holding edges, paid-in capital |
+| `Font` | One parsed face. `new` and `from_shared` return `Result` |
+| `Chart` | `new` compiles. `to_pdf` draws. `title` and `subject_name` read the subject |
 | `Error` / `ErrorCode` | Stable failure codes |
-| `MAX_NODES` and related | Hard caps for options |
 
 ---
 
@@ -103,7 +97,7 @@ testing).
 
 - No dependency on `pdfcraft-pdf` or `pdfcraft-forms`
 - No font collections; one face per call
-- Page headers come from chart role, not from `ChartOptions::title`
+- Page headers come from the chart role. `Chart::title` is not the page header
 - Fonts are not vendored in the published package
 
 ---

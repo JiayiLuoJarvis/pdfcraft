@@ -36,7 +36,7 @@ disposition 取值：`adopt`（已写成规范规则）、`adapt`（有理由地
 | `From` 配显式构造 | adopt | ERR-5 |
 | derive 优先；已知 std trait 优先；扩展 trait 加 `Ext` | adopt | API-7 |
 | `#[must_use]` on functions and types | adopt | API-8 |
-| `#[non_exhaustive]` on public enums / structs with public fields | adapt | API-9（四类例外；文档语言 enum 见延后项 t7，样式结构体见 t10） |
+| `#[non_exhaustive]` on public enums / structs with public fields | adapt | API-9（五类例外；文档语言 enum 见延后项 t7，样式结构体见 t10，协议记录见 t11） |
 | Naming：方法名跟 std、getter / setter、缩写 | adopt | STY-2、STY-3、STY-4 |
 | Documentation：`///`、`Errors` / `Panics` / 示例 | adopt | DOC-2、DOC-3 |
 | 不用 `unsafe`、不用 unstable feature | adopt | TOOL-3、TOOL-1 |
@@ -52,7 +52,8 @@ disposition 取值：`adopt`（已写成规范规则）、`adapt`（有理由地
 - **t5：`FieldValue::CheckBox(bool)`。** 保持 `bool`。文档写明 `true` 画勾、`false` 不画，调用点自解释（API-3 的登记例外）。若要改成 `CheckboxState`，先向提案书 §10 提修正案。
 - **t7：pdf 文档语言 enum 不加 `#[non_exhaustive]`。** `spec/mod.rs` 的 `Block`、`Alignment`、`Span`、`BlankWidth`、`ListKind`、`CanvasMark`、`BandSlot`、`TextRun`、`PageWhen`、`LayerMark`、`LayerShape` 与 `spec/types.rs` 的 `Numbering`、`Track` 描述提案书 §2、§12 已确认的文档语言。调用方穷尽 `match` 才能在新增元素时得到编译期提醒（API-9 例外第二类）。
 - **t9：文档小项。** `emit.rs` `check_upem` 的 upem 为 0 时的说明，`Positive::pt` 的零值错误注记。
-- **t10：pdf 样式结构体不加 `#[non_exhaustive]`。** `pdfcraft_pdf::spec` 里类型名以 `Style` 结尾的公有结构体，按名字归入此类，不逐个列举。它们是公有字段 + `Default` + 结构体字面量（`..XxxStyle::default()`）的可复用参数（提案书 §12.7），标 `non_exhaustive` 会让 crate 外写不出字面量。0.x 加字段按 VER-1 / VER-2 记 breaking。`ParagraphStyle` 的 rustdoc 示例在 crate 外用 `..ParagraphStyle::default()`，`cargo test --doc` 守住这一条（API-9 例外第四类）。
+- **t10：样式结构体不加 `#[non_exhaustive]`。** 各 crate 里类型名以 `Style` 结尾的公有结构体，按名字归入此类，不逐个列举。`pdfcraft_pdf::spec` 的样式和 orgchart 的 `ChartStyle` 都在里面。它们是公有字段 + `Default` + 结构体字面量（`..XxxStyle::default()`）的可复用参数（提案书 §12.7），标 `non_exhaustive` 会让 crate 外写不出字面量。0.x 加字段按 VER-1 / VER-2 记 breaking。`ParagraphStyle` 的 rustdoc 示例在 crate 外用 `..ParagraphStyle::default()`，`cargo test --doc` 守住这一条（API-9 例外第四类）。
+- **t11：协议记录不加 `#[non_exhaustive]`。** orgchart 的 `Node`、`Edge`、`PaidIn`、`ChartRequest` 由调用方用结构体字面量构造。`ChartRequest` 没有 `Default`，用 `ChartRequest::new` 填缺省。标 `non_exhaustive` 会让 crate 外写不出这些字面量。0.x 加字段按 VER-1 / VER-2 记 breaking（API-9 例外第五类）。
 - **post 的 bool。** `merge_pdfs(parts, preserve_outlines: bool)` 保持 `bool`，`merge.rs` 文档写明取舍，调用点要具名实参或注释。`EncryptionConfig` 的 8 个 `bool` 镜像 PDF 安全位，保留（API-3 的登记例外）。
 - **orgchart 私有 bool。** `measure.rs` 的 `is_subject` 与 `captions.rs` 的 `has_investments` 全私有、同文件内调用点自解释，保持。
 

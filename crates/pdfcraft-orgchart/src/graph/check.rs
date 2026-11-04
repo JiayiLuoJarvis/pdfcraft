@@ -2,13 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::arena::{EdgeId, EdgeRec, Graph, NodeId, NodeOrigin, NodeRec, OVERFLOW_ID_PREFIX};
+use super::arena::{EdgeId, EdgeRec, Graph, NodeId, NodeOrigin, NodeRec};
 use super::ratio::unique_layout_parent_edge;
-use crate::error::{Error, ErrorCode};
-use crate::request::{
-    ChartOptions, ChartRequest, MAX_MARGIN_MM, MAX_NODES, MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,
-    RATIO_MAX, RATIO_MIN,
-};
+use crate::error::{Error, ErrorCode, ErrorSubject};
+use crate::request::{ChartRequest, ChartStyle, PaidIn, RATIO_MAX, RATIO_MIN};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Visit {
@@ -20,12 +17,13 @@ enum Visit {
 /// Check `request` and copy it into an arena. Folding is a separate step.
 pub(crate) fn validate(request: &ChartRequest) -> Result<Graph, Error> {
     if request.subject_id.trim().is_empty() {
-        return Err(Error::new(
-            ErrorCode::InvalidProtocol,
-            "subject_id is blank",
-        ));
+        return Err(
+            Error::new(ErrorCode::InvalidProtocol, "subject_id is blank")
+                .with_subject(ErrorSubject::Field("subject_id")),
+        );
     }
-    let max_nodes = option_bounds(&request.options)?;
+    request_bounds(request)?;
+    let max_nodes = request.max_nodes;
     if request.nodes.len() > max_nodes {
         return Err(Error::new(
             ErrorCode::TooManyNodes,
@@ -33,83 +31,102 @@ pub(crate) fn validate(request: &ChartRequest) -> Result<Graph, Error> {
                 "nodes={} exceeds max_nodes={max_nodes}",
                 request.nodes.len()
             ),
-        ));
+        )
+        .with_subject(ErrorSubject::Field("nodes")));
     }
-    let (nodes, by_protocol_id) = index_nodes(request)?;
+    let (mut nodes, by_protocol_id) = index_nodes(request)?;
+    bind_folded_holders(&mut nodes, &request.nodes, &by_protocol_id)?;
     let Some(&subject) = by_protocol_id.get(request.subject_id.as_str()) else {
         return Err(Error::new(
             ErrorCode::SubjectNotFound,
             format!("subject_id={} not in nodes", request.subject_id),
-        ));
+        )
+        .with_subject(ErrorSubject::Field("subject_id")));
     };
     let edges = check_edges(request, &by_protocol_id)?;
-    let node_count = nodes.len();
-    let mut outgoing = vec![Vec::new(); node_count];
-    let mut incoming = vec![Vec::new(); node_count];
-    let mut out_nodes = vec![Vec::new(); node_count];
-    for edge in &edges {
-        outgoing[edge.from.index()].push(edge.id);
-        incoming[edge.to.index()].push(edge.id);
-        out_nodes[edge.from.index()].push(edge.to);
-    }
-    detect_cycle(&out_nodes, &nodes)?;
-    let mut graph = Graph {
+    let mut graph = Graph::from_records(
         nodes,
         edges,
-        by_protocol_id,
-        outgoing,
-        incoming,
-        out_nodes,
         subject,
-        subject_protocol_id: request.subject_id.clone(),
-        options: request.options.clone(),
-        reach_cache: HashMap::new(),
-        overflow_ids: HashMap::new(),
-    };
-    require_dual_cone(&graph)?;
-    reject_ambiguous_ratios(&mut graph)?;
+        request.subject_id.clone(),
+        request.style,
+        request.max_nodes,
+    );
+    check_structure(&mut graph)?;
     Ok(graph)
 }
 
-fn option_bounds(options: &ChartOptions) -> Result<usize, Error> {
-    if let Some(max_nodes) = options.max_nodes {
-        if !(1..=MAX_NODES).contains(&max_nodes) {
-            return Err(Error::new(
-                ErrorCode::InvalidProtocol,
-                format!("max_nodes={max_nodes} exceeds limit {MAX_NODES}"),
-            ));
-        }
+/// Rerun the protocol rules that a fold can break: the node cap, cycles, the
+/// two cones, a declared stand-in edge, and a unique layout parent.
+pub(crate) fn recheck(graph: &mut Graph) -> Result<(), Error> {
+    let max_nodes = graph.max_nodes;
+    if graph.nodes.len() > max_nodes {
+        return Err(Error::new(
+            ErrorCode::TooManyNodes,
+            format!("nodes={} exceeds max_nodes={max_nodes}", graph.nodes.len()),
+        )
+        .with_subject(ErrorSubject::Field("nodes")));
     }
-    let max_nodes = options.max_nodes.unwrap_or(MAX_NODES);
-    if let Some(top_n) = options.top_n {
+    check_structure(graph)
+}
+
+fn check_structure(graph: &mut Graph) -> Result<(), Error> {
+    detect_cycle(graph)?;
+    require_dual_cone(graph)?;
+    require_stand_in_edges(graph)?;
+    reject_ambiguous_ratios(graph)
+}
+
+fn request_bounds(request: &ChartRequest) -> Result<(), Error> {
+    let max_nodes = request.max_nodes;
+    if !(1..=ChartRequest::MAX_NODES).contains(&max_nodes) {
+        return Err(Error::new(
+            ErrorCode::InvalidProtocol,
+            format!(
+                "max_nodes={max_nodes} exceeds limit {}",
+                ChartRequest::MAX_NODES
+            ),
+        )
+        .with_subject(ErrorSubject::Field("max_nodes")));
+    }
+    if let Some(top_n) = request.top_n {
+        let top_n = top_n.get();
         if top_n > max_nodes {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
-                format!("top_n={top_n} must be in 0..{max_nodes}"),
-            ));
+                format!("top_n={top_n} must be in 0..={max_nodes}"),
+            )
+            .with_subject(ErrorSubject::Field("top_n")));
         }
     }
-    if let Some(margin_mm) = options.margin_mm {
-        if !(margin_mm.is_finite() && margin_mm > 0.0 && margin_mm <= MAX_MARGIN_MM) {
-            return Err(Error::new(
-                ErrorCode::InvalidProtocol,
-                format!("margin_mm={margin_mm:?} must be in (0, {MAX_MARGIN_MM}]"),
-            ));
-        }
+    let ChartStyle {
+        margin_mm,
+        node_width_mm,
+    } = request.style;
+    if !(margin_mm.is_finite() && margin_mm > 0.0 && margin_mm <= ChartStyle::MAX_MARGIN_MM) {
+        return Err(Error::new(
+            ErrorCode::InvalidProtocol,
+            format!(
+                "margin_mm={margin_mm:?} must be in (0, {}]",
+                ChartStyle::MAX_MARGIN_MM
+            ),
+        )
+        .with_subject(ErrorSubject::Field("style.margin_mm")));
     }
-    if let Some(node_width_mm) = options.node_width_mm {
-        let in_range = node_width_mm.is_finite()
-            && (MIN_NODE_WIDTH_MM..=MAX_NODE_WIDTH_MM).contains(&node_width_mm);
-        if !in_range {
-            return Err(Error::new(
-                ErrorCode::InvalidProtocol,
-                format!(
-                    "node_width_mm={node_width_mm:?} must be in [{MIN_NODE_WIDTH_MM}, {MAX_NODE_WIDTH_MM}]"
-                ),
-            ));
-        }
+    let in_range = node_width_mm.is_finite()
+        && (ChartStyle::MIN_NODE_WIDTH_MM..=ChartStyle::MAX_NODE_WIDTH_MM).contains(&node_width_mm);
+    if !in_range {
+        return Err(Error::new(
+            ErrorCode::InvalidProtocol,
+            format!(
+                "node_width_mm={node_width_mm:?} must be in [{}, {}]",
+                ChartStyle::MIN_NODE_WIDTH_MM,
+                ChartStyle::MAX_NODE_WIDTH_MM
+            ),
+        )
+        .with_subject(ErrorSubject::Field("style.node_width_mm")));
     }
-    Ok(max_nodes)
+    Ok(())
 }
 
 fn index_nodes(request: &ChartRequest) -> Result<(Vec<NodeRec>, HashMap<String, NodeId>), Error> {
@@ -117,36 +134,41 @@ fn index_nodes(request: &ChartRequest) -> Result<(Vec<NodeRec>, HashMap<String, 
     let mut nodes = Vec::with_capacity(request.nodes.len());
     for (index, node) in request.nodes.iter().enumerate() {
         if node.id.trim().is_empty() || node.name.trim().is_empty() {
-            return Err(Error::new(ErrorCode::InvalidProtocol, "node id/name blank"));
+            return Err(
+                Error::new(ErrorCode::InvalidProtocol, "node id/name blank").with_subject(
+                    ErrorSubject::Node {
+                        index,
+                        id: node.id.clone(),
+                    },
+                ),
+            );
         }
         if by_protocol_id.contains_key(node.id.as_str()) {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
                 format!("duplicate node id={}", node.id),
-            ));
-        }
-        if node.id.starts_with(OVERFLOW_ID_PREFIX) {
-            return Err(Error::new(
-                ErrorCode::InvalidProtocol,
-                format!(
-                    "node id uses reserved prefix {OVERFLOW_ID_PREFIX}: {}",
-                    node.id
-                ),
-            ));
+            )
+            .with_subject(ErrorSubject::Node {
+                index,
+                id: node.id.clone(),
+            }));
         }
         let id = NodeId::from_index(index);
-        let origin = folded_origin(&node.id, &by_protocol_id).unwrap_or(NodeOrigin::Input);
         by_protocol_id.insert(node.id.clone(), id);
+        let (paid_in_amount, currency) = paid_in_fields(node.paid_in.as_ref());
         nodes.push(NodeRec {
             id,
-            origin,
-            protocol_id: node.id.clone(),
+            origin: NodeOrigin::Caller {
+                index,
+                id: node.id.clone(),
+                stands_in_for: None,
+            },
             name: node.name.clone(),
             legal_person: node.legal_person.clone(),
             ratio: node.ratio,
             node_type: node.node_type,
-            paid_in_amount: node.paid_in_amount.clone(),
-            currency: node.currency.clone(),
+            paid_in_amount,
+            currency,
             location: node.location.clone(),
             approval_date: node.approval_date.clone(),
         });
@@ -154,16 +176,53 @@ fn index_nodes(request: &ChartRequest) -> Result<(Vec<NodeRec>, HashMap<String, 
     Ok((nodes, by_protocol_id))
 }
 
-/// When a later node is `__other__:{parent}` and that parent is already indexed,
-/// treat it as a fold stand-in. Caller-written `__other__:` ids whose parent is
-/// missing stay [`NodeOrigin::Input`].
-fn folded_origin(
-    protocol_id: &str,
+fn paid_in_fields(paid_in: Option<&PaidIn>) -> (Option<String>, Option<String>) {
+    match paid_in {
+        Some(paid) => (Some(paid.amount.clone()), paid.currency.clone()),
+        None => (None, None),
+    }
+}
+
+/// `folded_holders_of` must name one existing node, and only one caller may claim it.
+fn bind_folded_holders(
+    nodes: &mut [NodeRec],
+    request_nodes: &[crate::request::Node],
     by_protocol_id: &HashMap<String, NodeId>,
-) -> Option<NodeOrigin> {
-    let parent_protocol = protocol_id.strip_prefix("__other__:")?;
-    let parent = *by_protocol_id.get(parent_protocol)?;
-    Some(NodeOrigin::FoldedHolders { parent })
+) -> Result<(), Error> {
+    let mut claimed = HashSet::new();
+    for (index, (node, request_node)) in nodes.iter_mut().zip(request_nodes).enumerate() {
+        let Some(parent_key) = request_node.folded_holders_of.as_deref() else {
+            continue;
+        };
+        let subject = ErrorSubject::Node {
+            index,
+            id: request_node.id.clone(),
+        };
+        let Some(&parent) = by_protocol_id.get(parent_key) else {
+            return Err(Error::new(
+                ErrorCode::InvalidProtocol,
+                format!(
+                    "node {} folded_holders_of={parent_key} is not a node id",
+                    request_node.id
+                ),
+            )
+            .with_subject(subject));
+        };
+        if !claimed.insert(parent) {
+            return Err(Error::new(
+                ErrorCode::InvalidProtocol,
+                format!(
+                    "node {} folded_holders_of={parent_key} duplicates another stand-in",
+                    request_node.id
+                ),
+            )
+            .with_subject(subject));
+        }
+        if let NodeOrigin::Caller { stands_in_for, .. } = &mut node.origin {
+            *stands_in_for = Some(parent);
+        }
+    }
+    Ok(())
 }
 
 fn check_edges(
@@ -174,44 +233,103 @@ fn check_edges(
     let mut edges = Vec::with_capacity(request.edges.len());
     for (index, edge) in request.edges.iter().enumerate() {
         let (Some(&from), Some(&to)) = (
-            by_protocol_id.get(edge.from_id.as_str()),
-            by_protocol_id.get(edge.to_id.as_str()),
+            by_protocol_id.get(edge.holder.as_str()),
+            by_protocol_id.get(edge.held.as_str()),
         ) else {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
-                format!("dangling edge {}->{}", edge.from_id, edge.to_id),
-            ));
+                format!("dangling edge {}->{}", edge.holder, edge.held),
+            )
+            .with_subject(ErrorSubject::Edge {
+                index,
+                holder: edge.holder.clone(),
+                held: edge.held.clone(),
+            }));
         };
         if from == to {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
-                format!("self-loop on {}", edge.from_id),
-            ));
+                format!("self-loop on {}", edge.holder),
+            )
+            .with_subject(ErrorSubject::Edge {
+                index,
+                holder: edge.holder.clone(),
+                held: edge.held.clone(),
+            }));
         }
         if !seen.insert((from, to)) {
             return Err(Error::new(
                 ErrorCode::InvalidProtocol,
-                format!("duplicate edge {}->{}", edge.from_id, edge.to_id),
-            ));
+                format!("duplicate edge {}->{}", edge.holder, edge.held),
+            )
+            .with_subject(ErrorSubject::Edge {
+                index,
+                holder: edge.holder.clone(),
+                held: edge.held.clone(),
+            }));
         }
         require_ratio(
             edge.ratio,
-            &format!("edge {}->{}", edge.from_id, edge.to_id),
+            &format!("edge {}->{}", edge.holder, edge.held),
+            ErrorSubject::Edge {
+                index,
+                holder: edge.holder.clone(),
+                held: edge.held.clone(),
+            },
         )?;
         edges.push(EdgeRec {
             id: EdgeId::from_index(index),
             from,
             to,
             ratio: edge.ratio,
+            caller_index: Some(index),
         });
     }
-    for node in &request.nodes {
-        require_ratio(node.ratio, &format!("node {}", node.id))?;
+    for (index, node) in request.nodes.iter().enumerate() {
+        require_ratio(
+            node.ratio,
+            &format!("node {}", node.id),
+            ErrorSubject::Node {
+                index,
+                id: node.id.clone(),
+            },
+        )?;
     }
     Ok(edges)
 }
 
-fn require_ratio(value: Option<f64>, label: &str) -> Result<(), Error> {
+fn require_stand_in_edges(graph: &Graph) -> Result<(), Error> {
+    for node in &graph.nodes {
+        let NodeOrigin::Caller {
+            stands_in_for: Some(parent),
+            id,
+            index,
+        } = &node.origin
+        else {
+            continue;
+        };
+        let linked = graph
+            .incoming_edges(*parent)
+            .iter()
+            .any(|&edge| graph.edge_from(edge) == node.id);
+        if !linked {
+            return Err(Error::new(
+                ErrorCode::InvalidProtocol,
+                format!(
+                    "node {id} declares folded holders of {} but has no direct edge to it",
+                    graph.label(*parent)
+                ),
+            )
+            .with_subject(ErrorSubject::Node {
+                index: *index,
+                id: id.clone(),
+            }));
+        }
+    }
+    Ok(())
+}
+
+fn require_ratio(value: Option<f64>, label: &str, subject: ErrorSubject) -> Result<(), Error> {
     let Some(value) = value else {
         return Ok(());
     };
@@ -221,10 +339,12 @@ fn require_ratio(value: Option<f64>, label: &str) -> Result<(), Error> {
     Err(Error::new(
         ErrorCode::InvalidProtocol,
         format!("{label} ratio={value:?} must be finite and in {RATIO_MIN}..{RATIO_MAX}"),
-    ))
+    )
+    .with_subject(subject))
 }
 
-fn detect_cycle(out_nodes: &[Vec<NodeId>], nodes: &[NodeRec]) -> Result<(), Error> {
+fn detect_cycle(graph: &Graph) -> Result<(), Error> {
+    let out_nodes = &graph.out_nodes;
     let mut state = vec![Visit::Unvisited; out_nodes.len()];
     for start in 0..out_nodes.len() {
         if state[start] != Visit::Unvisited {
@@ -241,13 +361,13 @@ fn detect_cycle(out_nodes: &[Vec<NodeId>], nodes: &[NodeRec]) -> Result<(), Erro
                 }
                 match state[target] {
                     Visit::Visiting => {
+                        let from_id = NodeId::from_index(node);
+                        let to_id = NodeId::from_index(target);
                         return Err(Error::new(
                             ErrorCode::CycleDetected,
-                            format!(
-                                "cycle at {}->{}",
-                                nodes[node].protocol_id, nodes[target].protocol_id
-                            ),
-                        ));
+                            format!("cycle at {}->{}", graph.label(from_id), graph.label(to_id)),
+                        )
+                        .with_optional_subject(graph.subject_between(from_id, to_id)));
                     }
                     Visit::Unvisited => {
                         state[target] = Visit::Visiting;
@@ -308,19 +428,30 @@ fn require_dual_cone(graph: &Graph) -> Result<(), Error> {
             && !shareholders.contains(&node.id)
             && !investments.contains(&node.id)
         {
-            orphans.push(node.protocol_id.as_str());
+            orphans.push(node.id);
         }
     }
     if !orphans.is_empty() {
-        orphans.sort_unstable();
+        let mut labels: Vec<String> = orphans.iter().map(|id| graph.label(*id)).collect();
+        labels.sort_unstable();
+        let subject = orphans
+            .iter()
+            .filter_map(|id| graph.node_subject(*id))
+            .min_by_key(|subject| match subject {
+                ErrorSubject::Node { index, .. } => *index,
+                ErrorSubject::Edge { .. } | ErrorSubject::Field(_) | ErrorSubject::Character(_) => {
+                    usize::MAX
+                }
+            });
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
             format!(
                 "nodes not connected to subject={}: {}",
                 graph.subject_protocol_id,
-                orphans.join(",")
+                labels.join(",")
             ),
-        ));
+        )
+        .with_optional_subject(subject));
     }
     for edge in &graph.edges {
         let from = edge.from;
@@ -336,10 +467,11 @@ fn require_dual_cone(graph: &Graph) -> Result<(), Error> {
                 ErrorCode::InvalidProtocol,
                 format!(
                     "edge crosses shareholder/investment cones: {}->{}",
-                    graph.protocol_id(from),
-                    graph.protocol_id(to)
+                    graph.label(from),
+                    graph.label(to)
                 ),
-            ));
+            )
+            .with_optional_subject(graph.edge_subject(edge)));
         }
     }
     Ok(())
@@ -354,4 +486,100 @@ fn reject_ambiguous_ratios(graph: &mut Graph) -> Result<(), Error> {
         unique_layout_parent_edge(graph, id)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod subject_tests {
+    use super::super::arena::{EdgeId, EdgeRec, Graph, NodeId, NodeOrigin, NodeRec};
+    use super::require_dual_cone;
+    use crate::error::{ErrorCode, ErrorSubject};
+    use crate::request::ChartStyle;
+
+    fn caller(index: usize, id: &str) -> NodeRec {
+        NodeRec {
+            id: NodeId::from_index(index),
+            origin: NodeOrigin::Caller {
+                index,
+                id: id.to_owned(),
+                stands_in_for: None,
+            },
+            name: id.to_owned(),
+            legal_person: None,
+            ratio: None,
+            node_type: None,
+            paid_in_amount: None,
+            currency: None,
+            location: None,
+            approval_date: None,
+        }
+    }
+
+    fn folded(index: usize, parent: usize) -> NodeRec {
+        NodeRec {
+            id: NodeId::from_index(index),
+            origin: NodeOrigin::FoldedHolders {
+                parent: NodeId::from_index(parent),
+                count: 2,
+            },
+            name: "其他股东(2家)".to_owned(),
+            legal_person: None,
+            ratio: None,
+            node_type: None,
+            paid_in_amount: None,
+            currency: None,
+            location: None,
+            approval_date: None,
+        }
+    }
+
+    fn edge(index: usize, from: usize, to: usize, caller_index: Option<usize>) -> EdgeRec {
+        EdgeRec {
+            id: EdgeId::from_index(index),
+            from: NodeId::from_index(from),
+            to: NodeId::from_index(to),
+            ratio: None,
+            caller_index,
+        }
+    }
+
+    fn graph(nodes: Vec<NodeRec>, edges: Vec<EdgeRec>) -> Graph {
+        Graph::from_records(
+            nodes,
+            edges,
+            NodeId::from_index(0),
+            "root".to_owned(),
+            ChartStyle::default(),
+            100,
+        )
+    }
+
+    #[test]
+    fn a_synthetic_cross_cone_edge_names_the_caller_end() {
+        let error = require_dual_cone(&graph(
+            vec![caller(0, "root"), caller(1, "invest"), folded(2, 0)],
+            vec![
+                edge(0, 2, 0, None),
+                edge(1, 0, 1, Some(0)),
+                edge(2, 2, 1, None),
+            ],
+        ))
+        .expect_err("cross");
+        assert_eq!(error.code(), ErrorCode::InvalidProtocol);
+        assert_eq!(
+            error.subject(),
+            Some(&ErrorSubject::Node {
+                index: 1,
+                id: "invest".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_folded_orphan_has_no_subject() {
+        let error = require_dual_cone(&graph(vec![caller(0, "root"), folded(1, 0)], vec![]))
+            .expect_err("orphan");
+        assert_eq!(error.code(), ErrorCode::InvalidProtocol);
+        assert_eq!(error.subject(), None);
+        assert!(error.message().contains("folded holders"));
+    }
 }

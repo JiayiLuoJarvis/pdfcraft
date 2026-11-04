@@ -172,22 +172,17 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
             let Some(box_) = content.boxes.get(id) else {
                 return Err(Error::new(
                     ErrorCode::LayoutFailed,
-                    format!("page order id {} has no measured box", self.protocol(*id)),
+                    format!(
+                        "page order id {} has no measured box",
+                        self.graph.label(*id)
+                    ),
                 ));
             };
             boxes.push(box_.clone());
         }
         let cols = geometry.max_cols(self.node_width);
         let printable = geometry.printable_width_mm();
-        let anchors = sized_cue_anchors(
-            &content
-                .anchors
-                .iter()
-                .map(|(id, side)| (id.as_str(), *side))
-                .collect::<Vec<_>>(),
-            &boxes,
-            self.measurer,
-        )?;
+        let anchors = sized_cue_anchors(&content.anchors, &boxes, self.measurer)?;
         let anchor_sizes: Vec<CueAnchorSize> = anchors
             .into_iter()
             .map(|anchor| CueAnchorSize {

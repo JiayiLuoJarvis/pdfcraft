@@ -1,21 +1,43 @@
 //! Font bytes, wrap, and the HC `ExtraLight` face.
 
+use std::error::Error as StdError;
 use std::sync::Arc;
 
-use super::{wrap_text, FallbackMeasurer, FontBytes, FontMetrics, Measurer};
-use crate::ErrorCode;
+use super::{wrap_text, FallbackMeasurer, Font, FontMetrics, Measurer};
+use crate::{ErrorCode, ErrorSubject};
 
-#[test]
-fn new_wraps_owned_bytes() {
-    let font = FontBytes::new(b"face".to_vec());
-    assert_eq!(font.data.as_slice(), b"face");
+fn source_text(error: &crate::Error) -> String {
+    StdError::source(error).expect("source").to_string()
+}
+
+fn font_failure_keeps_the_cause_on_source(error: &crate::Error, detail: &str) {
+    assert_eq!(error.code(), ErrorCode::FontError);
+    assert_eq!(error.subject(), None);
+    let source = source_text(error);
+    assert!(source.contains(detail), "{source}");
+    assert!(
+        !error.message().contains(&source),
+        "message={} source={source}",
+        error.message()
+    );
 }
 
 #[test]
-fn from_shared_keeps_the_arc() {
-    let source = Arc::new(b"face".to_vec());
-    let font = FontBytes::from_shared(Arc::clone(&source));
-    assert!(Arc::ptr_eq(&source, &font.data));
+fn new_rejects_bytes_that_are_not_one_face() {
+    let ttc = Font::new(b"ttcf".to_vec()).expect_err("ttc");
+    font_failure_keeps_the_cause_on_source(&ttc, "TTC");
+    let garbage = Font::new(b"not a font".to_vec()).expect_err("bad");
+    assert_eq!(garbage.code(), ErrorCode::FontError);
+    assert_eq!(garbage.subject(), None);
+    let garbage_source = source_text(&garbage);
+    assert!(!garbage_source.is_empty(), "{garbage_source}");
+    assert!(
+        !garbage.message().contains(&garbage_source),
+        "message={} source={garbage_source}",
+        garbage.message()
+    );
+    let empty = Font::new(Vec::<u8>::new()).expect_err("empty");
+    font_failure_keeps_the_cause_on_source(&empty, "empty");
 }
 
 #[test]
@@ -55,17 +77,29 @@ fn ratio_text_stays_one_line_when_wrap_is_off() {
     assert_eq!(parts, [long_ratio]);
 }
 
-fn hc_font() -> Option<FontBytes> {
+fn hc_font() -> Option<Font> {
     crate::test_font::env_font()
 }
 
 #[test]
-fn open_keeps_the_shared_buffer() {
+fn from_shared_keeps_the_arc_and_debug_omits_bytes() {
     let Some(font) = hc_font() else {
         return;
     };
-    let metrics = FontMetrics::open(&font).expect("open");
-    assert!(Arc::ptr_eq(&font.data, metrics.bytes()));
+    let source = Arc::clone(&font.data);
+    let again = Font::from_shared(Arc::clone(&source)).expect("font");
+    assert!(
+        Arc::ptr_eq(&source, &again.data),
+        "from_shared keeps the buffer"
+    );
+    let rendered = format!("{again:?}");
+    assert!(rendered.contains("units_per_em"), "{rendered}");
+    assert!(
+        rendered.len() < source.len(),
+        "debug dumped face bytes: {rendered}"
+    );
+    let metrics = FontMetrics::from_font(&again);
+    assert!(Arc::ptr_eq(&again.data, metrics.bytes()));
 }
 
 #[test]
@@ -73,7 +107,7 @@ fn hc_line_height_matches_hhea_plus_gap() {
     let Some(bytes) = hc_font() else {
         return;
     };
-    let font = FontMetrics::open(&bytes).expect("open");
+    let font = FontMetrics::from_font(&bytes);
     let line_h = font.line_height_mm(10.0);
     assert!((4.0..=8.0).contains(&line_h));
     assert!(font.ascent_mm(10.0) < line_h);
@@ -84,23 +118,14 @@ fn hebrew_is_missing_from_the_hc_face() {
     let Some(bytes) = hc_font() else {
         return;
     };
-    let mut font = FontMetrics::open(&bytes).expect("open");
+    let mut font = FontMetrics::from_font(&bytes);
     let width = font.string_width_mm("אבג", 10.0).expect_err("width");
-    assert_eq!(width.code, ErrorCode::MissingGlyph);
+    assert_eq!(width.code(), ErrorCode::MissingGlyph);
     let ensured = font.ensure_glyphs("אבג").expect_err("ensure");
-    assert_eq!(ensured.code, ErrorCode::MissingGlyph);
-    assert!(ensured.message.contains("missing glyph"));
-}
-
-#[test]
-fn a_collection_and_garbage_are_font_error() {
-    let ttc = FontMetrics::open(&FontBytes::new(b"ttcf".to_vec())).expect_err("ttc");
-    assert_eq!(ttc.code, ErrorCode::FontError);
-    assert!(ttc.message.contains("TTC"));
-    let garbage = FontMetrics::open(&FontBytes::new(b"not a font".to_vec())).expect_err("bad");
-    assert_eq!(garbage.code, ErrorCode::FontError);
-    let empty = FontMetrics::open(&FontBytes::new(Vec::<u8>::new())).expect_err("empty");
-    assert_eq!(empty.code, ErrorCode::FontError);
+    assert_eq!(ensured.code(), ErrorCode::MissingGlyph);
+    assert!(ensured.message().contains("missing glyph"));
+    assert_eq!(ensured.subject(), Some(&ErrorSubject::Character('א')));
+    assert_eq!(width.subject(), Some(&ErrorSubject::Character('א')));
 }
 
 #[test]
@@ -108,7 +133,7 @@ fn hc_latin_glyph_run_is_stable_and_has_width() {
     let Some(bytes) = hc_font() else {
         return;
     };
-    let mut font = FontMetrics::open(&bytes).expect("open");
+    let mut font = FontMetrics::from_font(&bytes);
     let first = font.glyph_run("A").expect("glyphs");
     let second = font.glyph_run("A").expect("glyphs");
     assert_eq!(first, second);

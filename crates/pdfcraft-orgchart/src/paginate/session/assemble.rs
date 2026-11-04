@@ -22,7 +22,10 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
             let Some(box_) = self.boxes.get(&id) else {
                 return Err(Error::new(
                     ErrorCode::LayoutFailed,
-                    format!("page draft node {} has no measured box", self.protocol(id)),
+                    format!(
+                        "page draft node {} has no measured box",
+                        self.graph.label(id)
+                    ),
                 ));
             };
             let stored = match layout_root_id {
@@ -74,8 +77,8 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
         if let Some(cached) = self.overflow_boxes.get(&id) {
             return Ok(cached.clone());
         }
-        let protocol = self.graph.protocol_id(id).to_owned();
-        let box_ = overflow_box(id, &protocol, &name, self.measurer, self.node_width)?;
+        let origin = self.graph.origin(id).clone();
+        let box_ = overflow_box(id, origin, &name, self.measurer, self.node_width)?;
         self.overflow_boxes.insert(id, box_.clone());
         Ok(box_)
     }
@@ -135,13 +138,9 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
     }
 }
 
-pub(super) fn investment_id_refs<'a>(ids: &[NodeId], boxes: &'a [NodeBox]) -> Vec<&'a str> {
+pub(super) fn investment_id_refs(ids: &[NodeId], boxes: &[NodeBox]) -> Vec<NodeId> {
     ids.iter()
-        .filter_map(|id| {
-            boxes
-                .iter()
-                .find(|box_| box_.id == *id)
-                .map(|box_| box_.protocol_id.as_str())
-        })
+        .copied()
+        .filter(|id| boxes.iter().any(|box_| box_.id == *id))
         .collect()
 }

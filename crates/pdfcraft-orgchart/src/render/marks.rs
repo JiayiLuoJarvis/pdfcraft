@@ -46,7 +46,7 @@ pub(super) fn draw_cues(
                 .layout
                 .nodes
                 .iter()
-                .find(|node| node.protocol_id == slot.anchor_id)
+                .find(|node| node.id == slot.anchor_id)
             {
                 let (from, to) = leader_segment(slot, anchor);
                 stroke_leader(
@@ -98,7 +98,7 @@ pub(super) fn draw_node(
 ) -> Result<(), Error> {
     let x = placed.x + origin_x;
     let y0 = placed.y + origin_y;
-    let dashed = node.is_overflow;
+    let dashed = node.origin.is_overflow();
     let shade = if node.is_company { COMPANY_SHADE } else { 1.0 };
     let byte = gray_byte(shade);
     fill_round(
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn a_side_leader_joins_facing_edge_midpoints() {
         let slot = crate::page::CueSlot {
-            anchor_id: "a".to_owned(),
+            anchor_id: crate::graph::NodeId::from_index(0),
             side: crate::captions::CueSide::Shareholder,
             x: 0.0,
             y: 10.0,
@@ -301,7 +301,6 @@ mod tests {
         };
         let anchor = crate::page::PlacedNode {
             id: crate::graph::NodeId::from_index(0),
-            protocol_id: "a".to_owned(),
             x: 40.0,
             y: 10.0,
             width: 20.0,

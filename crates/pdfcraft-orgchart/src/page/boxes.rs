@@ -7,8 +7,7 @@ use crate::content::LineKind;
 use crate::content::LogicalLine;
 use crate::error::{Error, ErrorCode};
 use crate::font::{wrap_text, Measurer};
-use crate::graph::NodeId;
-use crate::graph::OVERFLOW_ID_PREFIX;
+use crate::graph::{NodeId, NodeOrigin};
 use crate::units::{
     node_height_limit_mm, CONT_CUE_LINE_COUNT, CONT_CUE_LINE_GAP_MM, CONT_CUE_MIN_WIDTH_MM,
     CONT_CUE_PAD_MM, CONT_CUE_PAGE_DIGITS, CONT_CUE_TEXT_PT, DETAIL_FONT_PT, NAME_FONT_PT,
@@ -38,10 +37,8 @@ pub(crate) struct WrappedLine {
 pub(crate) struct NodeBox {
     /// Layout identity from the graph arena (request nodes or overflow).
     pub id: NodeId,
-    /// Caller id, or the synthetic `__overflow__:` / `__other__:` id.
-    pub protocol_id: String,
-    /// Dashed stroke. Set only for a layout overflow box.
-    pub is_overflow: bool,
+    /// Arena origin. An overflow box is drawn dashed.
+    pub origin: NodeOrigin,
     /// Box width in mm.
     pub width_mm: f64,
     /// Box height in mm.
@@ -58,8 +55,8 @@ pub(crate) struct NodeBox {
 pub(crate) struct InboxNode<'a> {
     /// Arena id.
     pub id: NodeId,
-    /// Protocol id for error messages and the box.
-    pub protocol_id: &'a str,
+    /// Arena origin, copied onto the box.
+    pub origin: NodeOrigin,
     /// Lines from [`crate::content::inbox_lines`].
     pub lines: &'a [LogicalLine],
     /// Gray fill. See [`crate::content::company_fill`].
@@ -101,15 +98,16 @@ pub(crate) fn build_node_boxes(
     nodes: &[InboxNode<'_>],
     measurer: &mut impl Measurer,
     node_width_mm: f64,
-    subject_id: &str,
+    subject: NodeId,
     printable_height_mm: f64,
 ) -> Result<Vec<NodeBox>, Error> {
     let limit = node_height_limit_mm(printable_height_mm);
     let mut boxes = Vec::with_capacity(nodes.len());
     for inbox in nodes {
-        let is_subject = inbox.protocol_id == subject_id;
+        let is_subject = inbox.id == subject;
         let width_mm = if is_subject {
-            (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::request::MAX_NODE_WIDTH_MM)
+            (node_width_mm * SUBJECT_WIDTH_FACTOR)
+                .min(crate::request::ChartStyle::MAX_NODE_WIDTH_MM)
         } else {
             node_width_mm
         };
@@ -138,14 +136,14 @@ pub(crate) fn build_node_boxes(
                 ErrorCode::NodeTooTall,
                 format!(
                     "node {} height_mm={height} exceeds max_node_height={limit}",
-                    inbox.protocol_id
+                    inbox.origin
                 ),
-            ));
+            )
+            .with_optional_subject(inbox.origin.error_subject()));
         }
         boxes.push(NodeBox {
             id: inbox.id,
-            protocol_id: inbox.protocol_id.to_owned(),
-            is_overflow: false,
+            origin: inbox.origin.clone(),
             width_mm,
             height_mm: height,
             lines,
@@ -163,7 +161,7 @@ pub(crate) fn build_node_boxes(
 /// Returns a measurer error.
 pub(crate) fn overflow_box(
     node_id: NodeId,
-    protocol_id: &str,
+    origin: NodeOrigin,
     name: &str,
     measurer: &mut impl Measurer,
     node_width_mm: f64,
@@ -185,8 +183,7 @@ pub(crate) fn overflow_box(
     let line_h = measurer.line_height_mm(NAME_FONT_PT);
     Ok(NodeBox {
         id: node_id,
-        protocol_id: protocol_id.to_owned(),
-        is_overflow: true,
+        origin,
         width_mm: node_width_mm,
         height_mm: (2.0 * PADDING_Y_MM
             + f64::from(u32::try_from(lines.len()).unwrap_or(u32::MAX)) * line_h)
@@ -210,7 +207,8 @@ pub(crate) fn promote_to_page_subject(
     node_width_mm: f64,
     measurer: &mut impl Measurer,
 ) -> Result<NodeBox, Error> {
-    let width_mm = (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::request::MAX_NODE_WIDTH_MM);
+    let width_mm =
+        (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::request::ChartStyle::MAX_NODE_WIDTH_MM);
     let max_content = width_mm - 2.0 * PADDING_X_MM;
     let segments = join_segments(&box_.lines);
     let mut lines = Vec::new();
@@ -227,8 +225,7 @@ pub(crate) fn promote_to_page_subject(
     }
     Ok(NodeBox {
         id: box_.id,
-        protocol_id: box_.protocol_id.clone(),
-        is_overflow: box_.is_overflow,
+        origin: box_.origin.clone(),
         width_mm,
         height_mm: height.max(min_node_height_mm(true, measurer)),
         lines,
@@ -281,7 +278,7 @@ pub(crate) fn cont_cue_height_mm(measurer: &mut impl Measurer) -> f64 {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CueAnchor {
     /// Node the cue points at.
-    pub anchor_id: String,
+    pub anchor_id: NodeId,
     /// Shareholder or investment side.
     pub side: CueSide,
     /// Slot width in mm.
@@ -290,14 +287,14 @@ pub(crate) struct CueAnchor {
     pub height_mm: f64,
 }
 
-/// Measure cue slots. An overflow id cannot be an anchor.
+/// Measure cue slots. An overflow box cannot be an anchor.
 ///
 /// # Errors
 ///
-/// Returns [`ErrorCode::LayoutFailed`] when an anchor is missing or is an overflow id,
+/// Returns [`ErrorCode::LayoutFailed`] when an anchor is missing or is an overflow box,
 /// and measurer errors from the cue text.
 pub(crate) fn sized_cue_anchors(
-    anchors: &[(&str, CueSide)],
+    anchors: &[(NodeId, CueSide)],
     boxes: &[NodeBox],
     measurer: &mut impl Measurer,
 ) -> Result<Vec<CueAnchor>, Error> {
@@ -310,18 +307,21 @@ pub(crate) fn sized_cue_anchors(
         + CONT_CUE_PAGE_DIGITS * digit;
     let mut sized = Vec::with_capacity(anchors.len());
     for &(anchor_id, side) in anchors {
-        if anchor_id.starts_with(OVERFLOW_ID_PREFIX) {
+        let Some(box_) = boxes.iter().find(|box_| box_.id == anchor_id) else {
             return Err(Error::new(
                 ErrorCode::LayoutFailed,
-                format!("continuation cue cannot anchor an overflow id: {anchor_id}"),
-            ));
-        }
-        let Some(box_) = boxes.iter().find(|box_| box_.protocol_id == anchor_id) else {
-            return Err(Error::new(
-                ErrorCode::LayoutFailed,
-                format!("continuation cue anchor is not on the page: {anchor_id}"),
+                format!("continuation cue anchor is not on the page: node #{anchor_id}"),
             ));
         };
+        if box_.origin.is_overflow() {
+            return Err(Error::new(
+                ErrorCode::LayoutFailed,
+                format!(
+                    "continuation cue cannot anchor an overflow box: {}",
+                    box_.origin
+                ),
+            ));
+        }
         let see = cont_cue_see(side);
         let text = measurer
             .string_width_mm(see, CONT_CUE_TEXT_PT)?
@@ -336,7 +336,7 @@ pub(crate) fn sized_cue_anchors(
             ));
         }
         sized.push(CueAnchor {
-            anchor_id: anchor_id.to_owned(),
+            anchor_id,
             side,
             width_mm: width,
             height_mm: height,

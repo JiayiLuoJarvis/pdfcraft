@@ -1,8 +1,10 @@
 //! Stable protocol codes and the error that carries one.
 
+use std::error::Error as StdError;
 use std::fmt;
+use std::sync::Arc;
 
-/// Why a chart request was rejected.
+/// Why a chart request or a draw was rejected.
 ///
 /// [`ErrorCode::as_str`] is the stable value. It matches Python `EquityErrorCode.value`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,7 +23,7 @@ pub enum ErrorCode {
     MissingGlyph,
     /// A node box is taller than the portrait limit.
     NodeTooTall,
-    /// Layout hit a broken internal invariant.
+    /// Layout hit a broken internal invariant, or a page that cannot fit.
     LayoutFailed,
 }
 
@@ -48,16 +50,22 @@ impl fmt::Display for ErrorCode {
     }
 }
 
-/// A chart-protocol failure.
+/// A chart failure.
 ///
-/// Match on [`code`](Self::code). [`message`](Self::message) is detail for logs.
-/// Its wording is not a stable contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Match on [`code`](Self::code). [`message`](Self::message) is for logs.
+/// Its wording is not a stable contract. [`subject`](Self::subject) names the
+/// request value involved, when one exists. A parser or writer failure stays
+/// on [`StdError::source`] and is not copied into the message.
+///
+/// There is no [`PartialEq`]. [`source`](StdError::source) cannot be compared.
+#[derive(Debug, Clone)]
 pub struct Error {
-    /// Stable protocol code.
-    pub code: ErrorCode,
-    /// Detail for logs. Wording can change between releases.
-    pub message: String,
+    code: ErrorCode,
+    message: String,
+    subject: Option<ErrorSubject>,
+    // `Arc` keeps `Error: Clone`. `Box<dyn StdError>` is not `Clone`, and a
+    // borrow would tie the error to the parser's lifetime.
+    source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 impl Error {
@@ -65,7 +73,48 @@ impl Error {
         Self {
             code,
             message: message.into(),
+            subject: None,
+            source: None,
         }
+    }
+
+    pub(crate) fn with_subject(mut self, subject: ErrorSubject) -> Self {
+        self.subject = Some(subject);
+        self
+    }
+
+    pub(crate) fn with_optional_subject(mut self, subject: Option<ErrorSubject>) -> Self {
+        self.subject = subject;
+        self
+    }
+
+    pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
+        self.source = Some(Arc::new(source));
+        self
+    }
+
+    /// Draw-path protocol failures are internal once [`crate::Chart::new`] has passed.
+    pub(crate) fn into_layout_failed(mut self) -> Self {
+        self.code = ErrorCode::LayoutFailed;
+        self
+    }
+
+    /// Stable protocol code.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        self.code
+    }
+
+    /// Detail for logs. Wording can change between releases.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The request value this failure is about, when the check names one.
+    #[must_use]
+    pub fn subject(&self) -> Option<&ErrorSubject> {
+        self.subject.as_ref()
     }
 }
 
@@ -75,7 +124,43 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn StdError + 'static))
+    }
+}
+
+/// Which request value a failure refers to.
+///
+/// Folded and overflow nodes are not listed. The message describes them.
+/// A synthetic edge uses [`ErrorSubject::Node`] for its caller-authored end,
+/// or `None` when both ends are synthetic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ErrorSubject {
+    /// `index` is the position in [`ChartRequest::nodes`](crate::ChartRequest::nodes).
+    Node {
+        /// Position in the request node list.
+        index: usize,
+        /// Caller id, as stored.
+        id: String,
+    },
+    /// `index` is the position in [`ChartRequest::edges`](crate::ChartRequest::edges).
+    Edge {
+        /// Position in the request edge list.
+        index: usize,
+        /// Holder id, as stored.
+        holder: String,
+        /// Held id, as stored.
+        held: String,
+    },
+    /// A request field, such as `"subject_id"`, `"max_nodes"`, `"top_n"`, or `"style.margin_mm"`.
+    Field(&'static str),
+    /// A character with no glyph in the font.
+    Character(char),
+}
 
 #[cfg(test)]
 mod tests {

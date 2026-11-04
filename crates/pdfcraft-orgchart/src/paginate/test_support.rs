@@ -1,10 +1,10 @@
 //! Shared fixtures for the pagination tests: fake measurer, fake engine, and request builders.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::content::LineKind;
 use crate::font::{FallbackMeasurer, Measurer};
-use crate::graph::NodeId;
+use crate::graph::{NodeId, NodeOrigin};
 use crate::layout::{FamilyRowMetrics, LayoutEngine, LayoutInput};
 use crate::page::{EdgeRef, LayoutResult, NodeBox, PageSpec, PlacedNode, WrappedLine};
 use crate::paginate::paginate_request_with as paginate_with;
@@ -50,7 +50,6 @@ impl LayoutEngine for FakeEngine {
                 let height = box_.height_mm.max(1.0);
                 nodes.push(PlacedNode {
                     id: box_.id,
-                    protocol_id: box_.protocol_id.clone(),
                     x,
                     y: 0.0,
                     width: box_.width_mm,
@@ -106,8 +105,7 @@ impl LayoutEngine for FakeEngine {
 pub(super) fn plain_box(index: usize, id: &str, name: &str, subject: bool) -> NodeBox {
     NodeBox {
         id: NodeId::from_index(index),
-        protocol_id: id.to_owned(),
-        is_overflow: false,
+        origin: caller(index, id),
         width_mm: 38.0,
         height_mm: 12.0,
         lines: vec![WrappedLine {
@@ -156,16 +154,72 @@ pub(super) fn chain(ids: &[&str], investment: bool) -> ChartRequest {
     ChartRequest::new("root", nodes, edges)
 }
 
+pub(super) fn caller(index: usize, id: &str) -> NodeOrigin {
+    NodeOrigin::Caller {
+        index,
+        id: id.to_owned(),
+        stands_in_for: None,
+    }
+}
+
+/// `NodeId` of request node `id`. Validation assigns ids in request order.
+pub(super) fn node_id(request: &ChartRequest, id: &str) -> NodeId {
+    let index = request
+        .nodes
+        .iter()
+        .position(|node| node.id == id)
+        .expect(id);
+    NodeId::from_index(index)
+}
+
+/// Box labels per page: caller ids, and `__overflow__:{subject}:{first}` for overflow boxes.
 pub(super) fn id_sets(pages: &[PageSpec]) -> Vec<BTreeSet<String>> {
+    let names = caller_names(pages);
     pages
         .iter()
         .map(|page| {
             page.boxes
                 .iter()
-                .map(|box_| box_.protocol_id.clone())
+                .map(|box_| label(&box_.origin, &names))
                 .collect()
         })
         .collect()
+}
+
+/// The box on `pages[page]` whose [`id_sets`] label is `wanted`.
+pub(super) fn labeled_box<'a>(pages: &'a [PageSpec], page: usize, wanted: &str) -> &'a NodeBox {
+    let labels = id_sets(pages);
+    assert!(labels[page].contains(wanted), "{wanted} not on page {page}");
+    let names = caller_names(pages);
+    pages[page]
+        .boxes
+        .iter()
+        .find(|box_| label(&box_.origin, &names) == wanted)
+        .expect(wanted)
+}
+
+fn caller_names(pages: &[PageSpec]) -> HashMap<NodeId, String> {
+    pages
+        .iter()
+        .flat_map(|spec| &spec.boxes)
+        .filter_map(|box_| match &box_.origin {
+            NodeOrigin::Caller { id, .. } => Some((box_.id, id.clone())),
+            NodeOrigin::FoldedHolders { .. } | NodeOrigin::Overflow { .. } => None,
+        })
+        .collect()
+}
+
+pub(super) fn label(origin: &NodeOrigin, names: &HashMap<NodeId, String>) -> String {
+    let name = |id: &NodeId| names.get(id).cloned().unwrap_or_else(|| format!("#{id}"));
+    match origin {
+        NodeOrigin::Caller { id, .. } => id.clone(),
+        NodeOrigin::FoldedHolders { parent, .. } => format!("__other__:{}", name(parent)),
+        NodeOrigin::Overflow {
+            subject,
+            first_moved,
+            ..
+        } => format!("__overflow__:{}:{}", name(subject), name(first_moved)),
+    }
 }
 
 pub(super) fn set_of(ids: &[&str]) -> BTreeSet<String> {

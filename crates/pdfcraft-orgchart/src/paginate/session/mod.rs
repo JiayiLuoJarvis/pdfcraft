@@ -84,7 +84,6 @@ struct Session<'a, E: LayoutEngine, M: Measurer> {
     node_order: Vec<NodeId>,
     engine: &'a E,
     measurer: &'a mut M,
-    subject_protocol: String,
     subject_node: NodeId,
     subject_name: String,
     has_investments: bool,
@@ -168,7 +167,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
         measurer: &'a mut M,
     ) -> Result<Self, Error> {
         let subject_node = graph.subject;
-        let subject_protocol = graph.subject_protocol_id.clone();
         let subject_name = graph.node_name(subject_node).to_owned();
         let has_investments = !graph.outgoing_targets(subject_node).is_empty();
         let node_width = boxes
@@ -189,7 +187,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             node_order,
             engine,
             measurer,
-            subject_protocol,
             subject_node,
             subject_name: subject_name.clone(),
             has_investments,
@@ -250,7 +247,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
                 target_index: offset,
                 direct_count: count,
                 side: CueSide::Investment,
-                anchor_id: self.subject_protocol.clone(),
+                anchor_id: self.subject_node,
             });
         }
         finalize_pages(&pages, &cues, &links, self.measurer)
@@ -299,7 +296,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
                     target_index: target,
                     direct_count: 1,
                     side: side.cue_side(),
-                    anchor_id: self.protocol(cut.task.subject_id).to_owned(),
+                    anchor_id: cut.task.subject_id,
                 });
             }
             if let Some(overflow) = &page.overflow {
@@ -307,7 +304,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
                 links.push(PendingLink {
                     source_index,
                     target_index: target,
-                    node_id: overflow.node.protocol_id(|id| self.protocol(id).to_owned()),
+                    node_id: self.overflow_for(&overflow.node, side)?.id,
                 });
             }
         }
@@ -317,10 +314,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             links,
             direct_ids: direct_ids.to_vec(),
         })
-    }
-
-    fn protocol(&self, id: NodeId) -> &str {
-        self.graph.protocol_id(id)
     }
 
     fn search_page_to_spec(
@@ -379,7 +372,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
         let mut anchors = Vec::new();
         if let Some(side) = key.side {
             for stub_id in &draft.stub_ids {
-                anchors.push((self.protocol(*stub_id).to_owned(), side.cue_side()));
+                anchors.push((*stub_id, side.cue_side()));
             }
             if let Some(overflow) = &draft.overflow {
                 let box_ = self.overflow_for(overflow, side)?;
@@ -390,10 +383,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             }
         }
         if key.overview_cue {
-            anchors.push((
-                self.protocol(draft.subject_id).to_owned(),
-                CueSide::Investment,
-            ));
+            anchors.push((draft.subject_id, CueSide::Investment));
         }
         Ok(PageContent {
             boxes,
@@ -471,7 +461,7 @@ struct PageContent {
     boxes: HashMap<NodeId, NodeBox>,
     edges: Vec<EdgeRef>,
     order: Vec<NodeId>,
-    anchors: Vec<(String, CueSide)>,
+    anchors: Vec<(NodeId, CueSide)>,
 }
 
 #[derive(Clone, Copy)]

@@ -1,7 +1,7 @@
 //! Page chrome copy. Simplified Chinese. The footer keeps the character `頁`.
 //!
-//! Page headers do not read `ChartOptions::title`. That field is only for
-//! [`crate::document_title`].
+//! Page headers do not read [`crate::Chart::title`]. That string is for the
+//! caller to store as PDF document info.
 
 /// Which side a continuation cue belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,13 +38,10 @@ pub(crate) fn continuation_title(index: usize, subject_name: &str) -> String {
     role_title(&format!("续页{index}"), subject_name)
 }
 
-/// Document-info title. `None` becomes `{subject_name}股权架构图`. A blank string stays blank.
+/// Document-info title: `{subject_name}股权架构图`.
 #[must_use]
-pub(crate) fn main_title(subject_name: &str, options_title: Option<&str>) -> String {
-    match options_title {
-        Some(title) => title.to_owned(),
-        None => format!("{subject_name}股权架构图"),
-    }
+pub(crate) fn main_title(subject_name: &str) -> String {
+    format!("{subject_name}股权架构图")
 }
 
 /// Cut-page main title.

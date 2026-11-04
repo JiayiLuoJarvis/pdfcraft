@@ -9,11 +9,48 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Breaking
+
+- Compile with `Chart::new(request)?` and draw with `chart.to_pdf(&font)?`.
+  `validate_request`, `generate_pdf`, and `document_title` are gone.
+  `chart.title()` is `{subject name}股权架构图`. A caller who needs another
+  title builds that string itself.
+- `Font::new` and `Font::from_shared` replace `FontBytes` and return `Result`.
+  They parse the face. `Font` is not `PartialEq`. `Debug` prints the byte
+  length and units per em.
+- `ChartStyle { node_width_mm, margin_mm }` replaces `ChartOptions`. Both
+  fields are `f64`. `Default` is 38 mm and 8 mm. `top_n: Option<NonZeroUsize>`
+  and `max_nodes: usize` sit on `ChartRequest`. `None` does not fold. There is
+  no `ChartRequest::default`.
+- `Edge { holder, held, ratio }` replaces `from_id` and `to_id`.
+  `Node.paid_in: Option<PaidIn>` replaces `paid_in_amount` and `currency`.
+  A folded stand-in sets `folded_holders_of` to the parent id.
+- Caps are associated constants: `ChartRequest::MAX_NODES`,
+  `ChartStyle::MIN_NODE_WIDTH_MM`, `ChartStyle::MAX_NODE_WIDTH_MM`,
+  `ChartStyle::MAX_MARGIN_MM`.
+- `Error` fields are private. Read them with `code()`, `message()`, and
+  `subject()`. `Error` is not `PartialEq`. Compare `code()` and `subject()`.
+- `ErrorSubject` names the node, edge, field, or character a failure is about.
+  `std::error::Error::source` carries a font parser or PDF writer error.
+  That text is not copied into `message()`.
+
+### Changed
+
+- `Chart::new` checks the request, folds, then checks the folded chart. A fold
+  that passes `max_nodes` or leaves two layout parents fails there.
+- A node id may start with `__overflow__:`. An id `__other__:{parent}` is an
+  ordinary holder unless `folded_holders_of` is set.
+- Font parse errors come from `Font::new`. krilla still reports `FONT_ERROR`
+  from `to_pdf`.
+- A request that used to draw, rewritten as above, keeps the same extractable
+  text, page count, page roles, and annex numbers for the same font. Folding
+  stays idempotent when the stand-in is written back with `folded_holders_of`.
+
 ### Fixed
 
-- `generate_pdf` on the same request now returns identical PDF bytes. Placed
-  nodes are drawn in `NodeId` order, so `HashMap` iteration no longer changes
-  the content stream.
+- `to_pdf` on the same `Chart` returns identical PDF bytes. Placed nodes are
+  drawn in `NodeId` order, so `HashMap` iteration no longer changes the
+  content stream.
 
 ## [0.2.0] - 2026-11-03
 

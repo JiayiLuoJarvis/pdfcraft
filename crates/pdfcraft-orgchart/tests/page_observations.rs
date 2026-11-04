@@ -11,23 +11,22 @@
 
 use std::process::Command;
 
-use pdfcraft_orgchart::{
-    generate_pdf, ChartOptions, ChartRequest, Edge, FontBytes, Node, NodeType,
-};
+use std::num::NonZeroUsize;
 
-fn hc_font() -> Option<FontBytes> {
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node, NodeType};
+
+fn hc_font() -> Option<Font> {
     let path = std::env::var_os("PDFCRAFT_ORGCHART_FONT")
         .or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
-    Some(FontBytes::new(
-        std::fs::read(path).expect("read orgchart font"),
-    ))
+    Some(Font::new(std::fs::read(path).expect("read orgchart font")).expect("font"))
 }
 
 fn pdf_of(request: &ChartRequest) -> Option<Vec<u8>> {
     let font = hc_font()?;
-    match generate_pdf(request, &font) {
+    let chart = Chart::new(request.clone()).expect("chart");
+    match chart.to_pdf(&font) {
         Ok(pdf) => Some(pdf),
-        Err(error) if error.code == pdfcraft_orgchart::ErrorCode::MissingGlyph => None,
+        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => None,
         Err(error) => panic!("pdf: {error}"),
     }
 }
@@ -235,10 +234,7 @@ fn a_folded_holder_name_appears_and_the_dropped_names_do_not() {
             holding("s4", "root", 10.0),
         ],
     );
-    request.options = ChartOptions {
-        top_n: Some(2),
-        ..ChartOptions::default()
-    };
+    request.top_n = NonZeroUsize::new(2);
     let Some(pdf) = pdf_of(&request) else {
         return;
     };

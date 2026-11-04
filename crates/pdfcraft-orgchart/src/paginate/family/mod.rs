@@ -9,7 +9,7 @@ mod solve;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::error::{Error, ErrorCode};
-use crate::graph::{overflow_node_id, NodeId};
+use crate::graph::NodeId;
 use crate::units::PageGeometry;
 
 const MAX_SEARCH_EXPANSIONS: usize = 8192;
@@ -78,12 +78,6 @@ pub(crate) struct OverflowNode {
     pub(crate) subject_id: NodeId,
     pub(crate) first_moved_id: NodeId,
     pub(crate) moved_count: usize,
-}
-
-impl OverflowNode {
-    pub(crate) fn protocol_id(&self, protocol: impl Fn(NodeId) -> String) -> String {
-        overflow_node_id(&protocol(self.subject_id), &protocol(self.first_moved_id))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

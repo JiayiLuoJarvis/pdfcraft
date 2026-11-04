@@ -327,13 +327,8 @@ fn route_multi_in(
         spine_x = Some(caches.multi_in_spine_x[&edge.to_id]);
     }
     let path_to_bus = if column_stack {
-        let spine_x = spine_x.ok_or_else(|| {
-            Error::new(
-                ErrorCode::LayoutFailed,
-                "column_stack requires a shared spine_x",
-            )
-        })?;
-        route_side_to_spine(src, spine_x, bus_y, trunk_x)
+        let shared_spine = caches.multi_in_spine_x[&edge.to_id];
+        route_side_to_spine(src, shared_spine, bus_y, trunk_x)
     } else {
         let use_spine = multi_row && src.y < bottom_row_y - 0.01;
         let row_bottom = row_bottoms[&src.y.to_bits()];

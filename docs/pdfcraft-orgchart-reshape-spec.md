@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-11-04 |
-| 状态 | **决定草案**。D3 至 D5、D7 经 2026-11-04 对话选择题确认（D3、D7 按同日审查修订，`folded_holders_of` 的字段名与两条新校验同日确认）；D12、D14 于同日确认；PR 1 拆分时的可见性规则（§8.2 末段）与 `paginate/session/` 目录于同日确认；其余在维护者"允许完全重构""按建议撰写"的授权下拟定。提案书 §13 已起草（草案），确认后本文定稿，见 §11 |
+| 状态 | **产品条已定稿**（提案书 §13 于 2026-11-04 确认）。D3 至 D5、D7 经 2026-11-04 对话选择题确认（D3、D7 按同日审查修订，`folded_holders_of` 的字段名与两条新校验同日确认）；D12、D14 于同日确认；PR 1 拆分时的可见性规则（§8.2 末段）与 `paginate/session/` 目录于同日确认；其余在维护者"允许完全重构""按建议撰写"的授权下拟定 |
 | 范围 | 只改 `crates/pdfcraft-orgchart`：公共面、内部标识、模块与文件划分、错误面，以及 PR 0 的绘制顺序修复（DET-1）。算法、文案、常量、错误码字符串不改 |
 | 版本 | PR 3 合入后发 `pdfcraft-orgchart 0.3.0`（crates.io 当前 `0.2.0`）。全部 breaking 改动在 PR 3 一个 PR 内完成（VER-3） |
 | 相关 | [`pdfcraft-orgchart-spec.md`](pdfcraft-orgchart-spec.md)（行为合同）；[`pdfcraft-orgchart-structure-spec.md`](pdfcraft-orgchart-structure-spec.md)；[`pdfcraft-pdf-shape-refactor-spec.md`](pdfcraft-pdf-shape-refactor-spec.md)（同层先例）；[`rust-engineering-standard.md`](rust-engineering-standard.md) API-2、API-8、API-9、API-11、API-12、ARC-2、ARC-3、ERR-2、ERR-3、ERR-7、PAN-3、PAN-4、PAN-8、DET-1、TRK-2、TRK-4、TST-1、VER-1 至 VER-3、TOOL-5 |
@@ -43,7 +43,7 @@
 | D5 | 删除 `ChartOptions`。新增 `ChartStyle { node_width_mm: f64, margin_mm: f64 }`，`Default` 为 38 与 8 |
 | D6 | `ChartRequest` 上平放 `top_n: Option<NonZeroUsize>` 与 `max_nodes: usize`（默认 `ChartRequest::MAX_NODES`） |
 | D7 | 不再保留 id 前缀规则，不拒绝 `__overflow__:`，`__other__:` 不再有特殊含义。折叠占位改由 `Node::folded_holders_of: Option<String>` 声明，折叠保持幂等（行为规格 §5），见 §4.1 与 §6.2 |
-| D8 | `FontBytes` 改为 `Font`。`Font::new` 与 `Font::from_shared` 当场解析字体；krilla 侧的字体或序列化失败仍在 `to_pdf` 报 `FONT_ERROR`。前提是提案书 §13 已加入 |
+| D8 | `FontBytes` 改为 `Font`。`Font::new` 与 `Font::from_shared` 当场解析字体；krilla 侧的字体或序列化失败仍在 `to_pdf` 报 `FONT_ERROR`。提案书 §13 已于 2026-11-04 确认 |
 | D9 | `Edge { holder, held, ratio }` 取代 `from_id` 与 `to_id` |
 | D10 | `Node` 的 `paid_in_amount` 与 `currency` 合成 `paid_in: Option<PaidIn>`，`PaidIn { amount: String, currency: Option<String> }` |
 | D11 | 上限常量改为关联常量：`ChartRequest::MAX_NODES`、`ChartStyle::MIN_NODE_WIDTH_MM`、`ChartStyle::MAX_NODE_WIDTH_MM`、`ChartStyle::MAX_MARGIN_MM`。crate 根不再导出常量 |
@@ -189,7 +189,7 @@ impl fmt::Debug for Font { /* byte length and units per em, never the bytes */ }
 ```
 
 - `Font::new` 执行今天 `FontMetrics::open` 的全部检查（`measure.rs:82` 起），包括：拒绝 `ttcf`、拒绝空字节、解析 face、读取 `head` 与 `hhea`、upem 必须有限且大于 0、ascent 大于 0、descent 小于 0。
-- `Font::new` 之后，`to_pdf` 仍可能报 `FONT_ERROR`：krilla 拒绝字体（`render.rs:44-45`）、`document.finish` 失败（`render.rs:49-53`）。字形没有 advance（`measure.rs:148-152`）在 PR 3 分类，能由 `Font::new` 预检消掉就消掉，否则保留。
+- `Font::new` 之后，`to_pdf` 仍可能报 `FONT_ERROR`：krilla 拒绝字体（`render.rs:44-45`）、`document.finish` 失败（`render.rs:49-53`）。字形没有 advance（今天在 `font/mod.rs:159`）仍在 `to_pdf` 报 `FONT_ERROR`。`Font::new` 只做 `FontMetrics::open` 已有的检查，不新增拒绝条件（提案书 §13）。
 - 字形缓存不放进 `Font`。每次 `to_pdf` 新建一份缓存，所以 `Font` 不可变，可以跨图、跨线程共享。
 - `Debug` 手写，只输出字节长度和 upem，以 `finish_non_exhaustive()` 结束，避免把整份字体字节打进日志，也满足 `clippy::missing_fields_in_debug`。
 - `Font` 不实现 `PartialEq`/`Eq`。今天 `FontBytes` 实现了，所以这是 breaking，列入 §4.5。
@@ -231,7 +231,7 @@ pub enum ErrorSubject {
 - `Display` 打印 `message`，遵守 ERR-3。`message` 的措辞不是稳定合同。有 `source()` 时，`message` 不再拼接底层错误的文本（今天 `measure.rs:93,99,231` 与 `render.rs:52` 拼了）。
 - `source()` 返回字体解析的底层错误，用 `Arc<dyn Error + Send + Sync>` 保存（API-12，登记文字从 `FontBytes.data` 改为本条）。公共签名里不出现 skrifa 的类型（API-11）。
 - `Error` 不实现 `PartialEq`/`Eq`（`source` 无法比较）。今天实现了（`error.rs:55`），列入 §4.5。
-- `subject` 只指向调用方写下的东西。折叠占位和 overflow 合成节点不作 `subject`，`message` 用文字描述它们，例如 `folded holders of {parent}`。
+- `Node` 与 `Edge` 只指向调用方写下的节点和边。`Character` 是字体里缺的字符，可能来自库自带的文案（页眉、`其他股东(k家)`）。折叠占位和 overflow 合成节点不作 `subject`，`message` 用文字描述它们，例如 `folded holders of {parent}`。
 - `Edge { index }` 取自 `EdgeRec::caller_index`（§6.1）。折叠合成的边没有原始下标，涉及它的错误改报它在调用方一端的节点，记为 `Node`，两端都是合成节点时不给 `subject`。
 - `Error`、`Chart`、`Font` 都加 `Send + Sync` 的编译期断言测试（ERR-2）。
 
@@ -250,7 +250,7 @@ pub enum ErrorSubject {
 | `subject_id` 为空白（`graph.rs:192`） | `Field("subject_id")` |
 | 主体不在节点里（`graph.rs:209`） | `Field("subject_id")` |
 | 节点数超过 `max_nodes`，折叠前或折叠后（`graph.rs:199`） | `Field("nodes")` |
-| `max_nodes` 超过上限、`top_n` 不小于 `max_nodes`（`graph.rs:246,255`） | `Field("max_nodes")`、`Field("top_n")` |
+| `max_nodes` 超过上限、`top_n > max_nodes`（位置今在 `graph/check.rs` 的 `option_bounds`；`top_n == max_nodes` 合法，与 `0.2.0` / 行为规格 `0..=cap` 一致） | `Field("max_nodes")`、`Field("top_n")` |
 | `margin_mm`、`node_width_mm` 越界（`graph.rs:263,273`） | `Field("style.margin_mm")`、`Field("style.node_width_mm")` |
 | 节点 id 或名称为空白、id 重复（`graph.rs:288,292`） | `Node`，重复时取后出现的一个 |
 | `folded_holders_of` 悬空或重复（§4.1 新规则） | `Node` |
@@ -267,6 +267,10 @@ pub enum ErrorSubject {
 | 节点过高 | `Node`；overflow 节点不给 |
 
 不在表中的两处：`graph.rs:298` 的 `__overflow__:` 拒绝在 PR 3 随 D7 删除；`display.rs:315` `hug_for(Subject)` 的 `INVALID_PROTOCOL` 是内部不可达分支，PR 3 由调用结构保证只为非主体生成比例标签，删除该分支。表中"取最小下标""取后出现的一个"这类选择，用 §9 的测试锁住。
+
+**已裁决（2026-11-04）。** `top_n == max_nodes` 合法。与 `0.2.0` 代码（`top_n > max_nodes` 才拒）及行为规格 §4 的 `0..=cap` 一致。错误文案在 PR 3 改为与判断一致（例如 `must be in 0..={max_nodes}`），不算行为变化。
+
+同次核对中的非阻塞备注（实现时按既有规则处理）：§4.4 表内旧行号已随 PR 1 挪到 `graph/check.rs`、`graph/fold.rs`、`content/lines.rs`；`detect_cycle` 只有节点对、合成边的 `subject` 按 §4.4 退回规则；`fold` 的 `remap` 失败与 `layout_parent_optional` 的吞错按 §6.4 / D13 归类。
 
 ### 4.5 调用方迁移（写进 CHANGELOG `Breaking`）
 
@@ -358,7 +362,7 @@ pub(crate) struct EdgeRec {
 | `page.rs:42` `PlacedNode` | `protocol_id` | 删除 |
 | `page.rs:70` `CueSlot`、`page.rs:229` `ContCue` | `anchor_id` | `NodeId` |
 | `page.rs:236` `NodePageLink` | `node_id` | `NodeId` |
-| `page.rs:199-204` `PreferredParent`、`display.rs` `ParentEdge` | `from_id`、`to_id` | 复用 `EdgeRef`（`page.rs:13-18`，字段 `from_id`、`to_id` 已是 `NodeId`） |
+| `page.rs:199-204` `PreferredParent`、`display.rs` `ParentEdge` | `from_id`、`to_id` | 复用同一 `EdgeRef`（字段 `from_id`、`to_id` 为 `NodeId`）。类型定义在 `content`（`page` 已依赖 `content`）；若放在 `page` 再被 `content` 引用会形成环，与 §8.1 DAG 冲突。`page` 可重导出 |
 | `family.rs:80` `OverflowNode::protocol_id` | 拼接出的 id | 删除 |
 | `layout/place.rs:702,736` 构造 `PlacedNode` | `protocol_id` | 随 `PlacedNode` 删除 |
 | `render.rs:88,103,126,280,292`、`ratios.rs:53,152` | 按字符串查框或比例 | 按 `NodeId` 查 |
@@ -383,6 +387,8 @@ pub(crate) struct EdgeRec {
 `graph.rs:113` `layout_parent_optional` 用 `unwrap_or_default` 吞掉错误，同样在 PR 3 归类：要么由 D3 证明不会出错、改用类型表达，要么把错误传上去。
 
 不新增生产 `expect`（D13）。
+
+**实现核对（2026-11-04，PR 3 错误面）。** 换键之后，页草稿、测量框、放置节点、overflow 链接仍是分开的集合，缺框和「续页锚点是 overflow」仍可表示，这些检查继续报 `LAYOUT_FAILED`，不改回 panic。`hug_for(Subject)` 的 `INVALID_PROTOCOL` 分支已删除，比例标签只对股东和投资生成。出图路径上 `ratio_source` 若仍报协议错误，改记 `LAYOUT_FAILED`。`fold` 的 `remap` 失败改记 `LAYOUT_FAILED`。`layout_parent_optional` 只被 `cut_caption` 调用，它把歧义父边吞成「没有父边」。该函数已删除。`cut_caption` 改走 `layout_parent_ends`，协议错误在出图路径上改记 `LAYOUT_FAILED`。`column_stack` 的 spine 与 `direct_layout.is_some()` 之后的缺布局分支由同一段控制流保证，对应的 `LAYOUT_FAILED` 已删除。
 
 ## 7. 不动
 
@@ -504,7 +510,7 @@ lib       → chart, error, font, request                  只做重导出
 | (0) | `layout/mod.rs:110` 的 `laid_out.into_values().collect()` 遍历 `HashMap`（`layout/place.rs:678`），绘制顺序不确定，同一请求两次出图字节不同（DET-1）。改为收集后按 `NodeId` 排序（`sort_unstable_by_key`）。几何、文本、像素不变。2026-11-04 复核时在临时 worktree 做过正反对照：48 层多页请求，改前两次出图字节不同，改后相同。可以先于本文其余部分合入 | 不升版本。`Unreleased` 写 `Fixed`，随 `0.3.0` 发布 |
 | (1) | 按 §8 搬文件、拆文件、挪测试。在 `docs/module-dependency.md` 补 orgchart 的模块图。不改任何逻辑；可见性只按 §8.2 末段调整 | 不变，不记 |
 | (2) | §6.1 到 §6.3：arena 身份、在 arena 上折叠、页面层换键、`NodeId(usize)`、`EdgeRec::caller_index`。三个公共函数的行为原样保留，包括"校验通过、出图失败"的分裂。前缀规则（`__overflow__:` 拒绝、`__other__:{p}` 的排名排除与冲突）改为在请求边界把字符串翻译成 `NodeOrigin`，arena 内部不再比较字符串；字面量到 PR 3 才删。翻译在完整的节点索引建好之后进行，以 `prepare.rs:57-64,106-111` 的排名排除与冲突行为为准；`graph.rs:306-307` 边插入边查找、要求父节点先出现的做法是实现细节，不作为合同 | 不变，不记 |
-| (3) | §4.1 到 §4.3 与 §5：`Chart`、`Font`、`ChartStyle`、`Edge` 与 `Node` 改形状（含 `folded_holders_of`）、关联常量、D3、D7。按 D14 在工程规范 API-9 与 disposition 登记例外，API-12 的登记文字从 `FontBytes.data` 改为 `Font`。同步示例、crate 文档、`docs/guide.md`、`tests/`。版本号同步两份 README（crate `README.md` 的安装片段与根 `README.md:64` 的状态行，`scripts/check_readme_identity.py` 是门禁），以及 `AGENTS.md:17`、提案书第 661 行。`AGENTS.md:83` 的 `FontBytes` 改为 `Font`。同一 PR 内另做 §4.4 与 §6.4：`Error` 字段私有、`ErrorSubject`、`source()`、ERR-3 去重复文本、`LAYOUT_FAILED` 分类。**开工前提案书 §13 已确认（§11）** | 升到 `0.3.0`。写 `Breaking`（§4.5，含访问器、`Error` 不再可比较）和 `Changed`（§5）。合入后可发 `0.3.0` |
+| (3) | §4.1 到 §4.3 与 §5：`Chart`、`Font`、`ChartStyle`、`Edge` 与 `Node` 改形状（含 `folded_holders_of`）、关联常量、D3、D7。按 D14 在工程规范 API-9 与 disposition 登记例外，API-12 的登记文字从 `FontBytes.data` 改为 `Font`。同步示例、crate 文档、`docs/guide.md`、`tests/`。版本号同步两份 README（crate `README.md` 的安装片段与根 `README.md:64` 的状态行，`scripts/check_readme_identity.py` 是门禁），以及 `AGENTS.md:17`、提案书 §9 的版本行（今天第 679 行）。`AGENTS.md:83` 的 `FontBytes` 改为 `Font`。同一 PR 内另做 §4.4 与 §6.4：`Error` 字段私有、`ErrorSubject`、`source()`、ERR-3 去重复文本、`LAYOUT_FAILED` 分类。**开工前提案书 §13 已确认（§11）** | 升到 `0.3.0`。写 `Breaking`（§4.5，含访问器、`Error` 不再可比较）和 `Changed`（§5）。合入后可发 `0.3.0` |
 | (4) | 文档终态：行为规格 §2、§3、§4、§5、§6、§7、§9.1、§10.4（overflow id 不再是字符串）、§13、§14；结构规格 §1、§2、§3、§4、§9；`workspace-crates-spec.md` 第 44 行；工程规范 TRK-2 与 TRK-4 的 orgchart 反例、ERR-1 对 orgchart 错误的描述；disposition 中 M-STRONG-TYPES 改为 done | 不变 |
 
 PR 3 把公共面和错误面的全部 breaking 改动放在一起，因为 VER-3 要求在同一个 PR 内完成；而且每一项都要重写同一批 doctest、示例和集成测试，分开做就要重写多遍。PR 内分两组提交，每次提交门禁都绿：先做公共面（§4.1 到 §4.3），再做错误面（§4.4 与 §6.4，约 80 处 `Error::new`）。这样评审时可以单独看错误面那组提交。
@@ -513,7 +519,7 @@ crate README 的示例代码不受门禁编译，PR 3 人工核对（今天在 `
 
 ## 11. 文档同步
 
-- **提案书。** 新增一条（建议编号 §13，"`pdfcraft-orgchart` 公共值形状"），写法与 §12.7 相同，列出 D1 到 D14 的要点，指向本文。§13 须写明：orgchart 的字体入参由 `FontBytes` 改为预先解析的 `Font`，取代提案书 §9（第 663 行）与确认总表 §4.1（第 928 行）里关于 orgchart 的表述；`pdfcraft-forms` 的 `FontBytes`（借用 `&[u8]`）不受影响。第 623 行里 orgchart 的 `FontBytes.data`、`FontBytes::new`、`FontBytes::from_shared` 同步改为 `Font` 内部持有 `Arc<Vec<u8>>`、`Font::new`、`Font::from_shared`。这一条已于 2026-11-04 起草为草案，维护者确认后再更新提案书抬头与文末确认总表，本文的状态同时改为"产品条已定稿"。它不放进任何实现 PR，PR 3 以它的确认为前提。
+- **提案书。** §13（"`pdfcraft-orgchart` 公共值形状"）已于 2026-11-04 确认：写法与 §12.7 相同，列出 D1 到 D14 的要点，指向本文；orgchart 的字体入参由 `FontBytes` 改为预先解析的 `Font`；`pdfcraft-forms` 的 `FontBytes`（借用 `&[u8]`）不受影响；§4.1、§9 与确认总表里关于 orgchart 的旧表述已按本条改写；抬头、讨论顺序与文末确认总表已更新。只有 §9 的 orgchart 版本号留给 PR 3。PR 3 以本条确认为前提。
 - **行为规格 §14 新增和改写的条目。**
   - 改写 Q5：不保留前缀，身份由枚举表达，已折叠的占位由 `folded_holders_of` 声明。
   - 改写 Q11：在 `Chart::new` 内折叠后计数。

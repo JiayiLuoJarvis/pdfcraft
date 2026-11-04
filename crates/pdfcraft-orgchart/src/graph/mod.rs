@@ -5,9 +5,11 @@ mod check;
 mod fold;
 mod ratio;
 
-pub(crate) use arena::{overflow_node_id, Graph, NodeId, NodeRec, OVERFLOW_ID_PREFIX};
-pub(crate) use check::{investment_ids, shareholder_ids, validate};
-pub(crate) use fold::prepare_request;
+pub(crate) use arena::{Graph, NodeId, NodeOrigin, NodeRec};
+#[cfg(test)]
+pub(crate) use check::validate;
+pub(crate) use check::{investment_ids, recheck, shareholder_ids};
+pub(crate) use fold::prepare_graph;
 pub(crate) use ratio::{ratio_source, resolve_display_ratio};
 
 #[cfg(test)]
@@ -129,13 +131,16 @@ mod tests {
         let graph = validate(&request).expect("valid graph");
         let holders: BTreeSet<_> = shareholder_ids(&graph)
             .into_iter()
-            .map(|id| graph.protocol_id(id))
+            .map(|id| graph.label(id))
             .collect();
         let investments: BTreeSet<_> = investment_ids(&graph)
             .into_iter()
-            .map(|id| graph.protocol_id(id))
+            .map(|id| graph.label(id))
             .collect();
-        assert_eq!(holders, BTreeSet::from(["a", "b"]));
-        assert_eq!(investments, BTreeSet::from(["x", "y"]));
+        assert_eq!(holders, BTreeSet::from(["a".to_owned(), "b".to_owned()]));
+        assert_eq!(
+            investments,
+            BTreeSet::from(["x".to_owned(), "y".to_owned()])
+        );
     }
 }

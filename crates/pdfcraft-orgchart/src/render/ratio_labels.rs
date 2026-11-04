@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::NodeId;
-use crate::page::{LaidOutEdge, PageSpec, PlacedNode, PointMm, PreferredParent, RatioHug};
+use crate::page::{EdgeRef, LaidOutEdge, PageSpec, PlacedNode, PointMm, RatioHug};
 use crate::units::{RATIO_LABEL_GAP_Y_MM, RATIO_LABEL_OFFSET_X_MM};
 
 /// How far a stub point may sit from the box edge and still count as attached.
@@ -46,12 +46,6 @@ pub(crate) fn place_ratio_labels(page: &PageSpec, metrics: RatioMetrics) -> Vec<
         .iter()
         .map(|node| (node.id, node))
         .collect();
-    let names: HashMap<NodeId, &str> = page
-        .layout
-        .nodes
-        .iter()
-        .map(|node| (node.id, node.protocol_id.as_str()))
-        .collect();
     let boxed: HashMap<NodeId, bool> = page
         .boxes
         .iter()
@@ -74,7 +68,6 @@ pub(crate) fn place_ratio_labels(page: &PageSpec, metrics: RatioMetrics) -> Vec<
             anchor.hug,
             anchor.preferred_parent.as_ref(),
             &page.layout.edges,
-            &names,
         ) else {
             continue;
         };
@@ -98,11 +91,10 @@ fn baseline_y(node: &PlacedNode, hug: RatioHug, metrics: RatioMetrics) -> f64 {
 fn hugging_stub_x(
     node: &PlacedNode,
     hug: RatioHug,
-    preferred: Option<&PreferredParent>,
+    preferred: Option<&EdgeRef>,
     edges: &[LaidOutEdge],
-    names: &HashMap<NodeId, &str>,
 ) -> Option<f64> {
-    let candidates = ordered_edges(edges, node.id, hug, preferred, names);
+    let candidates = ordered_edges(edges, node.id, hug, preferred);
     for edge in &candidates {
         if let Some(x_mm) = vertical_stub_x(node, hug, edge) {
             return Some(x_mm);
@@ -122,8 +114,7 @@ fn ordered_edges<'a>(
     edges: &'a [LaidOutEdge],
     node_id: NodeId,
     hug: RatioHug,
-    preferred: Option<&PreferredParent>,
-    names: &HashMap<NodeId, &str>,
+    preferred: Option<&EdgeRef>,
 ) -> Vec<&'a LaidOutEdge> {
     let mut found: Vec<&LaidOutEdge> = edges
         .iter()
@@ -134,23 +125,16 @@ fn ordered_edges<'a>(
         .collect();
     if preferred.is_some() {
         found.sort_by(|left, right| {
-            let rank = |edge: &LaidOutEdge| u8::from(!is_preferred(edge, preferred, names));
+            let rank = |edge: &LaidOutEdge| u8::from(!is_preferred(edge, preferred));
             rank(left).cmp(&rank(right))
         });
     }
     found
 }
 
-fn is_preferred(
-    edge: &LaidOutEdge,
-    preferred: Option<&PreferredParent>,
-    names: &HashMap<NodeId, &str>,
-) -> bool {
-    let Some(preferred) = preferred else {
-        return false;
-    };
-    names.get(&edge.from_id).copied() == Some(preferred.from_id.as_str())
-        && names.get(&edge.to_id).copied() == Some(preferred.to_id.as_str())
+fn is_preferred(edge: &LaidOutEdge, preferred: Option<&EdgeRef>) -> bool {
+    preferred
+        .is_some_and(|preferred| edge.from_id == preferred.from_id && edge.to_id == preferred.to_id)
 }
 
 fn vertical_stub_x(node: &PlacedNode, hug: RatioHug, edge: &LaidOutEdge) -> Option<f64> {

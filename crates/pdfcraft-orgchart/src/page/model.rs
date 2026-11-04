@@ -1,28 +1,12 @@
 //! Placed nodes, cue slots, and one finished page.
 
 use crate::captions::CueSide;
-use crate::content::{LabelHug, RatioFact};
+use crate::content::{EdgeRef, LabelHug, RatioFact};
 use crate::error::{Error, ErrorCode};
-use crate::graph::{NodeId, OVERFLOW_ID_PREFIX};
+use crate::graph::NodeId;
 use crate::units::{within, PageGeometry};
 
 use super::boxes::NodeBox;
-
-/// One holding edge on a page, in holder → held order.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct EdgeRef {
-    /// Holder.
-    pub from_id: NodeId,
-    /// Held company.
-    pub to_id: NodeId,
-}
-
-impl EdgeRef {
-    #[must_use]
-    pub(crate) fn new(from_id: NodeId, to_id: NodeId) -> Self {
-        Self { from_id, to_id }
-    }
-}
 
 /// A point in layout space. Origin is the chart's top-left. `y` grows downward.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,8 +22,6 @@ pub(crate) struct PointMm {
 pub(crate) struct PlacedNode {
     /// Layout identity.
     pub id: NodeId,
-    /// Caller id or synthetic overflow id.
-    pub protocol_id: String,
     /// Left edge, mm.
     pub x: f64,
     /// Top edge, mm.
@@ -67,7 +49,7 @@ pub(crate) struct LaidOutEdge {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CueSlot {
     /// Node the cue points at.
-    pub anchor_id: String,
+    pub anchor_id: NodeId,
     /// Which cone the cue belongs to.
     pub side: CueSide,
     /// Left edge, mm.
@@ -128,7 +110,7 @@ impl LayoutResult {
     ) -> Result<Self, Error> {
         let mut seen = Vec::new();
         for slot in &slots {
-            let key = (slot.anchor_id.as_str(), slot.side);
+            let key = (slot.anchor_id, slot.side);
             if seen.contains(&key) {
                 return Err(Error::new(
                     ErrorCode::LayoutFailed,
@@ -194,15 +176,6 @@ pub(crate) enum RatioHug {
     Top,
 }
 
-/// Protocol ids of the holding edge a percent was copied from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PreferredParent {
-    /// Holder protocol id.
-    pub from_id: String,
-    /// Held protocol id.
-    pub to_id: String,
-}
-
 /// One ratio fact reduced to the fields placement needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RatioAnchor {
@@ -213,7 +186,7 @@ pub(crate) struct RatioAnchor {
     /// Which edge of the box the label hugs.
     pub hug: RatioHug,
     /// Parent edge when the percent came from that edge.
-    pub preferred_parent: Option<PreferredParent>,
+    pub preferred_parent: Option<EdgeRef>,
 }
 
 /// Navigation cue. The drawn box is the matching [`CueSlot`].
@@ -225,15 +198,15 @@ pub(crate) struct ContCue {
     pub direct_count: usize,
     /// Cone.
     pub side: CueSide,
-    /// Anchor node. Overflow ids are rejected.
-    pub anchor_id: String,
+    /// Anchor node. Overflow boxes are rejected.
+    pub anchor_id: NodeId,
 }
 
 /// Clickable overflow box. `target_page` is 1-based.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NodePageLink {
-    /// Overflow node id.
-    pub node_id: String,
+    /// Overflow node.
+    pub node_id: NodeId,
     /// 1-based PDF page number.
     pub target_page: usize,
 }
@@ -272,25 +245,22 @@ impl PageSpec {
                     LabelHug::Bottom => RatioHug::Bottom,
                     LabelHug::Top => RatioHug::Top,
                 },
-                preferred_parent: fact.preferred_parent.as_ref().map(|edge| PreferredParent {
-                    from_id: edge.from_id.clone(),
-                    to_id: edge.to_id.clone(),
-                }),
+                preferred_parent: fact.preferred_parent.clone(),
             })
             .collect()
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
-        let overflow_ids: Vec<&str> = self
+        let overflow_ids: Vec<NodeId> = self
             .boxes
             .iter()
-            .filter(|box_| box_.is_overflow)
-            .map(|box_| box_.protocol_id.as_str())
+            .filter(|box_| box_.origin.is_overflow())
+            .map(|box_| box_.id)
             .collect();
-        let link_ids: Vec<&str> = self
+        let link_ids: Vec<NodeId> = self
             .node_page_links
             .iter()
-            .map(|link| link.node_id.as_str())
+            .map(|link| link.node_id)
             .collect();
         if link_ids.len() != overflow_ids.len()
             || link_ids
@@ -310,11 +280,11 @@ impl PageSpec {
                     "continuation cue requires target_page >= 2 and direct_count >= 1",
                 ));
             }
-            if cue.anchor_id.starts_with(OVERFLOW_ID_PREFIX) {
+            if overflow_ids.contains(&cue.anchor_id) {
                 return Err(Error::new(
                     ErrorCode::LayoutFailed,
                     format!(
-                        "continuation cue cannot anchor an overflow id: {}",
+                        "continuation cue cannot anchor an overflow box: node #{}",
                         cue.anchor_id
                     ),
                 ));

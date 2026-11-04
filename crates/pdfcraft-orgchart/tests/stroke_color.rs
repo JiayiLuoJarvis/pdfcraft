@@ -5,14 +5,12 @@
     reason = "integration test: a panic is the failure report"
 )]
 
-use pdfcraft_orgchart::{generate_pdf, ChartRequest, Edge, FontBytes, Node};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
 
-fn hc_font() -> Option<FontBytes> {
+fn hc_font() -> Option<Font> {
     let path = std::env::var_os("PDFCRAFT_ORGCHART_FONT")
         .or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
-    Some(FontBytes::new(
-        std::fs::read(path).expect("read orgchart font"),
-    ))
+    Some(Font::new(std::fs::read(path).expect("read orgchart font")).expect("font"))
 }
 
 fn byte_channel(component: f64) -> u8 {
@@ -91,9 +89,9 @@ fn node_strokes_are_black_and_edge_strokes_are_byte_51() {
     let Some(font) = hc_font() else {
         return;
     };
-    let pdf = match generate_pdf(&request, &font) {
+    let pdf = match Chart::new(request).and_then(|chart| chart.to_pdf(&font)) {
         Ok(pdf) => pdf,
-        Err(error) if error.code == pdfcraft_orgchart::ErrorCode::MissingGlyph => return,
+        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => return,
         Err(error) => panic!("pdf: {error}"),
     };
     let doc = lopdf::Document::load_mem(&pdf).expect("pdf");

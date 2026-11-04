@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::error::{Error, ErrorCode};
+use crate::error::Error;
 use crate::graph::{self, ratio_source, Graph, NodeId, NodeRec};
 #[cfg(test)]
 use crate::request::ChartRequest;
@@ -83,13 +83,23 @@ pub(crate) enum LabelHug {
     Top,
 }
 
-/// The holding edge a ratio was copied from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ParentEdge {
-    /// Holder id.
-    pub from_id: String,
-    /// Held id.
-    pub to_id: String,
+/// One holding edge, in holder → held order.
+///
+/// Lives in `content` so both ratio facts and the page/layout layer share one
+/// type without a `content → page` edge (ARC-2).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct EdgeRef {
+    /// Holder.
+    pub from_id: NodeId,
+    /// Held company.
+    pub to_id: NodeId,
+}
+
+impl EdgeRef {
+    #[must_use]
+    pub(crate) fn new(from_id: NodeId, to_id: NodeId) -> Self {
+        Self { from_id, to_id }
+    }
 }
 
 /// Graph-time ratio for one non-subject node. No coordinates.
@@ -97,8 +107,6 @@ pub(crate) struct ParentEdge {
 pub(crate) struct RatioFact {
     /// Node id.
     pub node_id: NodeId,
-    /// Protocol id for page filtering and PDF text keys.
-    pub protocol_id: String,
     /// Percent in `0..=100`.
     pub ratio: f64,
     /// `xx.xx%`.
@@ -108,7 +116,7 @@ pub(crate) struct RatioFact {
     /// Parent edge when the percent came from that edge.
     ///
     /// A ratio stored on the node leaves this `None`.
-    pub preferred_parent: Option<ParentEdge>,
+    pub preferred_parent: Option<EdgeRef>,
 }
 
 /// Build in-box lines for every node.
@@ -262,7 +270,8 @@ pub(crate) fn format_display_ratio(ratio: f64) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`Error`] when `request` fails validation, or when a parent edge is ambiguous.
+/// Returns [`Error`] when `request` fails validation. An ambiguous parent that
+/// survives validation is [`crate::ErrorCode::LayoutFailed`].
 #[cfg(test)]
 pub(crate) fn ratio_facts(request: &ChartRequest) -> Result<Vec<RatioFact>, Error> {
     let mut graph = graph::validate(request)?;
@@ -280,41 +289,26 @@ pub(crate) fn facts_of(graph: &mut Graph) -> Result<Vec<RatioFact>, Error> {
         if role == DisplayRole::Subject {
             continue;
         }
-        let Some(source) = ratio_source(graph, id)? else {
+        let Some(source) = ratio_source(graph, id).map_err(Error::into_layout_failed)? else {
             continue;
         };
-        let preferred_parent = match source.parent {
-            Some(edge) => {
-                let from = graph.edge_from(edge);
-                let to = graph.edge_to(edge);
-                Some(ParentEdge {
-                    from_id: graph.protocol_id(from).to_owned(),
-                    to_id: graph.protocol_id(to).to_owned(),
-                })
-            }
-            None => None,
+        let preferred_parent = source
+            .parent
+            .map(|edge| EdgeRef::new(graph.edge_from(edge), graph.edge_to(edge)));
+        let hug = match role {
+            DisplayRole::Shareholder => LabelHug::Bottom,
+            DisplayRole::Investment => LabelHug::Top,
+            DisplayRole::Subject => continue,
         };
         facts.push(RatioFact {
             node_id: id,
-            protocol_id: graph.protocol_id(id).to_owned(),
             ratio: source.value,
             text: format_display_ratio(source.value),
-            hug: hug_for(role)?,
+            hug,
             preferred_parent,
         });
     }
     Ok(facts)
-}
-
-fn hug_for(role: DisplayRole) -> Result<LabelHug, Error> {
-    match role {
-        DisplayRole::Investment => Ok(LabelHug::Top),
-        DisplayRole::Shareholder => Ok(LabelHug::Bottom),
-        DisplayRole::Subject => Err(Error::new(
-            ErrorCode::InvalidProtocol,
-            "role SUBJECT has no ratio hug",
-        )),
-    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 # pdfcraft-orgchart guide
 
 How to build equity and outbound-investment charts with `pdfcraft-orgchart`:
-request shape, fonts, validation, titles, options, errors, and testing. For a
+request shape, fonts, compilation, titles, style, errors, and testing. For a
 one-page overview see the [crate README](../README.md). For every public item
 signature see [rustdoc](https://docs.rs/pdfcraft-orgchart)
 (`cargo doc -p pdfcraft-orgchart --open` locally).
@@ -14,31 +14,27 @@ guide is the caller-facing how-to.
 
 ## Mental model
 
-You pass a graph protocol (subject, nodes, holding edges, options) and one font
-face as bytes. The library validates, folds optional `top_n` shareholders,
-measures with skrifa, paginates, and draws with krilla.
+You describe a graph (subject, nodes, holding edges, style, `top_n`,
+`max_nodes`) and parse one font. `Chart::new` checks the protocol and folds
+shareholders. `to_pdf` measures with skrifa, paginates, and draws with krilla.
 
 ```text
-ChartRequest + FontBytes
-  →  validate_request   (optional; no font)
-  →  generate_pdf       →  PDF bytes
-
-ChartRequest
-  →  document_title     →  String (you store PDF /Info yourself)
+ChartRequest → Chart::new → Chart
+Font::new
+Chart::to_pdf(&Font) → PDF bytes
+Chart::title → String (you store PDF /Info yourself)
 ```
 
-**Dual cone.** Edges mean `from_id` holds `to_id`. Shareholders sit **above**
-the subject. Outbound investments sit **below**.
+**Dual cone.** `holder` holds `held`. Shareholders sit **above** the subject.
+Outbound investments sit **below**.
 
 This crate does not depend on `pdfcraft-pdf` or `pdfcraft-forms`.
 
 ```rust
-use pdfcraft_orgchart::{
-    document_title, generate_pdf, validate_request, ChartRequest, Edge, FontBytes, Node,
-};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
 
 fn chart(font_data: Vec<u8>) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
-    let font = FontBytes::new(font_data);
+    let font = Font::new(font_data)?;
     let request = ChartRequest::new(
         "root",
         vec![
@@ -48,11 +44,14 @@ fn chart(font_data: Vec<u8>) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
         ],
         vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
     );
-    validate_request(&request)?;
-    let _title = document_title(&request)?;
-    generate_pdf(&request, &font)
+    let chart = Chart::new(request)?;
+    let _title = chart.title();
+    chart.to_pdf(&font)
 }
 ```
+
+`Chart::new` takes the request by value. On error that value is dropped. Clone
+the request first if you need to edit it and try again.
 
 ---
 
@@ -62,10 +61,13 @@ fn chart(font_data: Vec<u8>) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
 | --- | --- |
 | `subject_id` | Id of the company the chart is about |
 | `nodes` | Parties. Order is the tie-break order for a `top_n` fold |
-| `edges` | Holding edges. `from_id` holds `to_id` |
-| `options` | Width, margin, title, `max_nodes`, `top_n` |
+| `edges` | Holding edges. `holder` holds `held` |
+| `style` | `ChartStyle`. Default width 38 mm, margin 8 mm |
+| `top_n` | `Option<NonZeroUsize>`. `None` does not fold |
+| `max_nodes` | Cap, including nodes a fold adds. `ChartRequest::new` uses `MAX_NODES` (100) |
 
-`ChartRequest::new(subject_id, nodes, edges)` starts with default options.
+`ChartRequest` has no `Default`. `ChartRequest::new(subject_id, nodes, edges)`
+fills style, `top_n: None`, and `max_nodes`.
 
 ### Node
 
@@ -75,30 +77,37 @@ fn chart(font_data: Vec<u8>) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
 | `legal_person` | Optional. Affects display and company fill |
 | `ratio` | Optional `0..=100` on the node |
 | `node_type` | `Person` or `Company` when set |
-| `paid_in_amount` / `currency` / `location` / `approval_date` | Investment detail lines (not parsed) |
+| `paid_in` | Optional `PaidIn { amount, currency }` on an investment |
+| `location` / `approval_date` | Investment detail lines (not parsed) |
+| `folded_holders_of` | This node already stands in for holders folded under that id |
 
 `Node::new(id, name)` leaves the optional fields as `None`.
+
+`PaidIn::new(amount)` sets no currency. A blank amount is not drawn. A blank
+currency is treated as absent.
+
+`folded_holders_of` names another node. The id must exist, only one node may
+name a given parent, and this node must have a direct edge to that parent.
+Ranking for that parent skips the stand-in.
 
 ### Edge
 
 | Field | Role |
 | --- | --- |
-| `from_id` / `to_id` | Holder → held |
+| `holder` / `held` | Holder → held |
 | `ratio` | Optional `0..=100` on the edge |
 
-`Edge::new(from, to)` leaves ratio as `None`.
+`Edge::new(holder, held)` leaves ratio as `None`.
 
-### ChartOptions
+### ChartStyle
 
-| Field | Default behavior |
-| --- | --- |
-| `node_width_mm` | Unset → `38` mm at draw time. Legal set range `[20, 80]` |
-| `margin_mm` | Unset → `8` mm. Legal set range `(0, 40]` |
-| `title` | Used by `document_title` only. Does **not** override page headers |
-| `max_nodes` | Unset → `MAX_NODES` (`100`). Set values must be in `1..=100` |
-| `top_n` | `None` / `Some(0)` do not fold. `Some(n)` for `n >= 1` keeps at most `n` direct holders per shareholder parent. Dropped ratios are summed like CPython `math.fsum` |
+| Field | Default | Legal range |
+| --- | --- | --- |
+| `node_width_mm` | 38 | `[20, 80]` (`MIN_NODE_WIDTH_MM`..=`MAX_NODE_WIDTH_MM`) |
+| `margin_mm` | 8 | `(0, 40]` (`MAX_MARGIN_MM`) |
 
-Constants: `MAX_NODES`, `MIN_NODE_WIDTH_MM`, `MAX_NODE_WIDTH_MM`, `MAX_MARGIN_MM`.
+`top_n` must be in `1..=max_nodes`. `top_n == max_nodes` is legal.
+`max_nodes` must be in `1..=ChartRequest::MAX_NODES`.
 
 ---
 
@@ -107,68 +116,59 @@ Constants: `MAX_NODES`, `MIN_NODE_WIDTH_MM`, `MAX_NODE_WIDTH_MM`, `MAX_MARGIN_MM
 ```rust
 use std::sync::Arc;
 
-use pdfcraft_orgchart::FontBytes;
+use pdfcraft_orgchart::Font;
 
-let owned = FontBytes::new(std::fs::read("face.ttf")?);
+let owned = Font::new(std::fs::read("face.ttf")?)?;
 let shared = Arc::new(std::fs::read("face.ttf")?);
-let reused = FontBytes::from_shared(shared);
+let reused = Font::from_shared(shared)?;
 ```
 
-- `FontBytes::new` wraps owned bytes. `FontBytes::from_shared` reuses an `Arc<Vec<u8>>`.
+- `Font::new` parses owned bytes. `Font::from_shared` reuses an `Arc<Vec<u8>>`.
 - Paths are not accepted.
-- One face per call. TrueType collections / OTC are rejected (`FONT_ERROR`).
+- One face per value. TrueType collections / OTC are rejected (`FONT_ERROR`).
+- A missing glyph advance is still `FONT_ERROR` from `to_pdf`.
 - Measurement and drawing share the same glyph pipeline. Missing cmap entries
   fail with `MISSING_GLYPH`.
+- The same `Font` can draw more than one chart. Each `to_pdf` keeps its own
+  glyph cache.
 - Fonts are not vendored in the published package. Tests and the example need
   `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT`.
 
 ---
 
-## validate_request
+## Chart::new
 
-Runs the prepare step (including `top_n` fold rules) and drops the folded
-request. It does **not** open a font. It does **not** re-validate the folded
-graph.
+Checks the request, folds `top_n`, then checks the folded chart. It does
+**not** open a font.
 
-A fold that adds a synthetic node can succeed here even when the folded node
-list would exceed `max_nodes`. `generate_pdf` folds again and validates that
-expanded graph, so the overflow fails at draw time.
-
-Use `validate_request` for cheap protocol checks before you load a font.
+A fold that adds a node past `max_nodes` returns `TOO_MANY_NODES` here. A fold
+that leaves a node with two layout parents returns `INVALID_PROTOCOL` here.
 
 ---
 
-## document_title
+## Chart::title
 
-Looks up `subject_id` in `nodes` and returns a title string. It does not run
-the full protocol check.
+`title()` returns `{subject name}股权架构图`. `subject_name()` is the name as
+stored. Both are available only after `Chart::new` succeeds.
 
-| `options.title` | Result |
-| --- | --- |
-| `None` | `{subject name}股权架构图` |
-| `Some("")` | empty string, kept |
-| `Some(other)` | that string |
-
-`generate_pdf` does **not** write a PDF document info dictionary. If you need
-`/Title`, call `document_title` and write info in your own PDF layer.
-
-Page headers always come from chart role captions, not from `options.title`.
+`to_pdf` does **not** write a PDF document info dictionary. If you need
+`/Title`, use `title()` and write info in your own PDF layer. Page headers
+come from chart role captions, not from `title()`.
 
 ---
 
-## generate_pdf
-
-Pipeline (observable stages):
+## Chart::to_pdf
 
 ```text
-ChartRequest
-  → prepare (top_n fold)
-  → validate graph
+Chart
   → display + ratio labels
   → measure node boxes
   → paginate (may split, continue, annex)
   → render → PDF bytes
 ```
+
+Calling `to_pdf` does not change the `Chart`. Two calls with the same font
+return the same bytes.
 
 Paper is A4. Shareholders above the subject, investments below. The main
 title starts at the page margin. The subtitle sits 1.5 mm below that line. A
@@ -199,10 +199,11 @@ headers and footers follow the behavior contract in the workspace spec.
   beside its anchor draws a 4.5 pt leader at 30 degrees to that anchor.
 - **Company fill.** Gray fill when `node_type == Company`, or when `node_type`
   is unset and `legal_person` is non-blank. `Person` is always white.
-- **`top_n` fold.** Excess direct shareholders become a synthetic
-  `其他股东(k家)` node. Investments are not folded by `top_n`. The dropped
-  ratios use the same finite sum as CPython `math.fsum`, so six copies of
-  `100/6` fold to 100. A sum outside `0..=100` is `InvalidProtocol`.
+- **`top_n` fold.** Excess direct shareholders become one `其他股东(k家)` node.
+  Investments are not folded by `top_n`. The dropped ratios use the same finite
+  sum as CPython `math.fsum`, so six copies of `100/6` fold to 100. A sum
+  outside `0..=100` is `InvalidProtocol`. A node with `folded_holders_of` set
+  does not take a rank under that parent.
 
 ---
 
@@ -216,9 +217,9 @@ strings (`INVALID_PROTOCOL`, …).
 | --- | --- |
 | `InvalidProtocol` | Protocol or `top_n` fold rule broken |
 | `CycleDetected` | Directed holding cycle |
-| `SubjectNotFound` | `subject_id` missing from nodes (also `document_title`) |
-| `TooManyNodes` | Node list over the active cap (including after fold) |
-| `FontError` | Face bytes unusable or a collection |
+| `SubjectNotFound` | `subject_id` missing from nodes |
+| `TooManyNodes` | Node list over the active cap, before or after fold |
+| `FontError` | Face bytes unusable, a collection, or krilla rejects the face |
 | `MissingGlyph` | Character absent from the font |
 | `NodeTooTall` | A node box exceeds the portrait height limit |
 | `LayoutFailed` | Internal layout invariant broken |
@@ -259,8 +260,8 @@ OFL notes for a common Source Han reference face are in
 
 | Path | Role |
 | --- | --- |
-| `validate_request` / `generate_pdf` / `document_title` | Public entrypoints |
-| `ChartRequest`, `Node`, `Edge`, `ChartOptions`, `FontBytes` | Values |
+| `Chart` | Compile and draw |
+| `ChartRequest`, `ChartStyle`, `Node`, `Edge`, `PaidIn`, `Font` | Values |
 | `Error` / `ErrorCode` | Failures |
 | `examples/` | Runnable demos |
 | `docs/guide.md` | This guide |

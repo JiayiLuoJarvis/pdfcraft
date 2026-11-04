@@ -1,8 +1,8 @@
 //! Continuation cues, overflow links, and attachment captions after final numbering.
 
-use super::test_support::{chain, fake_pages, id_sets, set_of};
+use super::test_support::{chain, fake_pages, id_sets, labeled_box, node_id, set_of};
 use crate::captions::CueSide;
-use crate::page::{ContCue, NodePageLink, PageSpec};
+use crate::page::{ContCue, NodePageLink};
 use crate::{ChartRequest, Edge, Node};
 
 #[test]
@@ -33,7 +33,7 @@ fn shallow_cones_pack_ahead_of_a_deeper_cone() {
             target_page: 2,
             direct_count: 1,
             side: CueSide::Shareholder,
-            anchor_id: "deep".to_owned(),
+            anchor_id: node_id(&request, "deep"),
         }]
     );
     assert_eq!(id_sets(&pages)[1], set_of(&["deep", "d1", "d2"]));
@@ -75,7 +75,7 @@ fn shareholder_pages_cue_the_next_direct_page_not_investments() {
             target_page: 4,
             direct_count: 1,
             side: CueSide::Investment,
-            anchor_id: "root".to_owned(),
+            anchor_id: node_id(&request, "root"),
         }]
     );
     assert!(pages[1].cont_cues.is_empty());
@@ -84,39 +84,33 @@ fn shareholder_pages_cue_the_next_direct_page_not_investments() {
     assert_eq!(
         pages[0].node_page_links,
         vec![NodePageLink {
-            node_id: "__overflow__:root:s2".to_owned(),
+            node_id: labeled_box(&pages, 0, "__overflow__:root:s2").id,
             target_page: 2,
         }]
     );
     assert_eq!(
         pages[1].node_page_links,
         vec![NodePageLink {
-            node_id: "__overflow__:root:s3".to_owned(),
+            node_id: labeled_box(&pages, 1, "__overflow__:root:s3").id,
             target_page: 3,
         }]
     );
     assert!(pages[2].node_page_links.is_empty());
-    let overflow_text = |page: &PageSpec, id: &str| {
-        page.boxes
-            .iter()
-            .find(|box_| box_.protocol_id == id)
-            .and_then(|box_| box_.lines.last())
+    let overflow_text = |page: usize, id: &str| {
+        labeled_box(&pages, page, id)
+            .lines
+            .last()
             .map(|line| line.text.clone())
             .unwrap_or_default()
     };
-    assert_eq!(
-        overflow_text(&pages[0], "__overflow__:root:s2"),
-        "详见附件2"
-    );
-    assert_eq!(
-        overflow_text(&pages[1], "__overflow__:root:s3"),
-        "详见附件3"
-    );
+    assert_eq!(overflow_text(0, "__overflow__:root:s2"), "详见附件2");
+    assert_eq!(overflow_text(1, "__overflow__:root:s3"), "详见附件3");
 }
 
 #[test]
 fn chain_cues_each_logical_attachment_after_final_numbering() {
-    let pages = fake_pages(&chain(&["a1", "a2", "a3"], false), 2).expect("pages");
+    let request = chain(&["a1", "a2", "a3"], false);
+    let pages = fake_pages(&request, 2).expect("pages");
     assert_eq!(
         id_sets(&pages),
         vec![
@@ -131,7 +125,7 @@ fn chain_cues_each_logical_attachment_after_final_numbering() {
             target_page: 2,
             direct_count: 1,
             side: CueSide::Shareholder,
-            anchor_id: "a1".to_owned(),
+            anchor_id: node_id(&request, "a1"),
         }]
     );
     assert_eq!(
@@ -140,7 +134,7 @@ fn chain_cues_each_logical_attachment_after_final_numbering() {
             target_page: 3,
             direct_count: 1,
             side: CueSide::Shareholder,
-            anchor_id: "a2".to_owned(),
+            anchor_id: node_id(&request, "a2"),
         }]
     );
     assert!(pages[2].cont_cues.is_empty());
@@ -234,13 +228,13 @@ fn completed_appendix_has_no_unanchored_sibling_cue() {
                 target_page: 2,
                 direct_count: 1,
                 side: CueSide::Shareholder,
-                anchor_id: "a".to_owned(),
+                anchor_id: node_id(&request, "a"),
             },
             ContCue {
                 target_page: 3,
                 direct_count: 1,
                 side: CueSide::Shareholder,
-                anchor_id: "b".to_owned(),
+                anchor_id: node_id(&request, "b"),
             },
         ]
     );
@@ -289,13 +283,13 @@ fn completed_investment_appendix_has_no_unanchored_sibling_cue() {
                 target_page: 3,
                 direct_count: 1,
                 side: CueSide::Investment,
-                anchor_id: "v".to_owned(),
+                anchor_id: node_id(&request, "v"),
             },
             ContCue {
                 target_page: 4,
                 direct_count: 1,
                 side: CueSide::Investment,
-                anchor_id: "w".to_owned(),
+                anchor_id: node_id(&request, "w"),
             },
         ]
     );

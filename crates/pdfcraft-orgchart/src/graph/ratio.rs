@@ -70,10 +70,11 @@ fn ambiguous(graph: &Graph, edges: &[EdgeId], node: NodeId) -> Error {
         ErrorCode::InvalidProtocol,
         format!(
             "ambiguous parent edges for {} count={} ratios={ratios:?}",
-            graph.protocol_id(node),
+            graph.label(node),
             edges.len()
         ),
     )
+    .with_optional_subject(graph.node_subject(node))
 }
 
 fn reaches(graph: &mut Graph, from: NodeId, target: NodeId) -> bool {

@@ -1,8 +1,19 @@
-//! `validate_request` surfaces `top_n` fold failures and does not recheck the folded cap.
+//! `Chart::new` folds `top_n` and rechecks the folded node cap.
 
-use pdfcraft_orgchart::{validate_request, ChartRequest, Edge, ErrorCode, Node};
+#![expect(
+    clippy::expect_used,
+    reason = "integration test: a panic is the failure report"
+)]
 
-fn holders(top_n: Option<usize>) -> ChartRequest {
+use std::num::NonZeroUsize;
+
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, ErrorCode, ErrorSubject, Node};
+
+fn nz(value: usize) -> NonZeroUsize {
+    NonZeroUsize::new(value).expect("nonzero")
+}
+
+fn holders(top_n: Option<NonZeroUsize>) -> ChartRequest {
     let mut request = ChartRequest::new(
         "root",
         vec![
@@ -43,55 +54,46 @@ fn holders(top_n: Option<usize>) -> ChartRequest {
             },
         ],
     );
-    request.options.top_n = top_n;
+    request.top_n = top_n;
     request
 }
 
 #[test]
-fn top_n_none_and_zero_pass_and_still_validate() {
-    assert_eq!(validate_request(&holders(None)), Ok(()));
-    assert_eq!(validate_request(&holders(Some(0))), Ok(()));
-    let mut blank = holders(Some(0));
+fn top_n_none_passes_and_a_blank_subject_fails() {
+    let _chart = Chart::new(holders(None)).expect("chart");
+    let mut blank = holders(None);
     blank.subject_id = "   ".to_owned();
-    let error = validate_request(&blank).expect_err("blank subject");
-    assert_eq!(error.code, ErrorCode::InvalidProtocol);
+    let error = Chart::new(blank).expect_err("blank subject");
+    assert_eq!(error.code(), ErrorCode::InvalidProtocol);
+    assert_eq!(error.subject(), Some(&ErrorSubject::Field("subject_id")));
 }
 
 #[test]
 fn a_missing_shareholder_ratio_fails_when_top_n_is_set() {
-    let request = ChartRequest {
-        options: pdfcraft_orgchart::ChartOptions {
-            top_n: Some(5),
-            ..pdfcraft_orgchart::ChartOptions::default()
-        },
-        ..ChartRequest::new(
-            "root",
-            vec![Node::new("s1", "甲"), Node::new("root", "主体")],
-            vec![Edge::new("s1", "root")],
-        )
-    };
-    let error = validate_request(&request).expect_err("missing ratio");
-    assert_eq!(error.code, ErrorCode::InvalidProtocol);
-    assert!(
-        error.message.contains("top_n requires"),
-        "{}",
-        error.message
-    );
-}
-
-#[test]
-fn top_n_zero_does_not_require_a_display_ratio() {
     let mut request = ChartRequest::new(
         "root",
         vec![Node::new("s1", "甲"), Node::new("root", "主体")],
         vec![Edge::new("s1", "root")],
     );
-    request.options.top_n = Some(0);
-    assert_eq!(validate_request(&request), Ok(()));
+    request.top_n = Some(nz(5));
+    let error = Chart::new(request).expect_err("missing ratio");
+    assert_eq!(error.code(), ErrorCode::InvalidProtocol);
+    assert!(
+        error.message().contains("top_n requires"),
+        "{}",
+        error.message()
+    );
+    assert_eq!(
+        error.subject(),
+        Some(&ErrorSubject::Node {
+            index: 0,
+            id: "s1".to_owned(),
+        })
+    );
 }
 
 #[test]
-fn a_fold_that_grows_past_max_nodes_still_passes_validate_request() {
+fn a_fold_past_max_nodes_is_too_many_nodes() {
     let mut request = ChartRequest::new(
         "root",
         vec![
@@ -128,12 +130,14 @@ fn a_fold_that_grows_past_max_nodes_still_passes_validate_request() {
             },
         ],
     );
-    request.options.max_nodes = Some(4);
-    request.options.top_n = Some(2);
-    assert_eq!(validate_request(&request), Ok(()));
+    request.max_nodes = 4;
+    request.top_n = Some(nz(2));
+    let error = Chart::new(request).expect_err("folded cap");
+    assert_eq!(error.code(), ErrorCode::TooManyNodes);
+    assert_eq!(error.subject(), Some(&ErrorSubject::Field("nodes")));
 }
 
 #[test]
 fn folding_four_holders_down_to_top_n_passes() {
-    assert_eq!(validate_request(&holders(Some(2))), Ok(()));
+    let _chart = Chart::new(holders(Some(nz(2)))).expect("chart");
 }

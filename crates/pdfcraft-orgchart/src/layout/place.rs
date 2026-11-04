@@ -698,7 +698,6 @@ fn assign_ys(
                             *node_id,
                             PlacedNode {
                                 id: *node_id,
-                                protocol_id: box_.protocol_id.clone(),
                                 x: xs[node_id],
                                 y: y_col,
                                 width: box_.width_mm,
@@ -732,7 +731,6 @@ fn assign_ys(
                             *node_id,
                             PlacedNode {
                                 id: *node_id,
-                                protocol_id: box_.protocol_id.clone(),
                                 x: xs[node_id],
                                 y,
                                 width: box_.width_mm,

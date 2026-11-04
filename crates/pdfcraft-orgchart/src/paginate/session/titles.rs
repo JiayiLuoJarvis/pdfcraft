@@ -22,8 +22,13 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
 
     pub(super) fn cut_caption(&mut self, node_id: NodeId) -> Result<String, Error> {
         let name = self.node_name(node_id);
-        let ratio = crate::graph::resolve_display_ratio(&mut self.graph, node_id)?;
-        match self.graph.layout_parent_optional(node_id) {
+        let ratio = crate::graph::resolve_display_ratio(&mut self.graph, node_id)
+            .map_err(Error::into_layout_failed)?;
+        match self
+            .graph
+            .layout_parent_ends(node_id)
+            .map_err(Error::into_layout_failed)?
+        {
             None => Ok(name),
             Some((from_id, to_id)) => {
                 if from_id == node_id {
