@@ -1,11 +1,10 @@
 //! Place nodes on layer coordinates.
 
-use crate::ids::NodeId;
+use crate::graph::NodeId;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::error::{Error, ErrorCode};
-use crate::measure::NodeBox;
-use crate::page::PlacedNode;
+use crate::page::{NodeBox, PlacedNode};
 use crate::units::FIT_EPSILON_MM;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

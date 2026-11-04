@@ -1,8 +1,202 @@
 //! In-box lines and ratio facts. Width and paging stay in later tests.
 
-use crate::display::{build_display, company_fill, ratio_facts, DisplayRole, LabelHug, LineKind};
+use super::{build_display, company_fill, ratio_facts, DisplayRole, LabelHug, LineKind};
 use crate::graph;
 use crate::{ChartRequest, Edge, Node, NodeType};
+
+fn edge(from: &str, to: &str, ratio: f64) -> Edge {
+    Edge {
+        ratio: Some(ratio),
+        ..Edge::new(from, to)
+    }
+}
+
+fn id_of(request: &ChartRequest, protocol: &str) -> graph::NodeId {
+    let graph = graph::validate(request).expect("valid");
+    graph.id_of(protocol).expect(protocol)
+}
+
+#[test]
+#[expect(
+    clippy::float_cmp,
+    reason = "the assertion checks that a stored ratio was copied unchanged"
+)]
+fn cones_keep_their_fields_and_leave_ratio_out_of_the_box() {
+    let request = ChartRequest::new(
+        "root",
+        vec![
+            Node {
+                legal_person: Some("李四".to_owned()),
+                ratio: Some(10.0),
+                paid_in_amount: Some("1万".to_owned()),
+                currency: Some("USD".to_owned()),
+                location: Some("上海".to_owned()),
+                approval_date: Some("2020-01-01".to_owned()),
+                ..Node::new("root", "主体")
+            },
+            Node {
+                legal_person: Some("  王五  ".to_owned()),
+                ratio: Some(40.0),
+                paid_in_amount: Some("9万".to_owned()),
+                currency: Some("HKD".to_owned()),
+                location: Some("北京".to_owned()),
+                approval_date: Some("2019-01-01".to_owned()),
+                ..Node::new("s", "股东甲")
+            },
+            Node {
+                legal_person: Some("赵六".to_owned()),
+                paid_in_amount: Some("100万".to_owned()),
+                currency: Some("CNY".to_owned()),
+                location: Some("  深圳  ".to_owned()),
+                approval_date: Some("2024-06-01".to_owned()),
+                ..Node::new("c", "子公司")
+            },
+        ],
+        vec![edge("s", "root", 40.0), edge("root", "c", 51.2)],
+    );
+    let display = build_display(&request).expect("display");
+    let pairs = |protocol: &str| {
+        let id = id_of(&request, protocol);
+        display
+            .get(id)
+            .expect(protocol)
+            .lines
+            .iter()
+            .map(|line| (line.kind, line.text.as_str()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        pairs("root"),
+        vec![(LineKind::Name, "主体"), (LineKind::LegalPerson, "李四"),]
+    );
+    assert_eq!(
+        pairs("s"),
+        vec![(LineKind::Name, "股东甲"), (LineKind::LegalPerson, "王五"),]
+    );
+    assert_eq!(
+        pairs("c"),
+        vec![
+            (LineKind::Name, "子公司"),
+            (LineKind::Detail, "实缴 100万 CNY"),
+            (LineKind::Detail, "深圳"),
+            (LineKind::Detail, "2024-06-01"),
+        ]
+    );
+    for content in display.nodes() {
+        for line in &content.lines {
+            assert!(!line.text.contains("法定代表人"));
+            assert!(!line.text.contains('%'));
+        }
+    }
+    let s = id_of(&request, "s");
+    assert!(display
+        .get(s)
+        .expect("s")
+        .lines
+        .iter()
+        .all(|line| !line.text.contains("实缴")));
+    let c = id_of(&request, "c");
+    assert!(display
+        .get(c)
+        .expect("c")
+        .lines
+        .iter()
+        .all(|line| !line.text.contains("赵六")));
+    let facts = ratio_facts(&request).expect("facts");
+    let holder = facts
+        .iter()
+        .find(|fact| fact.protocol_id == "s")
+        .expect("s");
+    assert_eq!(holder.text, "40.00%");
+    assert_eq!(holder.ratio, 40.0);
+    assert_eq!(holder.hug, LabelHug::Bottom);
+    assert!(holder.preferred_parent.is_none());
+    let child = facts
+        .iter()
+        .find(|fact| fact.protocol_id == "c")
+        .expect("c");
+    assert_eq!(child.text, "51.20%");
+    assert_eq!(child.hug, LabelHug::Top);
+    let parent = child.preferred_parent.as_ref().expect("edge");
+    assert_eq!(parent.from_id, "root");
+    assert_eq!(parent.to_id, "c");
+    assert!(facts.iter().all(|fact| fact.protocol_id != "root"));
+}
+
+#[test]
+fn currency_without_amount_adds_no_detail_line() {
+    let request = ChartRequest::new(
+        "root",
+        vec![
+            Node::new("root", "主体"),
+            Node {
+                currency: Some("CNY".to_owned()),
+                legal_person: Some("不应出现".to_owned()),
+                ..Node::new("c1", "只有币种")
+            },
+            Node {
+                paid_in_amount: Some("   ".to_owned()),
+                location: Some("  ".to_owned()),
+                ..Node::new("c2", "空白实缴")
+            },
+        ],
+        vec![edge("root", "c1", 10.0), edge("root", "c2", 0.0)],
+    );
+    let display = build_display(&request).expect("display");
+    let c1 = id_of(&request, "c1");
+    assert_eq!(
+        display
+            .get(c1)
+            .expect("c1")
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["只有币种"]
+    );
+    let c2 = id_of(&request, "c2");
+    assert_eq!(
+        display
+            .get(c2)
+            .expect("c2")
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["空白实缴"]
+    );
+    let facts = ratio_facts(&request).expect("facts");
+    assert_eq!(
+        facts
+            .iter()
+            .find(|fact| fact.protocol_id == "c2")
+            .expect("c2")
+            .text,
+        "0.00%"
+    );
+    assert!(facts.iter().all(|fact| fact.protocol_id != "root"));
+}
+
+#[test]
+fn person_is_white_and_company_is_gray() {
+    assert!(!company_fill(&Node {
+        node_type: Some(NodeType::Person),
+        legal_person: Some("张三".to_owned()),
+        ..Node::new("p", "张三")
+    }));
+    assert!(company_fill(&Node {
+        node_type: Some(NodeType::Company),
+        ..Node::new("c", "公司")
+    }));
+    assert!(company_fill(&Node {
+        legal_person: Some("李四".to_owned()),
+        ..Node::new("u", "未标")
+    }));
+    assert!(!company_fill(&Node {
+        legal_person: Some("  ".to_owned()),
+        ..Node::new("b", "空白")
+    }));
+}
 
 fn cone() -> ChartRequest {
     let mut root = Node::new("root", "主体");
@@ -44,7 +238,7 @@ fn cone() -> ChartRequest {
     )
 }
 
-fn nid(request: &ChartRequest, protocol: &str) -> crate::ids::NodeId {
+fn nid(request: &ChartRequest, protocol: &str) -> graph::NodeId {
     graph::validate(request)
         .expect("valid")
         .id_of(protocol)

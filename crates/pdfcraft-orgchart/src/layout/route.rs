@@ -1,6 +1,6 @@
 //! Orthogonal edge routing.
 
-use crate::ids::NodeId;
+use crate::graph::NodeId;
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{Error, ErrorCode};

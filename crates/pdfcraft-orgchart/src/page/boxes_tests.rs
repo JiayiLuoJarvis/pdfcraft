@@ -1,14 +1,14 @@
-//! Wrap, box height, and the HC `ExtraLight` face.
+//! Box height, wrap, subject promotion, and cue slots.
 
-use crate::captions::CueSide;
-use crate::display::{company_fill, LineKind, LogicalLine};
-use crate::ids::NodeId;
-use crate::measure::{
+use super::{
     build_node_boxes, cont_cue_height_mm, default_node_width_mm, overflow_box,
-    promote_to_page_subject, sized_cue_anchors, wrap_text, FontMetrics, InboxNode, Measurer,
-    NodeBox, WrappedLine,
+    promote_to_page_subject, sized_cue_anchors, InboxNode, NodeBox, WrappedLine,
 };
-use crate::{ErrorCode, FontBytes, Node, NodeType};
+use crate::captions::CueSide;
+use crate::content::{company_fill, LineKind, LogicalLine};
+use crate::font::{wrap_text, Measurer};
+use crate::graph::NodeId;
+use crate::{ErrorCode, Node, NodeType};
 
 fn chars_f64(text: &str) -> f64 {
     f64::from(u32::try_from(text.chars().count()).unwrap_or(u32::MAX))
@@ -84,43 +84,6 @@ fn inbox<'a>(
 
 fn name_only(id: &str, name: &str) -> Node {
     Node::new(id, name)
-}
-
-#[test]
-fn cjk_wraps_char_by_char() {
-    let mut measurer = FakeMeasurer::new(2.0, 5.0);
-    let parts = wrap_text("甲乙丙丁戊己", &mut measurer, 10.0, 6.0, true).expect("wrap");
-    assert_eq!(parts, ["甲乙丙", "丁戊己"]);
-}
-
-#[test]
-fn ascii_keeps_words_intact() {
-    let mut measurer = FakeMeasurer::new(2.0, 5.0);
-    let parts = wrap_text("ab cd ef", &mut measurer, 10.0, 6.0, true).expect("wrap");
-    assert_eq!(parts, ["ab ", "cd ", "ef"]);
-}
-
-#[test]
-fn overlong_ascii_token_is_cut_by_code_point() {
-    let mut measurer = FakeMeasurer::new(2.0, 5.0);
-    let text = "abcdefgh";
-    let parts = wrap_text(text, &mut measurer, 10.0, 6.0, true).expect("wrap");
-    assert_eq!(parts.concat(), text);
-    assert!(parts.len() > 1);
-    for part in &parts {
-        let width = measurer.string_width_mm(part, 10.0).expect("width");
-        assert!(width <= 6.0);
-    }
-}
-
-#[test]
-fn ratio_text_stays_one_line_when_wrap_is_off() {
-    let mut measurer = FakeMeasurer::new(2.0, 5.0);
-    let long_ratio = "12.50%".repeat(10);
-    let width = measurer.string_width_mm(&long_ratio, 9.0).expect("width");
-    assert!(width > 38.0);
-    let parts = wrap_text(&long_ratio, &mut measurer, 9.0, 38.0, false).expect("wrap");
-    assert_eq!(parts, [long_ratio]);
 }
 
 #[test]
@@ -466,67 +429,4 @@ fn overflow_box_reserves_a_blank_second_name_row() {
     assert!((box_.lines.last().expect("slot").font_size_pt - 10.0).abs() < 0.0001);
     assert!(box_.is_company);
     assert!(!box_.is_subject);
-}
-
-fn hc_font() -> Option<FontBytes> {
-    crate::test_font::env_font()
-}
-
-#[test]
-fn open_keeps_the_shared_buffer() {
-    let Some(font) = hc_font() else {
-        return;
-    };
-    let metrics = FontMetrics::open(&font).expect("open");
-    assert!(std::sync::Arc::ptr_eq(&font.data, metrics.bytes()));
-}
-
-#[test]
-fn hc_line_height_matches_hhea_plus_gap() {
-    let Some(bytes) = hc_font() else {
-        return;
-    };
-    let font = FontMetrics::open(&bytes).expect("open");
-    let line_h = font.line_height_mm(10.0);
-    assert!((4.0..=8.0).contains(&line_h));
-    assert!(font.ascent_mm(10.0) < line_h);
-}
-
-#[test]
-fn hebrew_is_missing_from_the_hc_face() {
-    let Some(bytes) = hc_font() else {
-        return;
-    };
-    let mut font = FontMetrics::open(&bytes).expect("open");
-    let width = font.string_width_mm("אבג", 10.0).expect_err("width");
-    assert_eq!(width.code, ErrorCode::MissingGlyph);
-    let ensured = font.ensure_glyphs("אבג").expect_err("ensure");
-    assert_eq!(ensured.code, ErrorCode::MissingGlyph);
-    assert!(ensured.message.contains("missing glyph"));
-}
-
-#[test]
-fn a_collection_and_garbage_are_font_error() {
-    let ttc = FontMetrics::open(&FontBytes::new(b"ttcf".to_vec())).expect_err("ttc");
-    assert_eq!(ttc.code, ErrorCode::FontError);
-    assert!(ttc.message.contains("TTC"));
-    let garbage = FontMetrics::open(&FontBytes::new(b"not a font".to_vec())).expect_err("bad");
-    assert_eq!(garbage.code, ErrorCode::FontError);
-    let empty = FontMetrics::open(&FontBytes::new(Vec::<u8>::new())).expect_err("empty");
-    assert_eq!(empty.code, ErrorCode::FontError);
-}
-
-#[test]
-fn hc_latin_glyph_run_is_stable_and_has_width() {
-    let Some(bytes) = hc_font() else {
-        return;
-    };
-    let mut font = FontMetrics::open(&bytes).expect("open");
-    let first = font.glyph_run("A").expect("glyphs");
-    let second = font.glyph_run("A").expect("glyphs");
-    assert_eq!(first, second);
-    assert_eq!(first.len(), 1);
-    assert!(first[0].glyph_id > 0);
-    let width = font.string_width_mm("A", 10.0).expect("width");
-    assert!(width > 0.0);
 }

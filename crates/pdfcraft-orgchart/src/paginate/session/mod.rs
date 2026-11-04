@@ -1,30 +1,27 @@
 //! Split a validated chart into pages. Shareholders come before investments.
 
+mod assemble;
+mod fit;
+mod titles;
+
+use assemble::investment_id_refs;
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::captions::{
-    equity_chart_title, holds_relation, investment_page_titles, invests_relation,
-    shareholder_page_titles, whole_chart_subtitle, CueSide,
+use super::cues::{direct_count, finalize_pages, PendingCue, PendingLink, UnnumberedPage};
+use super::family::{
+    search_family_pages, AttachmentTask, DirectFit, PageDraft, SearchPage, TaskKind,
 };
-use crate::cues::{
-    absorb_cue_slots, direct_count, finalize_pages, CueAnchorSize, PendingCue, PendingLink,
-    UnnumberedPage,
-};
-use crate::display::{self, RatioFact};
+use crate::captions::{equity_chart_title, whole_chart_subtitle, CueSide};
+use crate::content::{self, RatioFact};
 use crate::error::{Error, ErrorCode};
-use crate::family::{
-    search_family_pages, AttachmentTask, DirectFit, FamilyEdge, FamilyGraph, LayoutEvaluation,
-    OverflowNode, PageDraft, PageOracle, SearchPage, TaskKind,
-};
-use crate::graph::Graph;
-use crate::ids::NodeId;
-use crate::layout::{LayoutEngine, LayoutInput, WrappedEngine};
-use crate::measure::{overflow_box, promote_to_page_subject, sized_cue_anchors, Measurer, NodeBox};
+use crate::font::Measurer;
+use crate::graph::{Graph, NodeId};
+use crate::layout::{LayoutEngine, WrappedEngine};
+use crate::page::{EdgeRef, LayoutResult, NodeBox, PageSpec};
 #[cfg(test)]
-use crate::model::ChartRequest;
-use crate::model::NodeType;
-use crate::page::{EdgeRef, LayoutResult, PageSpec};
-use crate::units::{within, PageGeometry, NODE_WIDTH_MM, ROW_GAP_MM};
+use crate::request::ChartRequest;
+use crate::units::{within, PageGeometry, NODE_WIDTH_MM};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Side {
@@ -162,26 +159,6 @@ pub(crate) fn paginate_request_with<E: LayoutEngine, M: Measurer>(
     paginate_with(graph, boxes, geometry, engine, measurer)
 }
 
-/// Two millimetres per character. Paging tests inject this instead of a face.
-#[cfg(test)]
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct FallbackMeasurer;
-
-#[cfg(test)]
-impl Measurer for FallbackMeasurer {
-    fn string_width_mm(&mut self, text: &str, _size_pt: f64) -> Result<f64, Error> {
-        Ok(crate::units::n64(text.chars().count()) * 2.0)
-    }
-
-    fn line_height_mm(&mut self, _size_pt: f64) -> f64 {
-        5.0
-    }
-
-    fn ensure_glyphs(&mut self, _text: &str) -> Result<(), Error> {
-        Ok(())
-    }
-}
-
 impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
     fn new(
         mut graph: Graph,
@@ -204,7 +181,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             .enumerate()
             .map(|(index, id)| (*id, index))
             .collect();
-        let ratio_facts = display::facts_of(&mut graph)?;
+        let ratio_facts = content::facts_of(&mut graph)?;
         Ok(Self {
             graph,
             boxes,
@@ -346,60 +323,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
         self.graph.protocol_id(id)
     }
 
-    fn family_graph(&self, direct_ids: &[NodeId], side: Side) -> FamilyGraph {
-        let mut node_ids = HashSet::from([self.subject_node]);
-        let mut stack: Vec<NodeId> = direct_ids.to_vec();
-        while let Some(node_id) = stack.pop() {
-            if !node_ids.insert(node_id) {
-                continue;
-            }
-            let next = match side {
-                Side::Shareholder => self.graph.incoming_sources(node_id),
-                Side::Investment => self.graph.outgoing_targets(node_id),
-            };
-            stack.extend(next);
-        }
-        let mut edges = Vec::new();
-        for edge in &self.graph.edges {
-            let from_node = edge.from;
-            let to_node = edge.to;
-            if !node_ids.contains(&from_node) || !node_ids.contains(&to_node) {
-                continue;
-            }
-            let (parent_id, child_id) = if side == Side::Shareholder {
-                (to_node, from_node)
-            } else {
-                (from_node, to_node)
-            };
-            edges.push(FamilyEdge {
-                id: edge.id.index(),
-                parent_id,
-                child_id,
-            });
-        }
-        let person_ids = node_ids
-            .iter()
-            .copied()
-            .filter(|id| {
-                self.graph
-                    .nodes
-                    .get(id.index())
-                    .is_some_and(|node| node.node_type == Some(NodeType::Person))
-            })
-            .collect();
-        FamilyGraph {
-            subject_id: self.subject_node,
-            edges,
-            node_order: self
-                .node_order
-                .iter()
-                .copied()
-                .filter(|id| node_ids.contains(id))
-                .collect(),
-            person_ids,
-        }
-    }
-
     fn search_page_to_spec(
         &mut self,
         page: &SearchPage,
@@ -429,217 +352,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             let name = self.node_name(subject);
             self.unnumbered(&packed, self.whole_main.clone(), sub, Some(name))
         }
-    }
-
-    fn key(&self, draft: &PageDraft, side: Option<Side>, overview: bool) -> PageKey {
-        PageKey {
-            overview_cue: overview
-                && side.is_some()
-                && draft.kind == TaskKind::Primary
-                && draft.subject_id == self.subject_node,
-            draft: draft.clone(),
-            side,
-        }
-    }
-
-    fn standalone_key(&self, node_ids: BTreeSet<NodeId>) -> PageKey {
-        PageKey {
-            draft: PageDraft {
-                subject_id: self.subject_node,
-                node_ids,
-                stub_ids: BTreeSet::new(),
-                overflow: None,
-                kind: TaskKind::Primary,
-            },
-            side: None,
-            overview_cue: false,
-        }
-    }
-
-    fn evaluate(&mut self, key: &PageKey) -> Result<LayoutEvaluation, Error> {
-        let packed = self.layout_pack(key)?;
-        Ok(Self::as_evaluation(&packed, packed.orientation_violation))
-    }
-
-    fn evaluate_direct(&mut self, key: &PageKey) -> Result<DirectFit, Error> {
-        if let Some(cached) = self.direct_cache.get(key) {
-            return Ok(cached.clone());
-        }
-        let chosen = self.choose_direct_layer(key)?;
-        self.direct_cache.insert(key.clone(), chosen.clone());
-        Ok(chosen)
-    }
-
-    fn layout_pack(&mut self, key: &PageKey) -> Result<PackedLayout, Error> {
-        if let Some(cached) = self.chosen_cache.get(key) {
-            return Ok(cached.clone());
-        }
-        let packed = self.choose_layout(key)?;
-        self.chosen_cache.insert(key.clone(), packed.clone());
-        Ok(packed)
-    }
-
-    fn choose_layout(&mut self, key: &PageKey) -> Result<PackedLayout, Error> {
-        let (preferred, alternate) = self.orientation_pair(key)?;
-        let preferred_pack = self.layout_at(key, preferred)?;
-        if preferred_pack.fits() {
-            return Ok(preferred_pack);
-        }
-        let mut alternate_pack = self.layout_at(key, alternate)?;
-        if alternate_pack.fits() {
-            alternate_pack.orientation_violation = true;
-            return Ok(alternate_pack);
-        }
-        Ok(preferred_pack)
-    }
-
-    fn choose_direct_layer(&mut self, key: &PageKey) -> Result<DirectFit, Error> {
-        let (preferred, alternate) = self.orientation_pair(key)?;
-        let preferred_pack = self.layout_at(key, preferred)?;
-        let alternate_pack = self.layout_at(key, alternate)?;
-        for admit in [Admit::Comfort, Admit::Elastic] {
-            for (pack, violation) in [(&preferred_pack, false), (&alternate_pack, true)] {
-                if pack.fits() && admit.accepts(pack) {
-                    return Ok(DirectFit::Comfortable(Self::as_evaluation(pack, violation)));
-                }
-            }
-        }
-        if preferred_pack.fits() {
-            return Ok(DirectFit::PhysicalOnly(Self::as_evaluation(
-                &preferred_pack,
-                false,
-            )));
-        }
-        if alternate_pack.fits() {
-            return Ok(DirectFit::PhysicalOnly(Self::as_evaluation(
-                &alternate_pack,
-                true,
-            )));
-        }
-        Ok(DirectFit::None)
-    }
-
-    fn whole_page_if_elastic(&mut self, key: &PageKey) -> Result<Option<PackedLayout>, Error> {
-        let (preferred, alternate) = self.orientation_pair(key)?;
-        let preferred_pack = self.layout_at(key, preferred)?;
-        let alternate_pack = self.layout_at(key, alternate)?;
-        for admit in [Admit::Comfort, Admit::Elastic] {
-            for (mut pack, violation) in [
-                (preferred_pack.clone(), false),
-                (alternate_pack.clone(), true),
-            ] {
-                if !pack.fits() || !admit.accepts(&pack) {
-                    continue;
-                }
-                if violation {
-                    pack.orientation_violation = true;
-                }
-                return Ok(Some(pack));
-            }
-        }
-        Ok(None)
-    }
-
-    fn orientation_pair(&mut self, key: &PageKey) -> Result<(PageGeometry, PageGeometry), Error> {
-        let content = self.materialize(key)?;
-        let portrait = self.geometry;
-        let landscape = portrait.landscape();
-        if has_fork(&content.edges) {
-            Ok((landscape, portrait))
-        } else {
-            Ok((portrait, landscape))
-        }
-    }
-
-    fn as_evaluation(packed: &PackedLayout, violation: bool) -> LayoutEvaluation {
-        LayoutEvaluation {
-            fits: packed.fits(),
-            height_mm: packed.layout.height_mm,
-            printable_height_mm: packed.geometry.printable_height_mm(),
-            elastic_height_mm: packed.geometry.elastic_height_mm(),
-            orientation_violation: violation,
-            geometry: packed.fits().then_some(packed.geometry),
-        }
-    }
-
-    fn layout_at(&mut self, key: &PageKey, geometry: PageGeometry) -> Result<PackedLayout, Error> {
-        let cache_key = (key.clone(), geometry.cache_key());
-        if let Some(cached) = self.geometry_cache.get(&cache_key) {
-            return Ok(cached.clone());
-        }
-        let packed = self.pack_geometry(key, geometry)?;
-        self.geometry_cache.insert(cache_key, packed.clone());
-        Ok(packed)
-    }
-
-    fn pack_geometry(
-        &mut self,
-        key: &PageKey,
-        geometry: PageGeometry,
-    ) -> Result<PackedLayout, Error> {
-        let content = self.materialize(key)?;
-        let mut boxes = Vec::with_capacity(content.order.len());
-        for id in &content.order {
-            let Some(box_) = content.boxes.get(id) else {
-                return Err(Error::new(
-                    ErrorCode::LayoutFailed,
-                    format!("page order id {} has no measured box", self.protocol(*id)),
-                ));
-            };
-            boxes.push(box_.clone());
-        }
-        let cols = geometry.max_cols(self.node_width);
-        let printable = geometry.printable_width_mm();
-        let anchors = sized_cue_anchors(
-            &content
-                .anchors
-                .iter()
-                .map(|(id, side)| (id.as_str(), *side))
-                .collect::<Vec<_>>(),
-            &boxes,
-            self.measurer,
-        )?;
-        let anchor_sizes: Vec<CueAnchorSize> = anchors
-            .into_iter()
-            .map(|anchor| CueAnchorSize {
-                anchor_id: anchor.anchor_id,
-                side: anchor.side,
-                width_mm: anchor.width_mm,
-                height_mm: anchor.height_mm,
-            })
-            .collect();
-        let edges = content.edges.clone();
-        let order = content.order.clone();
-        let engine = self.engine;
-        let node_width = self.node_width;
-        let mut relayout = |row_gap: f64| {
-            engine.layout(&LayoutInput {
-                boxes: &boxes,
-                edges: &edges,
-                node_order: &order,
-                cols,
-                node_width_mm: node_width,
-                row_gap_mm: row_gap,
-                printable_width_mm: printable,
-            })
-        };
-        let placed = absorb_cue_slots(&anchor_sizes, &mut relayout, geometry)?;
-        let metrics =
-            engine.family_row_metrics(&boxes, &edges, &order, cols, node_width, printable)?;
-        let (layout, physical_fits) = if let Some(layout) = placed {
-            let fits = layout.fits(geometry);
-            (layout, fits)
-        } else {
-            (relayout(ROW_GAP_MM)?, false)
-        };
-        Ok(PackedLayout {
-            boxes: content.boxes,
-            layout,
-            geometry,
-            physical_fits,
-            max_nondirect_rows: metrics.max_nondirect_rows,
-            orientation_violation: false,
-        })
     }
 
     fn materialize(&mut self, key: &PageKey) -> Result<PageContent, Error> {
@@ -689,80 +401,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             order,
             anchors,
         })
-    }
-
-    fn boxes_for_page(
-        &mut self,
-        ids: &BTreeSet<NodeId>,
-        layout_root_id: Option<NodeId>,
-    ) -> Result<HashMap<NodeId, NodeBox>, Error> {
-        let mut page_boxes = HashMap::new();
-        for &id in ids {
-            let Some(box_) = self.boxes.get(&id) else {
-                return Err(Error::new(
-                    ErrorCode::LayoutFailed,
-                    format!("page draft node {} has no measured box", self.protocol(id)),
-                ));
-            };
-            let stored = match layout_root_id {
-                Some(root) if id == root => {
-                    if id == self.subject_node && box_.is_subject {
-                        box_.clone()
-                    } else {
-                        promote_to_page_subject(box_, self.node_width, self.measurer)?
-                    }
-                }
-                Some(_) if box_.is_subject => NodeBox {
-                    is_subject: false,
-                    ..box_.clone()
-                },
-                None | Some(_) => box_.clone(),
-            };
-            page_boxes.insert(id, stored);
-        }
-        Ok(page_boxes)
-    }
-
-    fn layout_root(&self, ids: &BTreeSet<NodeId>, preferred: NodeId) -> Option<NodeId> {
-        if ids.contains(&self.subject_node) {
-            Some(self.subject_node)
-        } else if ids.contains(&preferred) {
-            Some(preferred)
-        } else {
-            None
-        }
-    }
-
-    fn overflow_for(&mut self, node: &OverflowNode, side: Side) -> Result<NodeBox, Error> {
-        if !self.boxes.contains_key(&node.subject_id) {
-            return Err(Error::new(
-                ErrorCode::LayoutFailed,
-                format!("overflow subject missing: {}", node.subject_id),
-            ));
-        }
-        if !self.boxes.contains_key(&node.first_moved_id) {
-            return Err(Error::new(
-                ErrorCode::LayoutFailed,
-                format!("overflow child missing: {}", node.first_moved_id),
-            ));
-        }
-        let name = match side {
-            Side::Shareholder => crate::captions::other_shareholders_name(node.moved_count),
-            Side::Investment => crate::captions::other_investments_name(node.moved_count),
-        };
-        let id = self.graph.ensure_overflow(
-            node.subject_id,
-            node.first_moved_id,
-            node.moved_count,
-            name.clone(),
-        );
-        if let Some(cached) = self.overflow_boxes.get(&id) {
-            return Ok(cached.clone());
-        }
-        let protocol = self.graph.protocol_id(id).to_owned();
-        let box_ = overflow_box(id, &protocol, &name, self.measurer, self.node_width)?;
-        self.overflow_boxes.insert(id, box_.clone());
-        Ok(box_)
     }
 
     fn unnumbered(
@@ -819,35 +457,6 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
         };
         spec.check()?;
         Ok(spec)
-    }
-
-    fn next_shareholder_titles(&mut self) -> (String, String) {
-        self.shareholder_continue += 1;
-        shareholder_page_titles(&self.subject_name, self.shareholder_continue)
-    }
-
-    fn next_investment_titles(&mut self) -> (String, String) {
-        self.investment_continue += 1;
-        investment_page_titles(&self.subject_name, self.investment_continue)
-    }
-
-    fn cut_caption(&mut self, node_id: NodeId) -> Result<String, Error> {
-        let name = self.node_name(node_id);
-        let ratio = crate::graph::resolve_display_ratio(&mut self.graph, node_id)?;
-        match self.graph.layout_parent_optional(node_id) {
-            None => Ok(name),
-            Some((from_id, to_id)) => {
-                if from_id == node_id {
-                    Ok(holds_relation(&name, &self.node_name(to_id), ratio))
-                } else {
-                    Ok(invests_relation(&self.node_name(from_id), &name, ratio))
-                }
-            }
-        }
-    }
-
-    fn node_name(&self, id: NodeId) -> String {
-        self.graph.node_name(id).to_owned()
     }
 
     fn sorted(&self, ids: Vec<NodeId>) -> Vec<NodeId> {
@@ -919,35 +528,8 @@ fn task_index(
     Ok(target)
 }
 
-fn investment_id_refs<'a>(ids: &[NodeId], boxes: &'a [NodeBox]) -> Vec<&'a str> {
-    ids.iter()
-        .filter_map(|id| {
-            boxes
-                .iter()
-                .find(|box_| box_.id == *id)
-                .map(|box_| box_.protocol_id.as_str())
-        })
-        .collect()
-}
-
 struct SideOracle<'s, 'a, E: LayoutEngine, M: Measurer> {
     session: &'s mut Session<'a, E, M>,
     side: Side,
     overview: bool,
 }
-
-impl<E: LayoutEngine, M: Measurer> PageOracle for SideOracle<'_, '_, E, M> {
-    fn evaluate(&mut self, draft: &PageDraft) -> Result<LayoutEvaluation, Error> {
-        let key = self.session.key(draft, Some(self.side), self.overview);
-        self.session.evaluate(&key)
-    }
-
-    fn evaluate_direct(&mut self, draft: &PageDraft) -> Result<DirectFit, Error> {
-        let key = self.session.key(draft, Some(self.side), self.overview);
-        self.session.evaluate_direct(&key)
-    }
-}
-
-#[cfg(test)]
-#[path = "paging_tests.rs"]
-mod paging_tests;

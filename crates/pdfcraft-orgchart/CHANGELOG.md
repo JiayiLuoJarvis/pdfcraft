@@ -9,6 +9,12 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Fixed
+
+- `generate_pdf` on the same request now returns identical PDF bytes. Placed
+  nodes are drawn in `NodeId` order, so `HashMap` iteration no longer changes
+  the content stream.
+
 ## [0.2.0] - 2026-11-03
 
 ### Changed

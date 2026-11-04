@@ -1,7 +1,5 @@
 //! Chart request values. Optional fields stay optional through validation and folding.
 
-use std::sync::Arc;
-
 use crate::error::{Error, ErrorCode};
 
 /// Hard cap for [`ChartOptions::max_nodes`], and the cap used when that field is `None`.
@@ -130,29 +128,6 @@ pub struct ChartOptions {
     pub top_n: Option<usize>,
 }
 
-/// Font file bytes. Paths are not accepted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FontBytes {
-    /// Shared TrueType or OpenType bytes for one face.
-    pub data: Arc<Vec<u8>>,
-}
-
-impl FontBytes {
-    /// Wrap owned bytes without parsing them.
-    #[must_use]
-    pub fn new(data: impl Into<Vec<u8>>) -> Self {
-        Self {
-            data: Arc::new(data.into()),
-        }
-    }
-
-    /// Reuse an existing shared font buffer without copying its contents.
-    #[must_use]
-    pub fn from_shared(data: Arc<Vec<u8>>) -> Self {
-        Self { data }
-    }
-}
-
 /// One equity chart: a subject, its nodes, its holding edges, and options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartRequest {
@@ -206,24 +181,4 @@ pub fn document_title(request: &ChartRequest) -> Result<String, Error> {
         &node.name,
         request.options.title.as_deref(),
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::FontBytes;
-
-    #[test]
-    fn new_wraps_owned_bytes() {
-        let font = FontBytes::new(b"face".to_vec());
-        assert_eq!(font.data.as_slice(), b"face");
-    }
-
-    #[test]
-    fn from_shared_keeps_the_arc() {
-        let source = Arc::new(b"face".to_vec());
-        let font = FontBytes::from_shared(Arc::clone(&source));
-        assert!(Arc::ptr_eq(&source, &font.data));
-    }
 }

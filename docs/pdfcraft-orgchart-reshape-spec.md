@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-11-04 |
-| 状态 | **决定草案**。D3 至 D5、D7 经 2026-11-04 对话选择题确认（D3、D7 按同日审查修订，`folded_holders_of` 的字段名与两条新校验同日确认）；D12、D14 于同日确认；其余在维护者"允许完全重构""按建议撰写"的授权下拟定。提案书 §13 已起草（草案），确认后本文定稿，见 §11 |
+| 状态 | **决定草案**。D3 至 D5、D7 经 2026-11-04 对话选择题确认（D3、D7 按同日审查修订，`folded_holders_of` 的字段名与两条新校验同日确认）；D12、D14 于同日确认；PR 1 拆分时的可见性规则（§8.2 末段）与 `paginate/session/` 目录于同日确认；其余在维护者"允许完全重构""按建议撰写"的授权下拟定。提案书 §13 已起草（草案），确认后本文定稿，见 §11 |
 | 范围 | 只改 `crates/pdfcraft-orgchart`：公共面、内部标识、模块与文件划分、错误面，以及 PR 0 的绘制顺序修复（DET-1）。算法、文案、常量、错误码字符串不改 |
 | 版本 | PR 3 合入后发 `pdfcraft-orgchart 0.3.0`（crates.io 当前 `0.2.0`）。全部 breaking 改动在 PR 3 一个 PR 内完成（VER-3） |
 | 相关 | [`pdfcraft-orgchart-spec.md`](pdfcraft-orgchart-spec.md)（行为合同）；[`pdfcraft-orgchart-structure-spec.md`](pdfcraft-orgchart-structure-spec.md)；[`pdfcraft-pdf-shape-refactor-spec.md`](pdfcraft-pdf-shape-refactor-spec.md)（同层先例）；[`rust-engineering-standard.md`](rust-engineering-standard.md) API-2、API-8、API-9、API-11、API-12、ARC-2、ARC-3、ERR-2、ERR-3、ERR-7、PAN-3、PAN-4、PAN-8、DET-1、TRK-2、TRK-4、TST-1、VER-1 至 VER-3、TOOL-5 |
@@ -418,6 +418,8 @@ lib       → chart, error, font, request                  只做重导出
 
 目录模块一律用 `<name>/mod.rs`，不写成 `<name>.rs` 加 `<name>/`，因为根 `Cargo.toml:66` 把 `clippy::self_named_module_files` 设为 deny。
 
+上图中 `graph`、`font`、`content`、`page`、`paginate`、`render` 各是一个节点，节点内部文件互相引用不记成边，与 `docs/module-dependency.md` 对 pdf 包 `text`、`spec`、`backend` 的处理相同。
+
 ### 8.2 文件去向
 
 | 现有文件 | 去向 |
@@ -434,10 +436,11 @@ lib       → chart, error, font, request                  只做重导出
 | `display.rs` | `content/lines.rs`，测试见 §8.3 |
 | `captions.rs` | `captions.rs`（位置不变，见 §8.1），测试见 §8.3 |
 | `page.rs` | `page/model.rs` |
-| `paging.rs` 的 `Session` 骨架：`new`、`run`、`pack_side`、`search_page_to_spec`、`materialize`、`to_page`、`unnumbered`、`protocol`、`sorted`，以及 `task_key`、`task_index`、`has_fork` | `paginate/session.rs` |
-| `paging.rs` 选版式与朝向的方法：`key`、`standalone_key`、`evaluate`、`evaluate_direct`、`layout_pack`、`choose_layout`、`choose_direct_layer`、`whole_page_if_elastic`、`orientation_pair`、`as_evaluation`、`layout_at`、`pack_geometry`、`layout_root`，以及 `SideOracle` | `paginate/fit.rs` |
-| `paging.rs` 组页的方法：`boxes_for_page`、`overflow_for`、`family_graph`，以及 `investment_id_refs` | `paginate/assemble.rs` |
-| `paging.rs` 标题与附页说明：`next_shareholder_titles`、`next_investment_titles`、`cut_caption`、`node_name` | `paginate/titles.rs` |
+| `paging.rs` 的 `Session` 骨架：`new`、`run`、`pack_side`、`search_page_to_spec`、`materialize`、`to_page`、`unnumbered`、`protocol`、`sorted`，以及 `task_key`、`task_index`、`has_fork` | `paginate/session/mod.rs` |
+| `paging.rs` 中不属于 `Session` 方法的其余条目：`Session` 结构体定义、`Side`、`PageKey`、`GeometryCache`、`PackedLayout`、`SidePack`、`PageContent`、`Admit`，以及入口函数 `paginate`、`paginate_with`、`paginate_request`、`paginate_request_with` | `paginate/session/mod.rs`；入口函数由 `paginate/mod.rs` 以 `pub(crate) use` 导出 |
+| `paging.rs` 选版式与朝向的方法：`key`、`standalone_key`、`evaluate`、`evaluate_direct`、`layout_pack`、`choose_layout`、`choose_direct_layer`、`whole_page_if_elastic`、`orientation_pair`、`as_evaluation`、`layout_at`、`pack_geometry`、`layout_root`，以及 `SideOracle` | `paginate/session/fit.rs` |
+| `paging.rs` 组页的方法：`boxes_for_page`、`overflow_for`、`family_graph`，以及 `investment_id_refs` | `paginate/session/assemble.rs` |
+| `paging.rs` 标题与附页说明：`next_shareholder_titles`、`next_investment_titles`、`cut_caption`、`node_name` | `paginate/session/titles.rs` |
 | `paging.rs` 的 `FallbackMeasurer`（已带 `#[cfg(test)]`） | `font/fixed.rs`，在 `font/mod.rs` 里以 `#[cfg(test)] mod fixed;` 挂载 |
 | `family.rs` 的草稿类型、`PageOracle`、`Context` 骨架与图查询方法、`store_plan`、`plan_at`、`make_draft` | `paginate/family/mod.rs` |
 | `family.rs` 的 `PlanScore`、`OverflowScore`、`score`、`sparse_risk`、`page_utilization`、`sparse_buckets`、`repeated_context` | `paginate/family/score.rs` |
@@ -453,7 +456,16 @@ lib       → chart, error, font, request                  只做重导出
 | `render.rs` 的 krilla 图元：`fill_round`、`stroke_*`、`round_path`、`arrow`、颜色、`center_text`、`draw_text`、`krilla_glyphs`、`rect_pt` | `render/paint.rs` |
 | `ratios.rs` | `render/ratio_labels.rs` |
 
-同一类型的 `impl` 块可以分写在同一模块树的多个文件里。拆 `Session` 和 `Context` 时只搬方法，不改签名、不改控制流。表中的方法名以 PR 1 当时的代码为准。新增或改名的方法按同一职责归类。
+同一类型的 `impl` 块可以分写在同一目录的多个文件里。拆分只搬条目，不改签名、不改控制流。表中的方法名以 PR 1 当时的代码为准。新增或改名的方法按同一职责归类。
+
+拆分时的可见性规则如下。Rust 里子模块的私有条目对父模块和兄弟模块不可见，所以照搬不加修饰编不过。
+
+- 被拆类型的定义放在该目录的 `mod.rs`：`Session` 在 `paginate/session/mod.rs`，`Context` 在 `paginate/family/mod.rs`。字段保持私有，子文件靠祖先模块可见性读写。
+- 跨兄弟文件或子文件到父文件调用的方法、自由函数、类型，可以从私有提到 `pub(super)`。`render/` 的拆分同样适用。
+- `graph/arena.rs` 里 `Graph` 的私有字段（`by_protocol_id`、`outgoing`、`incoming`、`out_nodes`、`reach_cache`、`overflow_ids`）可以提到 `pub(super)`，供 `graph/check.rs`（含构造 `Graph` 的字面量）与 `graph/ratio.rs` 读写。`graph/fold.rs` 因此也能看到这些字段，PR 2 在 arena 上折叠（§6.2）需要这层访问。
+- 不得为拆分把条目提到 `pub(crate)` 或更宽。可见范围只扩到所在目录：`Session` 的内部不对 `paginate/family`、`paginate/cues` 可见，家族搜索仍只经 `PageOracle` 访问分页会话。
+- 不用 `include!` 拼文件：rustfmt 不格式化被 `include!` 的文件，TOOL-5 的 `cargo fmt --check` 会漏检。
+- 以上修饰调整不算改逻辑。
 
 ### 8.3 测试放置
 
@@ -466,7 +478,7 @@ lib       → chart, error, font, request                  只做重导出
 
 ## 9. 测试
 
-- **纯搬运的 PR（PR 1）。** 测试数量不变，断言一行不改。
+- **纯搬运的 PR（PR 1）。** 测试数量不变，断言一行不改。测试的 `use` 路径随搬运更新。
 - **换键的 PR（PR 2）。** 分页测试的页数、主副标题、角色、附件编号断言不改。`tests/generate_pdf.rs` 的 `pdftotext` 断言不改。
 - **PR 0。** 同一请求连续出图两次，字节相同。用一张会分多页的夹具（审查时用的是 33 页的图）。
 - **新增测试。**
@@ -490,7 +502,7 @@ lib       → chart, error, font, request                  只做重导出
 | PR | 内容 | 版本与 CHANGELOG |
 | --- | --- | --- |
 | (0) | `layout/mod.rs:110` 的 `laid_out.into_values().collect()` 遍历 `HashMap`（`layout/place.rs:678`），绘制顺序不确定，同一请求两次出图字节不同（DET-1）。改为收集后按 `NodeId` 排序（`sort_unstable_by_key`）。几何、文本、像素不变。2026-11-04 复核时在临时 worktree 做过正反对照：48 层多页请求，改前两次出图字节不同，改后相同。可以先于本文其余部分合入 | 不升版本。`Unreleased` 写 `Fixed`，随 `0.3.0` 发布 |
-| (1) | 按 §8 搬文件、拆文件、挪测试。在 `docs/module-dependency.md` 补 orgchart 的模块图。不改任何逻辑 | 不变，不记 |
+| (1) | 按 §8 搬文件、拆文件、挪测试。在 `docs/module-dependency.md` 补 orgchart 的模块图。不改任何逻辑；可见性只按 §8.2 末段调整 | 不变，不记 |
 | (2) | §6.1 到 §6.3：arena 身份、在 arena 上折叠、页面层换键、`NodeId(usize)`、`EdgeRec::caller_index`。三个公共函数的行为原样保留，包括"校验通过、出图失败"的分裂。前缀规则（`__overflow__:` 拒绝、`__other__:{p}` 的排名排除与冲突）改为在请求边界把字符串翻译成 `NodeOrigin`，arena 内部不再比较字符串；字面量到 PR 3 才删。翻译在完整的节点索引建好之后进行，以 `prepare.rs:57-64,106-111` 的排名排除与冲突行为为准；`graph.rs:306-307` 边插入边查找、要求父节点先出现的做法是实现细节，不作为合同 | 不变，不记 |
 | (3) | §4.1 到 §4.3 与 §5：`Chart`、`Font`、`ChartStyle`、`Edge` 与 `Node` 改形状（含 `folded_holders_of`）、关联常量、D3、D7。按 D14 在工程规范 API-9 与 disposition 登记例外，API-12 的登记文字从 `FontBytes.data` 改为 `Font`。同步示例、crate 文档、`docs/guide.md`、`tests/`。版本号同步两份 README（crate `README.md` 的安装片段与根 `README.md:64` 的状态行，`scripts/check_readme_identity.py` 是门禁），以及 `AGENTS.md:17`、提案书第 661 行。`AGENTS.md:83` 的 `FontBytes` 改为 `Font`。同一 PR 内另做 §4.4 与 §6.4：`Error` 字段私有、`ErrorSubject`、`source()`、ERR-3 去重复文本、`LAYOUT_FAILED` 分类。**开工前提案书 §13 已确认（§11）** | 升到 `0.3.0`。写 `Breaking`（§4.5，含访问器、`Error` 不再可比较）和 `Changed`（§5）。合入后可发 `0.3.0` |
 | (4) | 文档终态：行为规格 §2、§3、§4、§5、§6、§7、§9.1、§10.4（overflow id 不再是字符串）、§13、§14；结构规格 §1、§2、§3、§4、§9；`workspace-crates-spec.md` 第 44 行；工程规范 TRK-2 与 TRK-4 的 orgchart 反例、ERR-1 对 orgchart 错误的描述；disposition 中 M-STRONG-TYPES 改为 done | 不变 |

@@ -5,7 +5,7 @@ mod place;
 mod ranks;
 mod route;
 
-use crate::ids::NodeId;
+use crate::graph::NodeId;
 use std::collections::{BTreeMap, HashMap};
 
 use groups::{collect_layer_groups, group_band_rows, use_family_columns};
@@ -17,8 +17,7 @@ use ranks::prepare;
 use route::route_edges;
 
 use crate::error::Error;
-use crate::measure::NodeBox;
-use crate::page::{EdgeRef, LayoutResult};
+use crate::page::{EdgeRef, LayoutResult, NodeBox};
 type FamilyBands = Vec<Vec<Vec<NodeId>>>;
 
 use crate::units::{within, FAMILY_GAP_MM, LAYER_SPACING_MM, NODE_SPACING_MM, ROW_GAP_MM};
@@ -107,7 +106,10 @@ impl LayoutEngine for WrappedEngine {
         let plans = build_plans(&prepared, cols, &box_by_id, &mut child_widths, spacing)?;
         let laid_out = place_layers(&plans, &box_by_id, &child_widths, spacing)?;
         let routed = route_edges(&prepared.page_edges, &laid_out)?;
-        LayoutResult::from_parts(laid_out.into_values().collect(), routed, Vec::new())
+        // HashMap walk order is not the draw order. Callers compare PDF bytes.
+        let mut nodes: Vec<_> = laid_out.into_values().collect();
+        nodes.sort_unstable_by_key(|node| node.id);
+        LayoutResult::from_parts(nodes, routed, Vec::new())
     }
 
     fn family_row_metrics(

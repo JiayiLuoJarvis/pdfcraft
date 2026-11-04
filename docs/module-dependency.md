@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-14 |
-| 状态 | 工作项 G 已落地。本文是 `pdfcraft-pdf` 的目标图。完整边表在 [`scripts/pdfcraft-pdf-module-edges.txt`](../scripts/pdfcraft-pdf-module-edges.txt)，CI 用它核对源码 |
+| 状态 | 工作项 G 已落地。本文的前半是 `pdfcraft-pdf` 的目标图，`pdfcraft-orgchart` 的模块图见末节。`pdfcraft-pdf` 的完整边表在 [`scripts/pdfcraft-pdf-module-edges.txt`](../scripts/pdfcraft-pdf-module-edges.txt)，CI 用它核对源码 |
 | 相关 | [`AGENTS.md`](../AGENTS.md)；[`enterprise-readiness-spec.md`](enterprise-readiness-spec.md) 5.5 与 5.6 |
 
 ## 硬规则
@@ -137,3 +137,47 @@ layout/paginate      → canvas, error, geom, limits, layout/decorate, layout/fl
 - 为「无环」把 `pdfcraft-pdf` 再拆成多个 crate。
 - 为消环把 `FlowNode` 改成 trait 对象热路径。
 - 在 AGENTS 里把 `document` → `backend` 写成合法例外。`document` 模块已删除。
+
+## pdfcraft-orgchart
+
+日期 2026-11-04。来源：[`pdfcraft-orgchart-reshape-spec.md`](pdfcraft-orgchart-reshape-spec.md) §8.1，PR 1 搬运之后的 `crates/pdfcraft-orgchart/src`。本节还没有边文件和检查脚本，边由 `rg 'crate::'` 人工核对。
+
+`graph`、`font`、`content`、`page`、`paginate`、`render` 各是一个节点，节点内部的文件互相引用，不记成边。`layout` 的文件没有搬，它也是一个节点。目录模块一律写成 `<name>/mod.rs`（根 `Cargo.toml` 的 `clippy::self_named_module_files` 是 deny）。
+
+```text
+error                       无内部依赖
+units                       无内部依赖
+captions                    无内部依赖
+request   → error, captions                            captions 只供 document_title 用，PR 3 删除
+font      → error, units
+graph     → request, captions, error
+content   → graph, request, captions, error
+page      → graph, content, captions, font, request, units, error
+layout    → page, graph, units, error
+paginate  → layout, page, content, captions, graph, request, font, units, error
+render    → page, content, captions, graph, font, units, error
+chart     → paginate, render, page, content, captions, graph, font, request, units, error
+lib       → chart, error, font, request                只做重导出
+```
+
+上图是允许的出边。PR 1 的源码里 `content` 还没有用到 `captions`，`render` 还没有用到 `content`，其余边都存在。
+
+节点内部的拆分如下。
+
+```text
+graph     arena  check  ratio  fold
+font      mod（FontBytes、FontMetrics、Measurer、wrap_text）  fixed（仅测试）
+content   lines
+page      model  boxes
+paginate  cues  family/{mod,score,solve,head,inline,chain}  session/{mod,fit,assemble,titles}
+render    mod  chrome  marks  paint  ratio_labels
+```
+
+`paginate/session` 与 `paginate/family` 是兄弟目录。`Session` 的内部对 `family` 与 `cues` 不可见，家族搜索只经 `PageOracle` 访问分页会话。拆分只用 `pub(super)`，不用 `pub(crate)`，见规格 §8.2 末段。
+
+**禁止：**
+
+- `render` 以外的模块 `use krilla`
+- `graph`、`font`、`content`、`page`、`layout` → `paginate`、`render`、`chart`
+- `paginate` → `render`
+- `font` → `graph`、`page`、`content`

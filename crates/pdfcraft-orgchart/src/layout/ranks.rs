@@ -3,9 +3,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::error::{Error, ErrorCode};
-use crate::ids::NodeId;
-use crate::measure::NodeBox;
-use crate::page::EdgeRef;
+use crate::graph::NodeId;
+use crate::page::{EdgeRef, NodeBox};
 
 pub(crate) struct Prepared {
     pub(crate) ordered_ids: Vec<NodeId>,

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::ids::NodeId;
+use crate::graph::NodeId;
 use crate::page::EdgeRef;
 
 const MISSING_ORDER: usize = usize::MAX;

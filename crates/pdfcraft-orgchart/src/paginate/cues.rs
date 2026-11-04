@@ -1,11 +1,12 @@
 //! Continuation-cue slots and the numbered links written after page order is final.
 
 use crate::captions::{cont_cue_lines, overflow_detail_line, penetration_title, CueSide};
-use crate::display::RatioFact;
+use crate::content::RatioFact;
 use crate::error::{Error, ErrorCode};
-use crate::measure::{Measurer, NodeBox};
+use crate::font::Measurer;
 use crate::page::{
-    ContCue, CueSlot, LaidOutEdge, LayoutResult, NodePageLink, PageSpec, PlacedNode, PointMm,
+    ContCue, CueSlot, LaidOutEdge, LayoutResult, NodeBox, NodePageLink, PageSpec, PlacedNode,
+    PointMm,
 };
 use crate::units::{
     within, PageGeometry, CONT_CUE_GAP_MM, CONT_CUE_PAD_MM, CONT_CUE_TEXT_PT, FIT_EPSILON_MM,
@@ -512,7 +513,7 @@ fn write_overflow_line(
 mod tests {
     use super::{absorb_cue_slots, CueAnchorSize};
     use crate::captions::CueSide;
-    use crate::ids::NodeId;
+    use crate::graph::NodeId;
     use crate::page::{LayoutResult, PlacedNode};
     use crate::units::PageGeometry;
 

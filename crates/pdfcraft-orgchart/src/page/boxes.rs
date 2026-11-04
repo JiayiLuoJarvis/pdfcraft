@@ -1,27 +1,18 @@
-//! Glyph advances and node-box heights.
+//! Node boxes, subject promotion, and continuation-cue slot sizes.
 //!
-//! Width and a later draw step both go through [`FontMetrics::glyph_run`].
-//! Line height uses the hhea ascender and descender, plus a 2 pt gap.
-
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use read_fonts::TableProvider;
-use skrifa::instance::{LocationRef, Size};
-use skrifa::{FontRef, MetadataProvider};
+//! Wrapped rows are measured here. Coordinates are assigned later by layout.
 
 use crate::captions::{cont_cue_see, CueSide, ATTACHMENT_PREFIX};
-use crate::display::LineKind;
-use crate::display::LogicalLine;
+use crate::content::LineKind;
+use crate::content::LogicalLine;
 use crate::error::{Error, ErrorCode};
+use crate::font::{wrap_text, Measurer};
+use crate::graph::NodeId;
 use crate::graph::OVERFLOW_ID_PREFIX;
-use crate::ids::NodeId;
-use crate::model::FontBytes;
 use crate::units::{
-    node_height_limit_mm, pt_to_mm, CONT_CUE_LINE_COUNT, CONT_CUE_LINE_GAP_MM,
-    CONT_CUE_MIN_WIDTH_MM, CONT_CUE_PAD_MM, CONT_CUE_PAGE_DIGITS, CONT_CUE_TEXT_PT, DETAIL_FONT_PT,
-    LINE_GAP_PT, NAME_FONT_PT, PADDING_X_MM, PADDING_Y_MM, SUBJECT_NAME_FONT_PT,
-    SUBJECT_PADDING_Y_MM, SUBJECT_WIDTH_FACTOR,
+    node_height_limit_mm, CONT_CUE_LINE_COUNT, CONT_CUE_LINE_GAP_MM, CONT_CUE_MIN_WIDTH_MM,
+    CONT_CUE_PAD_MM, CONT_CUE_PAGE_DIGITS, CONT_CUE_TEXT_PT, DETAIL_FONT_PT, NAME_FONT_PT,
+    PADDING_X_MM, PADDING_Y_MM, SUBJECT_NAME_FONT_PT, SUBJECT_PADDING_Y_MM, SUBJECT_WIDTH_FACTOR,
 };
 
 /// Ordinary node width used when chart options leave the width unset.
@@ -29,213 +20,6 @@ use crate::units::{
 #[must_use]
 pub(crate) fn default_node_width_mm() -> f64 {
     crate::units::NODE_WIDTH_MM
-}
-
-/// Width, line height, and glyph coverage for wrapping.
-pub(crate) trait Measurer {
-    /// Width of `text` at `size_pt`, in mm.
-    ///
-    /// # Errors
-    ///
-    /// A real font returns [`ErrorCode::MissingGlyph`] when `text` needs a glyph it lacks.
-    fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, Error>;
-
-    /// Line slot height at `size_pt`, in mm.
-    fn line_height_mm(&mut self, size_pt: f64) -> f64;
-
-    /// Reject text that the font cannot draw.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorCode::MissingGlyph`] when a character has no glyph.
-    fn ensure_glyphs(&mut self, text: &str) -> Result<(), Error>;
-}
-
-/// One glyph produced by the same charmap and advance path drawing will use.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct GlyphUse {
-    /// Glyph id in the face.
-    pub glyph_id: u32,
-    /// Advance in font units, before size scaling.
-    pub advance_units: f32,
-}
-
-/// One face, opened from memory.
-#[derive(Debug, Clone)]
-pub(crate) struct FontMetrics {
-    bytes: Arc<Vec<u8>>,
-    upem: f64,
-    ascent: f64,
-    descent: f64,
-    glyphs: HashMap<char, GlyphUse>,
-}
-
-impl FontMetrics {
-    /// Open one TrueType or OpenType face.
-    ///
-    /// A `ttcf` collection is [`ErrorCode::FontError`]. So is a face whose hhea
-    /// ascent is not positive or whose hhea descent is not negative.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorCode::FontError`] when the bytes are not one usable face.
-    pub(crate) fn open(font: &FontBytes) -> Result<Self, Error> {
-        if font.data.starts_with(b"ttcf") {
-            return Err(Error::new(ErrorCode::FontError, "TTC not supported"));
-        }
-        if font.data.is_empty() {
-            return Err(Error::new(ErrorCode::FontError, "font bytes are empty"));
-        }
-        let face = parse_face(&font.data)?;
-        let head = face.head().map_err(|error| {
-            Error::new(
-                ErrorCode::FontError,
-                format!("failed to read head: {error}"),
-            )
-        })?;
-        let hhea = face.hhea().map_err(|error| {
-            Error::new(
-                ErrorCode::FontError,
-                format!("failed to read hhea: {error}"),
-            )
-        })?;
-        let upem = f64::from(head.units_per_em());
-        let ascent = f64::from(hhea.ascender().to_i16());
-        let descent = f64::from(hhea.descender().to_i16());
-        if !(upem.is_finite() && upem > 0.0) {
-            return Err(Error::new(
-                ErrorCode::FontError,
-                format!("head.unitsPerEm={upem} must be finite and > 0"),
-            ));
-        }
-        if !(ascent.is_finite() && ascent > 0.0 && descent.is_finite() && descent < 0.0) {
-            return Err(Error::new(
-                ErrorCode::FontError,
-                format!(
-                    "hhea ascent={ascent} descent={descent} must be finite, ascent > 0 and descent < 0"
-                ),
-            ));
-        }
-        let bytes = Arc::clone(&font.data);
-        Ok(Self {
-            bytes,
-            upem,
-            ascent,
-            descent: -descent,
-            glyphs: HashMap::new(),
-        })
-    }
-
-    /// Charmap hits and unscaled advances for `text`.
-    ///
-    /// Uncached characters parse the face once. Later calls reuse those glyph ids.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorCode::MissingGlyph`] or [`ErrorCode::FontError`].
-    pub(crate) fn glyph_run(&mut self, text: &str) -> Result<Vec<GlyphUse>, Error> {
-        if text.chars().any(|ch| !self.glyphs.contains_key(&ch)) {
-            let face = parse_face(&self.bytes)?;
-            let charmap = face.charmap();
-            let glyph_metrics = face.glyph_metrics(Size::unscaled(), LocationRef::default());
-            for ch in text.chars() {
-                if self.glyphs.contains_key(&ch) {
-                    continue;
-                }
-                let Some(gid) = charmap.map(ch) else {
-                    return Err(missing_glyph(text));
-                };
-                let advance_units = glyph_metrics.advance_width(gid).ok_or_else(|| {
-                    Error::new(
-                        ErrorCode::FontError,
-                        format!("no advance for glyph {}", gid.to_u32()),
-                    )
-                })?;
-                self.glyphs.insert(
-                    ch,
-                    GlyphUse {
-                        glyph_id: gid.to_u32(),
-                        advance_units,
-                    },
-                );
-            }
-        }
-        Ok(text.chars().map(|ch| self.glyphs[&ch]).collect())
-    }
-
-    /// Sum of advances at `size_pt`, in mm.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorCode::MissingGlyph`] when `text` is not covered.
-    pub(crate) fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, Error> {
-        let units: f64 = self
-            .glyph_run(text)?
-            .iter()
-            .map(|glyph| f64::from(glyph.advance_units))
-            .sum();
-        Ok(pt_to_mm(units / self.upem * size_pt))
-    }
-
-    /// Distance from the baseline to the ascender, in mm.
-    #[must_use]
-    pub(crate) fn ascent_mm(&self, size_pt: f64) -> f64 {
-        pt_to_mm(self.ascent / self.upem * size_pt)
-    }
-
-    /// Distance from the baseline down to the descender, in mm.
-    ///
-    /// The value is positive. It does not include the 2 pt line gap.
-    #[must_use]
-    pub(crate) fn descent_mm(&self, size_pt: f64) -> f64 {
-        pt_to_mm(self.descent / self.upem * size_pt)
-    }
-
-    /// Face bytes passed to krilla. The same buffer skrifa measured.
-    #[must_use]
-    pub(crate) fn bytes(&self) -> &Arc<Vec<u8>> {
-        &self.bytes
-    }
-
-    /// Units per em from `head`.
-    #[must_use]
-    pub(crate) fn units_per_em(&self) -> f64 {
-        self.upem
-    }
-
-    /// Ascender plus descender, scaled, plus a 2 pt gap.
-    #[must_use]
-    pub(crate) fn line_height_mm(&self, size_pt: f64) -> f64 {
-        pt_to_mm((self.ascent + self.descent) / self.upem * size_pt + LINE_GAP_PT)
-    }
-}
-
-impl Measurer for FontMetrics {
-    fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, Error> {
-        Self::string_width_mm(self, text, size_pt)
-    }
-
-    fn line_height_mm(&mut self, size_pt: f64) -> f64 {
-        Self::line_height_mm(self, size_pt)
-    }
-
-    fn ensure_glyphs(&mut self, text: &str) -> Result<(), Error> {
-        self.glyph_run(text).map(|_| ())
-    }
-}
-
-fn parse_face(bytes: &[u8]) -> Result<FontRef<'_>, Error> {
-    FontRef::from_index(bytes, 0).map_err(|error| {
-        Error::new(
-            ErrorCode::FontError,
-            format!("failed to load font: {error}"),
-        )
-    })
-}
-
-fn missing_glyph(text: &str) -> Error {
-    let prefix: String = text.chars().take(20).collect();
-    Error::new(ErrorCode::MissingGlyph, format!("missing glyph: {prefix}"))
 }
 
 /// One wrapped row inside a node box.
@@ -266,7 +50,7 @@ pub(crate) struct NodeBox {
     pub lines: Vec<WrappedLine>,
     /// Page subject, including a promoted annex root.
     pub is_subject: bool,
-    /// Gray fill. See [`crate::display::company_fill_rec`].
+    /// Gray fill. See [`crate::content::company_fill_rec`].
     pub is_company: bool,
 }
 
@@ -276,74 +60,10 @@ pub(crate) struct InboxNode<'a> {
     pub id: NodeId,
     /// Protocol id for error messages and the box.
     pub protocol_id: &'a str,
-    /// Lines from [`crate::display::inbox_lines`].
+    /// Lines from [`crate::content::inbox_lines`].
     pub lines: &'a [LogicalLine],
-    /// Gray fill. See [`crate::display::company_fill`].
+    /// Gray fill. See [`crate::content::company_fill`].
     pub is_company: bool,
-}
-
-/// Wrap `text`. ASCII runs stay together until a space. Other characters break one by one.
-///
-/// `allow_wrap == false` returns the whole string even when it is wider than `max_width_mm`.
-///
-/// # Errors
-///
-/// Returns the measurer's glyph or font error.
-pub(crate) fn wrap_text(
-    text: &str,
-    measurer: &mut impl Measurer,
-    size_pt: f64,
-    max_width_mm: f64,
-    allow_wrap: bool,
-) -> Result<Vec<String>, Error> {
-    measurer.ensure_glyphs(text)?;
-    if !allow_wrap || measurer.string_width_mm(text, size_pt)? <= max_width_mm {
-        return Ok(vec![text.to_owned()]);
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut index = 0;
-    while index < chars.len() {
-        let (mut candidate, mut take) = next_chunk(&chars, index);
-        if measurer.string_width_mm(&candidate, size_pt)? > max_width_mm {
-            candidate = chars[index].to_string();
-            take = 1;
-        }
-        let combined = format!("{current}{candidate}");
-        if measurer.string_width_mm(&combined, size_pt)? <= max_width_mm {
-            current = combined;
-            index += take;
-        } else if !current.is_empty() {
-            out.push(std::mem::take(&mut current));
-        } else {
-            out.push(candidate);
-            index += take;
-        }
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    Ok(out)
-}
-
-fn next_chunk(chars: &[char], index: usize) -> (String, usize) {
-    if chars[index].is_ascii() {
-        let mut end = chars.len();
-        for (offset, ch) in chars[index..].iter().enumerate() {
-            if !ch.is_ascii() || *ch == ' ' {
-                end = index + offset;
-                break;
-            }
-        }
-        if end < chars.len() && chars[end] == ' ' {
-            end += 1;
-        }
-        let end = end.max(index + 1);
-        (chars[index..end].iter().collect(), end - index)
-    } else {
-        (chars[index].to_string(), 1)
-    }
 }
 
 fn min_node_height_mm(is_subject: bool, measurer: &mut impl Measurer) -> f64 {
@@ -389,7 +109,7 @@ pub(crate) fn build_node_boxes(
     for inbox in nodes {
         let is_subject = inbox.protocol_id == subject_id;
         let width_mm = if is_subject {
-            (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::model::MAX_NODE_WIDTH_MM)
+            (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::request::MAX_NODE_WIDTH_MM)
         } else {
             node_width_mm
         };
@@ -490,7 +210,7 @@ pub(crate) fn promote_to_page_subject(
     node_width_mm: f64,
     measurer: &mut impl Measurer,
 ) -> Result<NodeBox, Error> {
-    let width_mm = (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::model::MAX_NODE_WIDTH_MM);
+    let width_mm = (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::request::MAX_NODE_WIDTH_MM);
     let max_content = width_mm - 2.0 * PADDING_X_MM;
     let segments = join_segments(&box_.lines);
     let mut lines = Vec::new();
@@ -626,5 +346,5 @@ pub(crate) fn sized_cue_anchors(
 }
 
 #[cfg(test)]
-#[path = "measure_tests.rs"]
-mod measure_tests;
+#[path = "boxes_tests.rs"]
+mod boxes_tests;

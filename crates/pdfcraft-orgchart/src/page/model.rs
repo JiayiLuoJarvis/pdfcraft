@@ -1,12 +1,12 @@
 //! Placed nodes, cue slots, and one finished page.
 
 use crate::captions::CueSide;
-use crate::display::{LabelHug, RatioFact};
+use crate::content::{LabelHug, RatioFact};
 use crate::error::{Error, ErrorCode};
-use crate::graph::OVERFLOW_ID_PREFIX;
-use crate::ids::NodeId;
-use crate::measure::NodeBox;
+use crate::graph::{NodeId, OVERFLOW_ID_PREFIX};
 use crate::units::{within, PageGeometry};
+
+use super::boxes::NodeBox;
 
 /// One holding edge on a page, in holder → held order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
