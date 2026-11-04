@@ -100,7 +100,7 @@ impl FontFace {
 ///
 /// A run picks one face from its resolved [`crate::spec::RunStyle`] bold and italic flags.
 /// Underline and strikethrough positions come from `regular`. The stroke is 1 pt.
-/// There is no Latin slot. [`crate::spec::InlineRun::split_latin`] assigns keys.
+/// There is no Latin slot. [`crate::spec::Span::split_latin`] assigns keys.
 /// There is no fallback chain and no synthetic bold or slant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]

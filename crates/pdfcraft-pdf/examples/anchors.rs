@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
     BandFn, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily,
-    FontRegistry, InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec,
-    TableBorder, TableRow, TableSpec, TextRun,
+    FontRegistry, OutlineEntry, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
+    Span, TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
@@ -247,19 +247,31 @@ fn heading(text: &str) -> Result<Block<()>> {
 
 fn para(text: &str) -> Result<Block<()>> {
     Ok(Block::Paragraph(ParagraphSpec {
-        runs: vec![text_run(text)],
-        font_size: Some(pos(11.0)?),
-        ..ParagraphSpec::default()
+        style: ParagraphStyle {
+            text: RunStyle {
+                font_size: Some(pos(11.0)?),
+                ..RunStyle::default()
+            },
+            ..ParagraphStyle::default()
+        },
+        children: vec![text_run(text)],
     }))
 }
 
 fn link_line(label: &str, target: pdfcraft_pdf::LinkTarget, link_text: &str) -> Result<Block<()>> {
     Ok(Block::Paragraph(ParagraphSpec {
-        runs: vec![
+        style: ParagraphStyle {
+            text: RunStyle {
+                font_size: Some(pos(11.0)?),
+                ..RunStyle::default()
+            },
+            ..ParagraphStyle::default()
+        },
+        children: vec![
             text_run(label),
-            InlineRun::Link {
+            Span::Link {
                 target,
-                runs: vec![InlineRun::Text {
+                children: vec![Span::Text {
                     text: link_text.into(),
                     font: (),
                     style: RunStyle {
@@ -270,13 +282,11 @@ fn link_line(label: &str, target: pdfcraft_pdf::LinkTarget, link_text: &str) -> 
                 }],
             },
         ],
-        font_size: Some(pos(11.0)?),
-        ..ParagraphSpec::default()
     }))
 }
 
-fn text_run(text: &str) -> InlineRun<()> {
-    InlineRun::Text {
+fn text_run(text: &str) -> Span<()> {
+    Span::Text {
         text: text.into(),
         font: (),
         style: RunStyle::default(),

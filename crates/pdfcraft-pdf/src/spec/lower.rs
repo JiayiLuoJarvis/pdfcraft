@@ -41,9 +41,9 @@ use super::types::{self, Rendered, Track};
 use super::{
     Alignment, BandCallback, BandFn, BandFnInner, BandInset, BandMark, BandSlot, BandSpec,
     BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnsSpec,
-    DocumentSpec, HLineSpec, ImageRef, ImageSpec, InlineRun, LayerMark, LayerShape, ListKind,
-    ListSpec, OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, Resources, RunStyle,
-    SectionSpec, TextRun,
+    DocumentSpec, HLineSpec, ImageRef, ImageSpec, LayerMark, LayerShape, ListKind, ListSpec,
+    OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
+    SectionSpec, Span, TextRun,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
@@ -635,16 +635,19 @@ fn lower_paragraph<K: FontKey>(
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
-    let paint = parent.patch(RunStyle {
-        color: spec.color,
-        font_size: spec.font_size,
-        ..RunStyle::default()
-    });
+    let ParagraphSpec { style, children } = spec;
+    let ParagraphStyle {
+        text,
+        align,
+        first_line_indent,
+        line_height,
+    } = style;
+    let paint = parent.patch(text);
     let mut bag = ErrorBag::default();
     let mut items = Vec::new();
     let mut active_link = None;
-    push_inline_runs(
-        spec.runs,
+    push_spans(
+        children,
         &paint,
         fonts,
         &mut items,
@@ -664,14 +667,14 @@ fn lower_paragraph<K: FontKey>(
     if structural || font_only_empty {
         return None;
     }
-    let mut style = paint.frame();
-    style.font = first_run_font(&items);
-    style.first_line_indent = spec.first_line_indent;
-    style.align = text_align(spec.align);
-    if let Some(factor) = spec.line_height_factor {
-        style.line_height_factor = factor;
+    let mut frame = paint.frame();
+    frame.font = first_run_font(&items);
+    frame.first_line_indent = first_line_indent;
+    frame.align = text_align(align);
+    if let Some(line_height) = line_height {
+        frame.line_height_factor = line_height.get();
     }
-    Some(FlowNode::Text(TextNode::from_items(items, style)))
+    Some(FlowNode::Text(TextNode::from_items(items, frame)))
 }
 
 fn sole_or_stack(nodes: Vec<FlowNode>) -> FlowNode {
@@ -707,17 +710,17 @@ fn first_run_font(items: &[InlineItem]) -> Option<FontId> {
     })
 }
 
-fn push_inline_runs<K: FontKey>(
-    runs: Vec<InlineRun<K>>,
+fn push_spans<K: FontKey>(
+    spans: Vec<Span<K>>,
     paint: &InheritedPaint,
     fonts: &FontTable<K>,
     items: &mut Vec<InlineItem>,
     active_link: &mut Option<LinkTarget>,
     errors: &mut ErrorBag,
 ) {
-    for run in runs {
-        match run {
-            InlineRun::Text { text, font, style } => {
+    for span in spans {
+        match span {
+            Span::Text { text, font, style } => {
                 if text.is_empty() {
                     continue;
                 }
@@ -726,10 +729,7 @@ fn push_inline_runs<K: FontKey>(
                     append_text(items, glyph, &text, active_link.as_ref(), errors);
                 }
             }
-            InlineRun::Link {
-                target,
-                runs: linked,
-            } => {
+            Span::Link { target, children } => {
                 match &target {
                     LinkTarget::Uri(uri) if uri.is_empty() => {
                         errors.record(Error::from(ErrorKind::EmptyLink));
@@ -748,10 +748,10 @@ fn push_inline_runs<K: FontKey>(
                     LinkTarget::Uri(_) | LinkTarget::Anchor(_) => {}
                 }
                 let previous = active_link.replace(target);
-                push_inline_runs(linked, paint, fonts, items, active_link, errors);
+                push_spans(children, paint, fonts, items, active_link, errors);
                 *active_link = previous;
             }
-            InlineRun::Blank(spec) => {
+            Span::Blank(spec) => {
                 if sealed(items) {
                     errors.record(Error::from(ErrorKind::RunAfterFillBlank));
                     continue;

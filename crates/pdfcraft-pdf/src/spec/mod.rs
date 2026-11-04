@@ -33,7 +33,7 @@ pub use crate::fonts::{FontFace, FontFamily, FontRegistry};
 #[doc(inline)]
 pub use lower::layout_spec;
 #[doc(inline)]
-pub use types::{Numbering, Ratio, Rendered, Track};
+pub use types::{LineHeight, Numbering, Ratio, Rendered, Track};
 
 use std::fmt;
 use std::num::{NonZeroU16, NonZeroU32};
@@ -263,11 +263,10 @@ impl<K> Block<K> {
 
 /// Inline text properties. `None` inherits the enclosing value.
 ///
-/// Body runs resolve in this order, later `Some` values winning: the document
+/// Body spans resolve in this order, later `Some` values winning: the document
 /// seed (12 pt, black, regular, no lines, no tracking), each enclosing
-/// [`Block::Styled`] from outside in, [`ParagraphSpec::font_size`] and
-/// [`ParagraphSpec::color`], then the run's own style. `Some(false)` turns off
-/// a flag an outer style turned on.
+/// [`Block::Styled`] from outside in, [`ParagraphStyle::text`], then the span's
+/// own style. `Some(false)` turns off a flag an outer style turned on.
 ///
 /// Header, footer, layer, and canvas text start from the seed and apply only
 /// their own style.
@@ -312,47 +311,30 @@ pub enum Alignment {
     Justify,
 }
 
-/// A paragraph and its inline runs.
+/// A paragraph: one reusable [`ParagraphStyle`] and its inline [`Span`]s.
 #[derive(Debug)]
 #[must_use]
 pub struct ParagraphSpec<K> {
+    /// Text defaults and line layout for this paragraph.
+    pub style: ParagraphStyle,
     /// Inline content in order.
-    pub runs: Vec<InlineRun<K>>,
-    /// First-line inset.
-    pub first_line_indent: Length<NonNegative>,
-    /// Line alignment.
-    pub align: Alignment,
-    /// Paragraph color override, applied over [`Block::Styled`] and under each run.
-    pub color: Option<Color>,
-    /// Paragraph font-size override, applied over [`Block::Styled`] and under each run.
-    ///
-    /// Paragraph size. Em blanks use it. A line of only blanks uses the first text
-    /// run's resolved face at this size. A paragraph with no text runs uses
-    /// `size * line-height factor` and does not read a font. A line with glyphs
-    /// scales each face by that face's own size.
-    pub font_size: Option<Length<Positive>>,
-    /// Line-height factor override. `None` keeps the document seed (1.2).
-    pub line_height_factor: Option<f32>,
+    pub children: Vec<Span<K>>,
 }
 
 impl<K> Default for ParagraphSpec<K> {
     fn default() -> Self {
         Self {
-            runs: Vec::new(),
-            first_line_indent: NonNegative::ZERO,
-            align: Alignment::Start,
-            color: None,
-            font_size: None,
-            line_height_factor: None,
+            style: ParagraphStyle::default(),
+            children: Vec::new(),
         }
     }
 }
 
 impl<K> ParagraphSpec<K> {
-    /// Creates a paragraph containing one text run in `font`.
+    /// Creates a paragraph containing one text span in `font`.
     pub fn text(font: K, text: impl Into<String>) -> Self {
         Self {
-            runs: vec![InlineRun::Text {
+            children: vec![Span::Text {
                 text: text.into(),
                 font,
                 style: RunStyle::default(),
@@ -362,27 +344,80 @@ impl<K> ParagraphSpec<K> {
     }
 }
 
-/// One paragraph run.
+/// Reusable paragraph presentation.
+///
+/// Public fields, [`Default`], and struct literals are the intended use. The type
+/// is not `#[non_exhaustive]`; a new field is a breaking change while `0.x`.
+///
+/// ```
+/// use pdfcraft_pdf::spec::{Alignment, LineHeight, ParagraphStyle, RunStyle};
+///
+/// # fn main() -> pdfcraft_pdf::Result<()> {
+/// let body = ParagraphStyle {
+///     line_height: Some(LineHeight::new(1.5)?),
+///     ..ParagraphStyle::default()
+/// };
+/// let quote = ParagraphStyle {
+///     text: RunStyle { italic: Some(true), ..body.text },
+///     align: Alignment::Center,
+///     ..body
+/// };
+/// assert_eq!(quote.line_height, body.line_height);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct ParagraphStyle {
+    /// Run defaults for every span, applied over enclosing [`Block::Styled`] and
+    /// under each span's own style. Every [`RunStyle`] field applies.
+    ///
+    /// The resolved `font_size` is the paragraph size. Em blanks use it. A line of
+    /// only blanks uses the first text span's resolved face at this size. A
+    /// paragraph with no text spans uses `size × line height` and reads no font.
+    /// A line with glyphs scales each face by that face's own size.
+    pub text: RunStyle,
+    /// Line alignment.
+    pub align: Alignment,
+    /// First-line inset.
+    pub first_line_indent: Length<NonNegative>,
+    /// `None` keeps the document seed (1.2).
+    pub line_height: Option<LineHeight>,
+}
+
+impl Default for ParagraphStyle {
+    /// `RunStyle::default()`, `Start`, zero indent, `None`.
+    fn default() -> Self {
+        Self {
+            text: RunStyle::default(),
+            align: Alignment::Start,
+            first_line_indent: NonNegative::ZERO,
+            line_height: None,
+        }
+    }
+}
+
+/// One piece of inline paragraph content.
 #[derive(Debug)]
 #[must_use]
-pub enum InlineRun<K> {
+pub enum Span<K> {
     /// Text in a face of the keyed family, chosen by the resolved bold and italic flags.
     ///
     /// An empty string is skipped and needs no face.
     Text {
-        /// Run text.
+        /// Span text.
         text: String,
         /// Key in the document [`FontRegistry`].
         font: K,
         /// Patch over the inherited style.
         style: RunStyle,
     },
-    /// Runs linked to a URI or in-document anchor.
+    /// Spans linked to a URI or in-document anchor.
     Link {
         /// `Uri` or `Anchor` at the call site. Layout may replace `Anchor` with `Xyz` before paint.
         target: crate::canvas::LinkTarget,
-        /// Linked runs.
-        runs: Vec<Self>,
+        /// Linked spans.
+        children: Vec<Self>,
     },
     /// A fixed, em-based, or fill-to-end blank.
     Blank(BlankSpec),

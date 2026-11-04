@@ -16,11 +16,11 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, HLineSpec,
-    InlineRun, ParagraphSpec, Resources, RunStyle, SectionSpec,
+    LineHeight, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
 };
 use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, Color, DocumentSpec, ErrorKind, Finite, Length, NonNegative,
-    PageSize, PathVerb, Positive, RecordedPage, Rendered, Result,
+    layout_spec, CanvasCommand, Color, DocumentSpec, ErrorKind, Finite, GeometryKind, Length,
+    LinkTarget, NonNegative, PageSize, PathVerb, Positive, RecordedPage, Rendered, Result,
 };
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
@@ -46,6 +46,12 @@ const REGULAR_ONLY: Faces = Faces {
     bold_italic: false,
 };
 
+const WITH_BOLD: Faces = Faces {
+    bold: true,
+    italic: false,
+    bold_italic: false,
+};
+
 fn render(faces: &Faces, body: Vec<Block<()>>) -> Option<Result<Rendered>> {
     let bytes = common::test_font_bytes()?;
     let face = |on: bool| on.then(|| FontFace::new(bytes.clone(), 0));
@@ -67,17 +73,17 @@ fn render(faces: &Faces, body: Vec<Block<()>>) -> Option<Result<Rendered>> {
     }))
 }
 
-fn run(text: &str, style: RunStyle) -> InlineRun<()> {
-    InlineRun::Text {
+fn run(text: &str, style: RunStyle) -> Span<()> {
+    Span::Text {
         text: text.into(),
         font: (),
         style,
     }
 }
 
-fn para(runs: Vec<InlineRun<()>>) -> Block<()> {
+fn para(runs: Vec<Span<()>>) -> Block<()> {
     Block::Paragraph(ParagraphSpec {
-        runs,
+        children: runs,
         ..ParagraphSpec::default()
     })
 }
@@ -535,7 +541,7 @@ fn underline_covers_an_inline_space_but_not_a_dropped_leading_one() {
 
 #[test]
 fn a_blank_keeps_its_own_stroke_inside_underlined_text() {
-    let blank = InlineRun::Blank(BlankSpec {
+    let blank = Span::Blank(BlankSpec {
         width: BlankWidth::Fixed(nn(20.0)),
         thickness: Some(pos(3.0)),
         color: None,
@@ -582,9 +588,11 @@ fn tracking_widens_gaps_between_clusters_but_not_after_the_last() {
     let advance = common::advance_pt(&bytes, '字', 12.0);
     let end_aligned = |runs| {
         Block::Paragraph(ParagraphSpec {
-            runs,
-            align: Alignment::End,
-            ..ParagraphSpec::default()
+            style: ParagraphStyle {
+                align: Alignment::End,
+                ..ParagraphStyle::default()
+            },
+            children: runs,
         })
     };
     let tracked_underline = RunStyle {
@@ -775,7 +783,7 @@ fn two_faces_on_one_line_use_each_faces_own_size() {
             bold_italic: None,
         },
     );
-    let run = |text: &str, font: FaceKey, size: f32| InlineRun::Text {
+    let run = |text: &str, font: FaceKey, size: f32| Span::Text {
         text: text.into(),
         font,
         style: RunStyle {
@@ -787,9 +795,11 @@ fn two_faces_on_one_line_use_each_faces_own_size() {
         Resources::with_fonts(fonts),
         vec![
             Block::Paragraph(ParagraphSpec {
-                runs: vec![run("A", small_key, 12.0), run("B", large_key, 18.0)],
-                line_height_factor: Some(1.2),
-                ..ParagraphSpec::default()
+                style: ParagraphStyle {
+                    line_height: Some(LineHeight::new(1.2).expect("1.2 is a valid factor")),
+                    ..ParagraphStyle::default()
+                },
+                children: vec![run("A", small_key, 12.0), run("B", large_key, 18.0)],
             }),
             Block::HLine(HLineSpec {
                 thickness: pos(1.0),
@@ -842,8 +852,16 @@ fn blank_line_after_bold_text_uses_the_bold_face_at_paragraph_size() {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             body: vec![Block::Paragraph(ParagraphSpec {
-                runs: vec![
-                    InlineRun::Text {
+                style: ParagraphStyle {
+                    text: RunStyle {
+                        font_size: Some(pos(14.0)),
+                        ..RunStyle::default()
+                    },
+                    line_height: Some(LineHeight::new(1.2).expect("1.2 is a valid factor")),
+                    ..ParagraphStyle::default()
+                },
+                children: vec![
+                    Span::Text {
                         text: "A\n".into(),
                         font: (),
                         style: RunStyle {
@@ -852,16 +870,13 @@ fn blank_line_after_bold_text_uses_the_bold_face_at_paragraph_size() {
                             ..RunStyle::default()
                         },
                     },
-                    InlineRun::Blank(BlankSpec {
+                    Span::Blank(BlankSpec {
                         width: BlankWidth::Fixed(nn(20.0)),
                         thickness: None,
                         color: None,
                         baseline_offset: Some(nn(1.0)),
                     }),
                 ],
-                font_size: Some(pos(14.0)),
-                line_height_factor: Some(1.2),
-                ..ParagraphSpec::default()
             })],
             ..SectionSpec::default()
         }],
@@ -895,15 +910,20 @@ fn blank_only_paragraph_reads_no_font() {
         sections: vec![SectionSpec {
             body: vec![
                 Block::Paragraph(ParagraphSpec {
-                    runs: vec![InlineRun::Blank(BlankSpec {
+                    style: ParagraphStyle {
+                        text: RunStyle {
+                            font_size: Some(pos(14.0)),
+                            ..RunStyle::default()
+                        },
+                        line_height: Some(LineHeight::new(1.2).expect("1.2 is a valid factor")),
+                        ..ParagraphStyle::default()
+                    },
+                    children: vec![Span::Blank(BlankSpec {
                         width: BlankWidth::Fixed(nn(20.0)),
                         thickness: None,
                         color: None,
                         baseline_offset: Some(nn(1.0)),
                     })],
-                    font_size: Some(pos(14.0)),
-                    line_height_factor: Some(1.2),
-                    ..ParagraphSpec::default()
                 }),
                 Block::HLine(HLineSpec {
                     thickness: pos(1.0),
@@ -927,4 +947,197 @@ fn blank_only_paragraph_reads_no_font() {
         let pdf = pdfcraft_pdf::to_pdf(rendered).expect("blank-only paragraph emits pdf");
         assert!(pdf.starts_with(b"%PDF"));
     }
+}
+
+#[test]
+fn line_height_new_rejects_nan_infinite_zero_negative() {
+    for factor in [f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0] {
+        assert_eq!(
+            LineHeight::new(factor).unwrap_err().kind,
+            ErrorKind::InvalidGeometry(GeometryKind::LineHeightFactor { factor }),
+            "{factor}"
+        );
+    }
+    let ErrorKind::InvalidGeometry(GeometryKind::LineHeightFactor {
+        factor: negative_zero,
+    }) = LineHeight::new(-0.0).unwrap_err().kind
+    else {
+        panic!("-0.0 should be LineHeightFactor");
+    };
+    assert_eq!(negative_zero.to_bits(), (-0.0f32).to_bits());
+    let ErrorKind::InvalidGeometry(GeometryKind::LineHeightFactor { factor: nan }) =
+        LineHeight::new(f32::NAN).unwrap_err().kind
+    else {
+        panic!("NaN should be LineHeightFactor");
+    };
+    assert!(nan.is_nan());
+    for factor in [1.0, 1.2, f32::MIN_POSITIVE] {
+        assert!(LineHeight::new(factor).is_ok(), "{factor}");
+    }
+}
+
+#[test]
+fn paragraph_style_line_height_matches_seed_when_1_2() {
+    let body = |line_height| {
+        vec![Block::Paragraph(ParagraphSpec {
+            style: ParagraphStyle {
+                line_height,
+                ..ParagraphStyle::default()
+            },
+            children: vec![run("A", RunStyle::default())],
+        })]
+    };
+    let Some(seeded) = render(&REGULAR_ONLY, body(None)) else {
+        return;
+    };
+    let Some(explicit) = render(
+        &REGULAR_ONLY,
+        body(Some(LineHeight::new(1.2).expect("1.2 is a valid factor"))),
+    ) else {
+        return;
+    };
+    let seeded = glyph_runs(&seeded.unwrap().pages()[0]);
+    let explicit = glyph_runs(&explicit.unwrap().pages()[0]);
+    assert_eq!(seeded.len(), 1);
+    assert_eq!(explicit.len(), 1);
+    assert_eq!(seeded[0].baseline.to_bits(), explicit[0].baseline.to_bits());
+}
+
+fn paragraph_text(text: RunStyle, children: Vec<Span<()>>) -> Block<()> {
+    Block::Paragraph(ParagraphSpec {
+        style: ParagraphStyle {
+            text,
+            ..ParagraphStyle::default()
+        },
+        children,
+    })
+}
+
+fn bold_on() -> RunStyle {
+    RunStyle {
+        bold: Some(true),
+        ..RunStyle::default()
+    }
+}
+
+#[test]
+fn paragraph_style_bold_selects_bold_face() {
+    let Some(rendered) = render(
+        &WITH_BOLD,
+        vec![paragraph_text(
+            bold_on(),
+            vec![run("A", RunStyle::default())],
+        )],
+    ) else {
+        return;
+    };
+    let glyphs = glyph_runs(&rendered.unwrap().pages()[0]);
+    assert_eq!(glyphs.len(), 1);
+    assert_eq!(glyphs[0].text, "A");
+    assert_eq!(glyphs[0].font, 1);
+}
+
+#[test]
+fn paragraph_style_bold_without_bold_face_fails() {
+    let Some(rendered) = render(
+        &REGULAR_ONLY,
+        vec![paragraph_text(
+            bold_on(),
+            vec![run("A", RunStyle::default())],
+        )],
+    ) else {
+        return;
+    };
+    assert_eq!(
+        rendered.unwrap_err().first().kind.clone(),
+        ErrorKind::BoldFaceRequired
+    );
+}
+
+#[test]
+fn span_bold_false_overrides_paragraph_bold() {
+    let Some(rendered) = render(
+        &WITH_BOLD,
+        vec![paragraph_text(
+            bold_on(),
+            vec![
+                run("A", RunStyle::default()),
+                run(
+                    "B",
+                    RunStyle {
+                        bold: Some(false),
+                        ..RunStyle::default()
+                    },
+                ),
+            ],
+        )],
+    ) else {
+        return;
+    };
+    let glyphs = glyph_runs(&rendered.unwrap().pages()[0]);
+    assert_eq!(glyphs.len(), 2);
+    assert_eq!(glyphs[0].font, 1);
+    assert_eq!(glyphs[1].font, 0);
+}
+
+#[test]
+fn paragraph_style_text_overrides_styled() {
+    let Some(rendered) = render(
+        &WITH_BOLD,
+        vec![Block::Styled {
+            style: bold_on(),
+            children: vec![paragraph_text(
+                RunStyle {
+                    bold: Some(false),
+                    ..RunStyle::default()
+                },
+                vec![run("A", RunStyle::default())],
+            )],
+        }],
+    ) else {
+        return;
+    };
+    let glyphs = glyph_runs(&rendered.unwrap().pages()[0]);
+    assert_eq!(glyphs.len(), 1);
+    assert_eq!(glyphs[0].font, 0);
+}
+
+#[test]
+fn paragraph_style_underline_and_tracking_reach_spans() {
+    let Some(bytes) = common::test_font_bytes() else {
+        return;
+    };
+    let advance = common::advance_pt(&bytes, '字', 12.0);
+    let Some(rendered) = render(
+        &REGULAR_ONLY,
+        vec![paragraph_text(
+            RunStyle {
+                underline: Some(true),
+                tracking: Some(Finite::pt(2.0).unwrap()),
+                ..RunStyle::default()
+            },
+            vec![Span::Link {
+                target: LinkTarget::uri("https://example.test/a").unwrap(),
+                children: vec![Span::Text {
+                    text: "字字".into(),
+                    font: (),
+                    style: RunStyle::default(),
+                }],
+            }],
+        )],
+    ) else {
+        return;
+    };
+    let page = &rendered.unwrap().pages()[0];
+    let glyphs = glyph_runs(page);
+    assert_eq!(glyphs.len(), 1);
+    assert!(pt_near(glyphs[0].advances[0], advance + 2.0));
+    assert!(pt_near(glyphs[0].advances[1], advance));
+    let lines = strokes(page);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let (offset, thickness) = underline_at(12.0);
+    assert!(pt_near(lines[0].y, glyphs[0].baseline + offset));
+    assert!(pt_near(lines[0].thickness, thickness));
+    assert!(pt_near(lines[0].x0, glyphs[0].x));
+    assert!(pt_near(lines[0].x1, glyphs[0].x + glyphs[0].width));
 }

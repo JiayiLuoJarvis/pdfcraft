@@ -8,9 +8,9 @@ use crate::fonts::fixture_bytes;
 use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect, Size};
 use crate::layout_spec;
 use crate::spec::{
-    Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, InlineRun,
-    LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, Numbering, PageWhen, ParagraphSpec,
-    Resources, RunStyle, SectionSpec, TextRun,
+    Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, LayerMark,
+    LayerShape, ListItemSpec, ListKind, ListSpec, Numbering, PageWhen, ParagraphSpec,
+    ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TextRun,
 };
 use crate::DocumentSpec;
 
@@ -106,23 +106,23 @@ fn adjacent_same_face_runs_paint_as_one_glyph_run() {
     let Some(rendered) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![
-                InlineRun::Text {
+            children: vec![
+                Span::Text {
                     text: "A".into(),
                     font: (),
                     style: RunStyle::default(),
                 },
-                InlineRun::Text {
+                Span::Text {
                     text: String::new(),
                     font: (),
                     style: RunStyle::default(),
                 },
-                InlineRun::Text {
+                Span::Text {
                     text: "B".into(),
                     font: (),
                     style: RunStyle::default(),
                 },
-                InlineRun::Text {
+                Span::Text {
                     text: "C".into(),
                     font: (),
                     style: RunStyle {
@@ -130,7 +130,7 @@ fn adjacent_same_face_runs_paint_as_one_glyph_run() {
                         ..RunStyle::default()
                     },
                 },
-                InlineRun::Text {
+                Span::Text {
                     text: "D".into(),
                     font: (),
                     style: RunStyle {
@@ -138,7 +138,7 @@ fn adjacent_same_face_runs_paint_as_one_glyph_run() {
                         ..RunStyle::default()
                     },
                 },
-                InlineRun::Text {
+                Span::Text {
                     text: "E".into(),
                     font: (),
                     style: RunStyle::default(),
@@ -159,19 +159,19 @@ fn a_blank_splits_adjacent_text_into_two_glyph_runs() {
     let Some(rendered) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![
-                InlineRun::Text {
+            children: vec![
+                Span::Text {
                     text: "A".into(),
                     font: (),
                     style: RunStyle::default(),
                 },
-                InlineRun::Blank(BlankSpec {
+                Span::Blank(BlankSpec {
                     width: BlankWidth::Fixed(NonNegative::pt(10.0).unwrap()),
                     thickness: Some(Positive::pt(0.5).unwrap()),
                     color: Some(Color::rgb(1, 2, 3)),
                     baseline_offset: Some(NonNegative::pt(2.0).unwrap()),
                 }),
-                InlineRun::Text {
+                Span::Text {
                     text: "B".into(),
                     font: (),
                     style: RunStyle::default(),
@@ -197,22 +197,22 @@ fn a_blank_splits_adjacent_text_into_two_glyph_runs() {
 fn a_run_after_fill_blank_fails_before_any_page() {
     for runs in [
         vec![
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Text {
+            Span::Text {
                 text: "x".into(),
                 font: (),
                 style: RunStyle::default(),
             },
         ],
         vec![
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Text {
+            Span::Text {
                 text: "x".into(),
                 font: (),
                 style: RunStyle {
@@ -222,31 +222,31 @@ fn a_run_after_fill_blank_fails_before_any_page() {
             },
         ],
         vec![
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::Fixed(NonNegative::ZERO),
                 ..blank_default()
             }),
         ],
         vec![
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::Em(1),
                 ..blank_default()
             }),
         ],
         vec![
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
-            InlineRun::Blank(BlankSpec {
+            Span::Blank(BlankSpec {
                 width: BlankWidth::ToEndOfLine,
                 ..blank_default()
             }),
@@ -255,7 +255,7 @@ fn a_run_after_fill_blank_fails_before_any_page() {
         let Some(error) = lay(
             PageSize::A4,
             body(vec![Block::Paragraph(ParagraphSpec {
-                runs,
+                children: runs,
                 ..ParagraphSpec::default()
             })]),
         ) else {
@@ -280,12 +280,14 @@ fn a_fixed_blank_wider_than_the_indented_line_fails() {
     let Some(error) = lay(
         PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![InlineRun::Blank(BlankSpec {
+            style: ParagraphStyle {
+                first_line_indent: NonNegative::pt(40.0).unwrap(),
+                ..ParagraphStyle::default()
+            },
+            children: vec![Span::Blank(BlankSpec {
                 width: BlankWidth::Fixed(NonNegative::pt(80.0).unwrap()),
                 ..blank_default()
             })],
-            first_line_indent: NonNegative::pt(40.0).unwrap(),
-            ..ParagraphSpec::default()
         })]),
     ) else {
         return;
@@ -303,21 +305,21 @@ fn nested_links_restore_the_outer_target() {
     let Some(rendered) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![
-                InlineRun::Link {
+            children: vec![
+                Span::Link {
                     target: LinkTarget::uri("https://a").unwrap(),
-                    runs: vec![
-                        InlineRun::Text {
+                    children: vec![
+                        Span::Text {
                             text: "A".into(),
                             font: (),
                             style: RunStyle::default(),
                         },
-                        InlineRun::Text {
+                        Span::Text {
                             text: "B".into(),
                             font: (),
                             style: RunStyle::default(),
                         },
-                        InlineRun::Text {
+                        Span::Text {
                             text: "C".into(),
                             font: (),
                             style: RunStyle {
@@ -325,22 +327,22 @@ fn nested_links_restore_the_outer_target() {
                                 ..RunStyle::default()
                             },
                         },
-                        InlineRun::Link {
+                        Span::Link {
                             target: LinkTarget::uri("https://b").unwrap(),
-                            runs: vec![InlineRun::Text {
+                            children: vec![Span::Text {
                                 text: "D".into(),
                                 font: (),
                                 style: RunStyle::default(),
                             }],
                         },
-                        InlineRun::Text {
+                        Span::Text {
                             text: "E".into(),
                             font: (),
                             style: RunStyle::default(),
                         },
                     ],
                 },
-                InlineRun::Text {
+                Span::Text {
                     text: "F".into(),
                     font: (),
                     style: RunStyle::default(),
@@ -362,15 +364,15 @@ fn an_empty_uri_fails_before_any_page() {
     let Some(error) = lay(
         PageSize::A4,
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![
-                InlineRun::Text {
+            children: vec![
+                Span::Text {
                     text: "A".into(),
                     font: (),
                     style: RunStyle::default(),
                 },
-                InlineRun::Link {
+                Span::Link {
                     target: LinkTarget::Uri(String::new()),
-                    runs: vec![InlineRun::Text {
+                    children: vec![Span::Text {
                         text: "x".into(),
                         font: (),
                         style: RunStyle::default(),
@@ -763,13 +765,15 @@ fn paragraph_align_end_wins_when_center_is_not_set() {
     let Some(rendered) = lay(
         PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
         body(vec![Block::Paragraph(ParagraphSpec {
-            runs: vec![InlineRun::Text {
+            style: ParagraphStyle {
+                align: Alignment::End,
+                ..ParagraphStyle::default()
+            },
+            children: vec![Span::Text {
                 text: "D".into(),
                 font: (),
                 style: RunStyle::default(),
             }],
-            align: Alignment::End,
-            ..ParagraphSpec::default()
         })]),
     ) else {
         return;

@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use skrifa::instance::{LocationRef, Size};
 
-use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, GeometryKind};
+use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault};
 use crate::fonts::{self, FaceMetrics, FontFace, FontId, FontStore};
 use crate::geom::{Finite, Length, Positive};
 
@@ -105,7 +105,7 @@ impl LineMetrics {
     ///
     /// # Errors
     ///
-    /// [`GeometryKind::LineHeightFactor`] when `factor` is not finite and positive.
+    /// [`crate::error::GeometryKind::LineHeightFactor`] when `factor` is not finite and positive.
     pub(crate) fn new(extent: LineExtent, factor: f32) -> Result<Self> {
         let height = checked_height(
             extent.ascent - extent.descent + extent.leading,
@@ -122,7 +122,7 @@ impl LineMetrics {
     ///
     /// # Errors
     ///
-    /// [`GeometryKind::LineHeightFactor`] when `factor` is not finite and positive.
+    /// [`crate::error::GeometryKind::LineHeightFactor`] when `factor` is not finite and positive.
     pub(crate) fn fontless(size: Length<Positive>, factor: f32) -> Result<Self> {
         let height = checked_height(size.as_pt() * factor, size, factor)?;
         Ok(Self {
@@ -133,9 +133,7 @@ impl LineMetrics {
 }
 
 fn checked_height(natural: f32, size: Length<Positive>, factor: f32) -> Result<Length<Positive>> {
-    if !factor.is_finite() || factor <= 0.0 {
-        return Err(GeometryKind::LineHeightFactor { factor }.into());
-    }
+    let factor = crate::geom::checked_line_height_factor(factor)?;
     let line_height = natural.max(size.as_pt() * factor);
     Positive::pt(line_height)
 }
@@ -296,6 +294,7 @@ impl FontFace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::GeometryKind;
     use crate::fonts::{fixture_bytes, FontSource, FontStore};
     use crate::geom::Positive;
 

@@ -1333,6 +1333,23 @@ impl PathBuilder {
     }
 }
 
+/// Returns `factor` when it is finite and greater than zero.
+///
+/// The only line-height-factor rule in the crate. [`crate::spec::LineHeight::new`]
+/// rejects at construction; layout measurement re-checks the internal `f32` it
+/// receives (seed 1.2 or a `LineHeight`) with the same function.
+///
+/// # Errors
+///
+/// [`crate::error::GeometryKind::LineHeightFactor`] otherwise.
+pub(crate) fn checked_line_height_factor(factor: f32) -> Result<f32, Error> {
+    if !factor.is_finite() || factor <= 0.0 {
+        Err(crate::error::GeometryKind::LineHeightFactor { factor }.into())
+    } else {
+        Ok(factor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

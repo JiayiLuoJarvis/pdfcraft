@@ -93,12 +93,7 @@ impl Style {
         paragraph_spacing: Length<NonNegative>,
         align: TextAlign,
     ) -> crate::error::Fallible<Self> {
-        if !line_height_factor.is_finite() || line_height_factor <= 0.0 {
-            return Err(crate::error::GeometryKind::LineHeightFactor {
-                factor: line_height_factor,
-            }
-            .into());
-        }
+        let line_height_factor = crate::geom::checked_line_height_factor(line_height_factor)?;
         Ok(Self {
             font: Some(font),
             font_size,

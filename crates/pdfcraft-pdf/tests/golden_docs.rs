@@ -44,9 +44,9 @@ use std::num::NonZeroU16;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellBlock,
-    CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, InlineRun, LayerMark,
-    LayerShape, PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow,
-    TableSpec, TextRun,
+    CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, LayerMark, LayerShape,
+    PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder,
+    TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, Color, DocumentSpec, Finite, Ink, Length, Limits, Margins, NonNegative, PageSize,
@@ -132,13 +132,13 @@ fn doc_info(title: &str) -> DocumentInfo {
 
 fn text_flow_body() -> Vec<Block<()>> {
     let lead = ParagraphSpec {
-        runs: vec![
-            InlineRun::Text {
+        children: vec![
+            Span::Text {
                 text: "Hello, golden flow. ".to_owned(),
                 font: (),
                 style: RunStyle::default(),
             },
-            InlineRun::Text {
+            Span::Text {
                 text: "Sized up. ".to_owned(),
                 font: (),
                 style: RunStyle {
@@ -147,7 +147,7 @@ fn text_flow_body() -> Vec<Block<()>> {
                     ..RunStyle::default()
                 },
             },
-            InlineRun::Text {
+            Span::Text {
                 text: "Underlined and tracked.".to_owned(),
                 font: (),
                 style: RunStyle {
@@ -160,8 +160,11 @@ fn text_flow_body() -> Vec<Block<()>> {
         ..ParagraphSpec::default()
     };
     let centered = ParagraphSpec {
-        align: Alignment::Center,
-        first_line_indent: nn(12.0),
+        style: ParagraphStyle {
+            align: Alignment::Center,
+            first_line_indent: nn(12.0),
+            ..ParagraphStyle::default()
+        },
         ..ParagraphSpec::text((), "Centered with a first-line indent.")
     };
     let styled = Block::Styled {

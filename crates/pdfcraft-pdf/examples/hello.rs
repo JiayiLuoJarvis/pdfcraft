@@ -20,8 +20,8 @@ use std::sync::Arc;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock,
     CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec,
-    InlineRun, ListItemSpec, ListKind, ListSpec, ParagraphSpec, Resources, RunStyle, SectionSpec,
-    TableBorder, TableRow, TableSpec, TextRun,
+    ListItemSpec, ListKind, ListSpec, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
+    SectionSpec, Span, TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
@@ -116,16 +116,16 @@ fn nn(value: f32) -> Result<Length<NonNegative>> {
     NonNegative::pt(value).map_err(pdfcraft_pdf::Errors::from)
 }
 
-fn text(value: impl Into<String>) -> InlineRun<()> {
-    InlineRun::Text {
+fn text(value: impl Into<String>) -> Span<()> {
+    Span::Text {
         text: value.into(),
         font: (),
         style: RunStyle::default(),
     }
 }
 
-fn bold(value: impl Into<String>) -> InlineRun<()> {
-    InlineRun::Text {
+fn bold(value: impl Into<String>) -> Span<()> {
+    Span::Text {
         text: value.into(),
         font: (),
         style: RunStyle {
@@ -135,10 +135,10 @@ fn bold(value: impl Into<String>) -> InlineRun<()> {
     }
 }
 
-fn link(uri: &str, runs: Vec<InlineRun<()>>) -> Result<InlineRun<()>> {
-    Ok(InlineRun::Link {
+fn link(uri: &str, runs: Vec<Span<()>>) -> Result<Span<()>> {
+    Ok(Span::Link {
         target: pdfcraft_pdf::LinkTarget::uri(uri).map_err(pdfcraft_pdf::Errors::from)?,
-        runs,
+        children: runs,
     })
 }
 
@@ -147,8 +147,8 @@ fn blank(
     thickness: f32,
     color: Option<Color>,
     offset: Option<f32>,
-) -> Result<InlineRun<()>> {
-    Ok(InlineRun::Blank(BlankSpec {
+) -> Result<Span<()>> {
+    Ok(Span::Blank(BlankSpec {
         width,
         thickness: Some(pos(thickness)?),
         color,
@@ -156,12 +156,14 @@ fn blank(
     }))
 }
 
-fn paragraph(runs: Vec<InlineRun<()>>, align: Alignment, indent: f32) -> Result<Block<()>> {
+fn paragraph(runs: Vec<Span<()>>, align: Alignment, indent: f32) -> Result<Block<()>> {
     Ok(Block::Paragraph(ParagraphSpec {
-        runs,
-        first_line_indent: nn(indent)?,
-        align,
-        ..ParagraphSpec::default()
+        style: ParagraphStyle {
+            align,
+            first_line_indent: nn(indent)?,
+            ..ParagraphStyle::default()
+        },
+        children: runs,
     }))
 }
 
@@ -291,9 +293,14 @@ fn marked(marker: &str, block: Block<()>) -> ListItemSpec<()> {
 fn head_cell(label: &str) -> CellSpec<()> {
     CellSpec {
         content: vec![CellBlock::Paragraph(ParagraphSpec {
-            runs: vec![bold(label)],
-            color: Some(Color::rgb(255, 255, 255)),
-            ..ParagraphSpec::default()
+            style: ParagraphStyle {
+                text: RunStyle {
+                    color: Some(Color::rgb(255, 255, 255)),
+                    ..RunStyle::default()
+                },
+                ..ParagraphStyle::default()
+            },
+            children: vec![bold(label)],
         })],
         fill: Some(Color::rgb(40, 40, 40)),
         ..CellSpec::default()
@@ -335,7 +342,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                 },
                 CellSpec {
                     content: vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![text("Pen "), bold("set")],
+                        children: vec![text("Pen "), bold("set")],
                         ..ParagraphSpec::default()
                     })],
                     ..CellSpec::default()
@@ -357,7 +364,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
             cells: vec![
                 CellSpec {
                     content: vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![link("https://example.test/ink", vec![text("Ink")])?],
+                        children: vec![link("https://example.test/ink", vec![text("Ink")])?],
                         ..ParagraphSpec::default()
                     })],
                     ..CellSpec::default()

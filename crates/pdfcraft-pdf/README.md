@@ -19,7 +19,7 @@ part of the public API. Body links use `LinkTarget::Uri` or `LinkTarget::Anchor`
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.5.0`. The API can break before `1.0` |
+| Status | `0.6.0`. The API can break before `1.0` |
 
 Filling existing AcroForms is [`pdfcraft-forms`](https://docs.rs/pdfcraft-forms).
 Equity charts are [`pdfcraft-orgchart`](https://docs.rs/pdfcraft-orgchart). Both
@@ -31,7 +31,7 @@ are separate crates with their own guides.
 
 ```toml
 [dependencies]
-pdfcraft-pdf = "0.5.0"
+pdfcraft-pdf = "0.6.0"
 ```
 
 Default features enable the krilla backend (`to_pdf`).
@@ -39,7 +39,7 @@ Default features enable the krilla backend (`to_pdf`).
 ```toml
 # Optional. Re-exports `pt_near` and `PT_ABS_TOLERANCE` at the crate root.
 # `canvas::pt_near` is available without this feature.
-pdfcraft-pdf = { version = "0.5.0", features = ["test-utils"] }
+pdfcraft-pdf = { version = "0.6.0", features = ["test-utils"] }
 ```
 
 ---

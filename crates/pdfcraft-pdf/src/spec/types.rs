@@ -75,6 +75,33 @@ impl Ratio {
     }
 }
 
+/// Line-height multiple of the font size for a paragraph.
+///
+/// A line is at least `font size × factor` tall, and never shorter than the
+/// face's own ascent + descent + leading. The document seed is 1.2.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[must_use]
+pub struct LineHeight(f32);
+
+// `new` rejects NaN, so `==` is reflexive.
+impl Eq for LineHeight {}
+
+impl LineHeight {
+    /// Builds a factor.
+    ///
+    /// # Errors
+    ///
+    /// [`GeometryKind::LineHeightFactor`](crate::GeometryKind::LineHeightFactor)
+    /// when `factor` is NaN, infinite, zero, or negative.
+    pub fn new(factor: f32) -> Result<Self, Error> {
+        crate::geom::checked_line_height_factor(factor).map(Self)
+    }
+
+    pub(crate) fn get(self) -> f32 {
+        self.0
+    }
+}
+
 /// A table or column track width.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Track {

@@ -9,6 +9,39 @@ cross-crate history.
 
 ## [Unreleased]
 
+Version `0.6.0` (shape refactor, proposal §12.7). Lands over several changes; this
+section collects them.
+
+### Breaking
+
+- `ParagraphSpec` is now `{ style: ParagraphStyle, children: Vec<Span<K>> }`.
+  `runs` is `children`. `color` and `font_size` move into `style.text`
+  (`RunStyle`). `first_line_indent` and `align` move into `style`.
+  `line_height_factor: Option<f32>` is `style.line_height: Option<LineHeight>`.
+  `..ParagraphSpec::default()` still works.
+- `InlineRun` is renamed `Span`, and `Link.runs` is `Link.children`.
+  `InlineRun::split_latin` is `Span::split_latin`. There is no alias.
+
+### Added
+
+- `ParagraphStyle` holds a paragraph's reusable presentation: `text`, `align`,
+  `first_line_indent`, `line_height`. It is `Copy`, has public fields and
+  `Default`, and is meant to be built with `..ParagraphStyle::default()`.
+  Adding a field to it is a breaking change while `0.x`.
+- `ParagraphStyle::text` accepts every `RunStyle` field. Bold, italic,
+  underline, strikethrough, and tracking can now be set for a whole paragraph.
+  They apply over an enclosing `Block::Styled` and under each span's own style.
+  Bold or italic still needs the face, or fails with `BoldFaceRequired` and the
+  related errors.
+- `spec::LineHeight::new(factor)` validates a line-height factor.
+
+### Changed
+
+- An invalid line-height factor (NaN, infinite, zero, or negative) now fails
+  when `LineHeight::new` is called, with the same
+  `GeometryKind::LineHeightFactor { factor }`. It used to fail inside
+  `layout_spec`. Line heights for valid factors are unchanged.
+
 ## [0.5.0] - 2026-11-03
 
 ### Breaking

@@ -1,8 +1,8 @@
-//! Caller-side split of a string into Latin-class and other [`InlineRun`]s.
+//! Caller-side split of a string into Latin-class and other [`Span`]s.
 
 use std::ops::RangeInclusive;
 
-use super::{InlineRun, RunStyle};
+use super::{RunStyle, Span};
 
 /// Blocks where an alphabetic scalar is Latin class.
 /// ASCII U+0020..=U+007E is Latin regardless of `is_alphabetic`.
@@ -26,18 +26,18 @@ fn is_latin(first: char) -> bool {
             .any(|block| block.contains(&first))
 }
 
-impl<K: Clone + PartialEq> InlineRun<K> {
-    /// Splits `text` into [`InlineRun::Text`] runs.
+impl<K: Clone + PartialEq> Span<K> {
+    /// Splits `text` into [`Span::Text`] spans.
     ///
     /// Latin-class grapheme clusters use `latin`. Every other cluster uses `cjk`.
     /// A cluster's class is its first scalar, and the rest of the cluster follows it.
-    /// Consecutive clusters that share a key share one run, so equal keys yield one run.
-    /// Every run has [`RunStyle::default`]. An empty `text` yields an empty [`Vec`].
+    /// Consecutive clusters that share a key share one span, so equal keys yield one span.
+    /// Every span has [`RunStyle::default`]. An empty `text` yields an empty [`Vec`].
     ///
     /// No font is read. A missing glyph still fails later in [`crate::layout_spec`]
-    /// under that run's key. A key that is not in the registry does not fail here.
+    /// under that span's key. A key that is not in the registry does not fail here.
     ///
-    /// Each run stores a clone of its key. The keys are taken by value so a caller can pass temporaries.
+    /// Each span stores a clone of its key. The keys are taken by value so a caller can pass temporaries.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "keys are taken by value so a caller can pass temporaries"
@@ -54,7 +54,7 @@ impl<K: Clone + PartialEq> InlineRun<K> {
             } else {
                 &cjk
             };
-            if let Some(InlineRun::Text {
+            if let Some(Span::Text {
                 text: last, font, ..
             }) = runs.last_mut()
             {
@@ -63,7 +63,7 @@ impl<K: Clone + PartialEq> InlineRun<K> {
                     continue;
                 }
             }
-            runs.push(InlineRun::Text {
+            runs.push(Span::Text {
                 text: cluster.to_owned(),
                 font: key.clone(),
                 style: RunStyle::default(),
@@ -75,20 +75,20 @@ impl<K: Clone + PartialEq> InlineRun<K> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{InlineRun, RunStyle};
+    use super::super::{RunStyle, Span};
 
     #[derive(Clone, PartialEq, Debug)]
     struct Unregistered;
 
-    fn texts<K: Clone + PartialEq + std::fmt::Debug>(runs: Vec<InlineRun<K>>) -> Vec<(String, K)> {
+    fn texts<K: Clone + PartialEq + std::fmt::Debug>(runs: Vec<Span<K>>) -> Vec<(String, K)> {
         runs.into_iter()
             .map(|run| match run {
-                InlineRun::Text { text, font, style } => {
+                Span::Text { text, font, style } => {
                     assert_eq!(style, RunStyle::default());
                     (text, font)
                 }
-                InlineRun::Link { .. } | InlineRun::Blank(_) => {
-                    panic!("split_latin returns only text runs")
+                Span::Link { .. } | Span::Blank(_) => {
+                    panic!("split_latin returns only text spans")
                 }
             })
             .collect()
@@ -96,13 +96,13 @@ mod tests {
 
     #[test]
     fn empty_text_is_an_empty_vec() {
-        assert!(InlineRun::<u8>::split_latin("", 0, 1).is_empty());
+        assert!(Span::<u8>::split_latin("", 0, 1).is_empty());
     }
 
     #[test]
     fn equal_keys_stay_one_run() {
         assert_eq!(
-            texts(InlineRun::split_latin("A中B", 7_u8, 7)),
+            texts(Span::split_latin("A中B", 7_u8, 7)),
             vec![("A中B".to_owned(), 7)]
         );
     }
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn amount_line_splits_after_the_cjk_prefix() {
         assert_eq!(
-            texts(InlineRun::split_latin("合同金额 USD 100", "cjk", "latin")),
+            texts(Span::split_latin("合同金额 USD 100", "cjk", "latin")),
             vec![
                 ("合同金额".to_owned(), "cjk"),
                 (" USD 100".to_owned(), "latin"),
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn line_feed_is_its_own_cjk_run() {
         assert_eq!(
-            texts(InlineRun::split_latin("A\nB", 0_u8, 1)),
+            texts(Span::split_latin("A\nB", 0_u8, 1)),
             vec![
                 ("A".to_owned(), 1),
                 ("\n".to_owned(), 0),
@@ -134,7 +134,7 @@ mod tests {
     fn combining_acute_stays_with_its_base() {
         let text = "e\u{0301}";
         assert_eq!(
-            texts(InlineRun::split_latin(text, 0_u8, 1)),
+            texts(Span::split_latin(text, 0_u8, 1)),
             vec![(text.to_owned(), 1)]
         );
     }
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn curly_quotes_stay_cjk_around_ascii() {
         assert_eq!(
-            texts(InlineRun::split_latin("\u{201C}ABC\u{201D}", 0_u8, 1)),
+            texts(Span::split_latin("\u{201C}ABC\u{201D}", 0_u8, 1)),
             vec![
                 ("\u{201C}".to_owned(), 0),
                 ("ABC".to_owned(), 1),
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn crlf_is_preserved_inside_the_cjk_run() {
-        let runs = texts(InlineRun::split_latin("A\r\nB", 0_u8, 1));
+        let runs = texts(Span::split_latin("A\r\nB", 0_u8, 1));
         assert_eq!(
             runs,
             vec![
@@ -167,22 +167,22 @@ mod tests {
 
     #[test]
     fn an_unregistered_key_does_not_fail_the_split() {
-        let runs = InlineRun::split_latin("A", Unregistered, Unregistered);
+        let runs = Span::split_latin("A", Unregistered, Unregistered);
         assert_eq!(runs.len(), 1);
         assert!(matches!(
             &runs[0],
-            InlineRun::Text { text, style, .. } if text == "A" && *style == RunStyle::default()
+            Span::Text { text, style, .. } if text == "A" && *style == RunStyle::default()
         ));
     }
 
     #[test]
     fn latin_1_operators_and_the_ipa_boundary_follow_the_table() {
         assert_eq!(
-            texts(InlineRun::split_latin("\u{00D7}\u{00F7}", 0_u8, 1)),
+            texts(Span::split_latin("\u{00D7}\u{00F7}", 0_u8, 1)),
             vec![("\u{00D7}\u{00F7}".to_owned(), 0)]
         );
         assert_eq!(
-            texts(InlineRun::split_latin("\u{024F}\u{0250}", 0_u8, 1)),
+            texts(Span::split_latin("\u{024F}\u{0250}", 0_u8, 1)),
             vec![("\u{024F}".to_owned(), 1), ("\u{0250}".to_owned(), 0)]
         );
     }

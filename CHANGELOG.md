@@ -13,6 +13,14 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+### Breaking
+
+- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `ParagraphSpec` becomes
+  `{ style: ParagraphStyle, children }`; `InlineRun` is renamed `Span`
+  (`Link.runs` → `children`); the line-height factor is a validated
+  `LineHeight`. No aliases. See
+  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+
 ## 2026-11-03
 
 ### Breaking

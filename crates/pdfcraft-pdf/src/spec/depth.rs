@@ -2,12 +2,12 @@
 
 use crate::error::{Error, ErrorKind, LimitKind};
 
-use super::{Block, CellBlock, InlineRun, ListSpec, SectionSpec};
+use super::{Block, CellBlock, ListSpec, SectionSpec, Span};
 
 enum Node<'a, K> {
     Block(&'a Block<K>),
     Cell(&'a CellBlock<K>),
-    Run(&'a InlineRun<K>),
+    Span(&'a Span<K>),
 }
 
 /// Fails when any element sits deeper than `max`. Section body blocks are at depth 0.
@@ -43,7 +43,12 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
     match *node {
         Node::Block(block) => match block {
             Block::Paragraph(paragraph) => {
-                stack.extend(paragraph.runs.iter().map(|run| (Node::Run(run), depth)));
+                stack.extend(
+                    paragraph
+                        .children
+                        .iter()
+                        .map(|span| (Node::Span(span), depth)),
+                );
             }
             Block::KeepTogether(children)
             | Block::Styled { children, .. }
@@ -77,7 +82,12 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
         },
         Node::Cell(cell) => match cell {
             CellBlock::Paragraph(paragraph) => {
-                stack.extend(paragraph.runs.iter().map(|run| (Node::Run(run), depth)));
+                stack.extend(
+                    paragraph
+                        .children
+                        .iter()
+                        .map(|span| (Node::Span(span), depth)),
+                );
             }
             CellBlock::List(list) => push_items(list, inner, stack),
             CellBlock::Anchor { child, .. } => stack.push((Node::Cell(child), inner)),
@@ -90,11 +100,11 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
             | CellBlock::Canvas(_)
             | CellBlock::Spacer(_) => {}
         },
-        Node::Run(run) => match run {
-            InlineRun::Link { runs, .. } => {
-                stack.extend(runs.iter().map(|child| (Node::Run(child), inner)));
+        Node::Span(span) => match span {
+            Span::Link { children, .. } => {
+                stack.extend(children.iter().map(|child| (Node::Span(child), inner)));
             }
-            InlineRun::Text { .. } | InlineRun::Blank(_) => {}
+            Span::Text { .. } | Span::Blank(_) => {}
         },
     }
 }
@@ -108,7 +118,7 @@ fn push_items<'a, K>(list: &'a ListSpec<K>, depth: u32, stack: &mut Vec<(Node<'a
 enum Owned<K> {
     Block(Block<K>),
     Cell(CellBlock<K>),
-    Run(InlineRun<K>),
+    Span(Span<K>),
 }
 
 /// Drops `sections` one node at a time.
@@ -123,7 +133,7 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
             match node {
                 Owned::Block(block) => match block {
                     Block::Paragraph(paragraph) => {
-                        stack.extend(paragraph.runs.into_iter().map(Owned::Run));
+                        stack.extend(paragraph.children.into_iter().map(Owned::Span));
                     }
                     Block::KeepTogether(children)
                     | Block::Styled { children, .. }
@@ -156,7 +166,7 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                 },
                 Owned::Cell(cell) => match cell {
                     CellBlock::Paragraph(paragraph) => {
-                        stack.extend(paragraph.runs.into_iter().map(Owned::Run));
+                        stack.extend(paragraph.children.into_iter().map(Owned::Span));
                     }
                     CellBlock::List(list) => {
                         for item in list.items {
@@ -173,11 +183,11 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                     | CellBlock::Canvas(_)
                     | CellBlock::Spacer(_) => {}
                 },
-                Owned::Run(run) => match run {
-                    InlineRun::Link { runs, .. } => {
-                        stack.extend(runs.into_iter().map(Owned::Run));
+                Owned::Span(span) => match span {
+                    Span::Link { children, .. } => {
+                        stack.extend(children.into_iter().map(Owned::Span));
                     }
-                    InlineRun::Text { .. } | InlineRun::Blank(_) => {}
+                    Span::Text { .. } | Span::Blank(_) => {}
                 },
             }
         }

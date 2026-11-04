@@ -27,9 +27,9 @@ use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
     CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily,
-    FontRegistry, HLineSpec, ImageSpec, InlineRun, LayerMark, LayerShape, ListItemSpec, ListKind,
-    ListSpec, MarkerFormat, PageWhen, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
-    TableRow, TableSpec, TextRun,
+    FontRegistry, HLineSpec, ImageSpec, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec,
+    MarkerFormat, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    TableBorder, TableRow, TableSpec, TextRun,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -181,7 +181,7 @@ fn regular_family(bytes: Vec<u8>) -> FontFamily {
 
 fn keyed_para<K>(font: K, text: &str) -> Block<K> {
     Block::Paragraph(ParagraphSpec {
-        runs: vec![InlineRun::Text {
+        children: vec![Span::Text {
             text: text.into(),
             font,
             style: RunStyle::default(),
@@ -215,16 +215,16 @@ fn para(text: impl Into<String>) -> Block<()> {
     Block::paragraph((), text)
 }
 
-fn text_run(text: impl Into<String>) -> InlineRun<()> {
-    InlineRun::Text {
+fn text_run(text: impl Into<String>) -> Span<()> {
+    Span::Text {
         text: text.into(),
         font: (),
         style: RunStyle::default(),
     }
 }
 
-fn bold_run(text: impl Into<String>) -> InlineRun<()> {
-    InlineRun::Text {
+fn bold_run(text: impl Into<String>) -> Span<()> {
+    Span::Text {
         text: text.into(),
         font: (),
         style: RunStyle {
@@ -234,14 +234,14 @@ fn bold_run(text: impl Into<String>) -> InlineRun<()> {
     }
 }
 
-fn link_run(uri: &str, runs: Vec<InlineRun<()>>) -> InlineRun<()> {
-    InlineRun::Link {
+fn link_run(uri: &str, runs: Vec<Span<()>>) -> Span<()> {
+    Span::Link {
         target: if uri.is_empty() {
             LinkTarget::Uri(String::new())
         } else {
             LinkTarget::uri(uri).expect("test uri")
         },
-        runs,
+        children: runs,
     }
 }
 
@@ -250,8 +250,8 @@ fn blank_run(
     thickness: Option<f32>,
     color: Option<Color>,
     offset: Option<f32>,
-) -> InlineRun<()> {
-    InlineRun::Blank(BlankSpec {
+) -> Span<()> {
+    Span::Blank(BlankSpec {
         width,
         thickness: thickness.map(pos),
         color,
@@ -259,27 +259,32 @@ fn blank_run(
     })
 }
 
-fn runs_para(runs: Vec<InlineRun<()>>) -> Block<()> {
+fn runs_para(runs: Vec<Span<()>>) -> Block<()> {
     Block::Paragraph(ParagraphSpec {
-        runs,
+        children: runs,
         ..ParagraphSpec::default()
     })
 }
 
 fn paragraph(
-    runs: Vec<InlineRun<()>>,
+    runs: Vec<Span<()>>,
     indent: f32,
     align: Alignment,
     color: Option<Color>,
     size: Option<f32>,
 ) -> Block<()> {
     Block::Paragraph(ParagraphSpec {
-        runs,
-        first_line_indent: nn(indent),
-        align,
-        color,
-        font_size: size.map(pos),
-        line_height_factor: None,
+        style: ParagraphStyle {
+            text: RunStyle {
+                color,
+                font_size: size.map(pos),
+                ..RunStyle::default()
+            },
+            align,
+            first_line_indent: nn(indent),
+            line_height: None,
+        },
+        children: runs,
     })
 }
 
@@ -2136,7 +2141,7 @@ fn mixed_nesting_counts_one_level_per_container() {
         id: "deep".into(),
         outline: None,
         child: Box::new(CellBlock::Paragraph(ParagraphSpec {
-            runs: vec![link_run("https://example.com", vec![text_run("x")])],
+            children: vec![link_run("https://example.com", vec![text_run("x")])],
             ..ParagraphSpec::default()
         })),
     };
@@ -2263,7 +2268,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
                 vec![],
                 vec![TableRow {
                     cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![deep_link(TOO_DEEP / 4)],
+                        children: vec![deep_link(TOO_DEEP / 4)],
                         ..ParagraphSpec::default()
                     })])],
                 }],
@@ -2620,7 +2625,7 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
             body: vec![TableRow {
                 cells: vec![
                     cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![link_run("", vec![text_run("x")])],
+                        children: vec![link_run("", vec![text_run("x")])],
                         ..ParagraphSpec::default()
                     })]),
                     text_cell("b"),
@@ -2769,13 +2774,13 @@ fn each_font_key_keeps_its_own_face() {
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             body: vec![Block::Paragraph(ParagraphSpec {
-                runs: vec![
-                    InlineRun::Text {
+                children: vec![
+                    Span::Text {
                         text: "A".into(),
                         font: DocFont::Latin,
                         style: RunStyle::default(),
                     },
-                    InlineRun::Text {
+                    Span::Text {
                         text: "B".into(),
                         font: DocFont::Cjk,
                         style: RunStyle::default(),
@@ -4856,7 +4861,7 @@ fn cell_paragraph_pins_bold_blank_and_link() {
             vec![TableRow {
                 cells: vec![
                     cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![
+                        children: vec![
                             text_run("A"),
                             bold_run("B"),
                             blank_run(BlankWidth::ToEndOfLine, None, None, None),
@@ -4864,7 +4869,7 @@ fn cell_paragraph_pins_bold_blank_and_link() {
                         ..ParagraphSpec::default()
                     })]),
                     cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![link_run("https://example.test/a", vec![text_run("Go")])],
+                        children: vec![link_run("https://example.test/a", vec![text_run("Go")])],
                         ..ParagraphSpec::default()
                     })]),
                 ],
@@ -4900,7 +4905,7 @@ fn cell_paragraph_errors_record_no_pages() {
             vec![],
             vec![TableRow {
                 cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![link_run("", vec![text_run("x")])],
+                    children: vec![link_run("", vec![text_run("x")])],
                     ..ParagraphSpec::default()
                 })])],
             }],
@@ -4917,7 +4922,7 @@ fn cell_paragraph_errors_record_no_pages() {
             vec![],
             vec![TableRow {
                 cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                    runs: vec![
+                    children: vec![
                         blank_run(BlankWidth::ToEndOfLine, None, None, None),
                         text_run("x"),
                     ],
@@ -4944,9 +4949,11 @@ fn cell_paragraph_indent_uses_cell_width() {
             vec![TableRow {
                 cells: vec![
                     cell(vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![text_run("A")],
-                        first_line_indent: nn(24.0),
-                        ..ParagraphSpec::default()
+                        style: ParagraphStyle {
+                            first_line_indent: nn(24.0),
+                            ..ParagraphStyle::default()
+                        },
+                        children: vec![text_run("A")],
                     })]),
                     text_cell("B"),
                 ],
@@ -5068,9 +5075,14 @@ fn cell_add_matches_sugar() {
         return;
     }
     let page = cell_page(vec![CellBlock::Paragraph(ParagraphSpec {
-        runs: vec![text_run("Fee 12")],
-        font_size: Some(pos(9.0)),
-        ..ParagraphSpec::default()
+        style: ParagraphStyle {
+            text: RunStyle {
+                font_size: Some(pos(9.0)),
+                ..RunStyle::default()
+            },
+            ..ParagraphStyle::default()
+        },
+        children: vec![text_run("Fee 12")],
     })]);
     let drawn = page
         .ops()

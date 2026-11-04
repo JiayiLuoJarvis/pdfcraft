@@ -1,6 +1,6 @@
 [package]
 name = "pdfcraft-pdf"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Lay out DocumentSpec values (flow, bands, layers) and emit vector PDF via a sealed krilla backend"

@@ -12,8 +12,8 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    InlineRun, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder,
-    TableRow, TableSpec, TextRun,
+    OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow,
+    TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
@@ -67,10 +67,10 @@ fn anchor(id: &str, outline: Option<OutlineEntry>, child: Block<()>) -> Block<()
     }
 }
 
-fn link_anchor(id: &str, text: &str) -> InlineRun<()> {
-    InlineRun::Link {
+fn link_anchor(id: &str, text: &str) -> Span<()> {
+    Span::Link {
         target: LinkTarget::anchor(id).unwrap(),
-        runs: vec![InlineRun::Text {
+        children: vec![Span::Text {
             text: text.into(),
             font: (),
             style: RunStyle::default(),
@@ -78,10 +78,10 @@ fn link_anchor(id: &str, text: &str) -> InlineRun<()> {
     }
 }
 
-fn link_uri(uri: &str, text: &str) -> InlineRun<()> {
-    InlineRun::Link {
+fn link_uri(uri: &str, text: &str) -> Span<()> {
+    Span::Link {
         target: LinkTarget::uri(uri).unwrap(),
-        runs: vec![InlineRun::Text {
+        children: vec![Span::Text {
             text: text.into(),
             font: (),
             style: RunStyle::default(),
@@ -145,7 +145,7 @@ fn uri_links_still_record_as_uri() {
         return;
     }
     let rendered = lay(vec![Block::Paragraph(ParagraphSpec {
-        runs: vec![link_uri("https://example.test/a", "go")],
+        children: vec![link_uri("https://example.test/a", "go")],
         ..ParagraphSpec::default()
     })])
     .unwrap();
@@ -161,7 +161,7 @@ fn anchor_link_resolves_to_xyz_at_body_origin() {
     let rendered = lay(vec![
         anchor("sec", None, para("Section")),
         Block::Paragraph(ParagraphSpec {
-            runs: vec![link_anchor("sec", "jump")],
+            children: vec![link_anchor("sec", "jump")],
             ..ParagraphSpec::default()
         }),
     ])
@@ -185,7 +185,7 @@ fn inset_shifts_anchor_x() {
             children: vec![anchor("sec", None, para("Section"))],
         },
         Block::Paragraph(ParagraphSpec {
-            runs: vec![link_anchor("sec", "jump")],
+            children: vec![link_anchor("sec", "jump")],
             ..ParagraphSpec::default()
         }),
     ])
@@ -205,7 +205,7 @@ fn spacer_anchor_is_a_valid_destination() {
     let rendered = lay(vec![
         anchor("gap", None, Block::Spacer(NonNegative::pt(24.0).unwrap())),
         Block::Paragraph(ParagraphSpec {
-            runs: vec![link_anchor("gap", "to gap")],
+            children: vec![link_anchor("gap", "to gap")],
             ..ParagraphSpec::default()
         }),
     ])
@@ -222,7 +222,7 @@ fn unknown_anchor_fails() {
         return;
     }
     let Err(err) = lay(vec![Block::Paragraph(ParagraphSpec {
-        runs: vec![link_anchor("missing", "x")],
+        children: vec![link_anchor("missing", "x")],
         ..ParagraphSpec::default()
     })]) else {
         panic!("expected error");
@@ -511,7 +511,7 @@ fn repeating_header_anchor_keeps_first_destination() {
             body: vec![
                 table,
                 Block::Paragraph(ParagraphSpec {
-                    runs: vec![link_anchor("hdr", "to header")],
+                    children: vec![link_anchor("hdr", "to header")],
                     ..ParagraphSpec::default()
                 }),
             ],

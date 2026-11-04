@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec,
-    ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, InlineRun,
-    ParagraphSpec, Resources, RunStyle, SectionSpec, TableBorder, TableRow, TableSpec, TextRun,
+    ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, ParagraphSpec,
+    ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow, TableSpec,
+    TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -120,13 +121,15 @@ fn line(text: &str) -> Block<()> {
 
 fn aligned(text: &str, align: Alignment) -> Block<()> {
     Block::Paragraph(ParagraphSpec {
-        runs: vec![InlineRun::Text {
+        style: ParagraphStyle {
+            align,
+            ..ParagraphStyle::default()
+        },
+        children: vec![Span::Text {
             text: text.into(),
             font: (),
             style: RunStyle::default(),
         }],
-        align,
-        ..ParagraphSpec::default()
     })
 }
 
@@ -176,14 +179,19 @@ fn filled(content: Vec<CellBlock<()>>, fill: Color) -> CellSpec<()> {
 fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec<()>> {
     Ok(CellSpec {
         content: vec![CellBlock::Paragraph(ParagraphSpec {
-            runs: vec![InlineRun::Text {
+            style: ParagraphStyle {
+                text: RunStyle {
+                    color: Some(color),
+                    font_size: Some(pos(size)?),
+                    ..RunStyle::default()
+                },
+                ..ParagraphStyle::default()
+            },
+            children: vec![Span::Text {
                 text: text.into(),
                 font: (),
                 style: RunStyle::default(),
             }],
-            color: Some(color),
-            font_size: Some(pos(size)?),
-            ..ParagraphSpec::default()
         })],
         ..CellSpec::default()
     })
@@ -297,31 +305,10 @@ fn service_table() -> Result<Vec<Block<()>>> {
             header: vec![TableRow {
                 cells: vec![
                     filled(
-                        vec![CellBlock::Paragraph(ParagraphSpec {
-                            runs: vec![InlineRun::Text {
-                                text: "Key item (s) / outlay (s) 主要項目/代支".into(),
-                                font: (),
-                                style: RunStyle::default(),
-                            }],
-                            color: Some(WHITE),
-                            font_size: Some(pos(11.0)?),
-                            ..ParagraphSpec::default()
-                        })],
+                        para_cell("Key item (s) / outlay (s) 主要項目/代支", 11.0, WHITE)?.content,
                         NAVY,
                     ),
-                    filled(
-                        vec![CellBlock::Paragraph(ParagraphSpec {
-                            runs: vec![InlineRun::Text {
-                                text: "Amt. 金額".into(),
-                                font: (),
-                                style: RunStyle::default(),
-                            }],
-                            color: Some(WHITE),
-                            font_size: Some(pos(10.5)?),
-                            ..ParagraphSpec::default()
-                        })],
-                        NAVY,
-                    ),
+                    filled(para_cell("Amt. 金額", 10.5, WHITE)?.content, NAVY),
                 ],
             }],
             body,
@@ -387,29 +374,11 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
             cells: vec![
                 filled(vec![CellBlock::Spacer(nn(1.0)?)], NAVY),
                 filled(
-                    vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![InlineRun::Text {
-                            text: "Payment by bank transfer (T/T) and other info".into(),
-                            font: (),
-                            style: RunStyle::default(),
-                        }],
-                        color: Some(WHITE),
-                        font_size: Some(pos(8.0)?),
-                        ..ParagraphSpec::default()
-                    })],
+                    para_cell("Payment by bank transfer (T/T) and other info", 8.0, WHITE)?.content,
                     NAVY,
                 ),
                 filled(
-                    vec![CellBlock::Paragraph(ParagraphSpec {
-                        runs: vec![InlineRun::Text {
-                            text: "以電匯付款及其他注意事項".into(),
-                            font: (),
-                            style: RunStyle::default(),
-                        }],
-                        color: Some(WHITE),
-                        font_size: Some(pos(8.0)?),
-                        ..ParagraphSpec::default()
-                    })],
+                    para_cell("以電匯付款及其他注意事項", 8.0, WHITE)?.content,
                     NAVY,
                 ),
             ],
