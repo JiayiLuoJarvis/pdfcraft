@@ -7,6 +7,8 @@ errors, limits, and testing.
 | --- | --- |
 | [crate README](../README.md) | Install and quick start |
 | This guide | How-to for real documents |
+| [paragraphs.md](paragraphs.md) | Caller guide for paragraphs and spans (Chinese, with examples) |
+| [tables.md](tables.md) | Caller guide for tables and cells (Chinese, with examples) |
 | [lists.md](lists.md) | Caller guide for lists and insets (Chinese, with examples) |
 | [migrate-0.6.md](migrate-0.6.md) | Field map from `0.5` to `0.6` |
 | [migrate-inline.md](migrate-inline.md) | Earlier step from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
@@ -280,6 +282,8 @@ available.
 
 ## Paragraphs, blanks, and links
 
+Caller-oriented recipes (Chinese, with fuller examples): [paragraphs.md](paragraphs.md).
+
 ```rust
 use pdfcraft_pdf::spec::{
     Alignment, BlankSpec, BlankWidth, ParagraphSpec, ParagraphStyle, RunStyle, Span,
@@ -369,6 +373,8 @@ ColumnsSpec {
 ---
 
 ## Tables
+
+Caller-oriented recipes (Chinese, with fuller examples): [tables.md](tables.md).
 
 ```rust
 use std::num::NonZeroU16;

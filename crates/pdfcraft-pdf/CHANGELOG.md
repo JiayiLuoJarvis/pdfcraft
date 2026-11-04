@@ -9,40 +9,59 @@ cross-crate history.
 
 ## [Unreleased]
 
-Version `0.6.0` (shape refactor, proposal §12.7). Lands over several changes; this
-section collects them. The field map from `0.5` is
-[`docs/migrate-0.6.md`](docs/migrate-0.6.md).
+## [0.6.0] - 2026-11-04
+
+Shape refactor (proposal §12.7). Public value fields split into reusable
+`XxxStyle`, descriptive fields, and `children` / named slots. There are no
+aliases for old names. Field map:
+[`docs/migrate-0.6.md`](docs/migrate-0.6.md). Caller guides:
+[`docs/paragraphs.md`](docs/paragraphs.md),
+[`docs/tables.md`](docs/tables.md),
+[`docs/lists.md`](docs/lists.md).
 
 ### Breaking
 
-- `ParagraphSpec` is now `{ style: ParagraphStyle, children: Vec<Span<K>> }`.
+#### Paragraphs and spans
+
+- `ParagraphSpec` is `{ style: ParagraphStyle, children: Vec<Span<K>> }`.
   `runs` is `children`. `color` and `font_size` move into `style.text`
   (`RunStyle`). `first_line_indent` and `align` move into `style`.
   `line_height_factor: Option<f32>` is `style.line_height: Option<LineHeight>`.
   `..ParagraphSpec::default()` still works.
-- `InlineRun` is renamed `Span`, and `Link.runs` is `Link.children`.
+- `InlineRun` is renamed `Span`. `Link.runs` is `Link.children`.
   `InlineRun::split_latin` is `Span::split_latin`. There is no alias.
+
+#### Cells and tables
+
 - `CellBlock` is removed. `CellSpec.content` is `children: Vec<Block<K>>`.
   Cell text is `Block::paragraph`. Columns, nested tables, keep-together
   groups, and page breaks in a cell fail at `layout_spec` with
   `InvalidCellContent` and container `"table cell"`.
-- Columns move presentation into `ColumnsStyle` and `ColumnStyle`;
-  `columns` / `blocks` are now `children`.
-- Lists are `{ style: ListStyle<K>, children }`. Ordered-list `numbering`,
-  `start`, and `format` move into `ListKind::Ordered`; list-item `blocks` is
-  `children`.
 - Tables are `{ style: TableStyle, header: Option<TableHeader<K>>, body }`.
-  Row `cells` is `children`, and cell `fill` moves into `CellStyle`.
-- `Block::KeepTogether` is now `{ children }`. `Block::Inset` is
-  `{ style: InsetStyle, children }`. `Block::Anchor.child` is replaced by
+  Row `cells` is `children`. Cell `fill` moves into `CellStyle`.
+  `repeat_header` moves into `TableHeader.repeat` (default `true`).
+
+#### Columns, lists, and wrappers
+
+- Columns move presentation into `ColumnsStyle` and `ColumnStyle`.
+  `columns` / `blocks` are `children`. `ColumnsStyle.gap` defaults to `0`.
+- Lists are `{ style: ListStyle<K>, children }`. Ordered-list `numbering`,
+  `start`, and `format` move into `ListKind::Ordered`. List-item `blocks` is
   `children`.
-- `ImageSpec` is now `{ image, style: ImageStyle }`. `width`, `height`, and
+- `Block::KeepTogether` is `{ children }`. `Block::Inset` is
+  `{ style: InsetStyle, children }`. `Block::Anchor.child` is `children`.
+
+#### Leaves
+
+- `ImageSpec` is `{ image, style: ImageStyle }`. `width`, `height`, and
   `align` move into `style`.
-- `CanvasSpec` is now `{ size, style: CanvasStyle, marks }`. `align` moves
-  into `style`. `CanvasMark` is unchanged.
+- `CanvasSpec` is `{ size, style: CanvasStyle, marks }`. `align` moves into
+  `style`. `CanvasMark` is unchanged.
 - `Block::HLine` takes `HLineStyle { width, align, thickness, color }`.
-  `HLineSpec` is removed, with no alias. `space_before` and `space_after`
-  are removed.
+  `HLineSpec` is removed. `space_before` and `space_after` are removed.
+
+#### Sections, bands, and layers
+
 - `SectionSpec.page_size` and `SectionSpec.margins` move into
   `style: SectionStyle`. `BandSpec.inset` moves into `style: BandStyle`.
 - `TextRun` is renamed `PageText`. There is no alias.
@@ -56,17 +75,18 @@ section collects them. The field map from `0.5` is
 
 ### Added
 
-- `ParagraphStyle` holds a paragraph's reusable presentation: `text`, `align`,
+- `ParagraphStyle` holds reusable paragraph presentation: `text`, `align`,
   `first_line_indent`, `line_height`. It is `Copy`, has public fields and
-  `Default`, and is meant to be built with `..ParagraphStyle::default()`.
-  Adding a field to it is a breaking change while `0.x`.
+  `Default`, and is meant for `..ParagraphStyle::default()`. Adding a field
+  is a breaking change while `0.x` (API-9 style-struct exception).
 - `ParagraphStyle::text` accepts every `RunStyle` field. Bold, italic,
-  underline, strikethrough, and tracking can now be set for a whole paragraph.
-  They apply over an enclosing `Block::Styled` and under each span's own style.
-  Bold or italic still needs the face, or fails with `BoldFaceRequired` and the
-  related errors.
-- `spec::LineHeight::new(factor)` validates a line-height factor.
-- `Block::Styled` may wrap cell children. Its fields apply to those paragraphs.
+  underline, strikethrough, and tracking can be set for a whole paragraph.
+  Resolution order is document seed → enclosing `Block::Styled` →
+  `ParagraphStyle.text` → each span's `style`. Bold or italic still needs the
+  face, or fails with `BoldFaceRequired` and related errors.
+- `spec::LineHeight::new(factor)` validates a line-height factor at construction.
+- `Block::Styled` may wrap cell children. Its fields apply to those
+  paragraphs (every `RunStyle` field, not only size and color).
 - `ColumnsStyle`, `ColumnStyle`, `ListStyle`, `TableStyle`, `CellStyle`,
   `InsetStyle`, `ImageStyle`, `CanvasStyle`, and `HLineStyle` hold reusable
   presentation. `ImageStyle` defaults to unset width and height with
@@ -77,10 +97,14 @@ section collects them. The field map from `0.5` is
 - `Angle::degrees` builds a finite clockwise angle. `as_degrees` reads it
   back. `+0` and `-0` compare equal. NaN and infinity fail with
   `GeometryKind::NonFiniteRotation`.
-- `TableHeader { repeat, rows }` makes the header slot and its repetition rule
-  explicit. An empty `rows` list is equivalent to no header.
-- `Block::Anchor.children` accepts multiple blocks and body-level page breaks.
-  The destination lands on the first effective fragment after any break.
+- `TableHeader { repeat, rows }` makes the header slot and its repetition
+  rule explicit. `Some` with empty `rows` is equivalent to `None`.
+- `Block::Anchor.children` accepts multiple blocks and body-level page
+  breaks. The destination lands on the first effective fragment after any
+  break.
+- Caller guides: [`docs/paragraphs.md`](docs/paragraphs.md) (paragraphs,
+  spans, style stacking) and [`docs/tables.md`](docs/tables.md) (tables,
+  cells, headers). List recipes remain in [`docs/lists.md`](docs/lists.md).
 
 ### Changed
 

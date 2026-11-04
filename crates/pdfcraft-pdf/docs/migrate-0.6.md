@@ -8,6 +8,12 @@
 - [表格行与边框](migrate-table-row.md)
 - [页脚标记进 band](migrate-band-marks.md)
 
+调用方用法指引（终态怎么写，不是字段对照）：
+
+- [段落与行内](paragraphs.md)
+- [表格](tables.md)
+- [列表与 Inset](lists.md)
+
 `pdfcraft-forms`、`pdfcraft-orgchart`、`pdfcraft-post` 的类型不变。
 
 下面每一节先给 0.5 的写法，再给当前写法。改完后看文末三条行为变化。那三条能编译通过，PDF 会不一样。

@@ -656,6 +656,8 @@ fn cn_items(pairs: &[(&str, &str)]) -> Vec<ListItemSpec<()>> {
 | 文档 | 内容 |
 | --- | --- |
 | [guide.md](guide.md) | 全库用法。Lists、Nesting、Limits |
+| [paragraphs.md](paragraphs.md) | 段落、Span、样式叠放 |
+| [tables.md](tables.md) | 表格与单元格 |
 | [migrate-0.6.md](migrate-0.6.md) | `0.5` 到 `0.6` 的字段对照 |
 | [crate CHANGELOG](../CHANGELOG.md) | `0.6.0` 的 Breaking / Added / Changed |
 | 提案书 §2.8、§12.5、§12.6、§12.7 | 已确认产品口径（仓库 `docs/提案书.md`） |

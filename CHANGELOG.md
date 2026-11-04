@@ -13,30 +13,31 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
-Field map for the `pdfcraft-pdf` `0.6.0` shape:
-[`crates/pdfcraft-pdf/docs/migrate-0.6.md`](crates/pdfcraft-pdf/docs/migrate-0.6.md).
+## 2026-11-04
 
 ### Breaking
 
-- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `ParagraphSpec` becomes
-  `{ style: ParagraphStyle, children }`; `InlineRun` is renamed `Span`
-  (`Link.runs` → `children`); the line-height factor is a validated
-  `LineHeight`. No aliases. See
+- **Breaking.** `pdfcraft-pdf` `0.6.0`. Shape refactor (proposal §12.7).
+  `ParagraphSpec` / `Span` / `ParagraphStyle` / `LineHeight`; `CellBlock`
+  removed; columns, lists, tables, wrappers, leaves, sections, bands, and
+  layers move into `XxxStyle` and renamed types (`PageText`, `Mark`,
+  `Angle`). No aliases. Field map:
+  [`crates/pdfcraft-pdf/docs/migrate-0.6.md`](crates/pdfcraft-pdf/docs/migrate-0.6.md).
+  Full notes:
   [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
-- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `CellBlock` is removed.
-  A table cell stores `children: Vec<Block<K>>`, and cell text is
-  `Block::paragraph`. See
-  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
-- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `ImageSpec` and
-  `CanvasSpec` move alignment and image size into `ImageStyle` and
-  `CanvasStyle`. `HLineSpec` is removed. `Block::HLine` takes `HLineStyle`
-  and no longer carries space above or below the rule. See
-  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
-- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). Section page setup
-  moves into `SectionStyle`. Band inset moves into `BandStyle`. `TextRun`
-  is `PageText`, `BandMark` is `Mark`, and `BandSlot` and `LayerMark` are
-  structs. `Mark::Rotated.degrees` is `Angle`. See
-  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+
+### Added
+
+- `pdfcraft-pdf` `0.6.0`. Caller guides:
+  [`paragraphs.md`](crates/pdfcraft-pdf/docs/paragraphs.md),
+  [`tables.md`](crates/pdfcraft-pdf/docs/tables.md),
+  [`lists.md`](crates/pdfcraft-pdf/docs/lists.md).
+
+### Changed
+
+- `pdfcraft-pdf` `0.6.0`. Cell style inheritance, empty cell paragraphs,
+  HLine height without built-in spacing, and earlier `LineHeight` / `Angle`
+  validation. Details in the crate changelog.
 
 ## 2026-11-03
 

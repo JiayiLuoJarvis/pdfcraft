@@ -15,7 +15,9 @@ the only band link.
 | | |
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
-| Lists | [docs/lists.md](docs/lists.md). Recommended list and inset usage for callers |
+| Paragraphs | [docs/paragraphs.md](docs/paragraphs.md). Paragraph, span, and style stacking |
+| Tables | [docs/tables.md](docs/tables.md). Tables, cells, and headers |
+| Lists | [docs/lists.md](docs/lists.md). Lists and insets |
 | Migration | [0.5 to 0.6](docs/migrate-0.6.md). Earlier steps: [inline styles](docs/migrate-inline.md), [table rows](docs/migrate-table-row.md), [band marks](docs/migrate-band-marks.md) |
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.98 |
@@ -148,7 +150,10 @@ Use Rust `if` and `for` when building body values. There is no template
 DSL. A header or footer may be `BandFn`.
 
 Deep dive: **[docs/guide.md](docs/guide.md)** (blocks, tables, links, limits,
-errors, testing).
+errors, testing). Caller recipes:
+[paragraphs](docs/paragraphs.md),
+[tables](docs/tables.md),
+[lists](docs/lists.md).
 
 ---
 
