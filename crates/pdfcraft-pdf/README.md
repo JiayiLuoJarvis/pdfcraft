@@ -2,20 +2,21 @@
 
 **Lay out business documents in Rust and emit vector PDF.**
 
-You build a `DocumentSpec` — flow content, headers/footers, and page-anchored
-marks — then call `layout_spec` and `to_pdf`. The library measures text with
-[skrifa](https://crates.io/crates/skrifa), breaks lines and pages, places
-tables and lists, draws through an internal canvas, and serializes PDF with a
-private [krilla](https://crates.io/crates/krilla) adapter. krilla types are not
-part of the public API. Body links use `LinkTarget::Uri` or `LinkTarget::Anchor`
-(`Block::Anchor` + optional `OutlineEntry` bookmarks). Header/footer
-`BandSlot::Link` stays URI-only.
+You build a `DocumentSpec` from flow content, headers and footers, and
+page-anchored marks, then call `layout_spec` and `to_pdf`. The library measures
+text with [skrifa](https://crates.io/crates/skrifa), breaks lines and pages,
+places tables and lists, draws through an internal canvas, and serializes PDF
+with a private [krilla](https://crates.io/crates/krilla) adapter. krilla types
+are not part of the public API. Body links use `LinkTarget::Uri` or
+`LinkTarget::Anchor` (`Block::Anchor` plus an optional `OutlineEntry`
+bookmark). A header or footer link is `BandSlot.link`, and that URI is still
+the only band link.
 
 | | |
 | --- | --- |
 | Guide | [docs/guide.md](docs/guide.md) |
-| Lists | [docs/lists.md](docs/lists.md) — recommended list / inset usage for callers |
-| Migration | [inline styles](docs/migrate-inline.md), [table rows](docs/migrate-table-row.md), [band marks](docs/migrate-band-marks.md) |
+| Lists | [docs/lists.md](docs/lists.md). Recommended list and inset usage for callers |
+| Migration | [0.5 to 0.6](docs/migrate-0.6.md). Earlier steps: [inline styles](docs/migrate-inline.md), [table rows](docs/migrate-table-row.md), [band marks](docs/migrate-band-marks.md) |
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
@@ -48,8 +49,8 @@ pdfcraft-pdf = { version = "0.6.0", features = ["test-utils"] }
 
 ```rust
 use pdfcraft_pdf::spec::{
-    BandFn, BandInset, BandSlot, BandSpec, Block, DocumentInfo, FontFace, FontFamily, FontRegistry,
-    Resources, RunStyle, SectionSpec, TextRun,
+    BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, DocumentInfo, FontFace, FontFamily,
+    FontRegistry, PageText, Resources, RunStyle, SectionSpec, SectionStyle,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, Margins, PageSize, Result};
 
@@ -68,23 +69,30 @@ fn main() -> Result<()> {
         limits: Limits::default(),
         info: DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0)?,
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0)?,
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text {
-                    runs: vec![TextRun::Literal("pdfcraft-pdf".into())],
+                style: BandStyle {
+                    inset: BandInset::PageMargins,
+                },
+                left: Some(BandSlot {
+                    children: vec![PageText::Literal("pdfcraft-pdf".into())],
                     font: (),
                     style: RunStyle::default(),
+                    link: None,
                 }),
-                right: Some(BandSlot::Text {
-                    runs: vec![
-                        TextRun::Literal("Page ".into()),
-                        TextRun::PageNumber,
-                        TextRun::Literal(" / ".into()),
-                        TextRun::PageCount,
+                right: Some(BandSlot {
+                    children: vec![
+                        PageText::Literal("Page ".into()),
+                        PageText::PageNumber,
+                        PageText::Literal(" / ".into()),
+                        PageText::PageCount,
                     ],
                     font: (),
                     style: RunStyle::default(),
+                    link: None,
                 }),
                 ..BandSpec::default()
             })),
@@ -126,16 +134,17 @@ cargo run -p pdfcraft-pdf --example band_fn # BAND_FN_CASE selects the sample �
                                      └──────────┘
 ```
 
-1. **Flow body** — paragraphs, spacers, page breaks, keep-together, styled
-   scopes, insets, columns, tables, lists, images, horizontal rules.
-2. **Bands** — header/footer slots; band height is the top/bottom margin.
-3. **Layers** — `behind` / `front` marks in page coordinates (seals, watermarks,
+1. **Flow body.** Paragraphs, spacers, page breaks, keep-together groups,
+   styled scopes, insets, columns, tables, lists, images, in-flow canvases,
+   and horizontal rules.
+2. **Bands.** Header and footer slots. Band height is the top or bottom margin.
+3. **Layers.** `behind` and `front` marks in page coordinates (seals, watermarks,
    paths).
 
-Coordinates: PDF points, **top-left origin, y downward**.  
-Fonts: register face bytes under your own key type. A missing cmap entry fails the document.  
-Inline style: `RunStyle` selects bold, italic, and bold italic faces you register, plus underline, strikethrough, tracking, size, and color.  
-Dynamic data: use Rust `if` / `for` when building body values. There is no template
+Coordinates are PDF points, with a top-left origin and **y downward**.
+Register face bytes under your own key type. A missing cmap entry fails the document.
+`RunStyle` selects the bold, italic, and bold italic faces you register, and also sets underline, strikethrough, tracking, size, and color.
+Use Rust `if` and `for` when building body values. There is no template
 DSL. A header or footer may be `BandFn`.
 
 Deep dive: **[docs/guide.md](docs/guide.md)** (blocks, tables, links, limits,
@@ -160,7 +169,7 @@ errors, testing).
 | `DocumentSpec.info` | PDF title and author (`DocumentInfo`). Creator stays `pdfcraft` |
 | `FontRegistry` / `Resources::with_fonts` | Faces keyed by your type, plus `add_image` → `ImageRef` |
 | `Block` and friends | Flow content |
-| `BandFn` / `BandSpec` / `TextRun` | Header/footer. `fixed` or a per-page function. Page numbers at paint time |
+| `BandFn` / `BandSpec` / `PageText` | Header and footer. `fixed` or a per-page function. Page numbers at paint time |
 | `LayerMark` / `PageWhen` | Page-anchored marks |
 | `Limits` | Batch safety caps |
 | `layout_spec` | Measure, paginate, record |
@@ -171,10 +180,10 @@ errors, testing).
 
 ## Design constraints (v1)
 
-- Horizontal Chinese + Latin; no bidi, vertical text, kerning, or ligatures
-- `Alignment::Justify` stretches paragraph lines (spaces then CJK gaps); last / hard-break / Fill lines stay Start; Image / HLine / Canvas `Justify` ≡ Start
-- No TOC / QR / SVG / in-flow canvas / encryption APIs
-- No HTTP image fetch; no fallback fonts
+- Horizontal Chinese and Latin. No bidi, vertical text, kerning, or ligatures
+- `Alignment::Justify` stretches paragraph lines (spaces, then CJK gaps). The last line, a hard-break line, and a `BlankWidth::ToEndOfLine` line stay Start. Image, `HLine`, and canvas `Justify` is Start
+- No TOC, QR, SVG, named image dictionary, or encryption APIs. In-flow vector blocks are `Block::Canvas`
+- No HTTP image fetch. No fallback fonts
 - No second PDF backend inside this crate
 - `Flowable` stays private
 
@@ -187,7 +196,7 @@ feature flag here.
 
 - **Rust**: MSRV 1.98 (edition 2021)
 - **`unsafe`**: forbidden in this crate
-- **SemVer**: `0.x` — breaking changes may land without a `1.0` bump; read
+- **SemVer.** `0.x`. Breaking changes may land before `1.0`. Read
   `CHANGELOG.md`
 
 ---

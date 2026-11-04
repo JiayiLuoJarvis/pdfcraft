@@ -31,7 +31,8 @@ emitting boxes.
 
 Visual check for §12.4: an external URI, in-document links onto `Block::Anchor`,
 a collapsed outline (`開篇` → `付款` → back up to `簽章`), and a repeating table
-header whose `CellBlock::Anchor` stays on the first placement.
+header whose anchor stays on the first placement. The anchor is a
+`Block::Anchor` inside the header cell.
 
 ```bash
 cargo run -p pdfcraft-pdf --example anchors

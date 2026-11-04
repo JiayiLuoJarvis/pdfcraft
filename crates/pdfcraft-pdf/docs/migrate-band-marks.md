@@ -1,12 +1,12 @@
 # 把 front 页脚迁到 band marks
 
-这份说明记录从 `SectionSpec.front` 上的页脚 `LayerMark` 迁到 `SectionSpec.footer` 上的 `BandMark`。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.5.0`。`pdfcraft-forms`、`pdfcraft-orgchart` 和 `pdfcraft-post` 的类型不变。
+这份说明记录从 `SectionSpec.front` 上的页脚 `LayerMark` 迁到 `SectionSpec.footer` 上的带内标记。那一步已经并进当前公共面。带内标记的类型现在是 `Mark`。从 `0.5` 迁到 `0.6` 的完整对照见 [migrate-0.6.md](migrate-0.6.md)。`pdfcraft-forms`、`pdfcraft-orgchart` 和 `pdfcraft-post` 的类型不变。
 
 按下面的顺序改。第 1 步是编译错误。后面的步骤能编译通过，但坐标、字号或越界错误会和旧页脚不一致。
 
 ## 1. 给 `BandSpec` 补上 `marks`
 
-`BandSpec` 新增公共字段 `marks: Vec<BandMark<K>>`。结构体字面量必须写出这个字段，或者用 `..BandSpec::default()`。`Default` 里 `marks` 是空的。
+`BandSpec.marks` 的类型是 `Vec<Mark<K>>`。结构体字面量必须写出这个字段，或者用 `..BandSpec::default()`。`Default` 里 `marks` 是空的。左右缩进在 `style.inset`。
 
 以前：
 
@@ -22,7 +22,9 @@ BandSpec {
 
 ```rust
 BandSpec {
-    inset: BandInset::PageMargins,
+    style: BandStyle {
+        inset: BandInset::PageMargins,
+    },
     left: Some(slot),
     right: None,
     marks: Vec::new(),
@@ -31,9 +33,9 @@ BandSpec {
 
 只改页脚标记、左右槽仍用默认值时，写成 `marks: vec![...]` 加上 `..BandSpec::default()`。
 
-## 2. 把每个 `LayerMark` 改成 `BandMark`
+## 2. 把页面 `LayerMark` 改成带内 `Mark`
 
-不旋转的标记写成 `BandMark::Shape(LayerShape::...)`。旋转组写成 `BandMark::Rotated { degrees, pivot, shapes }`。删掉 `PageWhen`。按页选择时用 `BandFn::from_fn`，读 `query.number.get() % 2`，或对该页返回 `Ok(None)`。
+不旋转的标记写成 `Mark::Shape(LayerShape::...)`。旋转组写成 `Mark::Rotated { degrees, pivot, shapes }`。`degrees` 用 `Angle::degrees` 构造。带内标记没有 `PageWhen`。按页选择时用 `BandFn::from_fn`，读 `query.number.get() % 2`，或对该页返回 `Ok(None)`。
 
 `LayerMark` 用页面左上角。footer band 用页脚带左上角。`x` 不变。`y` 按下面的公式换算：
 
@@ -57,7 +59,7 @@ front: vec![LayerMark::Rect {
 
 ```rust
 footer: Some(BandFn::fixed(BandSpec {
-    marks: vec![BandMark::Shape(LayerShape::Rect {
+    marks: vec![Mark::Shape(LayerShape::Rect {
         rect: Rect::try_pt(24.0, 8.0, 180.0, 65.0)?,
         ink: Ink::Stroke(pen),
     })],

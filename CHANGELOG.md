@@ -13,6 +13,9 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+Field map for the `pdfcraft-pdf` `0.6.0` shape:
+[`crates/pdfcraft-pdf/docs/migrate-0.6.md`](crates/pdfcraft-pdf/docs/migrate-0.6.md).
+
 ### Breaking
 
 - **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `ParagraphSpec` becomes

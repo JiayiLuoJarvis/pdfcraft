@@ -10,7 +10,8 @@ cross-crate history.
 ## [Unreleased]
 
 Version `0.6.0` (shape refactor, proposal §12.7). Lands over several changes; this
-section collects them.
+section collects them. The field map from `0.5` is
+[`docs/migrate-0.6.md`](docs/migrate-0.6.md).
 
 ### Breaking
 

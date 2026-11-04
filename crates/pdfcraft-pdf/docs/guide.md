@@ -7,10 +7,11 @@ errors, limits, and testing.
 | --- | --- |
 | [crate README](../README.md) | Install and quick start |
 | This guide | How-to for real documents |
-| [lists.md](lists.md) | Caller guide: correct and recommended list / inset usage (Chinese, with examples) |
-| [migrate-inline.md](migrate-inline.md) | Required edits from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
-| [migrate-table-row.md](migrate-table-row.md) | Required edits from `header: Vec<Vec<CellSpec>>` / `border_width` + `border_color` |
-| [migrate-band-marks.md](migrate-band-marks.md) | Move page-coordinate footer marks into a footer band |
+| [lists.md](lists.md) | Caller guide for lists and insets (Chinese, with examples) |
+| [migrate-0.6.md](migrate-0.6.md) | Field map from `0.5` to `0.6` |
+| [migrate-inline.md](migrate-inline.md) | Earlier step from `FontFamily.normal` / `InlineRun::Bold` / `TextStyle` |
+| [migrate-table-row.md](migrate-table-row.md) | Earlier step from `header: Vec<Vec<CellSpec>>` / `border_width` + `border_color` |
+| [migrate-band-marks.md](migrate-band-marks.md) | Earlier step that moved page-coordinate footer marks into a footer band |
 | [rustdoc](https://docs.rs/pdfcraft-pdf) | Every public signature (`cargo doc -p pdfcraft-pdf --open`) |
 
 Related crates (separate packages, separate docs):
@@ -35,13 +36,13 @@ Two moments matter:
 1. **Assemble time.** Your application already has data. Use Rust `if` / `for`
    to push `Block`s into `SectionSpec.body`. You do not know the page count yet.
 2. **Paint time.** After pagination, the library paints each page. It calls
-   the header function, then the footer function, and fills `TextRun` page
+   the header function, then the footer function, and fills `PageText` page
    counters. `PageWhen` still chooses layer marks only.
 
 ```rust
 use pdfcraft_pdf::spec::{
-    Block, CellBlock, CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources,
-    SectionSpec, TableRow, TableSpec,
+    Block, CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources, SectionSpec,
+    TableHeader, TableRow, TableSpec,
 };
 use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Limits, PageSize, Result};
 
@@ -66,19 +67,13 @@ fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
                 .iter()
                 .map(|item| {
                     TableRow {
-                        cells: vec![
+                        children: vec![
                             CellSpec {
-                                content: vec![CellBlock::Text {
-                                    text: item.name.clone(),
-                                    font: (),
-                                }],
+                                children: vec![Block::paragraph((), item.name.clone())],
                                 ..CellSpec::default()
                             },
                             CellSpec {
-                                content: vec![CellBlock::Text {
-                                    text: item.amount.clone(),
-                                    font: (),
-                                }],
+                                children: vec![Block::paragraph((), item.amount.clone())],
                                 ..CellSpec::default()
                             },
                         ],
@@ -86,24 +81,21 @@ fn build(contract: &Contract, font: Vec<u8>) -> Result<Vec<u8>> {
                 })
                 .collect();
             body.push(Block::Table(TableSpec {
-                header: vec![TableRow {
-                    cells: vec![
-                        CellSpec {
-                            content: vec![CellBlock::Text {
-                                text: "Item".into(),
-                                font: (),
-                            }],
-                            ..CellSpec::default()
-                        },
-                        CellSpec {
-                            content: vec![CellBlock::Text {
-                                text: "Amount".into(),
-                                font: (),
-                            }],
-                            ..CellSpec::default()
-                        },
-                    ],
-                }],
+                header: Some(TableHeader {
+                    rows: vec![TableRow {
+                        children: vec![
+                            CellSpec {
+                                children: vec![Block::paragraph((), "Item")],
+                                ..CellSpec::default()
+                            },
+                            CellSpec {
+                                children: vec![Block::paragraph((), "Amount")],
+                                ..CellSpec::default()
+                            },
+                        ],
+                    }],
+                    ..TableHeader::default()
+                }),
                 body: rows,
                 ..TableSpec::default()
             }));
@@ -228,8 +220,8 @@ DocumentSpec {
 
 | `SectionSpec` field | Meaning |
 | --- | --- |
-| `page_size` | `Some(…)` overrides the document default for this section |
-| `margins` | Body inset; top/bottom = band height |
+| `style.page_size` | `Some(…)` overrides the document default for this section |
+| `style.margins` | Body inset. Top and bottom margins are the band heights |
 | `header` / `footer` | Optional `BandFn` (`fixed` or per page) |
 | `behind` / `front` | Page-fixed `LayerMark` lists |
 | `body` | Flow content (`Vec<Block>`) |
@@ -250,29 +242,32 @@ available.
 | `Paragraph(ParagraphSpec)` | Wrapping paragraph |
 | `Spacer(Length<NonNegative>)` | Vertical gap (may be `0`) |
 | `PageBreak` | Force a new page (a leading break is a no-op) |
-| `KeepTogether(Vec<Block>)` | Children must fit on one page |
+| `KeepTogether { children }` | Children must fit on one page |
 | `Styled { style, children }` | Children inherit a `RunStyle` (face, lines, tracking, size, color) |
 | `Columns(ColumnsSpec)` | Side-by-side columns (not newspaper snaking) |
-| `Table(TableSpec)` | Table; may split with repeating header |
+| `Table(TableSpec)` | Table. May split with a repeating header |
 | `List(ListSpec)` | Bulleted or numbered list |
-| `Inset { left, right, children }` | Shift children right by `left` and narrow the frame by `left + right` |
-| `Image(ImageSpec)` | Raster block (atomic; not split mid-image) |
-| `HLine(HLineSpec)` | Horizontal rule |
+| `Inset { style, children }` | Shift children right by `style.left` and narrow the frame by `left + right` |
+| `Image(ImageSpec)` | Raster block (atomic, not split mid-image) |
+| `Canvas(CanvasSpec)` | Fixed-size vector block in the flow |
+| `HLine(HLineStyle)` | Horizontal rule. Height is `thickness` |
 
-`Block::paragraph(font, "…")` is shorthand for one `InlineRun::Text` on that font key. `ParagraphSpec::text` is the same run inside a paragraph value.
+`Block::paragraph(font, "…")` is shorthand for one `Span::Text` on that font key. `ParagraphSpec::text` is the same span inside a paragraph value.
+
+`Block::Canvas` occupies `CanvasSpec.size` and does not split. Marks use block coordinates, origin at the top-left, y down. `CanvasStyle.align` places the box in the frame. `Alignment::Justify` is treated as `Start`. Page-fixed marks stay on `LayerMark`, not on this block.
 
 ### Nesting rules (v1)
 
 - Columns may nest stacks of blocks; stacks may contain columns again.
-- Table cells may hold text, paragraphs, rules, images, spacers, lists, and insets.
-- Table cells may **not** hold nested tables, columns, or keep-together groups.
+- Table cells may hold paragraphs, rules, images, canvases, spacers, lists, insets, and `Styled` groups. Paragraphs in a cell inherit every field of an enclosing `Styled`.
+- Table cells may **not** hold nested tables, columns, keep-together groups, or page breaks.
   This also applies inside each item of a list in a cell.
 - List items may hold every block except page breaks: paragraphs, tables,
   columns, images, canvases, insets, keep-together groups, and nested lists.
 - A rejected block reports the innermost container that forbids it. A page
   break in a list item in a cell reports `"list item"`. Columns there report
   `"table cell"`.
-- `Inset` draws nothing and adds no vertical space. `left` and `right` are
+- `Inset` draws nothing and adds no vertical space. `style.left` and `style.right` are
   non-negative. `left + right` greater than or equal to the frame being laid
   out fails with `GeometryKind::InsetWiderThanFrame`. A child that is still
   too wide for the narrowed frame reports its own error, such as
@@ -286,73 +281,80 @@ available.
 ## Paragraphs, blanks, and links
 
 ```rust
-use pdfcraft_pdf::spec::{Alignment, BlankSpec, BlankWidth, InlineRun, ParagraphSpec, RunStyle};
+use pdfcraft_pdf::spec::{
+    Alignment, BlankSpec, BlankWidth, ParagraphSpec, ParagraphStyle, RunStyle, Span,
+};
 use pdfcraft_pdf::{Color, NonNegative, Positive};
 
 let paragraph = ParagraphSpec {
-    runs: vec![
-        InlineRun::Text {
+    style: ParagraphStyle {
+        align: Alignment::Start,
+        ..ParagraphStyle::default()
+    },
+    children: vec![
+        Span::Text {
             text: "Amount: ".into(),
             font: (),
             style: RunStyle { bold: Some(true), ..RunStyle::default() },
         },
-        InlineRun::Blank(BlankSpec {
+        Span::Blank(BlankSpec {
             width: BlankWidth::Em(8),
             thickness: Some(Positive::pt(0.75).unwrap()),
             color: Some(Color::rgb(0, 0, 0)),
             baseline_offset: Some(NonNegative::ZERO),
         }),
-        InlineRun::Text { text: ". See ".into(), font: (), style: RunStyle::default() },
-        InlineRun::Link {
+        Span::Text { text: ". See ".into(), font: (), style: RunStyle::default() },
+        Span::Link {
             target: pdfcraft_pdf::LinkTarget::uri("https://example.test/pay").unwrap(),
-            runs: vec![InlineRun::Text {
+            children: vec![Span::Text {
                 text: "payment terms".into(),
                 font: (),
                 style: RunStyle { underline: Some(true), ..RunStyle::default() },
             }],
         },
-        InlineRun::Text { text: ".".into(), font: (), style: RunStyle::default() },
+        Span::Text { text: ".".into(), font: (), style: RunStyle::default() },
     ],
-    first_line_indent: NonNegative::ZERO,
-    align: Alignment::Start,
-    color: None,
-    font_size: None,
-    line_height_factor: None,
 };
 ```
 
 | Topic | Rule |
 | --- | --- |
-| `InlineRun::Text` | `{ text, font, style }`. `RunStyle` fields left `None` inherit. `Some(false)` turns off an inherited flag. |
-| Inheritance | Seed (12 pt, black, regular, no lines, no tracking), then each `Block::Styled`, then `ParagraphSpec` size and color, then the run. Bands, layers, and canvas text start from the seed. Table cell text and list markers use the regular face and inherit only size and color. A list's `marker_font` selects which family. Bold and italic do not change the marker face. |
+| `Span::Text` | `{ text, font, style }`. `RunStyle` fields left `None` inherit. `Some(false)` turns off an inherited flag. |
+| Inheritance | Seed (12 pt, black, regular, no lines, no tracking), then each `Block::Styled`, then `ParagraphStyle.text` (every `RunStyle` field), then the span. Paragraphs inside table cells inherit every enclosing `Styled` field. List markers inherit only size and color, and stay on the regular face. A list's `marker_font` selects which family. Bands, layers, and canvas text start from the seed and ignore `Block::Styled`. |
 | Underline / strikethrough | Position scales with the run's size. Thickness is 1 pt. Adjacent runs on one line with the same size and color share one stroke, placed from the first segment. Spaces inside the line are covered. A blank keeps its own stroke. |
 | `tracking` | Extra space after each cluster followed by more text on the line. It counts toward line breaking. Negative values may not push a glyph's advance below zero (`ErrorKind::NegativeTracking`). |
 | Mixed sizes | Each face on a line is scaled by its own size. The line box takes the largest ascent, the deepest descent, and the largest leading, then the larger of that natural height and the largest size times the line-height factor. A line of only blanks uses the first text run's resolved face at the paragraph size. A paragraph with no text runs does not read a font. |
-| `Alignment::Justify` | Placement only; line breaking is unchanged. Phase 1 widens U+0020 spaces up to 0.5em of that space's run size. Phase 2 averages leftover into eligible cluster gaps (Han / fullwidth punctuation; CJK–Latin boundaries yes; Latin word interiors no). The last paragraph line, a hard-break line, a `BlankWidth::ToEndOfLine` line, a line with no stretch slots, and a non-positive remainder stay Start-shaped. `ImageSpec` / `HLineSpec` / `CanvasSpec` treat `Justify` as Start. |
-| `InlineRun::Link` | `target: LinkTarget` is `Uri` or `Anchor`. Layout resolves `Anchor` to page-local `Xyz` before paint. Empty URI → `EmptyLink`. Empty anchor id → `EmptyAnchorId`. |
-| `Block::Anchor` | `{ id, outline, child }`. Destination is the first placed fragment of `child` (top-left, y down). Optional `OutlineEntry { title, level }` builds the bookmark tree. |
+| `Alignment::Justify` | Placement only. Line breaking is unchanged. Phase 1 widens U+0020 spaces up to 0.5em of that space's span size. Phase 2 averages leftover into eligible cluster gaps (Han and fullwidth punctuation, and CJK–Latin boundaries). Latin word interiors are not stretched. The last paragraph line, a hard-break line, a `BlankWidth::ToEndOfLine` line, a line with no stretch slots, and a non-positive remainder stay Start-shaped. Image, `HLine`, and canvas treat `Justify` as Start. |
+| `Span::Link` | `target: LinkTarget` is `Uri` or `Anchor`. Layout resolves `Anchor` to page-local `Xyz` before paint. Empty URI fails with `EmptyLink`. Empty anchor id fails with `EmptyAnchorId`. |
+| `Block::Anchor` | `{ id, outline, children }`. The destination is the first effective fragment among `children` (top-left, y down). Optional `OutlineEntry { title, level }` builds the bookmark tree. |
 | Outline levels | First outline item must be level `1`. Later items deepen by at most +1; jumping up (e.g. 3→1) is allowed. Level `0` and empty titles fail. No outline entries → `to_pdf` does not write an outline. |
 | `BlankWidth::Fixed` / `Em` / `ToEndOfLine` | Underline-style blanks in forms |
-| Band / layer copy | Uses `TextRun` (resolved at paint time), not `InlineRun`. `BandSlot::Link` stays URI-only. |
+| Band / layer copy | Uses `PageText` (resolved at paint time), not `Span`. `BandSlot.link` is URI-only. |
 
 ---
 
 ## Columns
 
 ```rust
-use pdfcraft_pdf::spec::{ColumnSpec, ColumnsSpec};
+use pdfcraft_pdf::spec::{ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle};
 use pdfcraft_pdf::{NonNegative, Ratio, Track};
 
 ColumnsSpec {
-    gap: NonNegative::pt(12.0).unwrap(),
-    columns: vec![
+    style: ColumnsStyle {
+        gap: NonNegative::pt(12.0).unwrap(),
+    },
+    children: vec![
         ColumnSpec {
-            width: Track::Ratio(Ratio::new(1.0).unwrap()),
-            blocks: vec![/* … */],
+            style: ColumnStyle {
+                width: Track::Ratio(Ratio::new(1.0).unwrap()),
+            },
+            children: vec![/* … */],
         },
         ColumnSpec {
-            width: Track::Ratio(Ratio::new(2.0).unwrap()),
-            blocks: vec![/* … */],
+            style: ColumnStyle {
+                width: Track::Ratio(Ratio::new(2.0).unwrap()),
+            },
+            children: vec![/* … */],
         },
     ],
 }
@@ -370,30 +372,36 @@ ColumnsSpec {
 
 ```rust
 use std::num::NonZeroU16;
-use pdfcraft_pdf::spec::{CellBlock, CellSpec, TableBorder, TableRow, TableSpec};
+use pdfcraft_pdf::spec::{
+    Block, CellSpec, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
+};
 use pdfcraft_pdf::{Color, NonNegative, Track};
 
 TableSpec {
-    header: vec![TableRow {
-        cells: vec![
-            CellSpec {
-                content: vec![CellBlock::Text { text: "Name".into(), font: () }],
-                ..CellSpec::default()
-            },
-            CellSpec {
-                content: vec![CellBlock::Text { text: "Qty".into(), font: () }],
-                col_span: NonZeroU16::new(2).unwrap(),
-                ..CellSpec::default()
-            },
-        ],
-    }],
+    header: Some(TableHeader {
+        repeat: true, // default
+        rows: vec![TableRow {
+            children: vec![
+                CellSpec {
+                    children: vec![Block::paragraph((), "Name")],
+                    ..CellSpec::default()
+                },
+                CellSpec {
+                    children: vec![Block::paragraph((), "Qty")],
+                    col_span: NonZeroU16::new(2).unwrap(),
+                    ..CellSpec::default()
+                },
+            ],
+        }],
+    }),
     body: vec![/* rows of TableRow */],
-    repeat_header: true, // default
-    tracks: Some(vec![Track::Auto, Track::Ratio(pdfcraft_pdf::Ratio::new(1.0).unwrap())]),
-    cell_padding: NonNegative::pt(4.0).unwrap(),
-    border: TableBorder {
-        width: NonNegative::pt(0.5).unwrap(),
-        color: Color::rgb(0, 0, 0),
+    style: TableStyle {
+        tracks: Some(vec![Track::Auto, Track::Ratio(pdfcraft_pdf::Ratio::new(1.0).unwrap())]),
+        cell_padding: NonNegative::pt(4.0).unwrap(),
+        border: TableBorder {
+            width: NonNegative::pt(0.5).unwrap(),
+            color: Color::rgb(0, 0, 0),
+        },
     },
 }
 ```
@@ -410,26 +418,32 @@ Caller-oriented recipes (Chinese, with fuller examples): [lists.md](lists.md).
 
 ```rust
 use std::num::NonZeroU32;
-use pdfcraft_pdf::spec::{ListItemSpec, ListKind, ListSpec, MarkerAlign, MarkerFormat};
+use pdfcraft_pdf::spec::{
+    ListItemSpec, ListKind, ListSpec, ListStyle, MarkerAlign, MarkerFormat,
+};
 use pdfcraft_pdf::{NonNegative, Numbering, Positive};
 
 ListSpec {
-    kind: ListKind::Ordered(Numbering::Decimal),
-    start: NonZeroU32::new(1).unwrap(),
-    marker_width: Positive::pt(18.0).unwrap(),
-    body_indent: None, // defaults to marker_width
-    item_gap: NonNegative::pt(6.0).unwrap(),
-    marker_format: MarkerFormat::ClosingParen, // 1)  2)  also DotSuffix, Parens, Bare, IdeographicComma
-    marker_font: None, // Some(key) uses that family's regular face
-    marker_align: MarkerAlign::End, // 9) and 10) share the marker column's right edge
-    items: vec![
+    style: ListStyle {
+        kind: ListKind::Ordered {
+            numbering: Numbering::Decimal,
+            start: NonZeroU32::new(1).unwrap(),
+            format: MarkerFormat::ClosingParen, // 1)  2)  also DotSuffix, Parens, Bare, IdeographicComma
+        },
+        marker_width: Positive::pt(18.0).unwrap(),
+        body_indent: None, // defaults to marker_width
+        item_gap: NonNegative::pt(6.0).unwrap(),
+        marker_font: None, // Some(key) uses that family's regular face
+        marker_align: MarkerAlign::End, // 9) and 10) share the marker column's right edge
+    },
+    children: vec![
         ListItemSpec {
             marker: None, // automatic label
-            blocks: vec![Block::paragraph((), "First")],
+            children: vec![Block::paragraph((), "First")],
         },
         ListItemSpec {
-            marker: Some("*".into()), // custom; does not advance the counter or take marker_format
-            blocks: vec![Block::paragraph((), "Aside")],
+            marker: Some("*".into()), // custom; does not advance the counter or take format
+            children: vec![Block::paragraph((), "Aside")],
         },
     ],
 }
@@ -442,8 +456,8 @@ on the page is dropped. The next page does not start with that blank.
 `body_indent` is the body column's left edge, measured from the list's left
 edge. `None` uses `marker_width`. A smaller value fails.
 
-`marker_format` changes the generated number (`1.`, `1、`, `1)`, `(1)`, `1`).
-Bullets and custom markers ignore it. `marker_align` places every marker on
+`ListKind::Ordered.format` changes the generated number (`1.`, `1、`, `1)`, `(1)`, `1`).
+A bullet list has no `format` field. Custom markers ignore it. `marker_align` places every marker on
 the left or right edge of the marker column. The width is the final string.
 A marker wider than `marker_width` is an error.
 
@@ -467,30 +481,36 @@ instead.
 ## Header, footer, and page numbers
 
 ```rust
-use pdfcraft_pdf::spec::{BandFn, BandInset, BandSlot, BandSpec, RunStyle, TextRun};
+use pdfcraft_pdf::spec::{
+    BandFn, BandInset, BandSlot, BandSpec, BandStyle, PageText, RunStyle,
+};
 
 BandFn::fixed(BandSpec {
-    inset: BandInset::PageMargins, // or BandInset::Fixed { left, right }
-    left: Some(BandSlot::Text {
-        runs: vec![TextRun::Literal("Acme Co.".into())],
+    style: BandStyle {
+        inset: BandInset::PageMargins, // or BandInset::Fixed { left, right }
+    },
+    left: Some(BandSlot {
+        children: vec![PageText::Literal("Acme Co.".into())],
         font: (),
         style: RunStyle { bold: Some(true), ..RunStyle::default() },
+        link: None,
     }),
-    right: Some(BandSlot::Text {
-        runs: vec![
-            TextRun::Literal("Page ".into()),
-            TextRun::PageNumber,
-            TextRun::Literal(" / ".into()),
-            TextRun::PageCount,
+    right: Some(BandSlot {
+        children: vec![
+            PageText::Literal("Page ".into()),
+            PageText::PageNumber,
+            PageText::Literal(" / ".into()),
+            PageText::PageCount,
         ],
         font: (),
         style: RunStyle::default(),
+        link: None,
     }),
     ..BandSpec::default()
 })
 ```
 
-| `TextRun` | Value |
+| `PageText` | Value |
 | --- | --- |
 | `Literal` | Fixed string |
 | `PageNumber` / `PageCount` | Document page (1-based) |
@@ -507,10 +527,10 @@ your error. `layout_spec` requires `K: 'static`.
 Bands span the full page width unless inset. Content taller than the margin
 band fails with `ErrorKind::DecorationTallerThanMargin`. A `fixed` band reports
 that once for the section. A `from_fn` band reports it on the page.
-`BandSlot::Link` builds the URI from `TextRun`s at paint time the same way.
+`BandSlot.link` builds the URI from `PageText` values at paint time the same way.
 Band, layer, and canvas text take a `RunStyle` that starts from the seed, not from any enclosing block.
 
-`BandSpec.marks` holds `BandMark` values. Coordinates start at the band
+`BandSpec.marks` holds `Mark` values. Coordinates start at the band
 top-left. A header point `(x, y)` is the same point on the page. A footer
 point `(x, y)` is the page point `(x, y + page_height - margin.bottom)`.
 `BandInset` moves the slots only. The library paints the marks in order, then
@@ -527,7 +547,7 @@ To vary a header or footer by page, call `BandFn::from_fn` and branch on
 band, follow [migrate-band-marks.md](migrate-band-marks.md).
 
 ```rust
-use pdfcraft_pdf::spec::{BandFn, BandMark, BandSpec, LayerShape};
+use pdfcraft_pdf::spec::{BandFn, BandSpec, LayerShape, Mark};
 use pdfcraft_pdf::{Color, Ink, Pen, Rect};
 
 let footer = BandFn::from_fn(|query| {
@@ -536,7 +556,7 @@ let footer = BandFn::from_fn(|query| {
     }
     let pen = Pen::new(Color::rgb(153, 153, 153), 1.0)?;
     Ok(Some(BandSpec {
-        marks: vec![BandMark::Shape(LayerShape::Rect {
+        marks: vec![Mark::Shape(LayerShape::Rect {
             rect: Rect::try_pt(24.0, 8.0, 180.0, 65.0)?,
             ink: Ink::Stroke(pen),
         })],
@@ -549,19 +569,20 @@ let footer = BandFn::from_fn(|query| {
 
 ## Layers (`behind` / `front`)
 
-Use `LayerMark` for page-anchored content (seals, watermarks, paths):
+Use `LayerMark { when, child }` for page-anchored content (seals, watermarks, paths).
+`child` is a `Mark`. The same `Mark` type is used in a header or footer band.
 
-| Variant | Notes |
+| `Mark` | Notes |
 | --- | --- |
-| `Text` | One unwrapped line on a font key. Forced breaks error. |
-| `Image` | Stretched into a page `Rect` |
-| `Line` / `Rect` / `Ellipse` | Geometry + pen / ink |
-| `Rotated` | Group of `LayerShape<K>` around a pivot; may mix path, `Text`, and `Image` |
+| `Shape(LayerShape::Text)` | One unwrapped line on a font key. Forced breaks fail. `at` is the line-box top-left. |
+| `Shape(LayerShape::Image)` | Stretched into a page `Rect` |
+| `Shape(LayerShape::Line)`, `Rect`, or `Ellipse` | Geometry plus pen or ink |
+| `Rotated { degrees, pivot, shapes }` | One `Angle` and one pivot for a group of `LayerShape<K>`. The group may mix path, text, and image. `degrees` comes from `Angle::degrees`. |
 
-`PageWhen::All` — every page of the section.  
-`PageWhen::Last` — only the last page of the **whole document**.
+`PageWhen::All` paints every page of the section.
+`PageWhen::Last` paints only the last page of the whole document.
 
-Paint order: `behind` → header → body → footer → `front`.
+Paint order is `behind`, then the header, then the body, then the footer, then `front`.
 
 ---
 
@@ -656,7 +677,7 @@ See [examples/README.md](../examples/README.md).
 
 - Bidirectional text, vertical writing, kerning, ligatures, full UAX #14
 - Punctuation compression / hanging punctuation for Justify
-- TOC generation, QR encoding, SVG parsing, in-flow vector canvas, encryption
+- TOC generation, QR encoding, SVG parsing, a named image dictionary, encryption
 - Fetching images over HTTP
 - Silent missing-glyph substitution
 - A second PDF backend

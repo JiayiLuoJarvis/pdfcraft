@@ -28,7 +28,8 @@
 //! Each text run names a key in that registry. A character with no cmap entry
 //! fails the document ([`ErrorKind::MissingGlyph`]). There is no fallback font
 //! and no `.notdef` box. v1 targets horizontal Chinese and Latin (no bidi,
-//! vertical writing, kerning, ligatures, or justified lines). Bold, italic, and
+//! vertical writing, kerning, or ligatures). [`spec::Alignment::Justify`]
+//! stretches paragraph lines. Bold, italic, and
 //! bold italic are separate registered faces. A run that needs a face its
 //! family lacks fails the document. There is no synthetic bold or slant.
 //!

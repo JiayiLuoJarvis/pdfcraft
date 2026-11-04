@@ -1,12 +1,12 @@
 # 迁到表格行与边框类型
 
-这份说明记录从 `header: Vec<Vec<CellSpec>>` 和 `border_width` / `border_color` 迁到当前表格行。这些类型已经在仓库里。当前 `pdfcraft-pdf` 版本是 `0.5.0`。`pdfcraft-forms` 和 `pdfcraft-orgchart` 的类型不变。
+这份说明记录从 `header: Vec<Vec<CellSpec>>` 和 `border_width` / `border_color` 迁到具名表格行。那一步已经并进当前公共面。从 `0.5` 迁到 `0.6` 的完整对照见 [migrate-0.6.md](migrate-0.6.md)。`pdfcraft-forms` 和 `pdfcraft-orgchart` 的类型不变。
 
 按下面的顺序改。每一步都对应一类编译错误。改完再看文末的说明。版式没有变化。
 
 ## 1. 把行包进 `TableRow`
 
-`header` 和 `body` 从 `Vec<Vec<CellSpec<K>>>` 改成 `Vec<TableRow<K>>`。每行包一层 `TableRow { cells: ... }`。
+`body` 从 `Vec<Vec<CellSpec<K>>>` 改成 `Vec<TableRow<K>>`。表头是 `Option<TableHeader<K>>`，行在 `TableHeader.rows` 里。每行的单元格字段是 `children`。
 
 以前：
 
@@ -26,17 +26,18 @@ TableSpec {
 现在：
 
 ```rust
-use pdfcraft_pdf::spec::TableRow;
+use pdfcraft_pdf::spec::{TableHeader, TableRow};
 
 TableSpec {
-    header: vec![TableRow {
-        cells: vec![
-            CellSpec {
-                content: vec![CellBlock::Text { text: "Item".into(), font: () }],
+    header: Some(TableHeader {
+        rows: vec![TableRow {
+            children: vec![CellSpec {
+                children: vec![Block::paragraph((), "Item")],
                 ..CellSpec::default()
-            },
-        ],
-    }],
+            }],
+        }],
+        ..TableHeader::default()
+    }),
     body,
     ..TableSpec::default()
 }
@@ -63,20 +64,18 @@ let rows: Vec<Vec<CellSpec<()>>> = items
 ```rust
 let rows: Vec<TableRow<()>> = items
     .iter()
-    .map(|item| {
-        TableRow {
-            cells: vec![CellSpec {
-                content: vec![CellBlock::Text { text: item.name.clone(), font: () }],
-                ..CellSpec::default()
-            }],
-        }
+    .map(|item| TableRow {
+        children: vec![CellSpec {
+            children: vec![Block::paragraph((), item.name.clone())],
+            ..CellSpec::default()
+        }],
     })
     .collect();
 ```
 
 ## 2. 把边框字段收进 `TableBorder`
 
-`TableSpec` 上的 `border_width` 和 `border_color` 两个字段合并成一个 `border: TableBorder { width, color }`。不要边框时写 `TableBorder::default()`（宽度为零，不画线）。
+`border_width` 和 `border_color` 收成 `TableStyle.border`，类型是 `TableBorder { width, color }`。不要边框时写 `TableBorder::default()`（宽度为零，不画线）。
 
 以前：
 
@@ -91,12 +90,15 @@ TableSpec {
 现在：
 
 ```rust
-use pdfcraft_pdf::spec::TableBorder;
+use pdfcraft_pdf::spec::{TableBorder, TableStyle};
 
 TableSpec {
-    border: TableBorder {
-        width: NonNegative::pt(0.5).unwrap(),
-        color: Color::rgb(0, 0, 0),
+    style: TableStyle {
+        border: TableBorder {
+            width: NonNegative::pt(0.5).unwrap(),
+            color: Color::rgb(0, 0, 0),
+        },
+        ..TableStyle::default()
     },
     ..TableSpec::default()
 }
@@ -111,33 +113,33 @@ TableSpec {
 ```rust
 fn header_row() -> TableRow<()> {
     TableRow {
-        cells: vec![CellSpec {
-            content: vec![CellBlock::Text { text: "Name".into(), font: () }],
+        children: vec![CellSpec {
+            children: vec![Block::paragraph((), "Name")],
             ..CellSpec::default()
         }],
     }
 }
 ```
 
-已有 `Vec<CellSpec>` 想复用时，用 `TableRow { cells }` 包一下：
+已有 `Vec<CellSpec>` 想复用时，用 `TableRow { children }` 包一下：
 
 ```rust
-let cells: Vec<CellSpec<()>> = build_cells(&item);
-TableRow { cells }
+let children: Vec<CellSpec<()>> = build_cells(&item);
+TableRow { children }
 ```
 
-已有行要追加单元格时，改的是 `row.cells`：
+已有行要追加单元格时，改的是 `row.children`：
 
 ```rust
-row.cells.push(CellSpec {
-    content: vec![CellBlock::Text { text: extra, font: () }],
+row.children.push(CellSpec {
+    children: vec![Block::paragraph((), extra)],
     ..CellSpec::default()
 });
 ```
 
 ## 4. FRU 语法的变化
 
-`TableSpec` 仍实现 `Default`，`..TableSpec::default()` 继续可用。`TableRow` 也实现 `Default`（空行），所以 `TableRow { cells }` 的简写仍然成立。
+`TableSpec` 仍实现 `Default`，`..TableSpec::default()` 继续可用。`TableRow` 也实现 `Default`（空行），所以 `TableRow { children }` 的简写仍然成立。
 
 `TableBorder` 实现 `Default` 而不是要求全写。非默认边框用全写 `TableBorder { width, color }`，不要只写一半再补 `..Default::default()`。宽度为零时不看颜色，不画线。
 
@@ -147,5 +149,5 @@ row.cells.push(CellSpec {
 
 这些不用改调用代码，生成的 PDF 和以前相同。
 
-行只是多了一层具名类型，`header` / `body` 的行数、每行的单元格数、`repeat_header` 的重复行为都不变。边框只是把两个字段收进一个 struct，线宽、颜色、零宽不画线的规则都不变。分页、列宽、单元格内边距的错误照旧。
+这一步只是把行收成具名类型。行数、每行的单元格数不变。重复表头的开关现在在 `TableHeader.repeat` 上，默认 `true`。边框收进 `TableStyle.border` 之后，线宽、颜色、零宽不画线的规则都不变。分页、列宽、单元格内边距的错误照旧。
 
