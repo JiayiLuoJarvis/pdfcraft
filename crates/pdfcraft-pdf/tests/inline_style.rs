@@ -1154,7 +1154,7 @@ fn bold_underline() -> RunStyle {
 fn cell_table(children: Vec<Block<()>>) -> Block<()> {
     Block::Table(TableSpec {
         body: vec![TableRow {
-            cells: vec![CellSpec {
+            children: vec![CellSpec {
                 children,
                 ..CellSpec::default()
             }],

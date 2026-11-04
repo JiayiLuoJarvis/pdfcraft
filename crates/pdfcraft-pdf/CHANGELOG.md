@@ -25,6 +25,16 @@ section collects them.
   Cell text is `Block::paragraph`. Columns, nested tables, keep-together
   groups, and page breaks in a cell fail at `layout_spec` with
   `InvalidCellContent` and container `"table cell"`.
+- Columns move presentation into `ColumnsStyle` and `ColumnStyle`;
+  `columns` / `blocks` are now `children`.
+- Lists are `{ style: ListStyle<K>, children }`. Ordered-list `numbering`,
+  `start`, and `format` move into `ListKind::Ordered`; list-item `blocks` is
+  `children`.
+- Tables are `{ style: TableStyle, header: Option<TableHeader<K>>, body }`.
+  Row `cells` is `children`, and cell `fill` moves into `CellStyle`.
+- `Block::KeepTogether` is now `{ children }`. `Block::Inset` is
+  `{ style: InsetStyle, children }`. `Block::Anchor.child` is replaced by
+  `children`.
 
 ### Added
 
@@ -39,6 +49,12 @@ section collects them.
   related errors.
 - `spec::LineHeight::new(factor)` validates a line-height factor.
 - `Block::Styled` may wrap cell children. Its fields apply to those paragraphs.
+- `ColumnsStyle`, `ColumnStyle`, `ListStyle`, `TableStyle`, `CellStyle`, and
+  `InsetStyle` hold reusable container presentation.
+- `TableHeader { repeat, rows }` makes the header slot and its repetition rule
+  explicit. An empty `rows` list is equivalent to no header.
+- `Block::Anchor.children` accepts multiple blocks and body-level page breaks.
+  The destination lands on the first effective fragment after any break.
 
 ### Changed
 
@@ -53,6 +69,8 @@ section collects them.
   and color.
 - An empty cell paragraph (`Block::paragraph(font, "")`) counts as one block.
   Empty `CellBlock::Text` counted as zero.
+- A page break directly inside a top-level anchor follows the normal body
+  page-break rules. Nested frames still reject page breaks.
 
 ## [0.5.0] - 2026-11-03
 

@@ -9,8 +9,8 @@ use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positi
 use crate::layout_spec;
 use crate::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, LayerMark,
-    LayerShape, ListItemSpec, ListKind, ListSpec, Numbering, PageWhen, ParagraphSpec,
-    ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TextRun,
+    LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, MarkerFormat, Numbering, PageWhen,
+    ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TextRun,
 };
 use crate::DocumentSpec;
 
@@ -649,9 +649,9 @@ fn a_forced_break_in_a_custom_marker_fails_before_any_page() {
     let Some(error) = lay(
         PageSize::A4,
         body(vec![Block::List(ListSpec {
-            items: vec![ListItemSpec {
+            children: vec![ListItemSpec {
                 marker: Some("A\nB".into()),
-                blocks: vec![Block::paragraph((), "body")],
+                children: vec![Block::paragraph((), "body")],
             }],
             ..ListSpec::default()
         })]),
@@ -707,9 +707,9 @@ fn a_missing_glyph_on_the_last_page_front_is_located_there() {
 fn keep_together_taller_than_the_page_names_the_body() {
     let Some(error) = lay(
         PageSize::A4,
-        body(vec![Block::KeepTogether(
-            (0..100).map(|_| Block::paragraph((), "line")).collect(),
-        )]),
+        body(vec![Block::KeepTogether {
+            children: (0..100).map(|_| Block::paragraph((), "line")).collect(),
+        }]),
     ) else {
         return;
     };
@@ -742,7 +742,7 @@ fn one_value_path_paints_a_paragraph_and_a_cell() {
             Block::paragraph((), "Risk"),
             Block::Table(crate::spec::TableSpec {
                 body: vec![crate::spec::TableRow {
-                    cells: vec![crate::spec::CellSpec {
+                    children: vec![crate::spec::CellSpec {
                         children: vec![Block::paragraph((), "cell")],
                         ..crate::spec::CellSpec::default()
                     }],
@@ -867,12 +867,18 @@ fn marker_and_body(blocks: Vec<Block<()>>) -> Option<(u32, u32)> {
     let rendered = lay(
         PageSize::A4,
         body(vec![Block::List(ListSpec {
-            kind: ListKind::Ordered(Numbering::Decimal),
-            items: vec![ListItemSpec {
+            style: ListStyle {
+                kind: ListKind::Ordered {
+                    numbering: Numbering::Decimal,
+                    start: std::num::NonZeroU32::MIN,
+                    format: MarkerFormat::default(),
+                },
+                ..ListStyle::default()
+            },
+            children: vec![ListItemSpec {
                 marker: None,
-                blocks,
+                children: blocks,
             }],
-            ..ListSpec::default()
         })]),
     )?;
     let rendered = rendered.expect("styled list lays out");

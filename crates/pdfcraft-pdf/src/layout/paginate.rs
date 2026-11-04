@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind, Location, Region};
 use crate::geom::{Length, Margins, NonNegative, Point, Positive, Size};
 use crate::layout::decorate::{self, Decorations, PageBands, SectionSpan};
-use crate::layout::flow::FlowNode;
+use crate::layout::flow::{AnchorNode, FlowNode, LandingScope, PendingLandings};
 use crate::layout::frame::{self, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
 use crate::limits::LimitKind;
 #[cfg(test)]
@@ -198,10 +198,12 @@ fn plan_pages(
             current: &mut current,
             nodes: &mut nodes,
             y: NonNegative::ZERO,
+            landing: PendingLandings::default(),
         };
-        while let Some(node) = state.nodes.pop_front() {
-            match node {
-                FlowNode::PageBreak => {
+        while let Some(work) = state.nodes.pop_front() {
+            match work {
+                BodyWork::Close(scope) => state.landing.close(scope),
+                BodyWork::Node(FlowNode::PageBreak) => {
                     state.cursor = apply_page_break(
                         state.cursor,
                         state.pages,
@@ -212,19 +214,21 @@ fn plan_pages(
                     )?;
                     state.y = NonNegative::ZERO;
                 }
-                node @ (FlowNode::Paragraph(_)
-                | FlowNode::Text(_)
-                | FlowNode::Spacer(_)
-                | FlowNode::KeepTogether(_)
-                | FlowNode::Anchor(_)
-                | FlowNode::Inset(_)
-                | FlowNode::Stack(_)
-                | FlowNode::Columns(_)
-                | FlowNode::Table(_)
-                | FlowNode::List(_)
-                | FlowNode::Image(_)
-                | FlowNode::Canvas(_)
-                | FlowNode::HLine(_)) => place_body_node(node, ctx, &frame, &mut state)?,
+                BodyWork::Node(FlowNode::Anchor(anchor)) => open_anchor(anchor, &mut state),
+                BodyWork::Node(
+                    node @ (FlowNode::Paragraph(_)
+                    | FlowNode::Text(_)
+                    | FlowNode::Spacer(_)
+                    | FlowNode::KeepTogether(_)
+                    | FlowNode::Inset(_)
+                    | FlowNode::Stack(_)
+                    | FlowNode::Columns(_)
+                    | FlowNode::Table(_)
+                    | FlowNode::List(_)
+                    | FlowNode::Image(_)
+                    | FlowNode::Canvas(_)
+                    | FlowNode::HLine(_)),
+                ) => place_body_node(node, ctx, &frame, &mut state)?,
             }
         }
         finalize_eof(
@@ -239,9 +243,9 @@ fn plan_pages(
     Ok(pages)
 }
 
-fn opened_root(root: FlowNode) -> VecDeque<FlowNode> {
+fn opened_root(root: FlowNode) -> VecDeque<BodyWork> {
     match root {
-        FlowNode::Stack(kids) => kids.into(),
+        FlowNode::Stack(kids) => kids.into_iter().map(BodyWork::Node).collect(),
         // Inset stays one node. Opening it the way Stack is opened would drop the narrowed frame.
         node @ (FlowNode::Paragraph(_)
         | FlowNode::Text(_)
@@ -255,8 +259,13 @@ fn opened_root(root: FlowNode) -> VecDeque<FlowNode> {
         | FlowNode::List(_)
         | FlowNode::Image(_)
         | FlowNode::Canvas(_)
-        | FlowNode::HLine(_)) => VecDeque::from([node]),
+        | FlowNode::HLine(_)) => VecDeque::from([BodyWork::Node(node)]),
     }
+}
+
+enum BodyWork {
+    Node(FlowNode),
+    Close(LandingScope),
 }
 
 struct BodyFrame {
@@ -272,8 +281,17 @@ struct PlanState<'a> {
     cursor: PageCursor,
     pages: &'a mut Vec<PagePlan>,
     current: &'a mut Option<PagePlan>,
-    nodes: &'a mut VecDeque<FlowNode>,
+    nodes: &'a mut VecDeque<BodyWork>,
     y: Length<NonNegative>,
+    landing: PendingLandings,
+}
+
+fn open_anchor(anchor: AnchorNode, state: &mut PlanState<'_>) {
+    let (scope, children) = state.landing.open(anchor);
+    state.nodes.push_front(BodyWork::Close(scope));
+    for child in children.into_iter().rev() {
+        state.nodes.push_front(BodyWork::Node(child));
+    }
 }
 
 #[expect(
@@ -286,6 +304,10 @@ fn place_body_node(
     frame: &BodyFrame,
     state: &mut PlanState<'_>,
 ) -> Result<()> {
+    debug_assert!(
+        !matches!(&node, FlowNode::Anchor(_)),
+        "top-level anchors are opened before body placement"
+    );
     ensure_content_page(state.current, frame.config);
     let avail = Frame {
         width: frame.width,
@@ -297,7 +319,11 @@ fn place_body_node(
         |ctx| node.split(ctx, avail),
     )?;
     match split {
-        Split::Fit { height, fragment } => {
+        Split::Fit {
+            height,
+            mut fragment,
+        } => {
+            state.landing.land(&mut fragment);
             let page = state.current.as_mut().expect("content page open");
             let origin = Point::try_pt(
                 frame.origin.x().as_pt(),
@@ -314,7 +340,8 @@ fn place_body_node(
             }
             state.cursor = PageCursor::HasBody;
         }
-        Split::Partial { head, tail, .. } => {
+        Split::Partial { mut head, tail, .. } => {
+            state.landing.land(&mut head);
             let page = state.current.as_mut().expect("content page open");
             let origin = Point::try_pt(
                 frame.origin.x().as_pt(),
@@ -330,7 +357,7 @@ fn place_body_node(
                 frame.first_page,
                 frame.max_pages,
             )?;
-            state.nodes.push_front(tail);
+            state.nodes.push_front(BodyWork::Node(tail));
             state.y = NonNegative::ZERO;
             state.cursor = PageCursor::Fresh;
         }
@@ -348,7 +375,7 @@ fn place_body_node(
                 frame.first_page,
                 frame.max_pages,
             )?;
-            state.nodes.push_front(tail);
+            state.nodes.push_front(BodyWork::Node(tail));
             state.y = NonNegative::ZERO;
             state.cursor = PageCursor::Fresh;
         }
@@ -484,7 +511,7 @@ mod tests {
     use crate::error::ErrorKind;
     use crate::fonts::{fixture_bytes, FontSource, FontStore};
     use crate::geom::{Color, NonNegative, Positive, A4};
-    use crate::layout::flow::{KeepTogetherNode, SpacerNode};
+    use crate::layout::flow::{AnchorNode, KeepTogetherNode, SpacerNode};
     use crate::layout::line_run::LinePiece;
     use crate::layout::paragraph::ParagraphNode;
     use crate::layout::style::{Style, TextAlign};
@@ -792,6 +819,43 @@ mod tests {
         assert!(pages[1].ops().is_empty());
         assert_eq!(page_texts(&pages[0]), vec!["A".to_owned()]);
         assert_eq!(page_texts(&pages[2]), vec!["B".to_owned()]);
+    }
+
+    #[test]
+    fn anchor_crossing_pages_stamps_exactly_once() {
+        let Some((mut fonts, _)) = fonts_and_style(TextAlign::Start, 0.0) else {
+            return;
+        };
+        let mut errors = crate::error::ErrorBag::default();
+        let mut ctx = LayoutCtx {
+            natural: false,
+            fonts: &mut fonts,
+            errors: &mut errors,
+        };
+        let pages = plan_pages(
+            FlowNode::Anchor(AnchorNode {
+                id: "long".into(),
+                children: vec![FlowNode::Spacer(SpacerNode {
+                    height: NonNegative::pt(80.0).unwrap(),
+                })],
+                landed: false,
+            }),
+            &mut ctx,
+            config(Size::try_pt(200.0, 50.0).unwrap()),
+            0,
+            Limits::default().max_pages(),
+        )
+        .unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(
+            pages
+                .iter()
+                .flat_map(|page| &page.placed)
+                .flat_map(|placed| &placed.fragment.anchors)
+                .filter(|anchor| anchor.id == "long")
+                .count(),
+            1
+        );
     }
 
     #[test]

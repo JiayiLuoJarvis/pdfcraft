@@ -19,9 +19,10 @@ use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellSpec,
-    ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec,
-    ListItemSpec, ListKind, ListSpec, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
-    SectionSpec, Span, TableBorder, TableRow, TableSpec, TextRun,
+    CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily,
+    FontRegistry, HLineSpec, ImageSpec, InsetStyle, ListItemSpec, ListKind, ListSpec, ListStyle,
+    MarkerFormat, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    TableBorder, TableHeader, TableRow, TableSpec, TableStyle, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
@@ -187,25 +188,30 @@ fn rule(
 
 fn ratio(weight: f32, blocks: Vec<Block<()>>) -> Result<ColumnSpec<()>> {
     Ok(ColumnSpec {
-        width: Track::Ratio(Ratio::new(weight).map_err(pdfcraft_pdf::Errors::from)?),
-        blocks,
+        style: ColumnStyle {
+            width: Track::Ratio(Ratio::new(weight).map_err(pdfcraft_pdf::Errors::from)?),
+        },
+        children: blocks,
     })
 }
 
 fn bullets() -> Result<Block<()>> {
     Ok(Block::List(ListSpec {
-        marker_width: pos(16.0)?,
-        body_indent: Some(pos(20.0)?),
-        items: vec![
+        style: ListStyle {
+            marker_width: pos(16.0)?,
+            body_indent: Some(pos(20.0)?),
+            ..ListStyle::default()
+        },
+        children: vec![
             ListItemSpec {
                 marker: None,
-                blocks: vec![
+                children: vec![
                     paragraph(vec![text("measure with skrifa")], Alignment::Start, 0.0)?,
                     Block::List(ListSpec {
-                        items: vec![
+                        children: vec![
                             ListItemSpec {
                                 marker: None,
-                                blocks: vec![paragraph(
+                                children: vec![paragraph(
                                     vec![text("cluster")],
                                     Alignment::Start,
                                     0.0,
@@ -213,7 +219,7 @@ fn bullets() -> Result<Block<()>> {
                             },
                             ListItemSpec {
                                 marker: None,
-                                blocks: vec![paragraph(
+                                children: vec![paragraph(
                                     vec![text("advance")],
                                     Alignment::Start,
                                     0.0,
@@ -226,7 +232,7 @@ fn bullets() -> Result<Block<()>> {
             },
             ListItemSpec {
                 marker: None,
-                blocks: vec![paragraph(
+                children: vec![paragraph(
                     vec![text("break lines in the frame")],
                     Alignment::Start,
                     0.0,
@@ -234,7 +240,7 @@ fn bullets() -> Result<Block<()>> {
             },
             ListItemSpec {
                 marker: Some("*".into()),
-                blocks: vec![paragraph(
+                children: vec![paragraph(
                     vec![text("custom marker item")],
                     Alignment::Start,
                     0.0,
@@ -242,11 +248,13 @@ fn bullets() -> Result<Block<()>> {
             },
             ListItemSpec {
                 marker: None,
-                blocks: vec![
+                children: vec![
                     paragraph(vec![text("Ship to")], Alignment::Start, 0.0)?,
                     Block::Inset {
-                        left: NonNegative::pt(12.0)?,
-                        right: NonNegative::ZERO,
+                        style: InsetStyle {
+                            left: NonNegative::pt(12.0)?,
+                            right: NonNegative::ZERO,
+                        },
                         children: vec![
                             paragraph(vec![text("Acme Corp")], Alignment::Start, 0.0)?,
                             paragraph(vec![text("1 Market Street")], Alignment::Start, 0.0)?,
@@ -255,15 +263,20 @@ fn bullets() -> Result<Block<()>> {
                 ],
             },
         ],
-        ..ListSpec::default()
     }))
 }
 
 fn ordered() -> Result<Block<()>> {
     Ok(Block::List(ListSpec {
-        kind: ListKind::Ordered(Numbering::LowerAlpha),
-        start: NonZeroU32::MIN.saturating_add(1),
-        items: vec![
+        style: ListStyle {
+            kind: ListKind::Ordered {
+                numbering: Numbering::LowerAlpha,
+                start: NonZeroU32::MIN.saturating_add(1),
+                format: MarkerFormat::default(),
+            },
+            ..ListStyle::default()
+        },
+        children: vec![
             item(paragraph(vec![text("paginate")], Alignment::Start, 0.0)?),
             item(paragraph(vec![text("decorate")], Alignment::Start, 0.0)?),
             marked(
@@ -272,26 +285,28 @@ fn ordered() -> Result<Block<()>> {
             ),
             item(paragraph(vec![text("emit PDF")], Alignment::Start, 0.0)?),
         ],
-        ..ListSpec::default()
     }))
 }
 
 fn item(block: Block<()>) -> ListItemSpec<()> {
     ListItemSpec {
         marker: None,
-        blocks: vec![block],
+        children: vec![block],
     }
 }
 
 fn marked(marker: &str, block: Block<()>) -> ListItemSpec<()> {
     ListItemSpec {
         marker: Some(marker.into()),
-        blocks: vec![block],
+        children: vec![block],
     }
 }
 
 fn head_cell(label: &str) -> CellSpec<()> {
     CellSpec {
+        style: CellStyle {
+            fill: Some(Color::rgb(40, 40, 40)),
+        },
         children: vec![Block::Paragraph(ParagraphSpec {
             style: ParagraphStyle {
                 text: RunStyle {
@@ -302,7 +317,6 @@ fn head_cell(label: &str) -> CellSpec<()> {
             },
             children: vec![bold(label)],
         })],
-        fill: Some(Color::rgb(40, 40, 40)),
         ..CellSpec::default()
     }
 }
@@ -325,7 +339,7 @@ fn span_text(value: &str, cols: u16) -> CellSpec<()> {
 fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>> {
     let mut rows = vec![
         TableRow {
-            cells: vec![
+            children: vec![
                 CellSpec {
                     children: vec![Block::paragraph((), "A1")],
                     row_span: NonZeroU16::MIN.saturating_add(1),
@@ -340,7 +354,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                 },
                 CellSpec {
                     children: vec![Block::List(ListSpec {
-                        items: vec![
+                        children: vec![
                             item(paragraph(vec![text("black")], Alignment::Start, 0.0)?),
                             item(paragraph(vec![text("blue")], Alignment::Start, 0.0)?),
                         ],
@@ -352,7 +366,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
             ],
         },
         TableRow {
-            cells: vec![
+            children: vec![
                 CellSpec {
                     children: vec![Block::Paragraph(ParagraphSpec {
                         children: vec![link("https://example.test/ink", vec![text("Ink")])?],
@@ -362,12 +376,18 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                 },
                 CellSpec {
                     children: vec![Block::List(ListSpec {
-                        kind: ListKind::Ordered(Numbering::Decimal),
-                        items: vec![
+                        style: ListStyle {
+                            kind: ListKind::Ordered {
+                                numbering: Numbering::Decimal,
+                                start: NonZeroU32::MIN,
+                                format: MarkerFormat::default(),
+                            },
+                            ..ListStyle::default()
+                        },
+                        children: vec![
                             item(paragraph(vec![text("bottle")], Alignment::Start, 0.0)?),
                             marked("+", paragraph(vec![text("refill")], Alignment::Start, 0.0)?),
                         ],
-                        ..ListSpec::default()
                     })],
                     ..CellSpec::default()
                 },
@@ -375,7 +395,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
             ],
         },
         TableRow {
-            cells: vec![
+            children: vec![
                 text_cell("B2"),
                 CellSpec {
                     children: vec![Block::Image(ImageSpec {
@@ -403,7 +423,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
     ];
     for n in 0..36 {
         rows.push(TableRow {
-            cells: vec![
+            children: vec![
                 text_cell(format!("R{n}")),
                 text_cell(format!("part {n}")),
                 text_cell("stock"),
@@ -412,7 +432,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
         });
     }
     rows.push(TableRow {
-        cells: vec![span_text("Total rows above", 4)],
+        children: vec![span_text("Total rows above", 4)],
     });
     Ok(rows)
 }
@@ -476,8 +496,8 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
             0.0,
         )?,
         Block::Columns(ColumnsSpec {
-            gap: nn(16.0)?,
-            columns: vec![
+            style: ColumnsStyle { gap: nn(16.0)? },
+            children: vec![
                 ratio(
                     1.0,
                     vec![
@@ -507,63 +527,71 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
 
 fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block<()>> {
     Ok(Block::Table(TableSpec {
-        header: vec![
-            TableRow {
-                cells: vec![
-                    head_cell("Code"),
-                    head_cell("Item"),
-                    head_cell("Notes"),
-                    head_cell("Qty"),
-                ],
+        style: TableStyle {
+            tracks: Some(vec![
+                Track::Fixed(pos(54.0)?),
+                Track::Ratio(Ratio::new(2.0).map_err(pdfcraft_pdf::Errors::from)?),
+                Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
+                Track::Fixed(pos(48.0)?),
+            ]),
+            cell_padding: nn(4.0)?,
+            border: TableBorder {
+                width: nn(0.5)?,
+                color: Color::rgb(30, 30, 30),
             },
-            TableRow {
-                cells: vec![span_text("group A", 4)],
-            },
-        ],
-        body: shipment_rows(logo)?,
-        tracks: Some(vec![
-            Track::Fixed(pos(54.0)?),
-            Track::Ratio(Ratio::new(2.0).map_err(pdfcraft_pdf::Errors::from)?),
-            Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
-            Track::Fixed(pos(48.0)?),
-        ]),
-        cell_padding: nn(4.0)?,
-        border: TableBorder {
-            width: nn(0.5)?,
-            color: Color::rgb(30, 30, 30),
         },
-        ..TableSpec::default()
+        header: Some(TableHeader {
+            repeat: true,
+            rows: vec![
+                TableRow {
+                    children: vec![
+                        head_cell("Code"),
+                        head_cell("Item"),
+                        head_cell("Notes"),
+                        head_cell("Qty"),
+                    ],
+                },
+                TableRow {
+                    children: vec![span_text("group A", 4)],
+                },
+            ],
+        }),
+        body: shipment_rows(logo)?,
     }))
 }
 
 fn closing_blocks() -> Result<Vec<Block<()>>> {
     Ok(vec![
-        Block::KeepTogether(vec![
-            paragraph(vec![bold("Keep-together block")], Alignment::Center, 0.0)?,
-            paragraph(
-                vec![
-                    text("These two lines move as one piece when the remaining"),
-                    text(" frame is too short."),
-                ],
-                Alignment::Start,
-                0.0,
-            )?,
-            rule(
-                Some(120.0),
-                Alignment::End,
-                1.0,
-                Color::rgb(0, 0, 0),
-                4.0,
-                0.0,
-            )?,
-        ]),
+        Block::KeepTogether {
+            children: vec![
+                paragraph(vec![bold("Keep-together block")], Alignment::Center, 0.0)?,
+                paragraph(
+                    vec![
+                        text("These two lines move as one piece when the remaining"),
+                        text(" frame is too short."),
+                    ],
+                    Alignment::Start,
+                    0.0,
+                )?,
+                rule(
+                    Some(120.0),
+                    Alignment::End,
+                    1.0,
+                    Color::rgb(0, 0, 0),
+                    4.0,
+                    0.0,
+                )?,
+            ],
+        },
         Block::Spacer(nn(8.0)?),
         Block::Columns(ColumnsSpec {
-            gap: nn(12.0)?,
-            columns: vec![
+            style: ColumnsStyle { gap: nn(12.0)? },
+            children: vec![
                 ColumnSpec {
-                    width: Track::Fixed(pos(140.0)?),
-                    blocks: vec![
+                    style: ColumnStyle {
+                        width: Track::Fixed(pos(140.0)?),
+                    },
+                    children: vec![
                         paragraph(vec![bold("Fixed column")], Alignment::Start, 0.0)?,
                         paragraph(
                             vec![text("Narrow frame wraps AA AA AA AA AA words here.")],
@@ -571,37 +599,48 @@ fn closing_blocks() -> Result<Vec<Block<()>>> {
                             0.0,
                         )?,
                         Block::List(ListSpec {
-                            kind: ListKind::Ordered(Numbering::UpperRoman),
-                            items: vec![
+                            style: ListStyle {
+                                kind: ListKind::Ordered {
+                                    numbering: Numbering::UpperRoman,
+                                    start: NonZeroU32::MIN,
+                                    format: MarkerFormat::default(),
+                                },
+                                ..ListStyle::default()
+                            },
+                            children: vec![
                                 item(paragraph(vec![text("one")], Alignment::Start, 0.0)?),
                                 item(paragraph(vec![text("two")], Alignment::Start, 0.0)?),
                             ],
-                            ..ListSpec::default()
                         }),
                     ],
                 },
                 ColumnSpec {
-                    width: Track::Auto,
-                    blocks: vec![
+                    style: ColumnStyle::default(),
+                    children: vec![
                         paragraph(vec![bold("Auto column")], Alignment::Start, 0.0)?,
                         Block::Table(TableSpec {
-                            header: vec![TableRow {
-                                cells: vec![text_cell("Side"), text_cell("Val")],
-                            }],
+                            style: TableStyle {
+                                cell_padding: nn(3.0)?,
+                                border: TableBorder {
+                                    width: nn(0.4)?,
+                                    color: Color::rgb(0, 0, 0),
+                                },
+                                ..TableStyle::default()
+                            },
+                            header: Some(TableHeader {
+                                repeat: true,
+                                rows: vec![TableRow {
+                                    children: vec![text_cell("Side"), text_cell("Val")],
+                                }],
+                            }),
                             body: vec![
                                 TableRow {
-                                    cells: vec![text_cell("L"), text_cell("1")],
+                                    children: vec![text_cell("L"), text_cell("1")],
                                 },
                                 TableRow {
-                                    cells: vec![text_cell("R"), text_cell("2")],
+                                    children: vec![text_cell("R"), text_cell("2")],
                                 },
                             ],
-                            cell_padding: nn(3.0)?,
-                            border: TableBorder {
-                                width: nn(0.4)?,
-                                color: Color::rgb(0, 0, 0),
-                            },
-                            ..TableSpec::default()
                         }),
                         paragraph(vec![text("end-aligned note")], Alignment::End, 0.0)?,
                     ],

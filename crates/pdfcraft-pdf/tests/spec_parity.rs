@@ -255,7 +255,7 @@ fn cell_image_section(image: ImageRef) -> SectionSpec<()> {
     let mut section = SectionSpec::default();
     section.body.push(Block::Table(TableSpec {
         body: vec![TableRow {
-            cells: vec![CellSpec {
+            children: vec![CellSpec {
                 children: vec![Block::Image(ImageSpec {
                     image,
                     width: None,

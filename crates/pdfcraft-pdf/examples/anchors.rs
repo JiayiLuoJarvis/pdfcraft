@@ -20,9 +20,9 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
-    OutlineEntry, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
-    TableBorder, TableRow, TableSpec, TextRun,
+    BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, CellStyle, FontFace, FontFamily,
+    FontRegistry, OutlineEntry, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
+    Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
@@ -185,11 +185,11 @@ fn sample_body() -> Result<Vec<Block<()>>> {
 
 fn sample_table() -> Result<Block<()>> {
     let header = TableRow {
-        cells: vec![cell(
+        children: vec![cell(
             vec![Block::Anchor {
                 id: "table-head".into(),
                 outline: None,
-                child: Box::new(Block::paragraph((), "表頭錨點（只登記第一次）")),
+                children: vec![Block::paragraph((), "表頭錨點（只登記第一次）")],
             }],
             Some(HEADER_FILL),
         )],
@@ -197,7 +197,7 @@ fn sample_table() -> Result<Block<()>> {
     let mut rows = Vec::with_capacity(BODY_ROWS);
     for index in 1..=BODY_ROWS {
         rows.push(TableRow {
-            cells: vec![cell(
+            children: vec![cell(
                 vec![Block::paragraph(
                     (),
                     format!("第 {index} 行。跨頁後的表頭不是連結目標。"),
@@ -207,17 +207,21 @@ fn sample_table() -> Result<Block<()>> {
         });
     }
     Ok(Block::Table(TableSpec {
-        tracks: Some(vec![Track::Ratio(
-            Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?,
-        )]),
-        header: vec![header],
-        body: rows,
-        repeat_header: true,
-        cell_padding: nn(4.0)?,
-        border: TableBorder {
-            width: nn(0.5)?,
-            color: Color::rgb(0x99, 0x99, 0x99),
+        style: TableStyle {
+            tracks: Some(vec![Track::Ratio(
+                Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?,
+            )]),
+            cell_padding: nn(4.0)?,
+            border: TableBorder {
+                width: nn(0.5)?,
+                color: Color::rgb(0x99, 0x99, 0x99),
+            },
         },
+        header: Some(TableHeader {
+            repeat: true,
+            rows: vec![header],
+        }),
+        body: rows,
     }))
 }
 
@@ -228,7 +232,7 @@ fn anchor(id: &str, title: &str, level: u8, child: Block<()>) -> Block<()> {
             title: title.into(),
             level,
         }),
-        child: Box::new(child),
+        children: vec![child],
     }
 }
 
@@ -292,10 +296,10 @@ fn text_run(text: &str) -> Span<()> {
 
 fn cell(content: Vec<Block<()>>, fill: Option<Color>) -> CellSpec<()> {
     CellSpec {
+        style: CellStyle { fill },
         children: content,
         col_span: NonZeroU16::MIN,
         row_span: NonZeroU16::MIN,
-        fill,
     }
 }
 

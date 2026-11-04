@@ -466,10 +466,10 @@ fn inset_page_break_in_body_is_nested_page_break() {
 fn inset_shifts_anchor_x() {
     let anchor = FlowNode::Anchor(AnchorNode {
         id: "here".into(),
-        child: Box::new(FlowNode::Spacer(SpacerNode {
+        children: vec![FlowNode::Spacer(SpacerNode {
             height: NonNegative::pt(8.0).unwrap(),
-        })),
-        marked: false,
+        })],
+        landed: false,
     });
     let Split::Fit { fragment, .. } = split_inset(node(15.0, 0.0, anchor), 100.0).unwrap() else {
         panic!("the spacer fits");

@@ -40,8 +40,8 @@ pub(crate) enum KeepTogetherNode {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AnchorNode {
     pub(crate) id: String,
-    pub(crate) child: Box<FlowNode>,
-    pub(crate) marked: bool,
+    pub(crate) children: Vec<FlowNode>,
+    pub(crate) landed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,7 +107,7 @@ impl Flowable for FlowNode {
     fn nested(&self) -> &[Self] {
         match self {
             FlowNode::Stack(kids) | FlowNode::KeepTogether(KeepTogetherNode::Open(kids)) => kids,
-            FlowNode::Anchor(node) => std::slice::from_ref(node.child.as_ref()),
+            FlowNode::Anchor(node) => &node.children,
             FlowNode::Inset(node) => std::slice::from_ref(node.child.as_ref()),
             FlowNode::Columns(columns) => columns.column_stacks(),
             FlowNode::Paragraph(_)
@@ -157,48 +157,135 @@ fn split_anchor(
     avail: Frame,
     node: AnchorNode,
 ) -> Result<Split<FlowNode>> {
-    let AnchorNode { id, child, marked } = node;
-    if matches!(child.as_ref(), FlowNode::PageBreak) {
-        return Ok(Split::Fit {
-            height: NonNegative::ZERO,
-            fragment: Fragment::empty(),
-        });
-    }
-    match (*child).split(ctx, avail)? {
-        Split::Fit {
-            height,
-            mut fragment,
-        } => {
-            if !marked && fragment_is_effective(&fragment) {
-                stamp_anchor(&id, &mut fragment);
-            }
-            Ok(Split::Fit { height, fragment })
+    let AnchorNode {
+        id,
+        children,
+        mut landed,
+    } = node;
+    let split = match sole_or_stack(children) {
+        FlowNode::Stack(children) => {
+            split_stack_for_anchor(ctx, avail, children, &id, &mut landed)?
         }
+        child @ (FlowNode::Paragraph(_)
+        | FlowNode::Text(_)
+        | FlowNode::Spacer(_)
+        | FlowNode::PageBreak
+        | FlowNode::KeepTogether(_)
+        | FlowNode::Anchor(_)
+        | FlowNode::Inset(_)
+        | FlowNode::Columns(_)
+        | FlowNode::Table(_)
+        | FlowNode::List(_)
+        | FlowNode::Image(_)
+        | FlowNode::Canvas(_)
+        | FlowNode::HLine(_)) => match child.split(ctx, avail)? {
+            Split::Fit {
+                height,
+                mut fragment,
+            } => {
+                land_once(&id, &mut landed, &mut fragment);
+                Split::Fit { height, fragment }
+            }
+            Split::Partial {
+                head_height,
+                mut head,
+                tail,
+            } => {
+                land_once(&id, &mut landed, &mut head);
+                Split::Partial {
+                    head_height,
+                    head,
+                    tail,
+                }
+            }
+            Split::MoveToNextPage(child) => Split::MoveToNextPage(child),
+        },
+    };
+    Ok(match split {
+        Split::Fit { height, fragment } => Split::Fit { height, fragment },
         Split::Partial {
             head_height,
-            mut head,
+            head,
             tail,
-        } => {
-            let mut marked = marked;
-            if !marked && fragment_is_effective(&head) {
-                stamp_anchor(&id, &mut head);
-                marked = true;
-            }
-            Ok(Split::Partial {
-                head_height,
-                head,
-                tail: FlowNode::Anchor(AnchorNode {
-                    id,
-                    child: Box::new(tail),
-                    marked,
-                }),
-            })
-        }
-        Split::MoveToNextPage(child) => Ok(Split::MoveToNextPage(FlowNode::Anchor(AnchorNode {
+        } => Split::Partial {
+            head_height,
+            head,
+            tail: FlowNode::Anchor(AnchorNode {
+                id,
+                children: into_children(tail),
+                landed,
+            }),
+        },
+        Split::MoveToNextPage(child) => Split::MoveToNextPage(FlowNode::Anchor(AnchorNode {
             id,
-            child: Box::new(child),
-            marked,
-        }))),
+            children: into_children(child),
+            landed,
+        })),
+    })
+}
+
+fn into_children(node: FlowNode) -> Vec<FlowNode> {
+    match node {
+        FlowNode::Stack(children) => children,
+        node @ (FlowNode::Paragraph(_)
+        | FlowNode::Text(_)
+        | FlowNode::Spacer(_)
+        | FlowNode::PageBreak
+        | FlowNode::KeepTogether(_)
+        | FlowNode::Anchor(_)
+        | FlowNode::Inset(_)
+        | FlowNode::Columns(_)
+        | FlowNode::Table(_)
+        | FlowNode::List(_)
+        | FlowNode::Image(_)
+        | FlowNode::Canvas(_)
+        | FlowNode::HLine(_)) => vec![node],
+    }
+}
+
+fn land_once(id: &str, landed: &mut bool, fragment: &mut Fragment) {
+    if !*landed && fragment_is_effective(fragment) {
+        stamp_anchor(id, fragment);
+        *landed = true;
+    }
+}
+
+pub(crate) fn sole_or_stack(nodes: Vec<FlowNode>) -> FlowNode {
+    match <[FlowNode; 1]>::try_from(nodes) {
+        Ok([node]) => node,
+        Err(nodes) if nodes.is_empty() => FlowNode::Stack(Vec::new()),
+        Err(nodes) => FlowNode::Stack(nodes),
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PendingLandings {
+    ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LandingScope(usize);
+
+impl PendingLandings {
+    pub(crate) fn open(&mut self, anchor: AnchorNode) -> (LandingScope, Vec<FlowNode>) {
+        let scope = LandingScope(self.ids.len());
+        if !anchor.landed {
+            self.ids.push(anchor.id);
+        }
+        (scope, anchor.children)
+    }
+
+    pub(crate) fn land(&mut self, fragment: &mut Fragment) {
+        if self.ids.is_empty() || !fragment_is_effective(fragment) {
+            return;
+        }
+        for id in self.ids.drain(..) {
+            stamp_anchor(&id, fragment);
+        }
+    }
+
+    pub(crate) fn close(&mut self, scope: LandingScope) {
+        self.ids.truncate(scope.0);
     }
 }
 
@@ -283,8 +370,27 @@ fn split_keep_together(
 
 fn split_stack(
     ctx: &mut LayoutCtx<'_>,
+    avail: Frame,
+    kids: Vec<FlowNode>,
+) -> Result<Split<FlowNode>> {
+    split_stack_inner(ctx, avail, kids, None)
+}
+
+fn split_stack_for_anchor(
+    ctx: &mut LayoutCtx<'_>,
+    avail: Frame,
+    kids: Vec<FlowNode>,
+    id: &str,
+    landed: &mut bool,
+) -> Result<Split<FlowNode>> {
+    split_stack_inner(ctx, avail, kids, Some((id, landed)))
+}
+
+fn split_stack_inner(
+    ctx: &mut LayoutCtx<'_>,
     mut avail: Frame,
     kids: Vec<FlowNode>,
+    mut landing: Option<(&str, &mut bool)>,
 ) -> Result<Split<FlowNode>> {
     if kids.is_empty() {
         return Ok(Split::Fit {
@@ -306,8 +412,9 @@ fn split_stack(
         match child.split(ctx, avail)? {
             Split::Fit {
                 height,
-                fragment: child_frag,
+                fragment: mut child_frag,
             } => {
+                land_nested_fragment(&mut landing, &mut child_frag);
                 let spacing = child_frag.spacing_after;
                 let offset = child_frag.with_offset(Finite::ZERO, y.into())?;
                 note_first_baseline(&mut baseline_chosen, &mut first_baseline, &offset);
@@ -329,9 +436,10 @@ fn split_stack(
             }
             Split::Partial {
                 head_height,
-                head,
+                mut head,
                 tail,
             } => {
+                land_nested_fragment(&mut landing, &mut head);
                 let offset = head.with_offset(Finite::ZERO, y.into())?;
                 note_first_baseline(&mut baseline_chosen, &mut first_baseline, &offset);
                 commands.extend(offset.commands);
@@ -391,6 +499,12 @@ fn split_stack(
     })
 }
 
+fn land_nested_fragment(landing: &mut Option<(&str, &mut bool)>, fragment: &mut Fragment) {
+    if let Some((id, landed)) = landing {
+        land_once(id, landed, fragment);
+    }
+}
+
 /// Rejects a body tree over `limits`.
 ///
 /// A stack is a container and is not a block. Text inside table cells, columns,
@@ -447,7 +561,7 @@ fn census(roots: &[FlowNode]) -> Census {
             }
             FlowNode::Anchor(node) => {
                 census.blocks = census.blocks.saturating_add(1);
-                pending.push(node.child.as_ref());
+                pending.extend(node.children.iter().rev());
             }
             FlowNode::Inset(node) => {
                 census.blocks = census.blocks.saturating_add(1);

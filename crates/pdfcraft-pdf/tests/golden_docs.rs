@@ -44,9 +44,9 @@ use std::num::NonZeroU16;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellSpec,
-    DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, LayerMark, LayerShape, PageWhen,
-    ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow,
-    TableSpec, TextRun,
+    CellStyle, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, LayerMark, LayerShape,
+    PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder,
+    TableHeader, TableRow, TableSpec, TableStyle, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, Color, DocumentSpec, Finite, Ink, Length, Limits, Margins, NonNegative, PageSize,
@@ -236,33 +236,40 @@ fn canvas_cell(w: f32, h: f32, marks: Vec<CanvasMark<()>>) -> CellSpec<()> {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the golden fixture keeps one complete document shape in one place"
+)]
 fn golden_doc_table_spans() {
     let info = doc_info("Golden Table Spans");
     let table = Block::Table(TableSpec {
-        header: vec![TableRow {
-            cells: vec![
-                span_cell(
-                    vec![Block::HLine(HLineSpec {
-                        thickness: pos(1.5),
-                        color: Color::rgb(0, 0, 0),
-                        ..HLineSpec::default()
-                    })],
-                    2,
-                    1,
-                ),
-                canvas_cell(
-                    40.0,
-                    16.0,
-                    vec![CanvasMark::Rect {
-                        rect: rect(0.0, 0.0, 40.0, 16.0),
-                        ink: Ink::Fill(Color::rgb(0, 128, 0)),
-                    }],
-                ),
-            ],
-        }],
+        header: Some(TableHeader {
+            repeat: false,
+            rows: vec![TableRow {
+                children: vec![
+                    span_cell(
+                        vec![Block::HLine(HLineSpec {
+                            thickness: pos(1.5),
+                            color: Color::rgb(0, 0, 0),
+                            ..HLineSpec::default()
+                        })],
+                        2,
+                        1,
+                    ),
+                    canvas_cell(
+                        40.0,
+                        16.0,
+                        vec![CanvasMark::Rect {
+                            rect: rect(0.0, 0.0, 40.0, 16.0),
+                            ink: Ink::Fill(Color::rgb(0, 128, 0)),
+                        }],
+                    ),
+                ],
+            }],
+        }),
         body: vec![
             TableRow {
-                cells: vec![
+                children: vec![
                     span_cell(
                         vec![Block::Canvas(CanvasSpec {
                             size: Size::try_pt(200.0, 24.0).unwrap(),
@@ -276,6 +283,9 @@ fn golden_doc_table_spans() {
                         1,
                     ),
                     CellSpec {
+                        style: CellStyle {
+                            fill: Some(Color::rgb(240, 240, 240)),
+                        },
                         children: vec![Block::Canvas(CanvasSpec {
                             size: Size::try_pt(40.0, 48.0).unwrap(),
                             align: Alignment::Start,
@@ -287,12 +297,11 @@ fn golden_doc_table_spans() {
                         })],
                         col_span: NonZeroU16::new(1).unwrap(),
                         row_span: NonZeroU16::new(2).unwrap(),
-                        fill: Some(Color::rgb(240, 240, 240)),
                     },
                 ],
             },
             TableRow {
-                cells: vec![span_cell(
+                children: vec![span_cell(
                     vec![Block::Canvas(CanvasSpec {
                         size: Size::try_pt(200.0, 12.0).unwrap(),
                         align: Alignment::Center,
@@ -306,16 +315,17 @@ fn golden_doc_table_spans() {
                 )],
             },
         ],
-        repeat_header: false,
-        tracks: Some(vec![
-            Track::Fixed(pos(140.0)),
-            Track::Fixed(pos(140.0)),
-            Track::Auto,
-        ]),
-        cell_padding: nn(4.0),
-        border: TableBorder {
-            width: nn(0.5),
-            color: Color::rgb(80, 80, 80),
+        style: TableStyle {
+            tracks: Some(vec![
+                Track::Fixed(pos(140.0)),
+                Track::Fixed(pos(140.0)),
+                Track::Auto,
+            ]),
+            cell_padding: nn(4.0),
+            border: TableBorder {
+                width: nn(0.5),
+                color: Color::rgb(80, 80, 80),
+            },
         },
     });
     let rendered = layout_spec(DocumentSpec {

@@ -173,12 +173,35 @@ fn block_limit_counts_body_paragraphs() {
 }
 
 #[test]
+fn block_limit_counts_a_multi_child_anchor_once() {
+    let Some(err) = fonted(
+        tighten(|limits| limits.set_max_blocks(2).unwrap()),
+        vec![Block::Anchor {
+            id: "multi".into(),
+            outline: None,
+            children: vec![Block::paragraph((), "A"), Block::paragraph((), "B")],
+        }],
+    ) else {
+        return;
+    };
+    let err = err.err().unwrap();
+    assert_eq!(
+        err.first().kind,
+        ErrorKind::LimitExceeded {
+            kind: LimitKind::Blocks,
+            value: 3,
+            max: 2,
+        }
+    );
+}
+
+#[test]
 fn table_cell_limit_counts_cells() {
     let Some(err) = fonted(
         tighten(|limits| limits.set_max_table_cells(1).unwrap()),
         vec![Block::Table(TableSpec {
             body: vec![TableRow {
-                cells: vec![
+                children: vec![
                     CellSpec {
                         children: vec![Block::paragraph((), "a")],
                         ..CellSpec::default()

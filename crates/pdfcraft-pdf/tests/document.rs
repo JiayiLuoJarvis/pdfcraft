@@ -26,10 +26,11 @@ use skrifa::{FontRef, MetadataProvider};
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
-    CanvasMark, CanvasSpec, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry,
-    HLineSpec, ImageSpec, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, MarkerFormat,
-    PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder,
-    TableRow, TableSpec, TextRun,
+    CanvasMark, CanvasSpec, CellSpec, CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec,
+    ColumnsStyle, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec, InsetStyle, LayerMark,
+    LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, MarkerFormat, PageWhen, ParagraphSpec,
+    ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableHeader, TableRow,
+    TableSpec, TableStyle, TextRun,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -301,59 +302,70 @@ fn styled(size: Option<f32>, color: Option<Color>, children: Vec<Block<()>>) -> 
 
 fn gap_columns(gap: f32, columns: Vec<ColumnSpec<()>>) -> Block<()> {
     Block::Columns(ColumnsSpec {
-        gap: nn(gap),
-        columns,
+        style: ColumnsStyle { gap: nn(gap) },
+        children: columns,
     })
 }
 
 fn ratio_col(weight: f32, blocks: Vec<Block<()>>) -> ColumnSpec<()> {
     ColumnSpec {
-        width: Track::Ratio(Ratio::new(weight).unwrap()),
-        blocks,
+        style: ColumnStyle {
+            width: Track::Ratio(Ratio::new(weight).unwrap()),
+        },
+        children: blocks,
     }
 }
 
 fn fixed_col(width: f32, blocks: Vec<Block<()>>) -> ColumnSpec<()> {
     ColumnSpec {
-        width: Track::Fixed(pos(width)),
-        blocks,
+        style: ColumnStyle {
+            width: Track::Fixed(pos(width)),
+        },
+        children: blocks,
     }
 }
 
 fn auto_col(blocks: Vec<Block<()>>) -> ColumnSpec<()> {
     ColumnSpec {
-        width: Track::Auto,
-        blocks,
+        style: ColumnStyle::default(),
+        children: blocks,
     }
 }
 
 fn bullet_list(items: Vec<ListItemSpec<()>>) -> Block<()> {
     Block::List(ListSpec {
-        items,
+        children: items,
         ..ListSpec::default()
     })
 }
 
 fn ordered_list(numbering: Numbering, start: u32, items: Vec<ListItemSpec<()>>) -> Block<()> {
     Block::List(ListSpec {
-        kind: ListKind::Ordered(numbering),
-        start: NonZeroU32::new(start).unwrap(),
-        items,
-        ..ListSpec::default()
+        style: ListStyle {
+            kind: ListKind::Ordered {
+                numbering,
+                start: NonZeroU32::new(start).unwrap(),
+                format: MarkerFormat::default(),
+            },
+            ..ListStyle::default()
+        },
+        children: items,
     })
 }
 
 fn plain_item<K>(blocks: Vec<Block<K>>) -> ListItemSpec<K> {
     ListItemSpec {
         marker: None,
-        blocks,
+        children: blocks,
     }
 }
 
 fn inset_block(left: f32, right: f32, children: Vec<Block<()>>) -> Block<()> {
     Block::Inset {
-        left: nn(left),
-        right: nn(right),
+        style: InsetStyle {
+            left: nn(left),
+            right: nn(right),
+        },
         children,
     }
 }
@@ -369,7 +381,7 @@ fn inset_tower(levels: usize) -> Block<()> {
 fn marked_item(marker: &str, blocks: Vec<Block<()>>) -> ListItemSpec<()> {
     ListItemSpec {
         marker: Some(marker.into()),
-        blocks,
+        children: blocks,
     }
 }
 
@@ -397,21 +409,24 @@ fn span_cell(text: &str, cols: u16) -> CellSpec<()> {
 
 fn filled_cell(text: &str, fill: Color) -> CellSpec<()> {
     CellSpec {
+        style: CellStyle { fill: Some(fill) },
         children: vec![Block::paragraph((), text)],
-        fill: Some(fill),
         ..CellSpec::default()
     }
 }
 
 fn text_row(items: &[&str]) -> TableRow<()> {
     TableRow {
-        cells: items.iter().copied().map(text_cell).collect(),
+        children: items.iter().copied().map(text_cell).collect(),
     }
 }
 
 fn grid(header: Vec<TableRow<()>>, body: Vec<TableRow<()>>) -> Block<()> {
     Block::Table(TableSpec {
-        header,
+        header: (!header.is_empty()).then_some(TableHeader {
+            repeat: true,
+            rows: header,
+        }),
         body,
         ..TableSpec::default()
     })
@@ -802,15 +817,20 @@ fn table_cell_fill_is_painted() {
     let pages = font_pages(
         PageSize::A4,
         sec(vec![Block::Table(TableSpec {
-            header: vec![TableRow {
-                cells: vec![filled_cell("H", Color::rgb(0x19, 0x2d, 0x74))],
-            }],
+            header: Some(TableHeader {
+                repeat: true,
+                rows: vec![TableRow {
+                    children: vec![filled_cell("H", Color::rgb(0x19, 0x2d, 0x74))],
+                }],
+            }),
             body: vec![text_row(&["b"])],
-            border: TableBorder {
-                width: nn(0.5),
-                ..TableBorder::default()
+            style: TableStyle {
+                border: TableBorder {
+                    width: nn(0.5),
+                    ..TableBorder::default()
+                },
+                ..TableStyle::default()
             },
-            ..TableSpec::default()
         })]),
     )
     .unwrap()
@@ -1701,13 +1721,19 @@ fn lists_number_bullet_and_custom_markers() {
         sec(vec![
             bullet_list(vec![plain_item(vec![para("dot")])]),
             Block::List(ListSpec {
-                kind: ListKind::Ordered(Numbering::UpperRoman),
-                items: vec![
+                style: ListStyle {
+                    kind: ListKind::Ordered {
+                        numbering: Numbering::UpperRoman,
+                        start: NonZeroU32::MIN,
+                        format: MarkerFormat::default(),
+                    },
+                    ..ListStyle::default()
+                },
+                children: vec![
                     plain_item(vec![para("one")]),
                     plain_item(vec![para("two")]),
                     marked_item("(c)", vec![para("custom")]),
                 ],
-                ..ListSpec::default()
             }),
         ]),
     )
@@ -1776,9 +1802,11 @@ fn custom_marker_wider_than_marker_width_errors() {
     let result = font_pages(
         PageSize::A4,
         sec(vec![Block::List(ListSpec {
-            marker_width: pos(10.0),
-            items: vec![marked_item("(1000)", vec![para("A")])],
-            ..ListSpec::default()
+            style: ListStyle {
+                marker_width: pos(10.0),
+                ..ListStyle::default()
+            },
+            children: vec![marked_item("(1000)", vec![para("A")])],
         })]),
     );
     assert!(
@@ -1794,10 +1822,16 @@ fn ordered_list_item_gap_shifts_the_next_body() {
     let pages = font_pages(
         PageSize::A4,
         sec(vec![Block::List(ListSpec {
-            kind: ListKind::Ordered(Numbering::Decimal),
-            item_gap: nn(10.0),
-            items: vec![plain_item(vec![para("one")]), plain_item(vec![para("two")])],
-            ..ListSpec::default()
+            style: ListStyle {
+                kind: ListKind::Ordered {
+                    numbering: Numbering::Decimal,
+                    start: NonZeroU32::MIN,
+                    format: MarkerFormat::default(),
+                },
+                item_gap: nn(10.0),
+                ..ListStyle::default()
+            },
+            children: vec![plain_item(vec![para("one")]), plain_item(vec![para("two")])],
         })]),
     )
     .unwrap()
@@ -1815,12 +1849,14 @@ fn body_indent_shifts_the_inner_list() {
     let pages = font_pages(
         PageSize::A4,
         sec(vec![Block::List(ListSpec {
-            body_indent: Some(pos(30.0)),
-            items: vec![plain_item(vec![
+            style: ListStyle {
+                body_indent: Some(pos(30.0)),
+                ..ListStyle::default()
+            },
+            children: vec![plain_item(vec![
                 para("outer"),
                 bullet_list(vec![plain_item(vec![para("child")])]),
             ])],
-            ..ListSpec::default()
         })]),
     )
     .unwrap()
@@ -1847,10 +1883,16 @@ fn marker_font_draws_the_number_with_that_regular_face() {
     let page = &lay_fonts(
         fonts,
         vec![Block::List(ListSpec {
-            kind: ListKind::Ordered(Numbering::Decimal),
-            marker_font: Some(FaceKey::Marker),
-            items: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
-            ..ListSpec::default()
+            style: ListStyle {
+                kind: ListKind::Ordered {
+                    numbering: Numbering::Decimal,
+                    start: NonZeroU32::MIN,
+                    format: MarkerFormat::default(),
+                },
+                marker_font: Some(FaceKey::Marker),
+                ..ListStyle::default()
+            },
+            children: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
         })],
     )
     .unwrap()
@@ -1892,10 +1934,16 @@ fn styled_bold_keeps_the_marker_on_the_regular_face() {
                 ..RunStyle::default()
             },
             children: vec![Block::List(ListSpec {
-                kind: ListKind::Ordered(Numbering::Decimal),
-                marker_font: Some(FaceKey::Marker),
-                items: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
-                ..ListSpec::default()
+                style: ListStyle {
+                    kind: ListKind::Ordered {
+                        numbering: Numbering::Decimal,
+                        start: NonZeroU32::MIN,
+                        format: MarkerFormat::default(),
+                    },
+                    marker_font: Some(FaceKey::Marker),
+                    ..ListStyle::default()
+                },
+                children: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
             })],
         }],
     )
@@ -1928,10 +1976,16 @@ fn unregistered_marker_font_fails() {
     let error = lay_fonts(
         fonts,
         vec![Block::List(ListSpec {
-            kind: ListKind::Ordered(Numbering::Decimal),
-            marker_font: Some(FaceKey::Marker),
-            items: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
-            ..ListSpec::default()
+            style: ListStyle {
+                kind: ListKind::Ordered {
+                    numbering: Numbering::Decimal,
+                    start: NonZeroU32::MIN,
+                    format: MarkerFormat::default(),
+                },
+                marker_font: Some(FaceKey::Marker),
+                ..ListStyle::default()
+            },
+            children: vec![plain_item(vec![keyed_para(FaceKey::Body, "one")])],
         })],
     )
     .err()
@@ -1948,8 +2002,8 @@ fn cell_list(blocks: Vec<Block<()>>) -> Block<()> {
     grid(
         vec![],
         vec![TableRow {
-            cells: vec![cell(vec![Block::List(ListSpec {
-                items: vec![plain_item(blocks)],
+            children: vec![cell(vec![Block::List(ListSpec {
+                children: vec![plain_item(blocks)],
                 ..ListSpec::default()
             })])],
         }],
@@ -1973,10 +2027,16 @@ fn item_table_splits_rows_across_pages_at_the_body_indent() {
         SectionSpec {
             margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
             body: vec![Block::List(ListSpec {
-                kind: ListKind::Ordered(Numbering::Decimal),
-                body_indent: Some(pos(30.0)),
-                items: vec![plain_item(vec![grid(vec![], rows)])],
-                ..ListSpec::default()
+                style: ListStyle {
+                    kind: ListKind::Ordered {
+                        numbering: Numbering::Decimal,
+                        start: NonZeroU32::MIN,
+                        format: MarkerFormat::default(),
+                    },
+                    body_indent: Some(pos(30.0)),
+                    ..ListStyle::default()
+                },
+                children: vec![plain_item(vec![grid(vec![], rows)])],
             })],
             ..SectionSpec::default()
         },
@@ -2024,7 +2084,9 @@ fn depth_error(value: u64, max: u64) -> ErrorKind {
 fn kept(levels: usize) -> Block<()> {
     let mut block = para("x");
     for _ in 0..levels {
-        block = Block::KeepTogether(vec![block]);
+        block = Block::KeepTogether {
+            children: vec![block],
+        };
     }
     block
 }
@@ -2036,10 +2098,11 @@ fn heavy(levels: usize) -> Block<()> {
         block = match level % 4 {
             0 => bullet_list(vec![plain_item(vec![block])]),
             1 => gap_columns(0.0, vec![auto_col(vec![block]), fixed_col(4.0, vec![])]),
-            2 => Block::KeepTogether(vec![block]),
+            2 => Block::KeepTogether {
+                children: vec![block],
+            },
             _ => Block::Inset {
-                left: NonNegative::ZERO,
-                right: NonNegative::ZERO,
+                style: InsetStyle::default(),
                 children: vec![block],
             },
         };
@@ -2146,13 +2209,13 @@ fn cell_anchor_link_depth_is_three() {
     let anchored = grid(
         vec![],
         vec![TableRow {
-            cells: vec![cell(vec![Block::Anchor {
+            children: vec![cell(vec![Block::Anchor {
                 id: "total".into(),
                 outline: None,
-                child: Box::new(Block::Paragraph(ParagraphSpec {
+                children: vec![Block::Paragraph(ParagraphSpec {
                     children: vec![link_run("https://example.com", vec![text_run("x")])],
                     ..ParagraphSpec::default()
-                })),
+                })],
             }])],
         }],
     );
@@ -2172,7 +2235,7 @@ fn cell_styled_counts_one_level() {
     let styled_cell = grid(
         vec![],
         vec![TableRow {
-            cells: vec![cell(vec![Block::Styled {
+            children: vec![cell(vec![Block::Styled {
                 style: RunStyle::default(),
                 children: vec![para("x")],
             }])],
@@ -2194,7 +2257,7 @@ fn cell_styled_counts_one_level() {
             vec![sec(vec![grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Styled {
+                    children: vec![cell(vec![Block::Styled {
                         style: RunStyle::default(),
                         children: vec![para("x")],
                     }])],
@@ -2219,10 +2282,10 @@ fn mixed_nesting_counts_one_level_per_container() {
     let anchored_cell = Block::Anchor {
         id: "deep".into(),
         outline: None,
-        child: Box::new(Block::Paragraph(ParagraphSpec {
+        children: vec![Block::Paragraph(ParagraphSpec {
             children: vec![link_run("https://example.com", vec![text_run("x")])],
             ..ParagraphSpec::default()
-        })),
+        })],
     };
     let columns_table = gap_columns(
         0.0,
@@ -2230,7 +2293,7 @@ fn mixed_nesting_counts_one_level_per_container() {
             auto_col(vec![grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![anchored_cell])],
+                    children: vec![cell(vec![anchored_cell])],
                 }],
             )]),
             fixed_col(4.0, vec![]),
@@ -2315,13 +2378,13 @@ fn very_deep_lists_columns_and_cell_anchors_fail_without_overflowing_the_stack()
             _ => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Anchor {
+                    children: vec![cell(vec![Block::Anchor {
                         id: String::new(),
                         outline: None,
-                        child: Box::new(Block::List(ListSpec {
-                            items: vec![plain_item(vec![block])],
+                        children: vec![Block::List(ListSpec {
+                            children: vec![plain_item(vec![block])],
                             ..ListSpec::default()
-                        })),
+                        })],
                     }])],
                 }],
             ),
@@ -2346,7 +2409,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             auto_col(vec![grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Paragraph(ParagraphSpec {
+                    children: vec![cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![deep_link(TOO_DEEP / 4)],
                         ..ParagraphSpec::default()
                     })])],
@@ -2356,28 +2419,29 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
     );
     for level in 0..TOO_DEEP {
         block = match level % 10 {
-            0 => Block::KeepTogether(vec![block]),
+            0 => Block::KeepTogether {
+                children: vec![block],
+            },
             1 => styled(None, None, vec![block]),
             2 => Block::Anchor {
                 id: String::new(),
                 outline: None,
-                child: Box::new(block),
+                children: vec![block],
             },
             3 => Block::Inset {
-                left: NonNegative::ZERO,
-                right: NonNegative::ZERO,
+                style: InsetStyle::default(),
                 children: vec![block],
             },
             4 => gap_columns(0.0, vec![auto_col(vec![block])]),
             5 => grid(
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Anchor {
+                    children: vec![cell(vec![Block::Anchor {
                         id: String::new(),
                         outline: None,
-                        child: Box::new(Block::List(ListSpec {
-                            items: vec![plain_item(vec![block])],
+                        children: vec![Block::List(ListSpec {
+                            children: vec![plain_item(vec![block])],
                             ..ListSpec::default()
-                        })),
+                        })],
                     }])],
                 }],
                 vec![],
@@ -2385,8 +2449,8 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             6 => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::List(ListSpec {
-                        items: vec![plain_item(vec![block])],
+                    children: vec![cell(vec![Block::List(ListSpec {
+                        children: vec![plain_item(vec![block])],
                         ..ListSpec::default()
                     })])],
                 }],
@@ -2394,11 +2458,10 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             7 => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Inset {
-                        left: NonNegative::ZERO,
-                        right: NonNegative::ZERO,
+                    children: vec![cell(vec![Block::Inset {
+                        style: InsetStyle::default(),
                         children: vec![Block::List(ListSpec {
-                            items: vec![plain_item(vec![block])],
+                            children: vec![plain_item(vec![block])],
                             ..ListSpec::default()
                         })],
                     }])],
@@ -2407,7 +2470,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             8 => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Styled {
+                    children: vec![cell(vec![Block::Styled {
                         style: RunStyle::default(),
                         children: vec![block],
                     }])],
@@ -2472,10 +2535,15 @@ fn ideographic_comma_marker_needs_u3001() {
     let missing = lay_fonts(
         latin_only,
         vec![Block::List(ListSpec {
-            kind: ListKind::Ordered(Numbering::Decimal),
-            marker_format: MarkerFormat::IdeographicComma,
-            items: vec![plain_item(vec![keyed_para(FaceKey::Latin, "one")])],
-            ..ListSpec::default()
+            style: ListStyle {
+                kind: ListKind::Ordered {
+                    numbering: Numbering::Decimal,
+                    start: NonZeroU32::MIN,
+                    format: MarkerFormat::IdeographicComma,
+                },
+                ..ListStyle::default()
+            },
+            children: vec![plain_item(vec![keyed_para(FaceKey::Latin, "one")])],
         })],
     )
     .err()
@@ -2494,11 +2562,16 @@ fn ideographic_comma_marker_needs_u3001() {
     let page = &lay_fonts(
         both,
         vec![Block::List(ListSpec {
-            kind: ListKind::Ordered(Numbering::Decimal),
-            marker_format: MarkerFormat::IdeographicComma,
-            marker_font: Some(FaceKey::Cjk),
-            items: vec![plain_item(vec![keyed_para(FaceKey::Latin, "one")])],
-            ..ListSpec::default()
+            style: ListStyle {
+                kind: ListKind::Ordered {
+                    numbering: Numbering::Decimal,
+                    start: NonZeroU32::MIN,
+                    format: MarkerFormat::IdeographicComma,
+                },
+                marker_font: Some(FaceKey::Cjk),
+                ..ListStyle::default()
+            },
+            children: vec![plain_item(vec![keyed_para(FaceKey::Latin, "one")])],
         })],
     )
     .unwrap()
@@ -2537,18 +2610,20 @@ fn table_spans_and_repeat_header_switch() {
         let mut body = Vec::new();
         for n in 0..80 {
             body.push(TableRow {
-                cells: vec![text_cell(format!("row {n}")), text_cell(n.to_string())],
+                children: vec![text_cell(format!("row {n}")), text_cell(n.to_string())],
             });
         }
         body.push(TableRow {
-            cells: vec![span_cell("Total", 2)],
+            children: vec![span_cell("Total", 2)],
         });
         font_pages(
             PageSize::A4,
             sec(vec![Block::Table(TableSpec {
-                header: vec![text_row(&["Item", "Amount"])],
+                header: Some(TableHeader {
+                    repeat,
+                    rows: vec![text_row(&["Item", "Amount"])],
+                }),
                 body,
-                repeat_header: repeat,
                 ..TableSpec::default()
             })]),
         )
@@ -2575,7 +2650,9 @@ fn keep_together_spacer_and_page_break() {
         sec(vec![
             para("A"),
             Block::Spacer(nn(A4.height().as_pt() - 20.0)),
-            Block::KeepTogether(vec![para("B1"), para("B2")]),
+            Block::KeepTogether {
+                children: vec![para("B1"), para("B2")],
+            },
             Block::PageBreak,
             para("C"),
         ]),
@@ -2709,9 +2786,12 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
     let errors = font_pages(
         PageSize::A4,
         sec(vec![Block::Table(TableSpec {
-            tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
+            style: TableStyle {
+                tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
+                ..TableStyle::default()
+            },
             body: vec![TableRow {
-                cells: vec![
+                children: vec![
                     cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![link_run("", vec![text_run("x")])],
                         ..ParagraphSpec::default()
@@ -3073,7 +3153,7 @@ fn cell_image_and_last_page_seal_share_coordinates() {
             body: vec![
                 Block::Table(TableSpec {
                     body: vec![TableRow {
-                        cells: vec![
+                        children: vec![
                             text_cell("A"),
                             cell(vec![Block::Image(ImageSpec {
                                 image: seal,
@@ -3950,7 +4030,7 @@ fn hline_in_list_item_and_cell() {
             grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::HLine(HLineSpec {
+                    children: vec![cell(vec![Block::HLine(HLineSpec {
                         color: Color::rgb(9, 9, 9),
                         ..HLineSpec::default()
                     })])],
@@ -4002,7 +4082,7 @@ fn cell_spacer_shifts_the_following_row() {
                 vec![],
                 vec![
                     TableRow {
-                        cells: vec![cell(vec![Block::Spacer(nn(height))])],
+                        children: vec![cell(vec![Block::Spacer(nn(height))])],
                     },
                     text_row(&["B"]),
                 ],
@@ -4029,7 +4109,7 @@ fn cell_spacer_alone_records_no_ops() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Spacer(nn(24.0))])],
+                children: vec![cell(vec![Block::Spacer(nn(24.0))])],
             }],
         )])],
     )
@@ -4047,7 +4127,7 @@ fn cell_spacer_taller_than_body_fails_before_any_page() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Spacer(nn(21.0))])],
+                children: vec![cell(vec![Block::Spacer(nn(21.0))])],
             }],
         )])],
     )
@@ -4077,7 +4157,7 @@ fn short_cell_spacer_does_not_grow_a_text_row() {
             vec![],
             vec![
                 TableRow {
-                    cells: vec![text_cell("A"), cell(vec![Block::Spacer(nn(8.0))])],
+                    children: vec![text_cell("A"), cell(vec![Block::Spacer(nn(8.0))])],
                 },
                 text_row(&["B", "C"]),
             ],
@@ -4947,7 +5027,7 @@ fn cell_paragraph_pins_bold_blank_and_link() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![
+                children: vec![
                     cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![
                             text_run("A"),
@@ -4992,7 +5072,7 @@ fn cell_paragraph_errors_record_no_pages() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec {
+                children: vec![cell(vec![Block::Paragraph(ParagraphSpec {
                     children: vec![link_run("", vec![text_run("x")])],
                     ..ParagraphSpec::default()
                 })])],
@@ -5009,7 +5089,7 @@ fn cell_paragraph_errors_record_no_pages() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec {
+                children: vec![cell(vec![Block::Paragraph(ParagraphSpec {
                     children: vec![
                         blank_run(BlankWidth::ToEndOfLine, None, None, None),
                         text_run("x"),
@@ -5035,7 +5115,7 @@ fn cell_paragraph_indent_uses_cell_width() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![
+                children: vec![
                     cell(vec![Block::Paragraph(ParagraphSpec {
                         style: ParagraphStyle {
                             first_line_indent: nn(24.0),
@@ -5074,7 +5154,7 @@ fn cell_rich_taller_than_frame_does_not_continue() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec::text(
+                children: vec![cell(vec![Block::Paragraph(ParagraphSpec::text(
                     (),
                     "A\nB",
                 ))])],
@@ -5100,8 +5180,8 @@ fn cell_rich_taller_than_frame_does_not_continue() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::List(ListSpec {
-                    items: vec![plain_item(vec![para("A")]), plain_item(vec![para("B")])],
+                children: vec![cell(vec![Block::List(ListSpec {
+                    children: vec![plain_item(vec![para("A")]), plain_item(vec![para("B")])],
                     ..ListSpec::default()
                 })])],
             }],
@@ -5129,8 +5209,8 @@ fn cell_list_can_borrow_a_table_local() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::List(ListSpec {
-                    items: vec![plain_item(vec![para(label)])],
+                children: vec![cell(vec![Block::List(ListSpec {
+                    children: vec![plain_item(vec![para(label)])],
                     ..ListSpec::default()
                 })])],
             }],
@@ -5147,7 +5227,7 @@ fn cell_page(content: Vec<Block<()>>) -> RecordedPage {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(content)],
+                children: vec![cell(content)],
             }],
         )]),
     )
@@ -5202,16 +5282,21 @@ fn cell_add_matches_sugar() {
     assert!(spacer_page.ops().is_empty());
 
     let bullet_page = cell_page(vec![Block::List(ListSpec {
-        items: vec![plain_item(vec![para("a")])],
+        children: vec![plain_item(vec![para("a")])],
         ..ListSpec::default()
     })]);
     assert!(texts(&bullet_page).iter().any(|text| text == "a"));
 
     let roman_page = cell_page(vec![Block::List(ListSpec {
-        kind: ListKind::Ordered(Numbering::UpperRoman),
-        start: NonZeroU32::new(4).unwrap(),
-        items: vec![plain_item(vec![para("a")])],
-        ..ListSpec::default()
+        style: ListStyle {
+            kind: ListKind::Ordered {
+                numbering: Numbering::UpperRoman,
+                start: NonZeroU32::new(4).unwrap(),
+                format: MarkerFormat::default(),
+            },
+            ..ListStyle::default()
+        },
+        children: vec![plain_item(vec![para("a")])],
     })]);
     assert!(texts(&roman_page).iter().any(|text| text == "IV."));
 }
@@ -5227,7 +5312,7 @@ fn cell_add_image_matches_sugar() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Image(ImageSpec {
+                children: vec![cell(vec![Block::Image(ImageSpec {
                     image,
                     width: Some(pos(10.0)),
                     height: None,
@@ -5258,7 +5343,7 @@ fn table_build_cell_image_paints_when_added() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Image(ImageSpec {
+                children: vec![cell(vec![Block::Image(ImageSpec {
                     image,
                     width: Some(pos(10.0)),
                     height: None,
@@ -5303,7 +5388,7 @@ fn empty_cell_is_a_zero_height_slot() {
             vec![],
             vec![
                 TableRow {
-                    cells: vec![CellSpec::default()],
+                    children: vec![CellSpec::default()],
                 },
                 text_row(&["B"]),
             ],
@@ -5325,10 +5410,10 @@ fn cell_list_marker_at_cell_x() {
             vec![],
             vec![
                 TableRow {
-                    cells: vec![
+                    children: vec![
                         text_cell("L"),
                         cell(vec![Block::List(ListSpec {
-                            items: vec![
+                            children: vec![
                                 plain_item(vec![para("dot")]),
                                 plain_item(vec![bullet_list(vec![plain_item(vec![para(
                                     "child",
@@ -5339,15 +5424,21 @@ fn cell_list_marker_at_cell_x() {
                     ],
                 },
                 TableRow {
-                    cells: vec![
+                    children: vec![
                         text_cell("M"),
                         cell(vec![Block::List(ListSpec {
-                            kind: ListKind::Ordered(Numbering::Decimal),
-                            items: vec![
+                            style: ListStyle {
+                                kind: ListKind::Ordered {
+                                    numbering: Numbering::Decimal,
+                                    start: NonZeroU32::MIN,
+                                    format: MarkerFormat::default(),
+                                },
+                                ..ListStyle::default()
+                            },
+                            children: vec![
                                 plain_item(vec![para("one")]),
                                 marked_item("(c)", vec![para("custom")]),
                             ],
-                            ..ListSpec::default()
                         })]),
                     ],
                 },
@@ -5403,12 +5494,20 @@ fn cell_list_item_reports_the_innermost_forbidding_container() {
             ],
         ),
     );
-    reject("table cell", "keep together", Block::KeepTogether(vec![]));
+    reject(
+        "table cell",
+        "keep together",
+        Block::KeepTogether {
+            children: Vec::new(),
+        },
+    );
     reject("list item", "page break", Block::PageBreak);
     reject(
         "list item",
         "page break",
-        Block::KeepTogether(vec![Block::PageBreak]),
+        Block::KeepTogether {
+            children: vec![Block::PageBreak],
+        },
     );
 }
 
@@ -5424,7 +5523,7 @@ fn cell_rejects_forbidden_blocks_at_runtime() {
                 sec(vec![grid(
                     vec![],
                     vec![TableRow {
-                        cells: vec![cell(vec![block])],
+                        children: vec![cell(vec![block])],
                     }],
                 )]),
             )),
@@ -5445,7 +5544,12 @@ fn cell_rejects_forbidden_blocks_at_runtime() {
         ),
     );
     reject("table", grid(vec![], vec![text_row(&["a"])]));
-    reject("keep together", Block::KeepTogether(vec![para("a")]));
+    reject(
+        "keep together",
+        Block::KeepTogether {
+            children: vec![para("a")],
+        },
+    );
     reject("page break", Block::PageBreak);
 }
 
@@ -5461,7 +5565,7 @@ fn cell_matrix_sees_through_styled_anchor_and_inset() {
                 sec(vec![grid(
                     vec![],
                     vec![TableRow {
-                        cells: vec![cell(vec![block])],
+                        children: vec![cell(vec![block])],
                     }],
                 )]),
             )),
@@ -5489,15 +5593,16 @@ fn cell_matrix_sees_through_styled_anchor_and_inset() {
         Block::Anchor {
             id: "nested".into(),
             outline: None,
-            child: Box::new(grid(vec![], vec![text_row(&["a"])])),
+            children: vec![grid(vec![], vec![text_row(&["a"])])],
         },
     );
     reject(
         "keep together",
         Block::Inset {
-            left: NonNegative::ZERO,
-            right: NonNegative::ZERO,
-            children: vec![Block::KeepTogether(vec![para("a")])],
+            style: InsetStyle::default(),
+            children: vec![Block::KeepTogether {
+                children: vec![para("a")],
+            }],
         },
     );
 }
@@ -5519,7 +5624,7 @@ fn cell_child_error_skips_the_matrix_like_a_list_item() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![para("A"), columns()]), cell(vec![columns()])],
+                children: vec![cell(vec![para("A"), columns()]), cell(vec![columns()])],
             }],
         )])],
     )
@@ -5552,7 +5657,7 @@ fn cell_allows_image_canvas_and_a_list() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![
+                children: vec![cell(vec![
                     Block::Image(ImageSpec {
                         image,
                         width: Some(pos(10.0)),
@@ -5568,7 +5673,7 @@ fn cell_allows_image_canvas_and_a_list() {
                         }],
                     }),
                     Block::List(ListSpec {
-                        items: vec![plain_item(vec![para("A")])],
+                        children: vec![plain_item(vec![para("A")])],
                         ..ListSpec::default()
                     }),
                 ])],
@@ -5621,8 +5726,8 @@ fn cell_list_narrower_than_marker_is_invalid_geometry() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::List(ListSpec {
-                    items: vec![plain_item(vec![para("A")])],
+                children: vec![cell(vec![Block::List(ListSpec {
+                    children: vec![plain_item(vec![para("A")])],
                     ..ListSpec::default()
                 })])],
             }],
@@ -5684,7 +5789,10 @@ fn table_tracks_fill_the_frame_and_keep_fixed_width() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
         sec(vec![Block::Table(TableSpec {
-            tracks: Some(vec![Track::Fixed(pos(40.0)), Track::Auto]),
+            style: TableStyle {
+                tracks: Some(vec![Track::Fixed(pos(40.0)), Track::Auto]),
+                ..TableStyle::default()
+            },
             body: vec![text_row(&["A", "B"])],
             ..TableSpec::default()
         })]),
@@ -5707,7 +5815,7 @@ fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec::text((), "A A"))])],
+                children: vec![cell(vec![Block::Paragraph(ParagraphSpec::text((), "A A"))])],
             }],
         )]),
     )
@@ -5716,9 +5824,12 @@ fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
     let padded = font_pages(
         page,
         sec(vec![Block::Table(TableSpec {
-            cell_padding: nn(width),
+            style: TableStyle {
+                cell_padding: nn(width),
+                ..TableStyle::default()
+            },
             body: vec![TableRow {
-                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec::text((), "A A"))])],
+                children: vec![cell(vec![Block::Paragraph(ParagraphSpec::text((), "A A"))])],
             }],
             ..TableSpec::default()
         })]),
@@ -5746,9 +5857,12 @@ fn table_zero_border_draws_no_stroke_and_a_positive_border_does() {
     let stroked = font_pages(
         page,
         sec(vec![Block::Table(TableSpec {
-            border: TableBorder {
-                width: nn(0.5),
-                ..TableBorder::default()
+            style: TableStyle {
+                border: TableBorder {
+                    width: nn(0.5),
+                    ..TableBorder::default()
+                },
+                ..TableStyle::default()
             },
             body: vec![text_row(&["A"])],
             ..TableSpec::default()
@@ -5770,8 +5884,8 @@ fn columns_fixed_plus_auto_gives_the_remainder_to_auto() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
         sec(vec![Block::Columns(ColumnsSpec {
-            gap: nn(10.0),
-            columns: vec![fixed_col(50.0, vec![para("L")]), auto_col(vec![para("R")])],
+            style: ColumnsStyle { gap: nn(10.0) },
+            children: vec![fixed_col(50.0, vec![para("L")]), auto_col(vec![para("R")])],
         })]),
     )
     .unwrap()
@@ -5788,8 +5902,8 @@ fn columns_gap_zero_places_the_second_column_against_the_first() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
         sec(vec![Block::Columns(ColumnsSpec {
-            gap: NonNegative::ZERO,
-            columns: vec![fixed_col(80.0, vec![para("L")]), auto_col(vec![para("R")])],
+            style: ColumnsStyle::default(),
+            children: vec![fixed_col(80.0, vec![para("L")]), auto_col(vec![para("R")])],
         })]),
     )
     .unwrap()
@@ -5823,10 +5937,13 @@ fn ratio_rejects_a_weight_that_is_not_positive_and_finite() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
         sec(vec![Block::Table(TableSpec {
-            tracks: Some(vec![
-                Track::Ratio(Ratio::new(1.0).unwrap()),
-                Track::Ratio(Ratio::new(2.0).unwrap()),
-            ]),
+            style: TableStyle {
+                tracks: Some(vec![
+                    Track::Ratio(Ratio::new(1.0).unwrap()),
+                    Track::Ratio(Ratio::new(2.0).unwrap()),
+                ]),
+                ..TableStyle::default()
+            },
             body: vec![text_row(&["A", "B"])],
             ..TableSpec::default()
         })]),
@@ -5844,8 +5961,8 @@ fn auto_with_ratio_fails_on_columns_and_table_tracks() {
     let columns = font_pages(
         PageSize::A4,
         sec(vec![Block::Columns(ColumnsSpec {
-            gap: nn(12.0),
-            columns: vec![auto_col(vec![para("A")]), ratio_col(1.0, vec![para("B")])],
+            style: ColumnsStyle { gap: nn(12.0) },
+            children: vec![auto_col(vec![para("A")]), ratio_col(1.0, vec![para("B")])],
         })]),
     );
     assert_eq!(
@@ -5857,7 +5974,10 @@ fn auto_with_ratio_fails_on_columns_and_table_tracks() {
     let table = font_pages(
         PageSize::A4,
         sec(vec![Block::Table(TableSpec {
-            tracks: Some(vec![Track::Auto, Track::Ratio(Ratio::new(1.0).unwrap())]),
+            style: TableStyle {
+                tracks: Some(vec![Track::Auto, Track::Ratio(Ratio::new(1.0).unwrap())]),
+                ..TableStyle::default()
+            },
             body: vec![text_row(&["A", "B"])],
             ..TableSpec::default()
         })]),
@@ -5878,7 +5998,10 @@ fn table_tracks_length_must_match_the_first_row() {
     let result = font_pages(
         PageSize::A4,
         sec(vec![Block::Table(TableSpec {
-            tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
+            style: TableStyle {
+                tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
+                ..TableStyle::default()
+            },
             body: vec![text_row(&["A", "B"])],
             ..TableSpec::default()
         })]),
@@ -6392,18 +6515,23 @@ fn cell_inset_draws_after_the_cell_padding() {
     let page = &font_pages(
         PageSize::A4,
         sec(vec![Block::Table(TableSpec {
+            style: TableStyle {
+                cell_padding: nn(6.0),
+                tracks: Some(vec![Track::Fixed(pos(160.0))]),
+                ..TableStyle::default()
+            },
             body: vec![TableRow {
-                cells: vec![CellSpec {
+                children: vec![CellSpec {
                     children: vec![Block::Inset {
-                        left: nn(8.0),
-                        right: NonNegative::ZERO,
+                        style: InsetStyle {
+                            left: nn(8.0),
+                            right: NonNegative::ZERO,
+                        },
                         children: vec![Block::Paragraph(ParagraphSpec::text((), "Net"))],
                     }],
                     ..CellSpec::default()
                 }],
             }],
-            cell_padding: nn(6.0),
-            tracks: Some(vec![Track::Fixed(pos(160.0))]),
             ..TableSpec::default()
         })]),
     )
@@ -6470,7 +6598,7 @@ fn inset_page_break_reports_the_enclosing_container() {
                     vec![grid(
                         vec![],
                         vec![TableRow {
-                            cells: vec![cell(vec![Block::Spacer(nn(4.0))])],
+                            children: vec![cell(vec![Block::Spacer(nn(4.0))])],
                         }],
                     )],
                 )]),
@@ -6493,11 +6621,10 @@ fn cell_inset_list_item_columns_report_the_table_cell() {
             vec![sec(vec![grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![Block::Inset {
-                        left: nn(0.0),
-                        right: nn(0.0),
+                    children: vec![cell(vec![Block::Inset {
+                        style: InsetStyle::default(),
                         children: vec![Block::List(ListSpec {
-                            items: vec![plain_item(vec![gap_columns(
+                            children: vec![plain_item(vec![gap_columns(
                                 0.0,
                                 vec![
                                     auto_col(vec![Block::Spacer(nn(1.0))]),

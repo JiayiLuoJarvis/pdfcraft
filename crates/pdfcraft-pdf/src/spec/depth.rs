@@ -49,25 +49,26 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
                         .map(|span| (Node::Span(span), depth)),
                 );
             }
-            Block::KeepTogether(children)
+            Block::KeepTogether { children }
             | Block::Styled { children, .. }
-            | Block::Inset { children, .. } => {
+            | Block::Inset { children, .. }
+            | Block::Anchor { children, .. } => {
                 stack.extend(children.iter().map(|child| (Node::Block(child), inner)));
             }
-            Block::Anchor { child, .. } => stack.push((Node::Block(child), inner)),
             Block::Columns(columns) => {
-                for column in &columns.columns {
+                for column in &columns.children {
                     stack.extend(
                         column
-                            .blocks
+                            .children
                             .iter()
                             .map(|child| (Node::Block(child), inner)),
                     );
                 }
             }
             Block::Table(table) => {
-                for row in table.header.iter().chain(&table.body) {
-                    for cell in &row.cells {
+                let headers = table.header.iter().flat_map(|header| &header.rows);
+                for row in headers.chain(&table.body) {
+                    for cell in &row.children {
                         stack.extend(
                             cell.children
                                 .iter()
@@ -93,8 +94,12 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
 }
 
 fn push_items<'a, K>(list: &'a ListSpec<K>, depth: u32, stack: &mut Vec<(Node<'a, K>, u32)>) {
-    for item in &list.items {
-        stack.extend(item.blocks.iter().map(|child| (Node::Block(child), depth)));
+    for item in &list.children {
+        stack.extend(
+            item.children
+                .iter()
+                .map(|child| (Node::Block(child), depth)),
+        );
     }
 }
 
@@ -117,27 +122,28 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                     Block::Paragraph(paragraph) => {
                         stack.extend(paragraph.children.into_iter().map(Owned::Span));
                     }
-                    Block::KeepTogether(children)
+                    Block::KeepTogether { children }
                     | Block::Styled { children, .. }
-                    | Block::Inset { children, .. } => {
+                    | Block::Inset { children, .. }
+                    | Block::Anchor { children, .. } => {
                         stack.extend(children.into_iter().map(Owned::Block));
                     }
-                    Block::Anchor { child, .. } => stack.push(Owned::Block(*child)),
                     Block::Columns(columns) => {
-                        for column in columns.columns {
-                            stack.extend(column.blocks.into_iter().map(Owned::Block));
+                        for column in columns.children {
+                            stack.extend(column.children.into_iter().map(Owned::Block));
                         }
                     }
                     Block::Table(table) => {
-                        for row in table.header.into_iter().chain(table.body) {
-                            for cell in row.cells {
+                        let headers = table.header.into_iter().flat_map(|header| header.rows);
+                        for row in headers.chain(table.body) {
+                            for cell in row.children {
                                 stack.extend(cell.children.into_iter().map(Owned::Block));
                             }
                         }
                     }
                     Block::List(list) => {
-                        for item in list.items {
-                            stack.extend(item.blocks.into_iter().map(Owned::Block));
+                        for item in list.children {
+                            stack.extend(item.children.into_iter().map(Owned::Block));
                         }
                     }
                     Block::Spacer(_)
@@ -154,5 +160,55 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::NonNegative;
+
+    #[test]
+    fn anchor_depth_walks_every_child() {
+        let sections: Vec<SectionSpec<()>> = vec![SectionSpec {
+            body: vec![Block::Anchor {
+                id: "outer".into(),
+                outline: None,
+                children: vec![
+                    Block::Spacer(NonNegative::ZERO),
+                    Block::Anchor {
+                        id: "inner".into(),
+                        outline: None,
+                        children: vec![Block::Spacer(NonNegative::ZERO)],
+                    },
+                ],
+            }],
+            ..SectionSpec::default()
+        }];
+        let error = check_depth(&sections, 1).unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::LimitExceeded {
+                kind: LimitKind::NestingDepth,
+                value: 2,
+                max: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn dismantle_drops_a_deep_anchor_chain_iteratively() {
+        let mut block: Block<()> = Block::Spacer(NonNegative::ZERO);
+        for level in 0..10_000 {
+            block = Block::Anchor {
+                id: level.to_string(),
+                outline: None,
+                children: vec![block],
+            };
+        }
+        dismantle(vec![SectionSpec {
+            body: vec![block],
+            ..SectionSpec::default()
+        }]);
     }
 }

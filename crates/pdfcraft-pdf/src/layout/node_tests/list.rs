@@ -642,8 +642,13 @@ fn item_rejects_page_breaks_inside_groups_stacks_and_anchors() {
         FlowNode::KeepTogether(KeepTogetherNode::Open(vec![FlowNode::PageBreak])),
         FlowNode::Anchor(AnchorNode {
             id: "a".to_owned(),
-            child: Box::new(FlowNode::PageBreak),
-            marked: false,
+            children: vec![
+                FlowNode::Spacer(SpacerNode {
+                    height: NonNegative::ZERO,
+                }),
+                FlowNode::PageBreak,
+            ],
+            landed: false,
         }),
     ];
     for node in wrapped {
@@ -1312,8 +1317,8 @@ fn marker_matches_anchor_and_keep_together_paragraphs() {
     let cases = [
         FlowNode::Anchor(AnchorNode {
             id: "a".into(),
-            child: Box::new(text("A", &style)),
-            marked: false,
+            children: vec![text("A", &style)],
+            landed: false,
         }),
         FlowNode::KeepTogether(KeepTogetherNode::Open(vec![text("A", &style)])),
     ];
@@ -1479,8 +1484,8 @@ fn columns_table_anchor_and_list_report_first_baseline() {
     let anchor = fit_fragment(
         FlowNode::Anchor(AnchorNode {
             id: "a".into(),
-            child: Box::new(text("A", &style)),
-            marked: false,
+            children: vec![text("A", &style)],
+            landed: false,
         }),
         &mut fonts,
     );

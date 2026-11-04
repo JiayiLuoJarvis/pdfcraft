@@ -9,7 +9,7 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
+    ImageSpec, Resources, RunStyle, SectionSpec, TableHeader, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
@@ -86,19 +86,26 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
                 Block::paragraph((), BODY_2),
                 Block::paragraph((), MIXED),
                 Block::Table(TableSpec {
-                    header: vec![TableRow {
-                        cells: vec![text_cell("项目"), text_cell("金额"), text_cell("交货日")],
-                    }],
+                    header: Some(TableHeader {
+                        repeat: true,
+                        rows: vec![TableRow {
+                            children: vec![
+                                text_cell("项目"),
+                                text_cell("金额"),
+                                text_cell("交货日"),
+                            ],
+                        }],
+                    }),
                     body: vec![
                         TableRow {
-                            cells: vec![
+                            children: vec![
                                 text_cell("设备"),
                                 text_cell("12000"),
                                 text_cell("2026-10-31"),
                             ],
                         },
                         TableRow {
-                            cells: vec![
+                            children: vec![
                                 text_cell("服务"),
                                 text_cell("8000"),
                                 text_cell("2026-11-15"),

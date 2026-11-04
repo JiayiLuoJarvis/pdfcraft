@@ -16,10 +16,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, ColumnSpec, ColumnsSpec,
-    FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, ParagraphSpec,
-    ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow, TableSpec,
-    TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, CellStyle, ColumnSpec,
+    ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily, FontRegistry, HLineSpec,
+    ImageRef, ImageSpec, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    TableBorder, TableHeader, TableRow, TableSpec, TableStyle, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -163,15 +163,17 @@ fn rule(
 
 fn ratio_col(weight: f32, blocks: Vec<Block<()>>) -> Result<ColumnSpec<()>> {
     Ok(ColumnSpec {
-        width: Track::Ratio(Ratio::new(weight).map_err(pdfcraft_pdf::Errors::from)?),
-        blocks,
+        style: ColumnStyle {
+            width: Track::Ratio(Ratio::new(weight).map_err(pdfcraft_pdf::Errors::from)?),
+        },
+        children: blocks,
     })
 }
 
 fn filled(content: Vec<Block<()>>, fill: Color) -> CellSpec<()> {
     CellSpec {
+        style: CellStyle { fill: Some(fill) },
         children: content,
-        fill: Some(fill),
         ..CellSpec::default()
     }
 }
@@ -210,8 +212,8 @@ fn bill_body(logo: ImageRef, mark: ImageRef, diamond: ImageRef) -> Result<Vec<Bl
 fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block<()>>> {
     Ok(vec![
         Block::Columns(ColumnsSpec {
-            gap: nn(12.0)?,
-            columns: vec![
+            style: ColumnsStyle { gap: nn(12.0)? },
+            children: vec![
                 ratio_col(
                     1.0,
                     vec![
@@ -227,8 +229,10 @@ fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block<()>>> {
                     ],
                 )?,
                 ColumnSpec {
-                    width: Track::Fixed(pos(56.0)?),
-                    blocks: vec![Block::Image(ImageSpec {
+                    style: ColumnStyle {
+                        width: Track::Fixed(pos(56.0)?),
+                    },
+                    children: vec![Block::Image(ImageSpec {
                         image: mark,
                         width: Some(pos(52.0)?),
                         height: None,
@@ -263,14 +267,14 @@ fn bill_to() -> Result<Vec<Block<()>>> {
 
 fn service_table() -> Result<Vec<Block<()>>> {
     let mut body = vec![TableRow {
-        cells: vec![
+        children: vec![
             para_cell("綜合服務費用（含代支）", 11.0, BLACK)?,
             para_cell("505.00 HKD", 10.5, BLACK)?,
         ],
     }];
     for _ in 0..3 {
         body.push(TableRow {
-            cells: vec![
+            children: vec![
                 CellSpec {
                     children: vec![Block::Spacer(nn(18.0)?)],
                     ..CellSpec::default()
@@ -284,8 +288,8 @@ fn service_table() -> Result<Vec<Block<()>>> {
     }
     Ok(vec![
         Block::Columns(ColumnsSpec {
-            gap: nn(12.0)?,
-            columns: vec![
+            style: ColumnsStyle { gap: nn(12.0)? },
+            children: vec![
                 ratio_col(
                     1.0,
                     vec![styled(12.0, NAVY, vec![line("Service Summary 服務概要")])?],
@@ -302,26 +306,31 @@ fn service_table() -> Result<Vec<Block<()>>> {
         }),
         Block::Spacer(nn(8.0)?),
         Block::Table(TableSpec {
-            header: vec![TableRow {
-                cells: vec![
-                    filled(
-                        para_cell("Key item (s) / outlay (s) 主要項目/代支", 11.0, WHITE)?.children,
-                        NAVY,
-                    ),
-                    filled(para_cell("Amt. 金額", 10.5, WHITE)?.children, NAVY),
-                ],
-            }],
-            body,
-            tracks: Some(vec![
-                Track::Ratio(Ratio::new(2.2).map_err(pdfcraft_pdf::Errors::from)?),
-                Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
-            ]),
-            cell_padding: nn(8.0)?,
-            border: TableBorder {
-                width: nn(0.66)?,
-                color: GRAY,
+            style: TableStyle {
+                tracks: Some(vec![
+                    Track::Ratio(Ratio::new(2.2).map_err(pdfcraft_pdf::Errors::from)?),
+                    Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
+                ]),
+                cell_padding: nn(8.0)?,
+                border: TableBorder {
+                    width: nn(0.66)?,
+                    color: GRAY,
+                },
             },
-            ..TableSpec::default()
+            header: Some(TableHeader {
+                repeat: true,
+                rows: vec![TableRow {
+                    children: vec![
+                        filled(
+                            para_cell("Key item (s) / outlay (s) 主要項目/代支", 11.0, WHITE)?
+                                .children,
+                            NAVY,
+                        ),
+                        filled(para_cell("Amt. 金額", 10.5, WHITE)?.children, NAVY),
+                    ],
+                }],
+            }),
+            body,
         }),
         Block::Spacer(nn(8.0)?),
         rule(None, Alignment::End, 2.5, 0.0, 8.0)?,
@@ -354,7 +363,7 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
     let mut body = Vec::new();
     for (en, zh) in rows {
         body.push(TableRow {
-            cells: vec![
+            children: vec![
                 CellSpec {
                     children: vec![Block::Image(ImageSpec {
                         image: diamond,
@@ -370,32 +379,36 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
         });
     }
     Ok(Block::Table(TableSpec {
-        header: vec![TableRow {
-            cells: vec![
-                filled(vec![Block::Spacer(nn(1.0)?)], NAVY),
-                filled(
-                    para_cell("Payment by bank transfer (T/T) and other info", 8.0, WHITE)?
-                        .children,
-                    NAVY,
-                ),
-                filled(
-                    para_cell("以電匯付款及其他注意事項", 8.0, WHITE)?.children,
-                    NAVY,
-                ),
-            ],
-        }],
-        body,
-        tracks: Some(vec![
-            Track::Fixed(pos(22.0)?),
-            Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
-            Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
-        ]),
-        cell_padding: nn(4.0)?,
-        border: TableBorder {
-            width: nn(0.66)?,
-            color: GRAY,
+        style: TableStyle {
+            tracks: Some(vec![
+                Track::Fixed(pos(22.0)?),
+                Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
+                Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
+            ]),
+            cell_padding: nn(4.0)?,
+            border: TableBorder {
+                width: nn(0.66)?,
+                color: GRAY,
+            },
         },
-        ..TableSpec::default()
+        header: Some(TableHeader {
+            repeat: true,
+            rows: vec![TableRow {
+                children: vec![
+                    filled(vec![Block::Spacer(nn(1.0)?)], NAVY),
+                    filled(
+                        para_cell("Payment by bank transfer (T/T) and other info", 8.0, WHITE)?
+                            .children,
+                        NAVY,
+                    ),
+                    filled(
+                        para_cell("以電匯付款及其他注意事項", 8.0, WHITE)?.children,
+                        NAVY,
+                    ),
+                ],
+            }],
+        }),
+        body,
     }))
 }
 
@@ -406,8 +419,8 @@ fn cheque_notes() -> Result<Vec<Block<()>>> {
             9.0,
             NAVY,
             vec![Block::Columns(ColumnsSpec {
-                gap: nn(16.0)?,
-                columns: vec![
+                style: ColumnsStyle { gap: nn(16.0)? },
+                children: vec![
                     ratio_col(
                         1.0,
                         vec![

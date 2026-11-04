@@ -11,9 +11,9 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry, OutlineEntry,
-    ParagraphSpec, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow, TableSpec,
-    TextRun,
+    BandFn, BandSlot, BandSpec, Block, CellSpec, CellStyle, FontFace, FontFamily, FontRegistry,
+    InsetStyle, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, Span, TableBorder,
+    TableHeader, TableRow, TableSpec, TableStyle, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
@@ -60,10 +60,14 @@ fn para(text: &str) -> Block<()> {
 }
 
 fn anchor(id: &str, outline: Option<OutlineEntry>, child: Block<()>) -> Block<()> {
+    anchor_children(id, outline, vec![child])
+}
+
+fn anchor_children(id: &str, outline: Option<OutlineEntry>, children: Vec<Block<()>>) -> Block<()> {
     Block::Anchor {
         id: id.into(),
         outline,
-        child: Box::new(child),
+        children,
     }
 }
 
@@ -139,6 +143,27 @@ fn uri_hits(rendered: &Rendered) -> Vec<String> {
         .collect()
 }
 
+fn glyph_texts(rendered: &Rendered) -> Vec<String> {
+    rendered
+        .pages()
+        .iter()
+        .flat_map(pdfcraft_pdf::RecordedPage::ops)
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            CanvasCommand::SetDocumentInfo(_)
+            | CanvasCommand::StartPage(_)
+            | CanvasCommand::FinishPage
+            | CanvasCommand::FillPath { .. }
+            | CanvasCommand::StrokePath { .. }
+            | CanvasCommand::DrawImage { .. }
+            | CanvasCommand::AnnotateLink { .. }
+            | CanvasCommand::PushTransform { .. }
+            | CanvasCommand::PopTransform
+            | _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn uri_links_still_record_as_uri() {
     if skip_without_font() {
@@ -180,8 +205,10 @@ fn inset_shifts_anchor_x() {
     }
     let rendered = lay(vec![
         Block::Inset {
-            left: NonNegative::pt(20.0).unwrap(),
-            right: NonNegative::ZERO,
+            style: InsetStyle {
+                left: NonNegative::pt(20.0).unwrap(),
+                right: NonNegative::ZERO,
+            },
             children: vec![anchor("sec", None, para("Section"))],
         },
         Block::Paragraph(ParagraphSpec {
@@ -217,6 +244,162 @@ fn spacer_anchor_is_a_valid_destination() {
 }
 
 #[test]
+fn anchor_skips_zero_height_children_and_lands_on_positive_spacer() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = lay(vec![
+        anchor_children(
+            "gap",
+            None,
+            vec![
+                Block::Spacer(NonNegative::ZERO),
+                Block::Spacer(NonNegative::pt(24.0).unwrap()),
+                para("Section"),
+            ],
+        ),
+        Block::Paragraph(ParagraphSpec {
+            children: vec![link_anchor("gap", "to gap")],
+            ..ParagraphSpec::default()
+        }),
+    ])
+    .unwrap();
+    let hits = xyz_destinations(&rendered);
+    assert_eq!(hits, [(0, 48.0, 48.0)]);
+}
+
+#[test]
+fn anchor_page_break_uses_body_pagination_and_lands_after_it() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = lay(vec![
+        para("before"),
+        anchor_children("next", None, vec![Block::PageBreak, para("after")]),
+        Block::Paragraph(ParagraphSpec {
+            children: vec![link_anchor("next", "jump")],
+            ..ParagraphSpec::default()
+        }),
+    ])
+    .unwrap();
+    let hits = xyz_destinations(&rendered);
+    assert_eq!(rendered.pages().len(), 2);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].0, 1);
+    assert!(pt_near(hits[0].2, 48.0));
+}
+
+#[test]
+fn anchor_consecutive_page_breaks_preserve_the_blank_page() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = lay(vec![
+        para("before"),
+        anchor_children(
+            "next",
+            None,
+            vec![Block::PageBreak, Block::PageBreak, para("after")],
+        ),
+        Block::Paragraph(ParagraphSpec {
+            children: vec![link_anchor("next", "jump")],
+            ..ParagraphSpec::default()
+        }),
+    ])
+    .unwrap();
+    assert_eq!(rendered.pages().len(), 3);
+    assert!(rendered.pages()[1].ops().is_empty());
+    assert_eq!(xyz_destinations(&rendered)[0].0, 2);
+}
+
+#[test]
+fn nested_anchors_land_together() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = lay(vec![
+        anchor_children(
+            "outer",
+            None,
+            vec![anchor_children(
+                "inner",
+                None,
+                vec![Block::PageBreak, para("after")],
+            )],
+        ),
+        Block::Paragraph(ParagraphSpec {
+            children: vec![link_anchor("outer", "outer"), link_anchor("inner", "inner")],
+            ..ParagraphSpec::default()
+        }),
+    ])
+    .unwrap();
+    let hits = xyz_destinations(&rendered);
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0], hits[1]);
+}
+
+#[test]
+fn zero_inset_and_top_level_anchor_have_identical_output() {
+    if skip_without_font() {
+        return;
+    }
+    let make = |wrapped: bool| {
+        let anchored = anchor_children(
+            "same",
+            None,
+            vec![Block::Spacer(NonNegative::ZERO), para("Section")],
+        );
+        let anchored = if wrapped {
+            Block::Inset {
+                style: InsetStyle::default(),
+                children: vec![anchored],
+            }
+        } else {
+            anchored
+        };
+        lay(vec![
+            anchored,
+            Block::Paragraph(ParagraphSpec {
+                children: vec![link_anchor("same", "jump")],
+                ..ParagraphSpec::default()
+            }),
+        ])
+        .unwrap()
+    };
+    assert_eq!(make(false).pages()[0].ops(), make(true).pages()[0].ops());
+}
+
+#[test]
+fn nested_anchor_page_break_remains_rejected() {
+    if skip_without_font() {
+        return;
+    }
+    for wrapper in [
+        Block::Inset {
+            style: InsetStyle::default(),
+            children: vec![anchor_children(
+                "inset",
+                None,
+                vec![Block::PageBreak, para("after")],
+            )],
+        },
+        Block::KeepTogether {
+            children: vec![anchor_children(
+                "kept",
+                None,
+                vec![Block::PageBreak, para("after")],
+            )],
+        },
+    ] {
+        let error = lay(vec![wrapper]).unwrap_err();
+        assert_eq!(
+            error.first().kind,
+            ErrorKind::InvalidGeometry(pdfcraft_pdf::GeometryKind::NestedPageBreak)
+        );
+    }
+}
+
+#[test]
 fn unknown_anchor_fails() {
     if skip_without_font() {
         return;
@@ -238,7 +421,7 @@ fn empty_anchor_id_fails() {
     let Err(err) = lay(vec![Block::Anchor {
         id: String::new(),
         outline: None,
-        child: Box::new(para("x")),
+        children: vec![para("x")],
     }]) else {
         panic!("expected error");
     };
@@ -265,9 +448,21 @@ fn anchor_without_fragment_fails() {
         return;
     }
     let cases = [
+        anchor_children("empty", None, Vec::new()),
         anchor("e0", None, Block::Spacer(NonNegative::ZERO)),
         anchor("e1", None, Block::PageBreak),
-        anchor("e2", None, Block::KeepTogether(Vec::new())),
+        anchor_children(
+            "e-break",
+            None,
+            vec![Block::Spacer(NonNegative::ZERO), Block::PageBreak],
+        ),
+        anchor(
+            "e2",
+            None,
+            Block::KeepTogether {
+                children: Vec::new(),
+            },
+        ),
     ];
     for case in cases {
         let Err(err) = lay(vec![case]) else {
@@ -275,6 +470,19 @@ fn anchor_without_fragment_fails() {
         };
         assert_eq!(err.first().kind, ErrorKind::AnchorWithoutFragment);
     }
+}
+
+#[test]
+fn empty_anchor_does_not_land_on_a_later_sibling() {
+    if skip_without_font() {
+        return;
+    }
+    let error = lay(vec![
+        anchor_children("empty", None, vec![Block::Spacer(NonNegative::ZERO)]),
+        para("later"),
+    ])
+    .unwrap_err();
+    assert_eq!(error.first().kind, ErrorKind::AnchorWithoutFragment);
 }
 
 #[test]
@@ -466,18 +674,18 @@ fn repeating_header_anchor_keeps_first_destination() {
         return;
     }
     let cell = |blocks: Vec<Block<()>>| CellSpec {
+        style: CellStyle::default(),
         children: blocks,
         col_span: std::num::NonZeroU16::new(1).unwrap(),
         row_span: std::num::NonZeroU16::new(1).unwrap(),
-        fill: None,
     };
     let header_anchor = Block::Anchor {
         id: "hdr".into(),
         outline: None,
-        child: Box::new(Block::paragraph((), "H")),
+        children: vec![Block::paragraph((), "H")],
     };
     let row = |text: &str| TableRow {
-        cells: vec![cell(vec![Block::paragraph((), text)])],
+        children: vec![cell(vec![Block::paragraph((), text)])],
     };
     // One A4 body is about 746 pt under 48 pt margins. Line height is at least
     // 12 pt * 1.2, so 40 rows can still fit. 80 rows cannot, on any face.
@@ -486,14 +694,18 @@ fn repeating_header_anchor_keeps_first_destination() {
         body_rows.push(row(&format!("row{i}")));
     }
     let table = Block::Table(TableSpec {
-        tracks: Some(vec![Track::Auto]),
-        header: vec![TableRow {
-            cells: vec![cell(vec![header_anchor])],
-        }],
+        style: TableStyle {
+            tracks: Some(vec![Track::Auto]),
+            cell_padding: NonNegative::ZERO,
+            border: TableBorder::default(),
+        },
+        header: Some(TableHeader {
+            repeat: true,
+            rows: vec![TableRow {
+                children: vec![cell(vec![header_anchor])],
+            }],
+        }),
         body: body_rows,
-        repeat_header: true,
-        cell_padding: NonNegative::ZERO,
-        border: TableBorder::default(),
     });
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -521,4 +733,60 @@ fn repeating_header_anchor_keeps_first_destination() {
     let hits = xyz_destinations(&rendered);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].0, 0, "first-wins must keep page 0 destination");
+}
+
+#[test]
+fn empty_table_header_is_equivalent_to_none() {
+    if skip_without_font() {
+        return;
+    }
+    let make = |header| {
+        lay(vec![Block::Table(TableSpec {
+            header,
+            body: vec![TableRow {
+                children: vec![CellSpec {
+                    children: vec![para("body")],
+                    ..CellSpec::default()
+                }],
+            }],
+            ..TableSpec::default()
+        })])
+        .unwrap()
+    };
+    let none = make(None);
+    let empty = make(Some(TableHeader {
+        repeat: true,
+        rows: Vec::new(),
+    }));
+    assert_eq!(none.pages()[0].ops(), empty.pages()[0].ops());
+}
+
+#[test]
+fn non_repeating_table_header_only_paints_once() {
+    if skip_without_font() {
+        return;
+    }
+    let row = |text: String| TableRow {
+        children: vec![CellSpec {
+            children: vec![para(&text)],
+            ..CellSpec::default()
+        }],
+    };
+    let rendered = lay(vec![Block::Table(TableSpec {
+        header: Some(TableHeader {
+            repeat: false,
+            rows: vec![row("HEADER".into())],
+        }),
+        body: (0..80).map(|index| row(format!("row{index}"))).collect(),
+        ..TableSpec::default()
+    })])
+    .unwrap();
+    assert!(rendered.pages().len() >= 2);
+    assert_eq!(
+        glyph_texts(&rendered)
+            .iter()
+            .filter(|text| text.as_str() == "HEADER")
+            .count(),
+        1
+    );
 }

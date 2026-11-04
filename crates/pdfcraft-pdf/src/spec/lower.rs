@@ -42,8 +42,8 @@ use super::{
     Alignment, BandCallback, BandFn, BandFnInner, BandInset, BandMark, BandSlot, BandSpec,
     BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CellSpec, ColumnsSpec,
     DocumentSpec, HLineSpec, ImageRef, ImageSpec, LayerMark, LayerShape, ListKind, ListSpec,
-    OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
-    SectionSpec, Span, TextRun,
+    MarkerFormat, OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, ParagraphStyle, Resources,
+    RunStyle, SectionSpec, Span, TextRun,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
@@ -566,24 +566,25 @@ fn lower_blocks<K: FontKey>(
             }
             Block::Spacer(height) => nodes.push(FlowNode::Spacer(SpacerNode { height })),
             Block::PageBreak => nodes.push(FlowNode::PageBreak),
-            Block::KeepTogether(children) => {
+            Block::KeepTogether { children } => {
                 let child = lower_blocks(children, env, anchors, errors);
                 nodes.push(FlowNode::KeepTogether(KeepTogetherNode::Open(child)));
             }
-            Block::Anchor { id, outline, child } => {
-                if let Some(node) = lower_anchor_block(id, outline, *child, env, anchors, errors) {
+            Block::Anchor {
+                id,
+                outline,
+                children,
+            } => {
+                if let Some(node) = lower_anchor_block(id, outline, children, env, anchors, errors)
+                {
                     nodes.push(node);
                 }
             }
-            Block::Inset {
-                left,
-                right,
-                children,
-            } => {
-                let child = sole_or_stack(lower_blocks(children, env, anchors, errors));
+            Block::Inset { style, children } => {
+                let child = flow::sole_or_stack(lower_blocks(children, env, anchors, errors));
                 nodes.push(FlowNode::Inset(InsetNode {
-                    left,
-                    right,
+                    left: style.left,
+                    right: style.right,
                     child: Box::new(child),
                 }));
             }
@@ -677,29 +678,20 @@ fn lower_paragraph<K: FontKey>(
     Some(FlowNode::Text(TextNode::from_items(items, frame)))
 }
 
-fn sole_or_stack(nodes: Vec<FlowNode>) -> FlowNode {
-    match <[FlowNode; 1]>::try_from(nodes) {
-        Ok([node]) => node,
-        Err(nodes) if nodes.is_empty() => FlowNode::Stack(Vec::new()),
-        Err(nodes) => FlowNode::Stack(nodes),
-    }
-}
-
 fn lower_anchor_block<K: FontKey>(
     id: String,
     outline: Option<OutlineEntry>,
-    child: Block<K>,
+    children: Vec<Block<K>>,
     env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
     let id = anchors.register(id, outline, env.at, errors)?;
-    let lowered = lower_blocks(vec![child], env, anchors, errors);
-    let child_node = sole_or_stack(lowered);
+    let children = lower_blocks(children, env, anchors, errors);
     Some(FlowNode::Anchor(AnchorNode {
         id,
-        child: Box::new(child_node),
-        marked: false,
+        children,
+        landed: false,
     }))
 }
 
@@ -909,8 +901,8 @@ fn lower_columns<K: FontKey>(
 ) -> Option<FlowNode> {
     let mut bag = ErrorBag::default();
     let mut cols = Vec::new();
-    for column in spec.columns {
-        let width = match column.width {
+    for column in spec.children {
+        let width = match column.style.width {
             Track::Fixed(width) => ColumnWidth::Fixed(width),
             Track::Ratio(ratio) => match LayoutRatio::new(ratio.get()) {
                 Ok(ratio) => ColumnWidth::Ratio(ratio),
@@ -922,7 +914,7 @@ fn lower_columns<K: FontKey>(
             Track::Auto => ColumnWidth::Auto,
         };
         let mark = bag.mark();
-        let nodes = lower_blocks(column.blocks, env, anchors, &mut bag);
+        let nodes = lower_blocks(column.children, env, anchors, &mut bag);
         if bag.clean_since(mark) {
             cols.push((width, nodes));
         }
@@ -936,7 +928,7 @@ fn lower_columns<K: FontKey>(
     if failed {
         return None;
     }
-    match ColumnsNode::new(spec.gap, cols) {
+    match ColumnsNode::new(spec.style.gap, cols) {
         Ok(node) => Some(FlowNode::Columns(node)),
         Err(error) => {
             errors.record(error);
@@ -951,18 +943,27 @@ fn lower_table<K: FontKey>(
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
+    let super::TableSpec {
+        style,
+        header,
+        body,
+    } = spec;
+    let (header, repeat_header) = match header {
+        Some(header) if !header.rows.is_empty() => (header.rows, header.repeat),
+        Some(_) | None => (Vec::new(), false),
+    };
     let mut bag = ErrorBag::default();
-    let first = spec.header.first().or(spec.body.first());
+    let first = header.first().or(body.first());
     let cols: usize = first.map_or(0, |row| {
-        row.cells
+        row.children
             .iter()
             .map(|cell| usize::from(cell.col_span.get()))
             .sum()
     });
-    let header = lower_table_rows(spec.header, env, anchors, &mut bag);
-    let body = lower_table_rows(spec.body, env, anchors, &mut bag);
+    let header = lower_table_rows(header, env, anchors, &mut bag);
+    let body = lower_table_rows(body, env, anchors, &mut bag);
     let mut blocked = !bag.is_empty() || header.is_none() || body.is_none();
-    let widths = match spec.tracks {
+    let widths = match style.tracks {
         Some(tracks) => table_widths(tracks, cols, &mut blocked, &mut bag),
         None => Some(vec![ColumnWidth::Ratio(LayoutRatio::ONE); cols]),
     };
@@ -984,11 +985,11 @@ fn lower_table<K: FontKey>(
     let layout_spec = LayoutTableSpec {
         header,
         body,
-        repeat_header: spec.repeat_header,
-        padding: spec.cell_padding,
+        repeat_header,
+        padding: style.cell_padding,
         border: layout_table::Border {
-            width: spec.border.width,
-            color: spec.border.color,
+            width: style.border.width,
+            color: style.border.color,
         },
         ..LayoutTableSpec::new(widths)
     };
@@ -1040,8 +1041,8 @@ fn lower_table_rows<K: FontKey>(
     let mut out = Vec::with_capacity(rows.len());
     let mut ok = true;
     for row in rows {
-        let mut stored = Vec::with_capacity(row.cells.len());
-        for cell in row.cells {
+        let mut stored = Vec::with_capacity(row.children.len());
+        for cell in row.children {
             match lower_cell(cell, env, anchors, errors) {
                 Some(built) => stored.push(built),
                 None => ok = false,
@@ -1085,14 +1086,14 @@ fn lower_cell<K: FontKey>(
     errors: &mut ErrorBag,
 ) -> Option<layout_table::Cell<FlowNode>> {
     let CellSpec {
+        style,
         children,
         col_span,
         row_span,
-        fill,
     } = spec;
     lower_checked(children, env, anchors, errors, |nodes| {
         layout_table::Cell::new(nodes)
-            .map(|cell| cell.with_span(col_span, row_span).with_fill(fill))
+            .map(|cell| cell.with_span(col_span, row_span).with_fill(style.fill))
     })
 }
 
@@ -1102,27 +1103,44 @@ fn lower_list<K: FontKey>(
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
+    let ListSpec { style, children } = spec;
     let paint = env.paint;
     let mut bag = ErrorBag::default();
     let mut items = Vec::new();
-    for item in spec.items {
+    for item in children {
         let marker = item.marker;
-        let built = lower_checked(item.blocks, env, anchors, &mut bag, |nodes| match marker {
-            Some(marker) => ListItem::custom(marker, nodes),
-            None => ListItem::new(nodes),
-        });
+        let built = lower_checked(
+            item.children,
+            env,
+            anchors,
+            &mut bag,
+            |nodes| match marker {
+                Some(marker) => ListItem::custom(marker, nodes),
+                None => ListItem::new(nodes),
+            },
+        );
         if let Some(built) = built {
             items.push(built);
         }
     }
-    let kind = match spec.kind {
-        ListKind::Bullet => LayoutListKind::Bullet,
-        ListKind::Ordered(numbering) => LayoutListKind::Ordered {
-            style: types::numbering_kind(numbering),
-            start: spec.start,
-        },
+    let (kind, affix) = match style.kind {
+        ListKind::Bullet => (
+            LayoutListKind::Bullet,
+            types::marker_affix(MarkerFormat::default()),
+        ),
+        ListKind::Ordered {
+            numbering,
+            start,
+            format,
+        } => (
+            LayoutListKind::Ordered {
+                style: types::numbering_kind(numbering),
+                start,
+            },
+            types::marker_affix(format),
+        ),
     };
-    let marker_family = match spec.marker_font {
+    let marker_family = match style.marker_font {
         None => Some(ResolvedFamily::first_face()),
         Some(key) => family_of(env.fonts, key, &mut bag).copied(),
     };
@@ -1138,12 +1156,12 @@ fn lower_list<K: FontKey>(
     }
     let layout_spec = LayoutListSpec {
         kind,
-        marker_width: spec.marker_width,
-        body_indent: spec.body_indent,
+        marker_width: style.marker_width,
+        body_indent: style.body_indent,
         marker_style,
-        item_gap: spec.item_gap,
-        affix: types::marker_affix(spec.marker_format),
-        align: types::marker_align(spec.marker_align),
+        item_gap: style.item_gap,
+        affix,
+        align: types::marker_align(style.marker_align),
         items,
     };
     match ListNode::new(layout_spec) {
@@ -1987,29 +2005,28 @@ fn validate_band_marks<K>(marks: &[BandMark<K>], images: &LoweredImages, errors:
 fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for block in blocks {
         match block {
-            Block::KeepTogether(children)
+            Block::KeepTogether { children }
             | Block::Styled { children, .. }
-            | Block::Inset { children, .. } => {
+            | Block::Inset { children, .. }
+            | Block::Anchor { children, .. } => {
                 validate_blocks(children, images, errors);
             }
-            Block::Anchor { child, .. } => {
-                validate_blocks(std::slice::from_ref(child.as_ref()), images, errors);
-            }
             Block::Columns(spec) => {
-                for column in &spec.columns {
-                    validate_blocks(&column.blocks, images, errors);
+                for column in &spec.children {
+                    validate_blocks(&column.children, images, errors);
                 }
             }
             Block::Table(spec) => {
-                for row in spec.header.iter().chain(spec.body.iter()) {
-                    for cell in &row.cells {
+                let headers = spec.header.iter().flat_map(|header| &header.rows);
+                for row in headers.chain(spec.body.iter()) {
+                    for cell in &row.children {
                         validate_blocks(&cell.children, images, errors);
                     }
                 }
             }
             Block::List(spec) => {
-                for item in &spec.items {
-                    validate_blocks(&item.blocks, images, errors);
+                for item in &spec.children {
+                    validate_blocks(&item.children, images, errors);
                 }
             }
             Block::Image(spec) => reject_image(spec.image, images, errors),

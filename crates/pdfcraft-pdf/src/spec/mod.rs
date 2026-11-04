@@ -202,7 +202,10 @@ pub enum Block<K> {
     /// Starts following content on a new page.
     PageBreak,
     /// Keeps all children on one page.
-    KeepTogether(Vec<Self>),
+    KeepTogether {
+        /// Blocks kept together.
+        children: Vec<Self>,
+    },
     /// Applies a parent run style to its children.
     ///
     /// Paragraph runs, including paragraphs inside table cells, inherit every
@@ -220,8 +223,8 @@ pub enum Block<K> {
         id: String,
         /// When `Some`, contributes one outline item in document order.
         outline: Option<OutlineEntry>,
-        /// Wrapped flow content. Destination is the first placed fragment of this child.
-        child: Box<Self>,
+        /// Wrapped flow content. Destination is the first effective placed fragment.
+        children: Vec<Self>,
     },
     /// Shifts `children` right by `left` and narrows their frame by `left + right`.
     ///
@@ -234,10 +237,8 @@ pub enum Block<K> {
     /// with [`GeometryKind::InsetWiderThanFrame`](crate::GeometryKind::InsetWiderThanFrame).
     /// The check uses that frame, not the page width.
     Inset {
-        /// Space added at the left of the frame. Zero is identity.
-        left: Length<NonNegative>,
-        /// Space removed from the right of the frame. Zero leaves the right edge.
-        right: Length<NonNegative>,
+        /// Reusable inset presentation.
+        style: InsetStyle,
         /// Blocks laid out in the narrowed frame, top to bottom.
         children: Vec<Self>,
     },
@@ -454,32 +455,80 @@ pub enum BlankWidth {
 #[derive(Debug)]
 #[must_use]
 pub struct ColumnSpec<K> {
+    /// Reusable column presentation.
+    pub style: ColumnStyle,
+    /// Blocks in the column.
+    pub children: Vec<Block<K>>,
+}
+
+/// Reusable presentation for one column.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[must_use]
+pub struct ColumnStyle {
     /// Fixed, ratio, or auto width.
     pub width: Track,
-    /// Blocks in the column.
-    pub blocks: Vec<Block<K>>,
+}
+
+impl Default for ColumnStyle {
+    fn default() -> Self {
+        Self { width: Track::Auto }
+    }
 }
 
 /// Side-by-side columns.
 #[derive(Debug)]
 #[must_use]
 pub struct ColumnsSpec<K> {
+    /// Reusable columns presentation.
+    pub style: ColumnsStyle,
+    /// Columns from left to right.
+    pub children: Vec<ColumnSpec<K>>,
+}
+
+/// Reusable presentation for a columns block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct ColumnsStyle {
     /// Gap between adjacent columns.
     pub gap: Length<NonNegative>,
-    /// Columns from left to right.
-    pub columns: Vec<ColumnSpec<K>>,
+}
+
+impl Default for ColumnsStyle {
+    fn default() -> Self {
+        Self {
+            gap: NonNegative::ZERO,
+        }
+    }
 }
 
 /// Table rows and presentation.
 #[derive(Debug)]
 #[must_use]
 pub struct TableSpec<K> {
-    /// Header rows, repeated when [`Self::repeat_header`] is true.
-    pub header: Vec<TableRow<K>>,
+    /// Reusable table presentation.
+    pub style: TableStyle,
+    /// Optional header rows.
+    ///
+    /// `Some` with empty `rows` is equivalent to `None`.
+    pub header: Option<TableHeader<K>>,
     /// Body rows.
     pub body: Vec<TableRow<K>>,
-    /// Whether header rows repeat after a page break.
-    pub repeat_header: bool,
+}
+
+impl<K> Default for TableSpec<K> {
+    fn default() -> Self {
+        Self {
+            style: TableStyle::default(),
+            header: None,
+            body: Vec::new(),
+        }
+    }
+}
+
+/// Reusable table presentation.
+#[derive(Debug, Clone, PartialEq)]
+#[must_use]
+pub struct TableStyle {
     /// Optional per-column tracks.
     pub tracks: Option<Vec<Track>>,
     /// Padding on every side of every cell.
@@ -488,15 +537,31 @@ pub struct TableSpec<K> {
     pub border: TableBorder,
 }
 
-impl<K> Default for TableSpec<K> {
+impl Default for TableStyle {
     fn default() -> Self {
         Self {
-            header: Vec::new(),
-            body: Vec::new(),
-            repeat_header: true,
             tracks: None,
             cell_padding: NonNegative::ZERO,
             border: TableBorder::default(),
+        }
+    }
+}
+
+/// Header rows and their repetition rule.
+#[derive(Debug)]
+#[must_use]
+pub struct TableHeader<K> {
+    /// Whether non-empty header rows repeat after a page break.
+    pub repeat: bool,
+    /// Header rows.
+    pub rows: Vec<TableRow<K>>,
+}
+
+impl<K> Default for TableHeader<K> {
+    fn default() -> Self {
+        Self {
+            repeat: true,
+            rows: Vec::new(),
         }
     }
 }
@@ -506,7 +571,7 @@ impl<K> Default for TableSpec<K> {
 #[must_use]
 pub struct TableRow<K> {
     /// Cells in the row, from left to right.
-    pub cells: Vec<CellSpec<K>>,
+    pub children: Vec<CellSpec<K>>,
 }
 
 /// Grid-line stroke centered on cell edges. Width zero draws nothing.
@@ -538,23 +603,50 @@ impl Default for TableBorder {
 #[derive(Debug)]
 #[must_use]
 pub struct CellSpec<K> {
+    /// Reusable cell presentation.
+    pub style: CellStyle,
     /// Flow blocks in the cell, top to bottom.
     pub children: Vec<Block<K>>,
     /// Horizontal span.
     pub col_span: NonZeroU16,
     /// Vertical span.
     pub row_span: NonZeroU16,
-    /// Optional background fill.
-    pub fill: Option<Color>,
 }
 
 impl<K> Default for CellSpec<K> {
     fn default() -> Self {
         Self {
+            style: CellStyle::default(),
             children: Vec::new(),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
-            fill: None,
+        }
+    }
+}
+
+/// Reusable table-cell presentation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use]
+pub struct CellStyle {
+    /// Optional background fill.
+    pub fill: Option<Color>,
+}
+
+/// Reusable inset presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct InsetStyle {
+    /// Space added at the left of the frame. Zero is identity.
+    pub left: Length<NonNegative>,
+    /// Space removed from the right of the frame. Zero leaves the right edge.
+    pub right: Length<NonNegative>,
+}
+
+impl Default for InsetStyle {
+    fn default() -> Self {
+        Self {
+            left: NonNegative::ZERO,
+            right: NonNegative::ZERO,
         }
     }
 }
@@ -608,10 +700,27 @@ pub enum MarkerAlign {
 #[derive(Debug)]
 #[must_use]
 pub struct ListSpec<K> {
-    /// Marker kind.
+    /// Reusable list presentation.
+    pub style: ListStyle<K>,
+    /// List items in order.
+    pub children: Vec<ListItemSpec<K>>,
+}
+
+impl<K> Default for ListSpec<K> {
+    fn default() -> Self {
+        Self {
+            style: ListStyle::default(),
+            children: Vec::new(),
+        }
+    }
+}
+
+/// Reusable list presentation.
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct ListStyle<K> {
+    /// Marker kind and ordered-list numbering settings.
     pub kind: ListKind,
-    /// First number for an ordered list.
-    pub start: NonZeroU32,
     /// Hanging marker-column width.
     pub marker_width: Length<Positive>,
     /// Body column left edge, measured from the list's left edge.
@@ -625,8 +734,6 @@ pub struct ListSpec<K> {
     /// fit in the remaining height, it is dropped. It is not carried to the next
     /// page.
     pub item_gap: Length<NonNegative>,
-    /// Suffix or parentheses for generated numbers. Bullets ignore this.
-    pub marker_format: MarkerFormat,
     /// Face for bullets, generated numbers, and custom markers.
     ///
     /// `None` uses the first registered face. `Some` uses that family's regular
@@ -634,22 +741,17 @@ pub struct ListSpec<K> {
     pub marker_font: Option<K>,
     /// Marker position in the marker column.
     pub marker_align: MarkerAlign,
-    /// List items in order.
-    pub items: Vec<ListItemSpec<K>>,
 }
 
-impl<K> Default for ListSpec<K> {
+impl<K> Default for ListStyle<K> {
     fn default() -> Self {
         Self {
             kind: ListKind::Bullet,
-            start: NonZeroU32::MIN,
             marker_width: Length::from_trusted_pt(18.0),
             body_indent: None,
             item_gap: NonNegative::ZERO,
-            marker_format: MarkerFormat::default(),
             marker_font: None,
             marker_align: MarkerAlign::default(),
-            items: Vec::new(),
         }
     }
 }
@@ -661,7 +763,14 @@ pub enum ListKind {
     /// Bullet markers.
     Bullet,
     /// Generated numbering.
-    Ordered(Numbering),
+    Ordered {
+        /// Numbering system.
+        numbering: Numbering,
+        /// First generated number.
+        start: NonZeroU32,
+        /// Suffix or parentheses.
+        format: MarkerFormat,
+    },
 }
 
 /// One list item.
@@ -670,7 +779,7 @@ pub enum ListKind {
 pub struct ListItemSpec<K> {
     /// Custom marker. `None` uses the list's generated marker.
     ///
-    /// Bullets, generated numbers, and custom markers use [`ListSpec::marker_font`]
+    /// Bullets, generated numbers, and custom markers use [`ListStyle::marker_font`]
     /// when it is set, and otherwise the first registered face. They take size
     /// and color from [`Block::Styled`] and stay on the regular face.
     pub marker: Option<String>,
@@ -679,7 +788,7 @@ pub struct ListItemSpec<K> {
     /// Any block except [`Block::PageBreak`], at any depth inside the item, is
     /// allowed. A list inside a table cell also keeps the cell's rules for every
     /// item: no tables, columns, or keep-together groups.
-    pub blocks: Vec<Block<K>>,
+    pub children: Vec<Block<K>>,
 }
 
 /// A vector block that occupies `size` in the flow.
