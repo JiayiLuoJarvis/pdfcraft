@@ -31,8 +31,8 @@
 下面任一变化都算改业务，本计划禁止：
 
 - 增删错误码，或改变 `ErrorCode::as_str` 的字符串。
-- 改变协议拒绝条件：空白 id、重复、悬空边、自环、环、双锥、跨锥、比例范围、`max_nodes` / `top_n` / 边距 / 节点宽、`__overflow__:` 前缀、`__other__:` 冲突。
-- 改变 `top_n` 的折叠对象、排序（比例降序、同比例按 `nodes` 序）、合成名、幂等、投资侧不动、`validate_request` 不把折叠后的节点数算进上限、`generate_pdf` 再校验一次。
+- 改变协议拒绝条件：空白 id、重复、悬空边、自环、环、双锥、跨锥、比例范围、`max_nodes`、`top_n`、边距、节点宽，以及 `folded_holders_of` 悬空、重复或缺少指向父节点的直接边。id 前缀不是拒绝条件，也不是身份。
+- 改变 `top_n` 的折叠对象、排序（比例降序、同比例按 `nodes` 序）、合成名 `其他股东(k家)`、幂等、投资侧不动。`Chart::new` 折叠后在新 arena 上重跑全部协议规则，包括 `max_nodes`。折叠后的协议错误在 `Chart::new` 返回。
 - 改变框内行顺序、空白字段省略、比例不进框、公司灰底条件、比例文案 `xx.xx%`、贴边位置。
 - 改变页眉、副标题、页脚（含「頁」）、续页虚框、overflow 第二行、`其他股东(k家)` / `其他投资(k家)`。
 - 改变行为规格 §12 的常量数值，或 `node_height_limit_mm` 的公式。
@@ -43,7 +43,7 @@
 - 用 krilla `Surface::draw_text` 或 `simple-text` 量宽、画字。
 - 为了让「当前误用 2 mm/字打出来的 PDF」保持字节不变，而把生产路径留在假测宽器上。那是实现违背行为规格 §9，不是要保护的业务。
 
-允许改变、而且应当改变的输出只有一类：`generate_pdf` 在 overflow 框、续页虚框、附页升格重折行上，改为使用已经打开的那份 skrifa 度量。单页、且分页阶段不再测字的图，文本与页结构保持现状。多页图的折行、框高、是否切开可以与**今天的错误实现**不同，但必须与行为规格的测字合同相同。不要回调常量去迁就 2 mm/字。
+允许改变、而且应当改变的输出只有一类：`to_pdf` 在 overflow 框、续页虚框、附页升格重折行上，改为使用已经打开的那份 skrifa 度量。单页、且分页阶段不再测字的图，文本与页结构保持现状。多页图的折行、框高、是否切开可以与**今天的错误实现**不同，但必须与行为规格的测字合同相同。不要回调常量去迁就 2 mm/字。
 
 缺框、缺键今天有的路径会 `continue` 或 `Index` panic。这些不是产品规则。重写之后用类型让「有节点必有框」成立，成功路径的 PDF 不变。不要为了「更严格」把现有成功夹具改成 `LAYOUT_FAILED`。若某条夹具只有靠静默丢节点才能出 PDF，停下来标出这条夹具，单独决定；默认不保留静默丢弃。
 
@@ -52,17 +52,13 @@
 crate 根只导出行为规格 §3 已确认的项：
 
 ```rust
-pub use error::{Error, ErrorCode};
-pub use model::{
-    document_title, ChartOptions, ChartRequest, Edge, FontBytes, Node, NodeType,
-    MAX_MARGIN_MM, MAX_NODES, MAX_NODE_WIDTH_MM, MIN_NODE_WIDTH_MM,
-};
-
-pub fn validate_request(request: &ChartRequest) -> Result<(), Error>;
-pub fn generate_pdf(request: &ChartRequest, font: &FontBytes) -> Result<Vec<u8>, Error>;
+pub use chart::Chart;
+pub use error::{Error, ErrorCode, ErrorSubject};
+pub use font::Font;
+pub use request::{ChartRequest, ChartStyle, Edge, Node, NodeType, PaidIn};
 ```
 
-`document_title`、`Node::new`、`Edge::new`、`FontBytes::new`、`ChartRequest::new`、`NodeType::as_str`、`ErrorCode::as_str` 保持。`Error` 仍是公开字段 `code` + `message`，`Display` 仍打印 `message`。
+这些 `pub use` 都带 `#[doc(inline)]`。`Chart::new`、`Chart::to_pdf`、`Chart::title`、`Chart::subject_name`、`Font::new`、`Font::from_shared`、`ChartRequest::new`、`Node::new`、`Edge::new`、`PaidIn::new`、`NodeType::as_str`、`ErrorCode::as_str` 在 crate 根可见。`Error`、`Chart`、`Font` 的字段私有。`Error` 的访问器是 `code()`、`message()`、`subject()`。`source()` 来自 `std::error::Error`。`Display` 打印 `message`。
 
 从 crate 根删除，不提供兼容导出：
 
@@ -80,85 +76,71 @@ pub fn generate_pdf(request: &ChartRequest, font: &FontBytes) -> Result<Vec<u8>,
 
 ## 3. 目标模块与依赖
 
-文件名可以合并，依赖方向不可反。不依赖 `pdfcraft-pdf`、`pdfcraft-forms`。
+依赖方向不可反。不依赖 `pdfcraft-pdf`、`pdfcraft-forms`。下图与 [`module-dependency.md`](module-dependency.md) 的 orgchart 节一致。`graph`、`font`、`content`、`page`、`paginate`、`render` 各是一个节点。节点内部的文件互相引用，不记成边。`layout` 也是一个节点。
 
 ```text
-model, error, units          无内部业务依赖
-graph                        → model, error
-prepare                      → graph
-caption                      → model          纯字符串。含现在的 captions.rs
-display                      → graph, caption
-measure                      → display, units, error, model
-page                         → measure, units, caption   页模型，pub(crate)
-layout                       → page, measure, units, error
-family                       → page, error    只搜索「哪些节点同页」，不放置坐标
-paging                       → family, layout, measure, graph, display, caption, page
-render                       → page, measure, units
-lib                          → 上述模块，只为三个公共函数接线
+error                       无内部依赖
+units                       无内部依赖
+captions                    无内部依赖
+request   → error
+font      → error, units
+graph     → request, captions, error
+content   → graph, request, captions, error
+page      → graph, content, captions, font, request, units, error
+layout    → page, graph, units, error
+paginate  → layout, page, content, captions, graph, request, font, units, error
+render    → page, content, captions, graph, font, units, error
+chart     → paginate, render, page, content, captions, graph, font, request, units, error
+lib       → chart, error, font, request                只做重导出
 ```
 
-禁止：`layout` → `paging`，`family` → `paging`，`measure` → `paging`，`render` → `layout`，任何模块 → `backend`（本 crate 没有这一层，krilla 只出现在 `render`）。
+禁止：
 
-`caption` 与 `display` 可以仍叫 `captions.rs` / `display.rs`。不要为了对照 Python 保留 `measuring.py` 式的对外模块。
+- `render` 以外的模块 `use krilla`。
+- `graph`、`font`、`content`、`page`、`layout` 指向 `paginate`、`render`、`chart`。
+- `paginate` 指向 `render`。
+- `font` 指向 `graph`、`page`、`content`。
 
 ## 4. 标识与 arena
 
-校验通过后，内部不再把 `String` 当节点键。
+校验通过后，节点键是 `NodeId`。
 
 ```rust
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub(crate) struct NodeId(u32);
+pub(crate) struct NodeId(usize);
+pub(crate) struct EdgeId(usize);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub(crate) struct EdgeId(u32);
-```
-
-`NodeId` / `EdgeId` 只由 arena 分配。不提供从裸整数公开构造的方法。调用方的 `String` id 只活在 `ChartRequest` 和错误文案里。
-
-```rust
 pub(crate) enum NodeOrigin {
-    /// 请求里的节点，含调用方自己写下的 `__other__:` id。
-    Input,
-    /// `top_n` 折叠生成的股东占位。id 文本仍是 `__other__:{parent}`。
-    FoldedHolders { parent: NodeId },
-    /// 分页合成。id 文本仍是 `__overflow__:{subject}:{first_moved}`。
-    Overflow {
-        subject: NodeId,
-        first_moved: NodeId,
-        moved_count: usize,
-    },
+    /// 来自请求。`index` 是 `ChartRequest::nodes` 里的位置。
+    /// `stands_in_for` 来自 `Node::folded_holders_of`。
+    Caller { index: usize, id: String, stands_in_for: Option<NodeId> },
+    /// `top_n` 为 `parent` 合成的股东占位。
+    FoldedHolders { parent: NodeId, count: usize },
+    /// 分页把直接孩子挪走后留下的合成节点。
+    Overflow { subject: NodeId, first_moved: NodeId, moved_count: usize },
 }
 
-pub(crate) struct NodeRec {
-    pub(crate) id: NodeId,
-    pub(crate) origin: NodeOrigin,
-    pub(crate) protocol_id: String,
-    pub(crate) name: String,
-    // 其余展示字段从请求搬来，折叠节点按现在的配方填
-}
-
-pub(crate) struct Graph {
-    pub(crate) nodes: Vec<NodeRec>,
-    pub(crate) edges: Vec<EdgeRec>,
-    by_protocol_id: HashMap<String, NodeId>,
-    outgoing: Vec<Vec<EdgeId>>,
-    incoming: Vec<Vec<EdgeId>>,
-    pub(crate) subject: NodeId,
+pub(crate) struct EdgeRec {
+    pub(crate) id: EdgeId,
+    pub(crate) from: NodeId,
+    pub(crate) to: NodeId,
+    pub(crate) ratio: Option<f64>,
+    /// `ChartRequest::edges` 里的位置。折叠新加的边是 `None`。
+    pub(crate) caller_index: Option<usize>,
 }
 ```
 
 规则：
 
-- `validate` 的产物就是 `Graph`。邻接表用 `EdgeId`，与现在的 `ValidatedGraph` 一样按下标走，键改成新类型。
-- `HashMap<String, NodeId>` 只用于：协议校验、`document_title` 不再经过它（标题仍按请求线性查找，行为不变）、折叠时识别已有 `__other__:`、错误信息里打印调用方 id。布局、走线、分页、绘制不接收 `String` 键。
-- 用户输入的 `__overflow__:` 仍在校验时拒绝。用户输入的 `__other__:` 仍允许，来源是 `NodeOrigin::Input`。折叠生成的占位才是 `FoldedHolders`。不要用「字符串前缀」在布局里区分这三件事；绘制虚线、禁止作 ContCue 锚点，看 `NodeOrigin::Overflow`。
-- 分页要加 overflow 节点时，向 `nodes` **追加** `NodeRec`，分配新 `NodeId`。不另建一张 `HashMap<String, NodeBox>`。
-- 页上的节点集合是 `BTreeSet<NodeId>`。边是 `EdgeId` 或 `{ from, to: NodeId }`。`BTreeSet` 保留现在的确定顺序；元素变 `Copy` 之后，克隆集合不再克隆字符串。
-- 节点上限 100，加上折叠与 overflow 仍是很小的图。用 `BTreeSet<NodeId>` 即可，不必上自定义位集。位集如果不能在不改搜索顺序的前提下替换比较结果，就不要做。
+- `NodeId` 与 `EdgeId` 只由 arena 分配。下标访问由类型保证。二者都包 `usize`，不用 `u32::MAX` 哨兵。
+- 调用方的字符串 id 只在 `NodeOrigin::Caller`、请求和错误文案里。`NodeRec` 没有协议 id 字段。展示名在 `NodeRec::name`。
+- 某节点已是 `parent` 的折叠占位，指 `Caller { stands_in_for: Some(parent), .. }` 或 `FoldedHolders { parent, .. }`。排名和冲突检查都读这个事实。
+- 是不是 overflow、是不是折叠占位，读 `NodeOrigin`。是不是主体，把 `NodeId` 与 `graph.subject` 比较。绘制虚线、禁止作 ContCue 锚点，看 `NodeOrigin::Overflow`。
+- 请求进入时，用临时的 `HashMap<String, NodeId>` 把调用方 id 对上 arena。这张表不留在 `Graph` 上。布局、走线、分页、绘制按 `NodeId` 索引。
+- `fold` 从旧 arena 构建新 arena，不经过 `ChartRequest`。存活节点按原顺序排列。折叠占位按仍留在图里的父节点顺序追加在末尾。存活边按原顺序排列并保留 `caller_index`，折叠边随后追加，`caller_index` 为 `None`。`Chart::new` 随后在新 arena 上重跑全部协议规则。
+- 分页追加 overflow 时，向 `nodes` 追加 `NodeRec`，身份是 `NodeOrigin::Overflow`。已有合成节点按 `(subject, first_moved)` 这一对 `NodeId` 复用。
+- id 前缀不是校验规则。
 
-`prepare` 仍返回折叠后的 `ChartRequest`，因为 `validate_request` 的合同是「折叠错误能报出，结果丢弃」，`generate_pdf` 的合同是「再 `validate` 一次才套 `max_nodes`」。这次克隆发生在协议边界，保留。`generate_pdf` 拿到第二次 `validate` 的 `Graph` 之后，不再把 id 拷回 `Vec<String>`。
-
-展示行、比例事实、节点框挂在 `NodeId` 上，用 `Vec` 按下标索引。`NodeDisplays::get(&str)` 这类按协议 id 查找的公开方法随公共面一起删除；crate 内直接用 `NodeId`。
+展示行、比例事实、节点框挂在 `NodeId` 上，用 `Vec` 按下标索引。
 
 ## 5. 家族搜索：控制流不动，键和缓存改掉
 
@@ -266,13 +248,17 @@ pub(crate) struct FontMetrics {
 
 ## 9. 错误与不变量
 
-公共错误类型不改。`LAYOUT_FAILED` 仍只用于行为规格 §6 已列出的那类失败：非法 overflow、缺锚点、bus 键非法、主体或直接层放不进页、虚框文字超宽等**现有**失败。
+`Error` 字段私有。访问器是 `code()`、`message()`、`subject()`。`std::error::Error::source()` 返回字体解析的底层错误，公共签名里不出现 skrifa 类型。`Display` 打印 `message`。有 `source()` 时，`message` 不拼接底层错误的文本。`message` 的措辞不是合同。`Error` 不可比较。
 
-内部不变量用类型或 `expect`。公共路径继续不 `unwrap`。
+`ErrorSubject` 标 `#[non_exhaustive]`。变体是 `Node { index, id }`、`Edge { index, holder, held }`、`Field(&'static str)`、`Character(char)`。`Node` 与 `Edge` 的下标只指向调用方写下的节点和边。折叠占位和 overflow 合成节点不作 `subject`。折叠合成边的错误记调用方那一端的 `Node`。两端都是合成节点时不给 `subject`。
 
-`node_name` 缺 id 时返回空字符串：改成按 `NodeId` 取 `NodeRec::name` 之后，这条分支不存在。升格副标题的文案函数仍接收名字和比例，输出字符串与现在相同。
+`LAYOUT_FAILED` 用于行为规格 §6 列出的出图失败。换键之后，页草稿、测量框、放置节点、overflow 链接仍是分开的集合。缺框，以及续页锚点是 overflow，仍可表示，继续报 `LAYOUT_FAILED`，不改回 panic。主体或直接层放不进页、续页文字超宽，同样报 `LAYOUT_FAILED`。overflow 的身份是 `NodeOrigin::Overflow`。
 
-`cut_caption` 把 `InvalidProtocol` 当成「只写根名」是现有规则（无合法父边时的副标题）。保留这个分支的**结果**。实现上改成 `layout_parent` 返回 `Option`，不要用 `error.code == InvalidProtocol` 做控制流。有父边、无父边、协议上本就没有唯一父边，三种结果与现在的副标题字符串一致。
+比例标签只对股东和投资生成。出图路径上 `ratio_source` 若报协议错误，改记 `LAYOUT_FAILED`。`fold` 的 `remap` 失败记 `LAYOUT_FAILED`。`layout_parent_optional` 已删除。`cut_caption` 走 `layout_parent_ends`。无父边时副标题只写该节点的名字。有父边时按持股或投资关系写名字和比例。这条路径上的协议错误记 `LAYOUT_FAILED`。`column_stack` 的 spine 与缺布局由同一段控制流保证。这两处不再各报 `LAYOUT_FAILED`。
+
+公共路径不 `unwrap`。不新增生产 `expect`。类型能消掉的不变量删掉对应分支。消不掉的报 `LAYOUT_FAILED`。
+
+`node_name` 按 `NodeId` 取 `NodeRec::name`。升格副标题的文案函数仍接收名字和比例。
 
 ## 10. 几何
 

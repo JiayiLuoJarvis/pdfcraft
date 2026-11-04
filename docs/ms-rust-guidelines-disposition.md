@@ -64,7 +64,7 @@ lint 级别的改动先改规范与根 `[workspace.lints]`，本表同一 PR 更
 | M-MOCKABLE-SYSCALLS | I/O and system calls are mockable | N/A | 无系统调用面；字体/文件注入走现有参数 |
 | M-TEST-UTIL | Test utilities are feature gated | done | test-utils feature 门；集成测试不用测试依赖反转生产 DAG |
 | M-INTEGRATION-TESTS | Integration tests live under tests/ | done | 规范 TST-1、TST-2 |
-| M-STRONG-TYPES | Use the proper type family | adopt | 规范 API-1、API-2；orgchart 页层字符串键与魔法前缀待改（规范 TRK-4） |
+| M-STRONG-TYPES | Use the proper type family | done | 规范 API-1、API-2。orgchart 页层键是 `NodeId`，身份是 `NodeOrigin` |
 | M-STRONG-TYPES-GUARD | Newtypes guard their invariants | done | 规范 API-1、ARC-3 |
 | M-BUILD-RESULT | Builders validate in final build() | N/A | 无 builder；M-INIT-BUILDER 联动 N/A |
 | M-NO-GLOB-REEXPORTS | Don't glob re-export items | done | 生产 src 零 glob 重导出；crate-root 用显式 pub use 列表 |

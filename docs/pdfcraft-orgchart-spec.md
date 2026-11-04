@@ -40,49 +40,51 @@
 
 ### 2.1 做
 
-- 双锥协议。`from_id` 持有 `to_id`。股东在上，对外投资在下。
-- `validate_request`。不加载字体，含 `top_n` 折叠错误。
-- `generate_pdf`。prepare → validate → display → measure → paginate → render。
+- 双锥协议。`holder` 持有 `held`。股东在上，对外投资在下。
+- `Chart::new`。不加载字体。含 `top_n` 折叠，并在折叠后的 arena 上重跑协议规则。
+- `Chart::to_pdf`。`content` 框内行，`font` 测字，`page` 节点框，`paginate` 分页，`render` 绘制。
 - 错误码字符串与 Python `EquityErrorCode.value` 一致。
-- 类型名去掉 `Pdfcraft` 前缀。公共类型缩短为 `ChartRequest` 等（§14）。
-- 字体只接受内存字节。
+- 公共类型是 `Chart`、`ChartRequest`、`ChartStyle`、`Node`、`Edge`、`PaidIn`、`NodeType`、`Font`、`Error`、`ErrorCode`、`ErrorSubject`（§14）。
+- 字体只接受内存字节。`Font::new` 与 `Font::from_shared` 当场解析，返回 `Result`。
 
 ### 2.2 不做
 
-- 依赖或反向依赖 `pdfcraft-pdf` / `pdfcraft-forms`。
+- 依赖或反向依赖 `pdfcraft-pdf`、`pdfcraft-forms`。
 - 环状交叉持股、跨页连线、自定义节点行、换纸张、换词表。
-- JSON / serde 作主接口。
+- JSON、serde 作主接口。
 - 进程级默认字体路径。
 - 几何截图作 v1 门禁（§14 Q10）。
+- 向调用方暴露页结构或中间阶段。
 
 ### 2.3 与其它 crate
 
 | | `pdfcraft-pdf` | `pdfcraft-forms` | `pdfcraft-orgchart` |
 | --- | --- | --- | --- |
-| 输入 | `DocumentSpec` | 已有 PDF + 字段值 | 节点边协议 + 字体字节 |
+| 输入 | `DocumentSpec` | 已有 PDF + 字段值 | 节点边协议 + `Font` |
 | PDF 栈 | krilla（仅 backend） | lopdf | krilla（本 crate 直接用） |
 | 测字 | skrifa | skrifa | skrifa `0.48.0` |
 
-旧 workspace 规格里「可选依赖 `pdfcraft-pdf`」作废。文档后改。
+不依赖 `pdfcraft-pdf`。
 
 ## 3. 公共 API（已确认）
+
+crate 根导出 `Chart`、`Error`、`ErrorCode`、`ErrorSubject`、`Font`、`ChartRequest`、`ChartStyle`、`Edge`、`Node`、`NodeType`、`PaidIn`。每条 `pub use` 带 `#[doc(inline)]`。
 
 ### 3.1 入口
 
 ```rust
-pub fn validate_request(request: &ChartRequest) -> Result<(), Error>;
-
-pub fn generate_pdf(
-    request: &ChartRequest,
-    font: &FontBytes,
-) -> Result<Vec<u8>, Error>;
-
-pub fn document_title(request: &ChartRequest) -> Result<String, Error>;
+impl Chart {
+    pub fn new(request: ChartRequest) -> Result<Self, Error>;
+    pub fn to_pdf(&self, font: &Font) -> Result<Vec<u8>, Error>;
+    pub fn title(&self) -> String;
+    pub fn subject_name(&self) -> &str;
+}
 ```
 
-- `validate_request` 跑 `prepare_request` 并丢弃结果。不读字体。
-- `generate_pdf` 见 §7。不写 `/Info`。
-- `document_title` 只查主体名。不做其余协议校验。主体缺失 → `SUBJECT_NOT_FOUND`。`options.title` 为 `None` 时回落 `{主体名}股权架构图`。`Some("")` 原样返回。
+- `Chart::new` 按值接收请求。它先校验原始请求（§4），再按 `top_n` 折叠（§5），再在折叠后的 arena 上重跑全部协议规则。不读字体。出错时请求随之丢弃。调用方要修正后重试，先克隆请求。
+- `Chart::to_pdf` 见 §7。不改变 `Chart`。同一个 `Chart` 配同一份 `Font`，多次出图字节相同。不写 `/Info`。
+- `Chart` 不持有字体。
+- `title()` 恒为 `{主体名}股权架构图`。名字按节点上存储的文本复制。`subject_name()` 返回该文本。页眉不读 `title()`。
 
 ### 3.2 请求类型
 
@@ -91,7 +93,7 @@ pub fn document_title(request: &ChartRequest) -> Result<String, Error>;
 | `EquityChartRequest` | `ChartRequest` |
 | `EquityNode` | `Node` |
 | `EquityEdge` | `Edge` |
-| `EquityChartOptions` | `ChartOptions` |
+| 无对应类型 | `ChartStyle`、`PaidIn`、`Font`、`Chart`、`ErrorSubject` |
 | `NodeType` | `NodeType` |
 | `PdfcraftEquityError` | `Error` |
 | `EquityErrorCode` | `ErrorCode` |
@@ -101,7 +103,14 @@ pub struct ChartRequest {
     pub subject_id: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
-    pub options: ChartOptions,
+    pub style: ChartStyle,
+    pub top_n: Option<NonZeroUsize>,
+    pub max_nodes: usize,
+}
+
+impl ChartRequest {
+    pub const MAX_NODES: usize = 100;
+    pub fn new(subject_id: impl Into<String>, nodes: Vec<Node>, edges: Vec<Edge>) -> Self;
 }
 
 pub struct Node {
@@ -110,24 +119,44 @@ pub struct Node {
     pub legal_person: Option<String>,
     pub ratio: Option<f64>,
     pub node_type: Option<NodeType>,
-    pub paid_in_amount: Option<String>,
-    pub currency: Option<String>,
+    pub paid_in: Option<PaidIn>,
     pub location: Option<String>,
     pub approval_date: Option<String>,
+    pub folded_holders_of: Option<String>,
+}
+
+impl Node {
+    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self;
+}
+
+pub struct PaidIn {
+    pub amount: String,
+    pub currency: Option<String>,
+}
+
+impl PaidIn {
+    pub fn new(amount: impl Into<String>) -> Self;
 }
 
 pub struct Edge {
-    pub from_id: String,
-    pub to_id: String,
+    pub holder: String,
+    pub held: String,
     pub ratio: Option<f64>,
 }
 
-pub struct ChartOptions {
-    pub node_width_mm: Option<f64>,
-    pub margin_mm: Option<f64>,
-    pub title: Option<String>,
-    pub max_nodes: Option<usize>,
-    pub top_n: Option<usize>,
+impl Edge {
+    pub fn new(holder: impl Into<String>, held: impl Into<String>) -> Self;
+}
+
+pub struct ChartStyle {
+    pub node_width_mm: f64,
+    pub margin_mm: f64,
+}
+
+impl ChartStyle {
+    pub const MIN_NODE_WIDTH_MM: f64 = 20.0;
+    pub const MAX_NODE_WIDTH_MM: f64 = 80.0;
+    pub const MAX_MARGIN_MM: f64 = 40.0;
 }
 
 pub enum NodeType {
@@ -135,35 +164,46 @@ pub enum NodeType {
     Company,
 }
 
-pub struct FontBytes {
-    pub data: Arc<Vec<u8>>,
-}
-
-impl FontBytes {
-    pub fn new(data: impl Into<Vec<u8>>) -> Self;
-    pub fn from_shared(data: Arc<Vec<u8>>) -> Self;
+impl Font {
+    pub fn new(data: impl Into<Vec<u8>>) -> Result<Self, Error>;
+    pub fn from_shared(data: Arc<Vec<u8>>) -> Result<Self, Error>;
 }
 ```
 
-- `node_type` 对应 Python `type`。对外字符串用 `PERSON` / `COMPANY`。
-- 可选字符串空串或纯空白在展示层当缺省。`id` / `name` / `subject_id` 校验仍要求 strip 后非空。
-- 金额与日期格式不校验。
+- `ChartRequest::new` 填 `ChartStyle::default()`、`top_n: None`、`max_nodes: ChartRequest::MAX_NODES`。`ChartRequest` 没有 `Default`。
+- `ChartStyle::default` 是宽 `38` mm、边距 `8` mm。字段是具体数，不是 `Option`。
+- `Node::new`、`Edge::new`、`PaidIn::new` 把其余可选字段设为 `None`。
+- `node_type` 对应 Python `type`。对外字符串用 `PERSON`、`COMPANY`，经 `NodeType::as_str`。
+- 可选字符串空串或纯空白在展示层当缺省。`id`、`name`、`subject_id` 校验仍要求 strip 后非空。
+- 金额与日期格式不校验。`PaidIn.amount` 去掉首尾空白后为空，就不画实缴行。`currency` 为空白时按没有币种处理。
+- `folded_holders_of` 声明本节点已是该 id 所指父节点的折叠占位。见 §5。
+- `holder` 持有 `held`。
+- `Node`、`Edge`、`PaidIn`、`ChartRequest`、`ChartStyle` 保持公有字段，供结构体字面量构造。不标 `#[non_exhaustive]`。`Chart`、`Font`、`Error` 字段私有。
 
-### 3.3 导出常量
+### 3.3 关联常量
+
+crate 根不导出常量。
 
 | 常量 | 值 |
 | --- | --- |
-| `MAX_NODES` | `100` |
-| `MIN_NODE_WIDTH_MM` | `20.0` |
-| `MAX_NODE_WIDTH_MM` | `80.0` |
-| `MAX_MARGIN_MM` | `40.0` |
+| `ChartRequest::MAX_NODES` | `100` |
+| `ChartStyle::MIN_NODE_WIDTH_MM` | `20.0` |
+| `ChartStyle::MAX_NODE_WIDTH_MM` | `80.0` |
+| `ChartStyle::MAX_MARGIN_MM` | `40.0` |
 
-options 字段保持 `Option` 穿过 prepare。缺省只在 `generate_pdf` 代入。普通宽 `38` mm，边距 `8` mm。
+`ChartStyle::default` 的普通宽是 `38` mm，边距是 `8` mm。
 
 ### 3.4 错误类型
 
 ```rust
-pub struct Error { /* code, message */ }
+pub struct Error { /* 私有：code, message, subject, source */ }
+
+impl Error {
+    pub fn code(&self) -> ErrorCode;
+    pub fn message(&self) -> &str;
+    pub fn subject(&self) -> Option<&ErrorSubject>;
+}
+
 pub enum ErrorCode {
     InvalidProtocol,
     CycleDetected,
@@ -174,70 +214,92 @@ pub enum ErrorCode {
     NodeTooTall,
     LayoutFailed,
 }
+
+#[non_exhaustive]
+pub enum ErrorSubject {
+    Node { index: usize, id: String },
+    Edge { index: usize, holder: String, held: String },
+    Field(&'static str),
+    Character(char),
+}
 ```
 
-`ErrorCode::as_str` 映射到 `INVALID_PROTOCOL`、`CYCLE_DETECTED`、`SUBJECT_NOT_FOUND`、`TOO_MANY_NODES`、`FONT_ERROR`、`MISSING_GLYPH`、`NODE_TOO_TALL`、`LAYOUT_FAILED`。
-
-不提供 `to_dict`。HTTP 状态不属于本库。
+- `ErrorCode::as_str` 映射到 `INVALID_PROTOCOL`、`CYCLE_DETECTED`、`SUBJECT_NOT_FOUND`、`TOO_MANY_NODES`、`FONT_ERROR`、`MISSING_GLYPH`、`NODE_TOO_TALL`、`LAYOUT_FAILED`。`ErrorCode` 是闭集，调用方按 `code()` 穷尽匹配。
+- `Display` 打印 `message`。`message()` 给日志。措辞不是合同。有 `source()` 时，`message` 不拼接底层错误的文本。
+- `std::error::Error::source()` 返回字体解析的底层错误。公共签名里不出现 skrifa 类型。
+- `Error` 不可比较。`Font` 不可比较。
+- `ErrorSubject` 标 `#[non_exhaustive]`。`Node.index` 是 `ChartRequest::nodes` 里的位置。`Edge.index` 是 `ChartRequest::edges` 里的位置。二者只指向调用方写下的节点和边。折叠占位与 overflow 合成节点不作 `subject`。`Field` 是请求字段，例如 `"subject_id"`、`"nodes"`、`"max_nodes"`、`"top_n"`、`"style.margin_mm"`、`"style.node_width_mm"`。`Character` 是字体里缺的那个字符，可能来自库自带的文案。
+- 不提供 `to_dict`。HTTP 状态不属于本库。
 
 ### 3.5 内部 API（`pub(crate)`）
 
-- `ValidatedGraph`、`validate`、`prepare_request`。
-- 保留前缀 `__overflow__:`（用户提交非法）、`__other__:`（折叠合成，校验允许用户自带）。
+- 身份是 `NodeId(usize)` 与 `NodeOrigin`。变体是 `Caller`、`FoldedHolders`、`Overflow`。见结构规格 §4。
+- 节点 id 不按前缀分类。折叠占位只认 `folded_holders_of` 与 `NodeOrigin`。
 
 ## 4. 图校验合同
 
-见既有行为。摘要如下。
+见既有行为。摘要如下。全部发生在 `Chart::new`。
 
-1. 空白 `subject_id` → `INVALID_PROTOCOL`。
-2. options 边界。`max_nodes` ∈ `1..=100`。`top_n` ∈ `0..=cap`。`margin_mm` ∈ `(0, 40]`。`node_width_mm` ∈ `[20, 80]`。
-3. `nodes.len() > cap` → `TOO_MANY_NODES`。
-4. 节点 id/name、重复、`__overflow__:` 前缀。
+1. 空白 `subject_id` → `INVALID_PROTOCOL`。`subject` 为 `Field("subject_id")`。
+2. 边界。`max_nodes` ∈ `1..=ChartRequest::MAX_NODES`（100）。`top_n` 为 `None` 时不折叠。`Some(n)` 的 `n` ∈ `1..=max_nodes`。`top_n == max_nodes` 合法。`margin_mm` 为有限值且 ∈ `(0, 40]`。`node_width_mm` 为有限值且 ∈ `[20, 80]`。越界 → `INVALID_PROTOCOL`。
+3. `nodes.len() > max_nodes` → `TOO_MANY_NODES`。折叠前查一次，折叠后再查一次。
+4. 节点 id 或名称为空白、id 重复 → `INVALID_PROTOCOL`。节点 id 不按前缀分类。
 5. 主体不在表 → `SUBJECT_NOT_FOUND`。
-6. 悬空边、自环、重复边、比例范围。
+6. 悬空边、自环、重复边、比例超出 `0..=100` → `INVALID_PROTOCOL`。
 7. 有向环 → `CYCLE_DETECTED`。
-8. 双锥连通与 `SH→INV` 跨锥。
-9. 无节点比例时布局父边必须唯一。
+8. 双锥连通，以及股东锥到投资锥的跨锥边 → `INVALID_PROTOCOL`。
+9. 无节点比例时布局父边必须唯一 → `INVALID_PROTOCOL`。
+10. `folded_holders_of` 指向不存在的节点，两个节点声明同一个父节点，或声明的节点没有一条指向该父节点的直接边 → `INVALID_PROTOCOL`。
+
+`Chart::new` 的顺序是校验原始请求、折叠、在新 arena 上重跑全部协议规则。折叠后节点数超限，或折叠删边后父边不唯一，都在 `Chart::new` 失败。
 
 双锥与比例解析细则与源包 `graph.py` 一致（股东入边锥、投资出边锥、父边选择四步）。
 
 ## 5. prepare 合同（`top_n`）
 
-只折叠股东锥。`None` / `0` 恒等。`>= 1` 时每个股东子都要有展示比例。按比例降序、同比例按 `nodes` 序，保留前 N，其余合成 `__other__:{parent}`，名 `其他股东(k家)`。被折掉的比例用与 CPython `math.fsum` 相同的有限和，结果须落在 `0..=100`，否则 `INVALID_PROTOCOL`。六笔 `100/6` 的和是 100，可以折叠。存活股东重算后删不可达节点。幂等。投资侧不动。
+只折叠股东锥。`top_n` 为 `None` 时图不变。`Some(n)` 时，每个被排名的股东子都要有展示比例。按比例降序，同比例按 `nodes` 序，保留前 `n` 个，其余合成一个占位。占位身份是 `NodeOrigin::FoldedHolders { parent, count }`。展示名是 `其他股东(k家)`。
 
-折叠后再 `validate` 计入 `max_nodes`（可出现校验过、生成挂）。
+调用方用 `folded_holders_of` 声明某节点已是该父节点的占位。对该父节点排名时跳过此节点。此节点不占名额，也不并入新占位。该父节点仍需折叠时报 `INVALID_PROTOCOL`，`subject` 为声明的节点。占位的展示、测字、分页与普通调用方节点相同，名称由调用方提供。
+
+被折掉的比例用与 CPython `math.fsum` 相同的有限和。结果须落在 `0..=100`，否则 `INVALID_PROTOCOL`。六笔 `100/6` 的和是 100，可以折叠。存活股东重算后删不可达节点。折叠幂等。投资侧不动。
+
+折叠在 arena 上构建新 arena。`Chart::new` 随后在这张新 arena 上重跑全部协议规则，包括 `max_nodes`。
 
 ## 6. 错误码触发点（整包）
 
-| 码 | 触发 |
-| --- | --- |
-| `INVALID_PROTOCOL` | §4 / §5 协议与折叠错误 |
-| `CYCLE_DETECTED` | 有向环 |
-| `SUBJECT_NOT_FOUND` | 主体不在节点表（含 `document_title`） |
-| `TOO_MANY_NODES` | 节点数超上限（含折叠后第二次 validate） |
-| `FONT_ERROR` | 字体 bytes 无法当单字体打开、TTC/OTC、解析失败 |
-| `MISSING_GLYPH` | 测宽或绘制前 `ensure_glyphs` 缺字 |
-| `NODE_TOO_TALL` | 折行后节点高超过 `node_height_limit_mm(肖像可印高)` |
-| `LAYOUT_FAILED` | 分页/布局内部不变量破坏（非法 overflow id、缺锚点框、bus 键非法等） |
+| 码 | 阶段 | 触发 |
+| --- | --- | --- |
+| `INVALID_PROTOCOL` | `Chart::new` | §4 与 §5 的协议和折叠错误 |
+| `CYCLE_DETECTED` | `Chart::new` | 有向环 |
+| `SUBJECT_NOT_FOUND` | `Chart::new` | 主体不在节点表 |
+| `TOO_MANY_NODES` | `Chart::new` | 折叠前或折叠后，节点数超过 `max_nodes` |
+| `FONT_ERROR` | `Font::new`、`Font::from_shared`、`Chart::to_pdf` | 打不开单字体、字体集合、解析失败。`to_pdf` 里还有 krilla 拒绝字体、序列化失败、字形没有 advance |
+| `MISSING_GLYPH` | `Chart::to_pdf` | 测宽或绘制前 `ensure_glyphs` 缺字 |
+| `NODE_TOO_TALL` | `Chart::to_pdf` | 折行后节点高超过 `node_height_limit_mm`（肖像可印高） |
+| `LAYOUT_FAILED` | `Chart::to_pdf` | 分页或布局无法完成。缺锚点框、主体或直接层放不进页、续页文字超宽。出图路径上的协议错误也记这个码 |
 
-`message` 尽量贴近 Python，不保证逐字。
+`message` 的措辞不是合同。调用方用 `code()` 取 `ErrorCode`，再用 `as_str` 取稳定字符串。
 
-## 7. `generate_pdf` 管线
+## 7. `to_pdf` 管线
 
 ```text
 ChartRequest
-  → prepare_request → ChartRequest'
-  → validate → ValidatedGraph
-  → build_display + ratio_facts
-  → 解析 margin / node_width 缺省
-  → FontMetrics(font bytes)
-  → build_node_boxes（用肖像可印高做 NODE_TOO_TALL）
-  → paginate（可横竖切换、overflow、cue、升格附页）
-  → ensure_glyphs（页眉、cue、页脚文案）
-  → render → PDF bytes
+  → Chart::new
+      graph 校验原始请求
+      → graph 按 top_n 在 arena 上折叠
+      → graph 在折叠后的 arena 上重跑协议规则
+  → Chart
+Font::new 或 Font::from_shared
+  → Chart::to_pdf
+      content 框内行
+      → font 测字
+      → page 节点框（肖像可印高，NODE_TOO_TALL）
+      → paginate（横竖切换、overflow、cue、升格附页）
+      → ensure_glyphs（页眉、cue、页脚文案）
+      → render → PDF bytes
 ```
 
-不写 `/Info`。不用 `document_title` / `options.title` 覆盖页眉。
+不写 `/Info`。页眉不读 `title()`。
 
 ## 8. 展示合同（display + captions）
 
@@ -254,7 +316,7 @@ ChartRequest
 | `SUBJECT` / `SHAREHOLDER` | 名称。法人姓名（无「法定代表人：」前缀） |
 | `INVESTMENT` | 名称。有实缴金额则 `实缴 {金额}` 或 `实缴 {金额} {币种}`（仅币种不画行）。所在地原文一行。核准日期原文一行。不画法人 |
 
-`__other__:` 节点按股东配方，通常只有名称一行。实线，不可点击。
+折叠占位按股东配方，通常只有名称一行。实线，不可点击。
 
 ### 8.3 线旁比例
 
@@ -303,14 +365,15 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 
 ### 9.1 字体
 
-- 入参 `FontBytes`。`data` 是 `Arc<Vec<u8>>`。`new` 包住拥有的字节。`from_shared` 复用已有的 `Arc`。可观察行为不变。拒绝 TTC/OTC → `FONT_ERROR`。
-- 无法解析 → `FONT_ERROR`。
-- 测宽前对每个字符 ensure glyph。缺字 → `MISSING_GLYPH`（消息可含文本前缀）。
+- 入参 `Font`。内部持有 `Arc<Vec<u8>>`。`Font::new` 包住调用方拥有的字节并当场解析。`Font::from_shared` 保存已有的 `Arc` 并当场解析。解析失败 → `FONT_ERROR`，原因在 `source()`。拒绝 TTC/OTC。
+- `Font::new` 只做打开单字体时已有的检查。空字节、打不开 face、读不到 `head` 或 `hhea`、upem 不是有限正数、ascent 不大于 0、descent 不小于 0，都在这里失败。字形没有 advance 仍在 `to_pdf` 报 `FONT_ERROR`。krilla 拒绝字体或序列化失败也在 `to_pdf` 报 `FONT_ERROR`。
+- `Font` 不可变，可以跨图复用。`Debug` 只输出字节长度和 units per em。`Font` 不可比较。
+- 测宽前对每个字符 ensure glyph。缺字 → `MISSING_GLYPH`。`subject` 为 `Character`。
 - 行高用 ascent+descent 比例尺 + `LINE_GAP_PT`。与绘制共用同一 charmap / advance 管线。禁止 krilla `draw_text` 反推宽度。
 
 ### 9.2 节点框
 
-- 普通宽 = options 或 `38` mm。主体宽 = `min(width * 2.55, 80)` mm。
+- 普通宽 = `style.node_width_mm`。缺省 `38` mm。主体宽 = `min(width * 2.55, 80)` mm。
 - 内容宽 = 框宽 − `2 * PADDING_X_MM`。名称可折行。名称字号主体 `12` pt，普通 `10` pt。法人/详情 `9` pt。
 - 高度 = 上下 padding + 各折行行高，再与两行名称下限取 max。主体用 `SUBJECT_PADDING_Y_MM`。
 - `NODE_TOO_TALL` 比较对象是**肖像**可印高导出的 `node_height_limit_mm = (printable_h - LAYER_SPACING_MM) / 2`。升格附页主体时 Python 不再做该检查。
@@ -344,7 +407,7 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 
 插入合成节点。
 
-- id `__overflow__:{主体}:{首个被挪走的孩子}`。
+- 身份是 `NodeOrigin::Overflow { subject, first_moved, moved_count }`。
 - 名称 `其他股东(k家)` 或 `其他投资(k家)`。
 - 虚线描边。整框可点到续页。不是 ContCue。
 - 若「主体 + 一个真实孩子 + 合成位」两朝向弹性都放不下，该页退回只要求物理 fits。
@@ -444,17 +507,17 @@ Python/reportlab 与 krilla 坐标约定可能不同。Rust 侧在适配层做�
 | `CONT_CUE_LINE_COUNT` | 2 |
 | `PAGE_NUMBER_INSET_MM` | 5 |
 
-## 13. 可测迁移切片
+## 13. 可测切片
 
-每个 §13 切片结束须可测。目标架构一次收敛，不为过渡态留兼容层（outcome-oriented）。
+每个切片结束须可测。
 
 | § | 交付 | 验证 |
 | --- | --- | --- |
-| §13.1 | 协议类型、`Error`、`validate`、`prepare`、`validate_request`、`document_title` | 移植 `test_graph` / `test_prepare` 行为。`cargo test -p pdfcraft-orgchart` |
-| §13.2 | display 框内行、`ratio_facts`、captions 字符串纯函数 | 对照 `test_display` / captions 期望字面量 |
-| §13.3 | `FontBytes` + skrifa 测宽、`build_node_boxes`、`MISSING_GLYPH` / `NODE_TOO_TALL` / `FONT_ERROR` | `test_measuring` 行为。缺字样张 |
-| §13.4 | paginate + layout 引擎、overflow、cue、附页升格 | `test_paging` / `test_layout` / cue 测试的可观察页结构 |
-| §13.5 | krilla `render` + `generate_pdf` | `%PDF` 冒烟。`pdftotext` 抽页眉/附件号/关键节点名。页数与附件编号与 Python 对照（非像素门禁） |
+| §13.1 | `request`、`error`、`graph` 的协议与折叠、`Chart::new` | 错误码与折叠结果。`cargo test -p pdfcraft-orgchart` |
+| §13.2 | `content` 框内行、比例事实、`captions` 字符串 | 对照框内行与文案的期望字面量 |
+| §13.3 | `font` 的 skrifa 测宽、`page` 的节点框、`MISSING_GLYPH`、`NODE_TOO_TALL`、`FONT_ERROR` | 缺字样张与打不开的字体 |
+| §13.4 | `paginate` 与 `layout`、overflow、cue、附页升格 | 页数、主副标题、角色、附件号 |
+| §13.5 | `render` 与 `Chart::to_pdf` | `%PDF` 冒烟。`pdftotext` 抽页眉、附件号、关键节点名。页数与附件编号与 Python 对照（非像素门禁） |
 
 Python 对照命令：
 
@@ -472,28 +535,35 @@ cargo test -p pdfcraft-orgchart
 cargo doc -p pdfcraft-orgchart --no-deps
 ```
 
-### 13.1 建议 crate 模块（非强制文件名）
+### 13.1 模块
 
-`error`、`model`、`graph`、`prepare`、`display`、`captions`、`measure`、`layout`、`paging`、`render`、`lib` 重导出稳定面。
+`error`、`units`、`captions`、`request`、`font`、`graph`、`content`、`page`、`layout`、`paginate`、`render`、`chart`。`lib` 只重导出 §3 的公共类型。依赖方向见结构规格 §3。
 
 ## 14. 已确认答复
 
 | 题 | 答复 | 来源 |
 | --- | --- | --- |
-| Q1 命名 | 缩短为 `ChartRequest` / `Node` / `Edge` / `ChartOptions` / `Error` / `ErrorCode` | 口头 |
+| Q1 命名 | `Chart`、`ChartRequest`、`ChartStyle`、`Node`、`Edge`、`PaidIn`、`Font`、`Error`、`ErrorCode`、`ErrorSubject` | 提案书 §13 |
 | Q2 中间 API | 不进稳定公共面 | 口头 |
 | Q3 `to_dict` | 不提供 | 默认 |
-| Q4 `NodeType` 字符串 | `PERSON` / `COMPANY` | 默认 |
-| Q5 `__other__:` | 校验允许，折叠冲突报错 | 默认 |
+| Q4 `NodeType` 字符串 | `PERSON`、`COMPANY` | 默认 |
+| Q5 折叠身份 | 身份由 `NodeOrigin` 表达。已有占位由 `folded_holders_of` 声明。id 前缀没有特殊含义 | 提案书 §13 |
 | Q6 字体 | bytes。拒 TTC/OTC。OTF 能开则开 | 默认 |
 | Q7 文案 | 简体词表。页脚「頁」保留 | 默认 |
 | Q8 `/Info` | 不写 | 默认 |
-| Q9 `message` | 只稳定 `code` | 默认 |
+| Q9 `message` | 只稳定 `code()`。`message()` 给日志 | 提案书 §13 |
 | Q10 验收 | 文本可抽取 + 页结构。无几何截图门禁 | 默认 |
-| Q11 `max_nodes` | 折叠后再计 | 口头 |
-| Q12 `top_n` | `None` 与 `Some(0)` 都不折叠 | 默认 |
-| Q13 options | 保持 `Option`，缺省在 `generate_pdf` 代入 | 默认 |
+| Q11 `max_nodes` | 在 `Chart::new` 内，折叠之后计数，并重跑全部协议规则 | 提案书 §13 |
+| Q12 `top_n` | 类型是 `Option<NonZeroUsize>`。`None` 不折叠。`Some(n)` 的 `n` 在 `1..=max_nodes`。`top_n == max_nodes` 合法 | 提案书 §13 |
+| Q13 外观缺省 | `ChartStyle::default` 为宽 38 mm、边距 8 mm。字段不是 `Option` | 提案书 §13 |
 | Q14 纸张朝向 | 固定 A4，启发式朝向 | 默认 |
+| Q15 编译与出图 | `Chart::new(ChartRequest) -> Result<Chart, Error>` 按值接收请求。`Chart::to_pdf(&self, &Font)` 出 PDF。`Chart` 不持有字体 | 提案书 §13 |
+| Q16 标题 | `Chart::title()` 恒为 `{主体名}股权架构图`。另有 `Chart::subject_name()` | 提案书 §13 |
+| Q17 外观类型 | `ChartStyle { node_width_mm, margin_mm }`。`Default` 为 38 与 8 | 提案书 §13 |
+| Q18 字体类型 | `Font::new` 与 `Font::from_shared` 返回 `Result`。解析失败是 `FONT_ERROR` | 提案书 §13 |
+| Q19 边与实缴 | `Edge { holder, held, ratio }`。`Node.paid_in` 是 `Option<PaidIn>`。`PaidIn { amount, currency }` | 提案书 §13 |
+| Q20 错误访问器 | `Error` 字段私有。访问器是 `code()`、`message()`、`subject()`、`source()`。`ErrorSubject` 标 `#[non_exhaustive]` | 提案书 §13 |
+| Q21 字面量例外 | `ChartStyle` 是样式结构体。`Node`、`Edge`、`PaidIn`、`ChartRequest` 是协议记录，公有字段，不标 `non_exhaustive`。`Chart`、`Font`、`Error` 字段私有 | 提案书 §13 |
 
 ## 15. 实现时仍须打开的源文件
 

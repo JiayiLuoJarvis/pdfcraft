@@ -113,7 +113,7 @@ cargo deny check advisories licenses bans sources
 
 | 号 | 规则 | 出处 | 执行 |
 | --- | --- | --- | --- |
-| ERR-1 | 每个包有自己的错误类型，不共用 error crate。`pdfcraft-pdf`：`Error` / `Errors`，位置放可选的 `Location`。`pdfcraft-forms`、`pdfcraft-post`：单条 `Error` 加 `ErrorKind`。`pdfcraft-orgchart`：`ErrorCode` 加只给日志看的 `message`，调用方匹配 `ErrorCode::as_str`。 | workspace-crates-spec；MS M-ERRORS-CANONICAL-STRUCTS（部分采纳，见 §15） | 评审 |
+| ERR-1 | 每个包有自己的错误类型，不共用 error crate。`pdfcraft-pdf`：`Error` / `Errors`，位置放可选的 `Location`。`pdfcraft-forms`、`pdfcraft-post`：单条 `Error` 加 `ErrorKind`。`pdfcraft-orgchart`：私有字段的 `Error`，访问器 `code()`、`message()`、`subject()`、`source()`。调用方用 `code()` 取 `ErrorCode`，再用 `as_str` 取稳定字符串。`message()` 只给日志，措辞不是合同。 | workspace-crates-spec；MS M-ERRORS-CANONICAL-STRUCTS（部分采纳，见 §15） | 评审 |
 | ERR-2 | 错误类型实现 `std::error::Error + Send + Sync + 'static`，并有编译期断言测试。依赖的错误经 `source()` 可取。 | API#c-good-err；MS M-TYPES-SEND | 编译期断言测试（现状：只有 `spec` 有 `assert_send_sync`，其余三包待补，见 §16） |
 | ERR-3 | `Display` 小写开头，句末不加标点，不带 `Error:` 前缀，不重复 `source()` 的内容。 | API#c-good-err | 评审 |
 | ERR-4 | 不丢弃有载荷的底层错误。`map_err(\|_\| ..)`、`.ok()`、`unwrap_or_default()` 只用于两种情况：错误本身无载荷（如 `TryFromIntError`），或「缺省即合法」是写明的语义。 | 本仓库；MS M-FROM-ERROR | 评审（`map_err_ignore` 分不清有无载荷，不开，见 §14） |
@@ -225,9 +225,9 @@ cargo deny check advisories licenses bans sources
 | 号 | 禁止 | 正派写法 | 反例（现存） | 执行 |
 | --- | --- | --- | --- | --- |
 | TRK-1 | 丢弃有载荷的底层错误 | 映射成带 `source` 的领域错误 | `post/thumbnail.rs:111`、`forms/inspect.rs:105` | 评审（ERR-4） |
-| TRK-2 | 用哨兵值表示「没有」或「失败」（`u32::MAX`、`0`、空串） | `Option` 或专用 enum。协议规定的常量除外，注明出处 | `pdf/spec/mod.rs:124`、`orgchart/ids.rs:14` | 评审 |
+| TRK-2 | 用哨兵值表示「没有」或「失败」（`u32::MAX`、`0`、空串） | `Option` 或专用 enum。协议规定的常量除外，注明出处 | `pdf/spec/mod.rs:124` | 评审 |
 | TRK-3 | 浮点位模式当键或比较手段 | 有限值 newtype 内实现 `Eq` / `Hash` | `orgchart/route.rs:284`、`pdf/spec/lower.rs:2041` | 评审（DET-3） |
-| TRK-4 | 字符串前缀或魔法字符串表达身份或类别 | enum 或类型化 id | `orgchart/graph.rs:13` `__overflow__:` | 评审（API-2） |
+| TRK-4 | 字符串前缀或魔法字符串表达身份或类别 | enum 或类型化 id | 已消除。orgchart 的节点身份是 `NodeOrigin` | 评审（API-2） |
 | TRK-5 | `Box<dyn Any>` 加 downcast | 泛型或 trait 方法 | `pdf/backend/mod.rs:29` | 评审（ARC-6） |
 | TRK-6 | 用 `if let Some(..) = ..find()` 或返回 `Option` 的 `?` 静默跳过本应成立的不变量 | 失败即错误或 PAN-3 的登记 panic | `forms/inspect.rs:90`、`pdf/layout/justify.rs:223` | 评审 |
 | TRK-7 | `let _ =` 丢弃 `Result` 或有意义的值 | 处理它，或写明为何可丢 | `pdf/layout/frame.rs:317` | `lint:let_underscore_drop`、`lint:clippy::let_underscore_must_use`、`lint:clippy::let_underscore_untyped` |
