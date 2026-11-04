@@ -12,7 +12,10 @@ use super::cues::{direct_count, finalize_pages, PendingCue, PendingLink, Unnumbe
 use super::family::{
     search_family_pages, AttachmentTask, DirectFit, PageDraft, SearchPage, TaskKind,
 };
-use crate::captions::{equity_chart_title, whole_chart_subtitle, CueSide};
+use crate::captions::{
+    both_cones_chart_title, equity_chart_title, investment_page_titles, whole_chart_subtitle,
+    CueSide,
+};
 use crate::content::{self, RatioFact};
 use crate::error::{Error, ErrorCode};
 use crate::font::Measurer;
@@ -168,7 +171,20 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
     ) -> Result<Self, Error> {
         let subject_node = graph.subject;
         let subject_name = graph.node_name(subject_node).to_owned();
+        let has_shareholders = !graph.incoming_sources(subject_node).is_empty();
         let has_investments = !graph.outgoing_targets(subject_node).is_empty();
+        // Whole-page chrome follows cone shape.
+        let (whole_main, whole_sub) = match (has_shareholders, has_investments) {
+            (false, true) => investment_page_titles(&subject_name, 1),
+            (true, true) => (
+                both_cones_chart_title(&subject_name),
+                whole_chart_subtitle(&subject_name, true),
+            ),
+            (_, _) => (
+                equity_chart_title(&subject_name),
+                whole_chart_subtitle(&subject_name, has_investments),
+            ),
+        };
         let node_width = boxes
             .values()
             .find(|box_| !box_.is_subject)
@@ -188,10 +204,10 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             engine,
             measurer,
             subject_node,
-            subject_name: subject_name.clone(),
+            subject_name,
             has_investments,
-            whole_main: equity_chart_title(&subject_name),
-            whole_sub: whole_chart_subtitle(&subject_name, has_investments),
+            whole_main,
+            whole_sub,
             node_width,
             order_index,
             shareholder_continue: 0,

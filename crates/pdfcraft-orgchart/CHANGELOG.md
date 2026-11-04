@@ -9,6 +9,18 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Fixed
+
+- A one-page chart with only outward investments (no shareholder edges) now
+  uses the investment-overview header (`对外投资: …` / `{主体} → 对外投资`)
+  instead of the equity whole-chart header.
+
+### Changed
+
+- A one-page chart that has both shareholder and investment edges now uses
+  main title `股权与对外投资: {主体}` instead of `股权架构图: {主体}`. The
+  dual-arrow subtitle is unchanged.
+
 ## [0.3.0] - 2026-11-04
 
 ### Breaking

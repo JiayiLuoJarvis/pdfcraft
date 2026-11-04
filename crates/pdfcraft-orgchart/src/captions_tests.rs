@@ -1,11 +1,11 @@
 //! Page chrome strings. They do not open a font.
 
 use crate::captions::{
-    cont_cue_lines, continuation_title, equity_chart_title, footer, holds_relation,
-    investment_chart_title, investment_overview, investment_page_titles, invests_relation,
-    main_title, other_investments_name, other_shareholders_name, overflow_detail_line,
-    penetration_title, shareholder_overview, shareholder_page_titles, whole_chart_subtitle,
-    CueSide,
+    both_cones_chart_title, cont_cue_lines, continuation_title, equity_chart_title, footer,
+    holds_relation, investment_chart_title, investment_overview, investment_page_titles,
+    invests_relation, main_title, other_investments_name, other_shareholders_name,
+    overflow_detail_line, penetration_title, shareholder_overview, shareholder_page_titles,
+    whole_chart_subtitle, CueSide,
 };
 
 #[test]
@@ -61,6 +61,7 @@ fn cut_relation_names_the_parent_and_ratio() {
 fn titles_match_the_role_table() {
     assert_eq!(equity_chart_title("主体"), "股权架构图: 主体");
     assert_eq!(investment_chart_title("主体"), "对外投资: 主体");
+    assert_eq!(both_cones_chart_title("主体"), "股权与对外投资: 主体");
     assert_eq!(continuation_title(2, "主体"), "续页2: 主体");
     assert_eq!(penetration_title(2, "超频三"), "附件2: 超频三");
     assert_eq!(whole_chart_subtitle("主体", false), "各股东/合伙人 → 主体");
@@ -134,6 +135,7 @@ fn cut_relation_and_chrome() {
     assert_eq!(main_title("主体"), "主体股权架构图");
     assert_eq!(equity_chart_title("主体"), "股权架构图: 主体");
     assert_eq!(investment_chart_title("主体"), "对外投资: 主体");
+    assert_eq!(both_cones_chart_title("主体"), "股权与对外投资: 主体");
     assert_eq!(continuation_title(2, "主体"), "续页2: 主体");
     assert_eq!(penetration_title(2, "超频三"), "附件2: 超频三");
     assert_eq!(whole_chart_subtitle("主体", false), "各股东/合伙人 → 主体");

@@ -72,7 +72,7 @@ fn a_subject_alone_is_one_portrait_page() {
 fn a_fork_that_fits_is_one_landscape_page() {
     let pages = pages_of(&chart(2, 1));
     assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].main_title, "股权架构图: 主体");
+    assert_eq!(pages[0].main_title, "股权与对外投资: 主体");
     assert_eq!(pages[0].sub_title, "各股东/合伙人 → 主体 → 对外投资");
     assert!((pages[0].geometry.page_width_mm - 297.0).abs() < 0.001);
     assert!((pages[0].geometry.page_height_mm - 210.0).abs() < 0.001);
@@ -185,7 +185,15 @@ fn whole_chart_with_investments_extends_the_arrow() {
     let pages = fake_pages(&request, 10).expect("pages");
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].sub_title, "各股东/合伙人 → 主体 → 对外投资");
-    assert_eq!(pages[0].main_title, "股权架构图: 主体");
+    assert_eq!(pages[0].main_title, "股权与对外投资: 主体");
+}
+
+#[test]
+fn investment_only_whole_page_uses_investment_titles() {
+    let pages = pages_of(&chart(0, 2));
+    assert_eq!(pages.len(), 1);
+    assert_eq!(pages[0].main_title, "对外投资: 主体");
+    assert_eq!(pages[0].sub_title, "主体 → 对外投资");
 }
 
 #[test]

@@ -18,7 +18,7 @@ fn role_title(role: &str, name: &str) -> String {
     format!("{role}{ROLE_SEP}{name}")
 }
 
-/// Shareholder overview and whole-chart main title.
+/// Shareholder overview and equity-only whole-page main title.
 #[must_use]
 pub(crate) fn equity_chart_title(subject_name: &str) -> String {
     role_title("股权架构图", subject_name)
@@ -28,6 +28,12 @@ pub(crate) fn equity_chart_title(subject_name: &str) -> String {
 #[must_use]
 pub(crate) fn investment_chart_title(subject_name: &str) -> String {
     role_title("对外投资", subject_name)
+}
+
+/// Whole-page main title when both shareholder and investment cones are present.
+#[must_use]
+pub(crate) fn both_cones_chart_title(subject_name: &str) -> String {
+    role_title("股权与对外投资", subject_name)
 }
 
 /// Side continuation main title.
