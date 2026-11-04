@@ -9,6 +9,10 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-04
+
+No public API change. Only page headers of one-page charts change.
+
 ### Fixed
 
 - A one-page chart with only outward investments (no shareholder edges) now

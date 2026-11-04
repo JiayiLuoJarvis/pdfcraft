@@ -47,9 +47,15 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 - `pdfcraft-orgchart` `0.3.0`. `Chart::new` checks the request, folds, then
   checks the folded chart. A node id may start with `__overflow__:`.
   Details in the crate changelog.
+- `pdfcraft-orgchart` `0.3.1`. A one-page chart with both shareholders and
+  investments is titled `股权与对外投资: {主体}`. Details in the crate
+  changelog.
 
 ### Fixed
 
+- `pdfcraft-orgchart` `0.3.1`. A one-page chart with only investments uses the
+  investment header `对外投资: {主体}` / `{主体} → 对外投资`. Details in the
+  crate changelog.
 - `pdfcraft-orgchart` `0.3.0`. `to_pdf` on the same `Chart` returns identical
   PDF bytes. Placed nodes are drawn in `NodeId` order. Details in the crate
   changelog.

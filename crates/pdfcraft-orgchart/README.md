@@ -23,7 +23,7 @@ Outbound investments sit below. Measurement uses
 
 ```toml
 [dependencies]
-pdfcraft-orgchart = "0.3.0"
+pdfcraft-orgchart = "0.3.1"
 ```
 
 ---
