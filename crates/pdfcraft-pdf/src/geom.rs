@@ -1063,6 +1063,43 @@ pub enum PathVerb {
 // 4/3 * (sqrt(2) - 1). Four cubics stay within about 0.027% of a true quarter ellipse.
 const KAPPA: f32 = 0.552_284_8;
 
+/// A clockwise page angle in degrees.
+///
+/// [`Angle::degrees`] rejects NaN and infinity. `+0` and `-0` compare equal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[must_use]
+pub struct Angle(f32);
+
+// `degrees` rejects NaN, so `==` is reflexive.
+impl Eq for Angle {}
+
+impl Angle {
+    /// Builds an angle from degrees.
+    ///
+    /// # Errors
+    ///
+    /// [`GeometryKind::NonFiniteRotation`](crate::error::GeometryKind::NonFiniteRotation)
+    /// when `value` is NaN or infinite.
+    pub fn degrees(value: f32) -> Result<Self, Error> {
+        if value.is_finite() {
+            Ok(Self(value))
+        } else {
+            Err(crate::error::GeometryKind::NonFiniteRotation { degrees: value }.into())
+        }
+    }
+
+    /// The angle in degrees. A negative zero stays a negative zero.
+    #[must_use]
+    pub const fn as_degrees(self) -> f32 {
+        self.0
+    }
+
+    /// True for `+0` and `-0`.
+    pub(crate) fn is_zero(self) -> bool {
+        self.0 == 0.0
+    }
+}
+
 /// Row-major 2×3 affine map in page space (y down).
 ///
 /// `[[a, b, tx], [c, d, ty]]` maps `(x, y) → (a*x + b*y + tx, c*x + d*y + ty)`.
@@ -1105,22 +1142,23 @@ impl Affine {
         }
     }
 
-    /// Clockwise about `pivot`, matching [`Path::rotated`] / krilla `Transform::from_rotate`.
-    pub(crate) fn rotate_cw_about(degrees: f32, pivot: Point) -> Result<Self, Error> {
-        if !degrees.is_finite() {
-            return Err(crate::error::GeometryKind::NonFiniteRotation { degrees }.into());
-        }
+    /// Clockwise about `pivot`, matching [`Path::rotated`] and krilla `Transform::from_rotate`.
+    ///
+    /// `degrees` is finite. A pivot far from the origin can still make `tx` or
+    /// `ty` non-finite. Callers that apply the map check those coordinates.
+    pub(crate) fn rotate_cw_about(degrees: Angle, pivot: Point) -> Self {
+        let degrees = degrees.as_degrees();
         let (sin, cos) = degrees.to_radians().sin_cos();
         let ox = pivot.x().as_pt();
         let oy = pivot.y().as_pt();
-        Ok(Self {
+        Self {
             a: cos,
             b: -sin,
             c: sin,
             d: cos,
             tx: ox * (1.0 - cos) + oy * sin,
             ty: -ox * sin + oy * (1.0 - cos),
-        })
+        }
     }
 
     /// Applies `self` first, then `next`.
@@ -1258,7 +1296,7 @@ impl Path {
     /// Rotates every point, including control points, by `degrees` about `about`.
     ///
     /// Positive is clockwise on the page, matching krilla `Transform::from_rotate`.
-    /// Fails when the angle is not finite or a rotated coordinate is not finite.
+    /// Fails when a rotated coordinate is not finite.
     /// Layer `Rotated` marks use the canvas CTM; this bake stays for geom tests.
     #[cfg_attr(
         not(test),
@@ -1267,8 +1305,8 @@ impl Path {
             reason = "geom unit tests; layer rotation uses the canvas CTM"
         )
     )]
-    pub(crate) fn rotated(&self, degrees: f32, about: Point) -> Result<Self, Error> {
-        let affine = Affine::rotate_cw_about(degrees, about)?;
+    pub(crate) fn rotated(&self, degrees: Angle, about: Point) -> Result<Self, Error> {
+        let affine = Affine::rotate_cw_about(degrees, about);
         self.map_points(|point| affine.apply(point))
     }
 
@@ -1705,7 +1743,7 @@ mod tests {
     fn rotated_quarter_turn_is_clockwise() {
         let about = pt(10.0, 20.0);
         let path = Path::line(pt(13.0, 20.0), pt(10.0, 24.0));
-        let turned = path.rotated(90.0, about).unwrap();
+        let turned = path.rotated(degrees(90.0), about).unwrap();
         let [PathVerb::MoveTo(start), PathVerb::LineTo(end)] = turned.verbs() else {
             panic!("expected a segment, got {:?}", turned.verbs());
         };
@@ -1715,7 +1753,7 @@ mod tests {
         assert!(crate::canvas::pt_near(end.y().as_pt(), 20.0));
 
         let ellipse = Path::ellipse(Rect::try_pt(0.0, 0.0, 4.0, 2.0).unwrap()).unwrap();
-        let spun = ellipse.rotated(90.0, pt(2.0, 1.0)).unwrap();
+        let spun = ellipse.rotated(degrees(90.0), pt(2.0, 1.0)).unwrap();
         let PathVerb::MoveTo(right) = spun.verbs()[0] else {
             panic!("expected move");
         };
@@ -1732,13 +1770,13 @@ mod tests {
     #[test]
     fn affine_rotate_cw_about_matches_path_bake() {
         let pivot = pt(10.0, 20.0);
-        let affine = Affine::rotate_cw_about(90.0, pivot).unwrap();
+        let affine = Affine::rotate_cw_about(degrees(90.0), pivot);
         let mapped = affine.apply(pt(13.0, 20.0)).unwrap();
         assert!(crate::canvas::pt_near(mapped.x().as_pt(), 10.0));
         assert!(crate::canvas::pt_near(mapped.y().as_pt(), 23.0));
 
         let composed =
-            Affine::translate(-5.0, 2.0).then(Affine::rotate_cw_about(90.0, Point::ZERO).unwrap());
+            Affine::translate(-5.0, 2.0).then(Affine::rotate_cw_about(degrees(90.0), Point::ZERO));
         let got = composed.apply(pt(3.0, 4.0)).unwrap();
         // translate first → (−2, 6); then 90° CW about origin → (−6, −2)
         assert!(crate::canvas::pt_near(got.x().as_pt(), -6.0));
@@ -1786,7 +1824,7 @@ mod tests {
     #[test]
     fn edge_box_transforms_all_four_corners() {
         let bounds = EdgeBox::from_rect(Rect::try_pt(0.0, 0.0, 10.0, 20.0).unwrap());
-        let affine = Affine::rotate_cw_about(90.0, Point::ZERO).unwrap();
+        let affine = Affine::rotate_cw_about(degrees(90.0), Point::ZERO);
         let rotated = bounds.transformed(affine).unwrap();
         assert!(crate::canvas::pt_near(rotated.min_x, -20.0));
         assert!(crate::canvas::pt_near(rotated.min_y, 0.0));
@@ -1795,15 +1833,36 @@ mod tests {
     }
 
     #[test]
-    fn affine_rejects_non_finite_degrees() {
-        let err = Affine::rotate_cw_about(f32::NAN, Point::ZERO).unwrap_err();
-        assert!(matches!(
-            err.kind,
-            ErrorKind::InvalidGeometry(crate::error::GeometryKind::NonFiniteRotation { degrees })
-                if degrees.is_nan()
-        ));
+    fn angle_degrees_rejects_non_finite_values() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            match Angle::degrees(value) {
+                Err(Error {
+                    kind:
+                        ErrorKind::InvalidGeometry(crate::error::GeometryKind::NonFiniteRotation {
+                            degrees,
+                        }),
+                    ..
+                }) => {
+                    assert_eq!(degrees.to_bits(), value.to_bits(), "payload");
+                }
+                other => panic!("expected NonFiniteRotation, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn angle_degrees_keeps_finite_values_and_equates_signed_zero() {
+        for value in [0.0, -0.0, 45.0, 360.0, 1.0e20] {
+            let angle = Angle::degrees(value).unwrap();
+            assert_eq!(angle.as_degrees().to_bits(), value.to_bits(), "{value}");
+        }
+        assert_eq!(Angle::degrees(0.0).unwrap(), Angle::degrees(-0.0).unwrap());
         assert!(Affine::IDENTITY.is_identity());
         assert!(Affine::IDENTITY.is_finite());
+    }
+
+    fn degrees(value: f32) -> Angle {
+        Angle::degrees(value).unwrap()
     }
 
     #[test]

@@ -1,12 +1,14 @@
 //! Public `Limits` caps through `layout_spec`.
 
 use pdfcraft_pdf::spec::{
-    Block, CellSpec, FontFace, FontFamily, FontRegistry, Resources, SectionSpec, TableRow,
-    TableSpec,
+    Block, CellSpec, FontFace, FontFamily, FontRegistry, HLineStyle, Resources, SectionSpec,
+    TableRow, TableSpec,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::ImageFormat;
-use pdfcraft_pdf::{layout_spec, DocumentSpec, ErrorKind, LimitKind, Limits, PageSize};
+use pdfcraft_pdf::{
+    layout_spec, DocumentSpec, ErrorKind, LimitKind, Limits, NonNegative, PageSize,
+};
 
 #[expect(
     dead_code,
@@ -243,6 +245,81 @@ fn paragraph_byte_limit_counts_utf8() {
             kind: LimitKind::ParagraphBytes,
             value: 2,
             max: 1,
+        }
+    );
+}
+
+#[test]
+fn migrated_rule_counts_three_blocks() {
+    let spaced = || {
+        vec![
+            Block::Spacer(NonNegative::pt(4.0).unwrap()),
+            Block::HLine(HLineStyle::default()),
+            Block::Spacer(NonNegative::pt(4.0).unwrap()),
+        ]
+    };
+    assert!(lay(
+        Resources::default(),
+        tighten(|limits| limits.set_max_blocks(1).unwrap()),
+        SectionSpec {
+            body: vec![Block::HLine(HLineStyle::default())],
+            ..SectionSpec::default()
+        },
+    )
+    .is_ok());
+    let err = lay(
+        Resources::default(),
+        tighten(|limits| limits.set_max_blocks(2).unwrap()),
+        SectionSpec {
+            body: spaced(),
+            ..SectionSpec::default()
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        err.first().kind,
+        ErrorKind::LimitExceeded {
+            kind: LimitKind::Blocks,
+            value: 3,
+            max: 2,
+        }
+    );
+    assert!(lay(
+        Resources::default(),
+        tighten(|limits| limits.set_max_blocks(3).unwrap()),
+        SectionSpec {
+            body: spaced(),
+            ..SectionSpec::default()
+        },
+    )
+    .is_ok());
+}
+
+#[test]
+fn kept_rule_counts_four_blocks() {
+    let err = lay(
+        Resources::default(),
+        tighten(|limits| limits.set_max_blocks(3).unwrap()),
+        SectionSpec {
+            body: vec![Block::KeepTogether {
+                children: vec![
+                    Block::Spacer(NonNegative::pt(4.0).unwrap()),
+                    Block::HLine(HLineStyle::default()),
+                    Block::Spacer(NonNegative::pt(4.0).unwrap()),
+                ],
+            }],
+            ..SectionSpec::default()
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        err.first().kind,
+        ErrorKind::LimitExceeded {
+            kind: LimitKind::Blocks,
+            value: 4,
+            max: 3,
         }
     );
 }

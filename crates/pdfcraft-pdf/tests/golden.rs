@@ -22,17 +22,18 @@ mod snapshot;
 
 use std::path::PathBuf;
 
-#[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::spec::ImageSpec;
 use pdfcraft_pdf::spec::{
-    Alignment, Block, CanvasMark, CanvasSpec, DocumentInfo, FontFace, FontFamily, FontRegistry,
-    HLineSpec, LayerMark, LayerShape, PageWhen, Resources, SectionSpec,
+    Alignment, Block, CanvasMark, CanvasSpec, CanvasStyle, DocumentInfo, FontFace, FontFamily,
+    FontRegistry, HLineStyle, LayerMark, LayerShape, Mark, PageWhen, Resources, SectionSpec,
+    SectionStyle,
 };
+#[cfg(feature = "backend-krilla")]
+use pdfcraft_pdf::spec::{ImageSpec, ImageStyle};
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::ImageFormat;
 use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, Color, DocumentSpec, Ink, LinkTarget, Margins, NonNegative,
-    PageSize, Path, Pen, Point, Positive, Rect, Size,
+    layout_spec, Angle, CanvasCommand, Color, DocumentSpec, Ink, LinkTarget, Margins, PageSize,
+    Path, Pen, Point, Positive, Rect, Size,
 };
 use snapshot::{FontMeta, GoldenError};
 
@@ -57,17 +58,17 @@ fn font_free_pages() -> (Vec<pdfcraft_pdf::RecordedPage>, DocumentInfo) {
         language: Some("en".to_owned()),
     };
     let body = vec![
-        Block::HLine(HLineSpec {
+        Block::HLine(HLineStyle {
             width: None,
             align: Alignment::Start,
             thickness: Positive::pt(2.0).unwrap(),
             color: Color::rgb(200, 0, 0),
-            space_before: NonNegative::ZERO,
-            space_after: NonNegative::ZERO,
         }),
         Block::Canvas(CanvasSpec {
             size: Size::try_pt(120.0, 60.0).unwrap(),
-            align: Alignment::Start,
+            style: CanvasStyle {
+                align: Alignment::Start,
+            },
             marks: vec![
                 CanvasMark::Line {
                     from: pt(0.0, 0.0),
@@ -85,27 +86,31 @@ fn font_free_pages() -> (Vec<pdfcraft_pdf::RecordedPage>, DocumentInfo) {
             ],
         }),
     ];
-    let behind = vec![LayerMark::Line {
+    let behind = vec![LayerMark {
         when: PageWhen::All,
-        from: pt(10.0, 10.0),
-        to: pt(100.0, 10.0),
-        pen: pen(0, 0, 0, 0.5),
+        child: Mark::Shape(LayerShape::Line {
+            from: pt(10.0, 10.0),
+            to: pt(100.0, 10.0),
+            pen: pen(0, 0, 0, 0.5),
+        }),
     }];
-    let front = vec![LayerMark::Rotated {
+    let front = vec![LayerMark {
         when: PageWhen::All,
-        degrees: 45.0,
-        pivot: pt(100.0, 100.0),
-        shapes: vec![
-            LayerShape::Line {
-                from: pt(90.0, 100.0),
-                to: pt(110.0, 100.0),
-                pen: pen(128, 0, 128, 1.0),
-            },
-            LayerShape::Rect {
-                rect: rect(95.0, 95.0, 10.0, 10.0),
-                ink: Ink::Stroke(pen(128, 0, 128, 1.0)),
-            },
-        ],
+        child: Mark::Rotated {
+            degrees: Angle::degrees(45.0).unwrap(),
+            pivot: pt(100.0, 100.0),
+            shapes: vec![
+                LayerShape::Line {
+                    from: pt(90.0, 100.0),
+                    to: pt(110.0, 100.0),
+                    pen: pen(128, 0, 128, 1.0),
+                },
+                LayerShape::Rect {
+                    rect: rect(95.0, 95.0, 10.0, 10.0),
+                    ink: Ink::Stroke(pen(128, 0, 128, 1.0)),
+                },
+            ],
+        },
     }];
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -113,8 +118,10 @@ fn font_free_pages() -> (Vec<pdfcraft_pdf::RecordedPage>, DocumentInfo) {
         limits: pdfcraft_pdf::Limits::default(),
         info: info.clone(),
         sections: vec![SectionSpec {
-            page_size: None,
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                page_size: None,
+                margins: Margins::try_uniform(48.0).unwrap(),
+            },
             header: None,
             footer: None,
             behind,
@@ -348,7 +355,10 @@ fn golden_glyph_runs_render_exact_text_and_font_header() {
         limits: pdfcraft_pdf::Limits::default(),
         info: DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0).unwrap(),
+                ..SectionStyle::default()
+            },
             body: vec![Block::paragraph((), "AB")],
             ..Default::default()
         }],
@@ -379,12 +389,17 @@ fn golden_image_ops_use_dense_slots() {
         limits: pdfcraft_pdf::Limits::default(),
         info: DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0).unwrap(),
+                ..SectionStyle::default()
+            },
             body: vec![Block::Image(ImageSpec {
                 image,
-                width: None,
-                height: None,
-                align: Alignment::Start,
+                style: ImageStyle {
+                    width: None,
+                    height: None,
+                    align: Alignment::Start,
+                },
             })],
             ..Default::default()
         }],

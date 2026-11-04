@@ -611,7 +611,9 @@ mod tests {
     };
     use crate::error::{Error, ErrorKind};
     use crate::fonts::FontId;
-    use crate::geom::{Affine, Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4};
+    use crate::geom::{
+        Affine, Angle, Color, Paint, Path, PathVerb, Point, Positive, Rect, Stroke, A4,
+    };
 
     #[test]
     fn rejecting_registry_refuses_every_image() {
@@ -821,7 +823,7 @@ mod tests {
     fn records_push_and_pop_transform() -> Result<(), Error> {
         let mut rec = RecordingCanvas::new();
         rec.start_page(A4)?;
-        let affine = Affine::rotate_cw_about(45.0, Point::try_pt(10.0, 20.0)?)?;
+        let affine = Affine::rotate_cw_about(Angle::degrees(45.0)?, Point::try_pt(10.0, 20.0)?);
         rec.push_transform(&affine)?;
         rec.pop_transform()?;
         rec.finish_page()?;

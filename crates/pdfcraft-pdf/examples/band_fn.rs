@@ -19,8 +19,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
-    BandFn, BandInset, BandMark, BandSlot, BandSpec, Block, FontFace, FontFamily, FontRegistry,
-    ImageRef, LayerShape, Resources, RunStyle, SectionSpec, TextRun,
+    BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, FontFace, FontFamily, FontRegistry,
+    ImageRef, LayerShape, Mark, PageText, Resources, RunStyle, SectionSpec, SectionStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Error, ImageFormat, Ink, Limits, Margins, PageSize,
@@ -41,11 +41,14 @@ fn load_font() -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
 
 fn text_band(text: impl Into<String>, style: RunStyle) -> BandSpec<()> {
     BandSpec {
-        inset: BandInset::PageMargins,
-        left: Some(BandSlot::Text {
-            runs: vec![TextRun::Literal(text.into())],
+        style: BandStyle {
+            inset: BandInset::PageMargins,
+        },
+        left: Some(BandSlot {
             font: (),
             style,
+            children: vec![PageText::Literal(text.into())],
+            link: None,
         }),
         right: None,
         marks: Vec::new(),
@@ -73,7 +76,10 @@ fn section(
     body: Vec<Block<()>>,
 ) -> SectionSpec<()> {
     SectionSpec {
-        margins,
+        style: SectionStyle {
+            margins,
+            ..SectionStyle::default()
+        },
         header,
         footer,
         body,
@@ -107,12 +113,14 @@ fn when_page(
 
 fn link_band() -> BandSpec<()> {
     BandSpec {
-        inset: BandInset::PageMargins,
-        left: Some(BandSlot::Link {
+        style: BandStyle {
+            inset: BandInset::PageMargins,
+        },
+        left: Some(BandSlot {
             font: (),
-            uri: vec![TextRun::Literal("https://example.test/band".into())],
-            text: vec![TextRun::Literal("band link".into())],
             style: RunStyle::default(),
+            children: vec![PageText::Literal("band link".into())],
+            link: Some(vec![PageText::Literal("https://example.test/band".into())]),
         }),
         right: None,
         marks: Vec::new(),
@@ -132,18 +140,18 @@ fn tall_band() -> Result<BandSpec<()>> {
 fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
     BandFn::from_fn(move |query| {
         let marks = if query.number.get() % 2 == 1 {
-            vec![BandMark::Shape(LayerShape::Image {
+            vec![Mark::Shape(LayerShape::Image {
                 image: odd_image,
                 rect: Rect::try_pt(270.0, 12.5, 55.0, 55.0)?,
             })]
         } else {
             vec![
-                BandMark::Shape(LayerShape::Rect {
+                Mark::Shape(LayerShape::Rect {
                     rect: Rect::try_pt(36.0, 7.5, 180.0, 65.0)?,
                     ink: Ink::Stroke(Pen::new(Color::rgb(153, 153, 153), 1.0)?),
                 }),
-                BandMark::Shape(LayerShape::Text {
-                    text: vec![TextRun::Literal("Anti-counterfeit".into())],
+                Mark::Shape(LayerShape::Text {
+                    text: vec![PageText::Literal("Anti-counterfeit".into())],
                     font: (),
                     at: Point::try_pt(44.0, 15.0)?,
                     style: RunStyle {
@@ -151,8 +159,8 @@ fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
                         ..RunStyle::default()
                     },
                 }),
-                BandMark::Shape(LayerShape::Text {
-                    text: vec![TextRun::Literal("Scan to verify".into())],
+                Mark::Shape(LayerShape::Text {
+                    text: vec![PageText::Literal("Scan to verify".into())],
                     font: (),
                     at: Point::try_pt(44.0, 31.0)?,
                     style: RunStyle {
@@ -160,8 +168,8 @@ fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
                         ..RunStyle::default()
                     },
                 }),
-                BandMark::Shape(LayerShape::Text {
-                    text: vec![TextRun::Literal("No. ".into()), TextRun::PageNumber],
+                Mark::Shape(LayerShape::Text {
+                    text: vec![PageText::Literal("No. ".into()), PageText::PageNumber],
                     font: (),
                     at: Point::try_pt(44.0, 49.0)?,
                     style: RunStyle {
@@ -170,7 +178,7 @@ fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
                         ..RunStyle::default()
                     },
                 }),
-                BandMark::Shape(LayerShape::Image {
+                Mark::Shape(LayerShape::Image {
                     image: even_image,
                     rect: Rect::try_pt(156.0, 12.5, 55.0, 55.0)?,
                 }),
@@ -237,8 +245,10 @@ fn sections_for(
                 vec![Block::paragraph((), "portrait")],
             ),
             SectionSpec {
-                page_size: Some(Paper::A4.landscape()),
-                margins,
+                style: SectionStyle {
+                    page_size: Some(Paper::A4.landscape()),
+                    margins,
+                },
                 header: Some(size_header()),
                 body: vec![Block::paragraph((), "landscape")],
                 ..SectionSpec::default()

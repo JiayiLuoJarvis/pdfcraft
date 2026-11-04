@@ -16,7 +16,7 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BlankSpec, BlankWidth, Block, CellSpec, FontFace, FontFamily, FontRegistry,
-    HLineSpec, LineHeight, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    HLineStyle, LineHeight, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
     TableRow, TableSpec,
 };
 use pdfcraft_pdf::{
@@ -802,9 +802,9 @@ fn two_faces_on_one_line_use_each_faces_own_size() {
                 },
                 children: vec![run("A", small_key, 12.0), run("B", large_key, 18.0)],
             }),
-            Block::HLine(HLineSpec {
+            Block::HLine(HLineStyle {
                 thickness: pos(1.0),
-                ..HLineSpec::default()
+                ..HLineStyle::default()
             }),
         ],
     );
@@ -926,9 +926,9 @@ fn blank_only_paragraph_reads_no_font() {
                         baseline_offset: Some(nn(1.0)),
                     })],
                 }),
-                Block::HLine(HLineSpec {
+                Block::HLine(HLineStyle {
                     thickness: pos(1.0),
-                    ..HLineSpec::default()
+                    ..HLineStyle::default()
                 }),
             ],
             ..SectionSpec::default()

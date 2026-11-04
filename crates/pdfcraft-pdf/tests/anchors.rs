@@ -12,8 +12,8 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     BandFn, BandSlot, BandSpec, Block, CellSpec, CellStyle, FontFace, FontFamily, FontRegistry,
-    InsetStyle, OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, Span, TableBorder,
-    TableHeader, TableRow, TableSpec, TableStyle, TextRun,
+    InsetStyle, OutlineEntry, PageText, ParagraphSpec, Resources, RunStyle, SectionSpec,
+    SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
@@ -48,7 +48,10 @@ fn lay(body: Vec<Block<()>>) -> Result<Rendered> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0).unwrap(),
+                ..SectionStyle::default()
+            },
             body,
             ..SectionSpec::default()
         }],
@@ -614,13 +617,16 @@ fn band_link_stays_uri_only() {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_new(48.0, 48.0, 48.0, 48.0).unwrap(),
+            style: SectionStyle {
+                margins: Margins::try_new(48.0, 48.0, 48.0, 48.0).unwrap(),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                left: Some(BandSlot::Link {
+                left: Some(BandSlot {
                     font: (),
-                    uri: vec![TextRun::Literal("https://band.example".into())],
-                    text: vec![TextRun::Literal("H".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("H".into())],
+                    link: Some(vec![PageText::Literal("https://band.example".into())]),
                 }),
                 ..BandSpec::default()
             })),
@@ -645,13 +651,16 @@ fn empty_band_uri_is_empty_link_in_header() {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_new(48.0, 48.0, 48.0, 48.0).unwrap(),
+            style: SectionStyle {
+                margins: Margins::try_new(48.0, 48.0, 48.0, 48.0).unwrap(),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                left: Some(BandSlot::Link {
+                left: Some(BandSlot {
                     font: (),
-                    uri: vec![TextRun::Literal(String::new())],
-                    text: vec![TextRun::Literal("H".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("H".into())],
+                    link: Some(vec![PageText::Literal(String::new())]),
                 }),
                 ..BandSpec::default()
             })),
@@ -713,7 +722,10 @@ fn repeating_header_anchor_keeps_first_destination() {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0).unwrap(),
+                ..SectionStyle::default()
+            },
             body: vec![
                 table,
                 Block::Paragraph(ParagraphSpec {

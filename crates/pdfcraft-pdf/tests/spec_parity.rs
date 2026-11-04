@@ -7,10 +7,12 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::spec::{Alignment, CellSpec, ImageRef, ImageSpec, TableRow, TableSpec};
 use pdfcraft_pdf::spec::{
-    BandInset, BandSlot, Block, FontFace, FontFamily, FontRegistry, LayerMark, PageWhen, Resources,
-    RunStyle, SectionSpec, TextRun,
+    Alignment, CellSpec, ImageRef, ImageSpec, ImageStyle, TableRow, TableSpec,
+};
+use pdfcraft_pdf::spec::{
+    BandInset, BandSlot, BandStyle, Block, FontFace, FontFamily, FontRegistry, LayerMark,
+    LayerShape, Mark, PageText, PageWhen, Resources, RunStyle, SectionSpec,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -82,32 +84,33 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         return;
     }
     let margin = NonNegative::pt(36.0).unwrap();
-    let mut section = SectionSpec {
-        margins: Margins::uniform(margin),
-        ..SectionSpec::default()
-    };
+    let mut section = SectionSpec::default();
+    section.style.margins = Margins::uniform(margin);
     section.header = Some(pdfcraft_pdf::spec::BandFn::fixed(
         pdfcraft_pdf::spec::BandSpec {
-            inset: BandInset::PageMargins,
-            left: Some(BandSlot::Link {
+            style: BandStyle {
+                inset: BandInset::PageMargins,
+            },
+            left: Some(BandSlot {
                 font: (),
-                uri: vec![
-                    TextRun::Literal("https://example.com/".to_owned()),
-                    TextRun::PageNumber,
-                ],
-                text: vec![TextRun::Literal("Home".to_owned())],
                 style: RunStyle::default(),
+                children: vec![PageText::Literal("Home".to_owned())],
+                link: Some(vec![
+                    PageText::Literal("https://example.com/".to_owned()),
+                    PageText::PageNumber,
+                ]),
             }),
-            right: Some(BandSlot::Text {
-                runs: vec![
-                    TextRun::Literal("第 ".to_owned()),
-                    TextRun::PageNumber,
-                    TextRun::Literal(" 页 / 共 ".to_owned()),
-                    TextRun::PageCount,
-                    TextRun::Literal(" 页".to_owned()),
-                ],
+            right: Some(BandSlot {
                 font: (),
                 style: RunStyle::default(),
+                children: vec![
+                    PageText::Literal("第 ".to_owned()),
+                    PageText::PageNumber,
+                    PageText::Literal(" 页 / 共 ".to_owned()),
+                    PageText::PageCount,
+                    PageText::Literal(" 页".to_owned()),
+                ],
+                link: None,
             }),
             marks: Vec::new(),
         },
@@ -117,12 +120,14 @@ fn two_page_spec_resolves_page_text_links_and_last_page_marks() {
         Block::PageBreak,
         Block::paragraph((), "Beta"),
     ];
-    section.front.push(LayerMark::Text {
-        font: (),
+    section.front.push(LayerMark {
         when: PageWhen::Last,
-        text: vec![TextRun::Literal("SEAL".to_owned())],
-        at: Point::try_pt(430.0, 680.0).unwrap(),
-        style: RunStyle::default(),
+        child: Mark::Shape(LayerShape::Text {
+            text: vec![PageText::Literal("SEAL".to_owned())],
+            font: (),
+            at: Point::try_pt(430.0, 680.0).unwrap(),
+            style: RunStyle::default(),
+        }),
     });
 
     let spec = DocumentSpec {
@@ -258,9 +263,11 @@ fn cell_image_section(image: ImageRef) -> SectionSpec<()> {
             children: vec![CellSpec {
                 children: vec![Block::Image(ImageSpec {
                     image,
-                    width: None,
-                    height: None,
-                    align: Alignment::Start,
+                    style: ImageStyle {
+                        width: None,
+                        height: None,
+                        align: Alignment::Start,
+                    },
                 })],
                 ..CellSpec::default()
             }],

@@ -9,7 +9,8 @@
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableHeader, TableRow, TableSpec, TextRun,
+    ImageSpec, ImageStyle, PageText, Resources, RunStyle, SectionSpec, SectionStyle, TableHeader,
+    TableRow, TableSpec,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
@@ -66,18 +67,22 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::uniform(margin),
+            style: SectionStyle {
+                margins: Margins::uniform(margin),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(BandSpec {
-                left: Some(BandSlot::Text {
-                    runs: vec![
-                        TextRun::Literal("第 ".into()),
-                        TextRun::PageNumber,
-                        TextRun::Literal(" 页 / 共 ".into()),
-                        TextRun::PageCount,
-                        TextRun::Literal(" 页".into()),
-                    ],
+                left: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![
+                        PageText::Literal("第 ".into()),
+                        PageText::PageNumber,
+                        PageText::Literal(" 页 / 共 ".into()),
+                        PageText::PageCount,
+                        PageText::Literal(" 页".into()),
+                    ],
+                    link: None,
                 }),
                 ..BandSpec::default()
             })),
@@ -116,9 +121,11 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
                 }),
                 Block::Image(ImageSpec {
                     image: mark,
-                    width: Some(Positive::pt(8.0).expect("8 pt")),
-                    height: None,
-                    align: Alignment::Start,
+                    style: ImageStyle {
+                        width: Some(Positive::pt(8.0).expect("8 pt")),
+                        height: None,
+                        align: Alignment::Start,
+                    },
                 }),
             ],
             ..SectionSpec::default()

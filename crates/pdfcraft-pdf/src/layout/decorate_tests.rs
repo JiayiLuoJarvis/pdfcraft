@@ -4,7 +4,7 @@
 
 use crate::canvas::CanvasCommand;
 use crate::error::{Error, ErrorBag, ErrorKind, Region};
-use crate::geom::{Affine, Color, EdgeBox, Ink, NonNegative, Path, Pen, Point, Rect};
+use crate::geom::{Affine, Angle, Color, EdgeBox, Ink, NonNegative, Path, Pen, Point, Rect};
 use crate::layout::column_width::{ColumnWidth, Ratio};
 use crate::layout::columns::ColumnsNode;
 use crate::layout::decorate::{
@@ -511,7 +511,10 @@ fn rotated_band_mark_checks_rotated_corners() {
     let decorations = Decorations {
         header: Some(Box::new(move |_: &PageInfo, _: &mut ErrorBag| {
             Ok(mark_band(vec![LayerItem::Group {
-                affine: Affine::rotate_cw_about(45.0, Point::try_pt(55.0, 25.0).unwrap()).unwrap(),
+                affine: Affine::rotate_cw_about(
+                    Angle::degrees(45.0).unwrap(),
+                    Point::try_pt(55.0, 25.0).unwrap(),
+                ),
                 items: vec![filled_rect(rect)],
             }]))
         })),

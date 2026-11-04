@@ -5,7 +5,7 @@ use crate::geom::{Color, Length, NonNegative, Paint, Path, Point, Positive, Stro
 use crate::layout::frame::{Fragment, FragmentCommand, Frame, Split};
 use crate::layout::style::TextAlign;
 
-/// A solid horizontal line in the flow.
+/// A solid horizontal line in the flow. Its box is exactly the stroke thickness.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HLineNode {
     /// `None` means the full width of the frame the node lands in.
@@ -13,8 +13,6 @@ pub(crate) struct HLineNode {
     align: TextAlign,
     thickness: Length<Positive>,
     color: Color,
-    space_before: Length<NonNegative>,
-    space_after: Length<NonNegative>,
 }
 
 impl HLineNode {
@@ -23,21 +21,17 @@ impl HLineNode {
         align: TextAlign,
         thickness: Length<Positive>,
         color: Color,
-        space_before: Length<NonNegative>,
-        space_after: Length<NonNegative>,
     ) -> Self {
         Self {
             width,
             align,
             thickness,
             color,
-            space_before,
-            space_after,
         }
     }
 
     fn height(&self) -> Length<NonNegative> {
-        self.space_before + Length::<NonNegative>::from(self.thickness) + self.space_after
+        Length::<NonNegative>::from(self.thickness)
     }
 
     pub(crate) fn split(self, avail: Frame) -> Result<Split<Self>> {
@@ -65,7 +59,7 @@ impl HLineNode {
             TextAlign::Center => (avail.width - width).as_pt() / 2.0,
             TextAlign::End => (avail.width - width).as_pt(),
         };
-        let y = self.space_before.as_pt() + self.thickness.as_pt() / 2.0;
+        let y = self.thickness.as_pt() / 2.0;
         let path = Path::line(Point::try_pt(x, y)?, Point::try_pt(x + width.as_pt(), y)?);
         Ok(Split::Fit {
             height,

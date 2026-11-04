@@ -24,6 +24,16 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
   A table cell stores `children: Vec<Block<K>>`, and cell text is
   `Block::paragraph`. See
   [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `ImageSpec` and
+  `CanvasSpec` move alignment and image size into `ImageStyle` and
+  `CanvasStyle`. `HLineSpec` is removed. `Block::HLine` takes `HLineStyle`
+  and no longer carries space above or below the rule. See
+  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). Section page setup
+  moves into `SectionStyle`. Band inset moves into `BandStyle`. `TextRun`
+  is `PageText`, `BandMark` is `Mark`, and `BandSlot` and `LayerMark` are
+  structs. `Mark::Rotated.degrees` is `Angle`. See
+  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 
 ## 2026-11-03
 

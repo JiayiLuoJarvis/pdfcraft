@@ -7,8 +7,8 @@ use crate::error::{
 };
 use crate::fonts::{EmOffset, FaceDecorations, FontFace, FontId, FontKey, FontSource, FontStore};
 use crate::geom::{
-    Affine, Color, EdgeBox, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point,
-    Positive, Rect,
+    Affine, Angle, Color, EdgeBox, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen,
+    Point, Positive, Rect,
 };
 use crate::layout::anchor::{self, ExpectedAnchor, ExpectedOutline};
 use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
@@ -39,11 +39,11 @@ use super::depth;
 use super::token::DocToken;
 use super::types::{self, Rendered, Track};
 use super::{
-    Alignment, BandCallback, BandFn, BandFnInner, BandInset, BandMark, BandSlot, BandSpec,
-    BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CellSpec, ColumnsSpec,
-    DocumentSpec, HLineSpec, ImageRef, ImageSpec, LayerMark, LayerShape, ListKind, ListSpec,
-    MarkerFormat, OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, ParagraphStyle, Resources,
-    RunStyle, SectionSpec, Span, TextRun,
+    Alignment, BandCallback, BandFn, BandFnInner, BandInset, BandSlot, BandSpec, BandStyle,
+    BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CanvasStyle, CellSpec,
+    ColumnsSpec, DocumentSpec, HLineStyle, ImageRef, ImageSpec, ImageStyle, LayerMark, LayerShape,
+    ListKind, ListSpec, Mark, MarkerFormat, OutlineEntry, PageBandQuery, PageText, PageWhen,
+    ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, SectionStyle, Span,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
@@ -506,14 +506,14 @@ fn lower_section<K: FontKey + 'static>(
     anchors: &mut AnchorRegistry,
 ) -> (PaginateConfig, FlowNode, Decorations<'static>, ErrorBag) {
     let SectionSpec {
-        page_size,
-        margins,
+        style,
         header,
         footer,
         behind,
         front,
         body,
     } = spec;
+    let SectionStyle { page_size, margins } = style;
     let mut errors = ErrorBag::default();
     let seed = InheritedPaint::seed();
     let env = LowerEnv {
@@ -528,8 +528,8 @@ fn lower_section<K: FontKey + 'static>(
         header.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
     let footer =
         footer.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
-    let behind = own_marks(behind, fonts, &mut errors);
-    let front = own_marks(front, fonts, &mut errors);
+    let behind = own_layer_marks(behind, fonts, &mut errors);
+    let front = own_layer_marks(front, fonts, &mut errors);
     let decorations = Decorations {
         header,
         footer,
@@ -624,7 +624,7 @@ fn lower_blocks<K: FontKey>(
                     nodes.push(node);
                 }
             }
-            Block::HLine(spec) => nodes.push(lower_hline(spec)),
+            Block::HLine(style) => nodes.push(lower_hline(style)),
         }
     }
     nodes
@@ -801,21 +801,14 @@ fn append_text(
     ));
 }
 
-fn lower_hline(spec: HLineSpec) -> FlowNode {
-    let align = match spec.align {
-        Alignment::Start => TextAlign::Start,
-        Alignment::Center => TextAlign::Center,
-        Alignment::End => TextAlign::End,
-        Alignment::Justify => TextAlign::Justify,
-    };
-    FlowNode::HLine(HLineNode::new(
-        spec.width,
+fn lower_hline(style: HLineStyle) -> FlowNode {
+    let HLineStyle {
+        width,
         align,
-        spec.thickness,
-        spec.color,
-        spec.space_before,
-        spec.space_after,
-    ))
+        thickness,
+        color,
+    } = style;
+    FlowNode::HLine(HLineNode::new(width, text_align(align), thickness, color))
 }
 
 fn lower_image(
@@ -824,20 +817,22 @@ fn lower_image(
     images: &LoweredImages,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
-    let image = image_for(spec.image, images)?;
+    let ImageSpec {
+        image,
+        style: ImageStyle {
+            width,
+            height,
+            align,
+        },
+    } = spec;
+    let image = image_for(image, images)?;
     if image.doc != doc {
         errors.record(Error::from(ErrorKind::UnknownImage {
             id: image.decoded.id.as_u32(),
         }));
         return None;
     }
-    let align = match spec.align {
-        Alignment::Start => TextAlign::Start,
-        Alignment::Center => TextAlign::Center,
-        Alignment::End => TextAlign::End,
-        Alignment::Justify => TextAlign::Justify,
-    };
-    match ImageNode::new(image.decoded, spec.width, spec.height, align) {
+    match ImageNode::new(image.decoded, width, height, text_align(align)) {
         Ok(node) => Some(FlowNode::Image(node)),
         Err(error) => {
             errors.record(error);
@@ -860,8 +855,13 @@ fn lower_canvas<K: FontKey>(
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
-    let mut marks = Vec::with_capacity(spec.marks.len());
-    for mark in spec.marks {
+    let CanvasSpec {
+        size,
+        style: CanvasStyle { align },
+        marks: spec_marks,
+    } = spec;
+    let mut marks = Vec::with_capacity(spec_marks.len());
+    for mark in spec_marks {
         match mark {
             CanvasMark::Line { from, to, pen } => {
                 marks.push(CanvasMarkNode::Line { from, to, pen });
@@ -884,7 +884,7 @@ fn lower_canvas<K: FontKey>(
             }
         }
     }
-    match CanvasNode::new(spec.size, text_align(spec.align), marks) {
+    match CanvasNode::new(size, text_align(align), marks) {
         Ok(node) => Some(FlowNode::Canvas(node)),
         Err(error) => {
             errors.record(error);
@@ -1177,21 +1177,12 @@ struct OwnedBand {
     inset: BandInset,
     left: Option<OwnedSlot>,
     right: Option<OwnedSlot>,
-    marks: Vec<OwnedBandMark>,
-}
-
-enum OwnedBandMark {
-    Shape(OwnedShape),
-    Rotated {
-        degrees: f32,
-        pivot: Point,
-        shapes: Vec<OwnedShape>,
-    },
+    marks: Vec<OwnedMark>,
 }
 
 struct OwnedSlot {
-    runs: Vec<TextRun>,
-    uri: Option<Vec<TextRun>>,
+    children: Vec<PageText>,
+    link: Option<Vec<PageText>>,
     style: GlyphStyle,
 }
 
@@ -1201,11 +1192,12 @@ fn own_band<K: FontKey>(
     errors: &mut ErrorBag,
 ) -> Option<OwnedBand> {
     let BandSpec {
-        inset,
+        style,
         left,
         right,
         marks,
     } = spec;
+    let BandStyle { inset } = style;
     let left = left.and_then(|slot| own_slot(slot, fonts, errors));
     let right = right.and_then(|slot| own_slot(slot, fonts, errors));
     let marks = own_band_marks(marks, fonts, errors);
@@ -1221,27 +1213,13 @@ fn own_band<K: FontKey>(
 }
 
 fn own_band_marks<K: FontKey>(
-    marks: Vec<BandMark<K>>,
+    marks: Vec<Mark<K>>,
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
-) -> Vec<OwnedBandMark> {
+) -> Vec<OwnedMark> {
     marks
         .into_iter()
-        .filter_map(|mark| match mark {
-            BandMark::Shape(shape) => {
-                let mut shapes = own_shapes(vec![shape], fonts, errors);
-                shapes.pop().map(OwnedBandMark::Shape)
-            }
-            BandMark::Rotated {
-                degrees,
-                pivot,
-                shapes,
-            } => Some(OwnedBandMark::Rotated {
-                degrees,
-                pivot,
-                shapes: own_shapes(shapes, fonts, errors),
-            }),
-        })
+        .filter_map(|mark| own_mark(mark, fonts, errors))
         .collect()
 }
 
@@ -1250,18 +1228,19 @@ fn own_slot<K: FontKey>(
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Option<OwnedSlot> {
-    let (runs, uri, key, style) = match slot {
-        BandSlot::Text { runs, font, style } => (runs, None, font, style),
-        BandSlot::Link {
-            uri,
-            text,
-            font,
-            style,
-        } => (text, Some(uri), font, style),
-    };
-    let family = family_of(fonts, key, errors)?;
+    let BandSlot {
+        font,
+        style,
+        children,
+        link,
+    } = slot;
+    let family = family_of(fonts, font, errors)?;
     let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
-    Some(OwnedSlot { runs, uri, style })
+    Some(OwnedSlot {
+        children,
+        link,
+        style,
+    })
 }
 
 fn band_content(
@@ -1465,8 +1444,8 @@ fn band_slot(
     page: &PageFacts,
     errors: &mut ErrorBag,
 ) -> Option<BandSlotResolved> {
-    let text = render_text(&slot.runs, page);
-    let link = if let Some(uri_runs) = &slot.uri {
+    let text = render_text(&slot.children, page);
+    let link = if let Some(uri_runs) = &slot.link {
         let uri = render_text(uri_runs, page);
         match LinkTarget::uri(&uri) {
             Ok(target) => Some(target),
@@ -1485,15 +1464,15 @@ fn band_slot(
     })
 }
 
-fn render_text(runs: &[TextRun], page: &PageFacts) -> String {
+fn render_text(runs: &[PageText], page: &PageFacts) -> String {
     let mut text = String::new();
     for run in runs {
         match run {
-            TextRun::Literal(value) => text.push_str(value),
-            TextRun::PageNumber => text.push_str(&page.number.to_string()),
-            TextRun::PageCount => text.push_str(&page.count.to_string()),
-            TextRun::SectionNumber => text.push_str(&page.section_number.to_string()),
-            TextRun::SectionCount => text.push_str(&page.section_count.to_string()),
+            PageText::Literal(value) => text.push_str(value),
+            PageText::PageNumber => text.push_str(&page.number.to_string()),
+            PageText::PageCount => text.push_str(&page.count.to_string()),
+            PageText::SectionNumber => text.push_str(&page.section_number.to_string()),
+            PageText::SectionCount => text.push_str(&page.section_count.to_string()),
         }
     }
     text
@@ -1514,7 +1493,7 @@ enum OwnedShape {
         ink: Ink,
     },
     Text {
-        text: Vec<TextRun>,
+        text: Vec<PageText>,
         at: Point,
         style: GlyphStyle,
     },
@@ -1531,104 +1510,72 @@ enum BandImageErrors {
 }
 
 enum OwnedMark {
-    Text {
-        when: PageWhen,
-        text: Vec<TextRun>,
-        at: Point,
-        style: GlyphStyle,
-    },
-    Image {
-        when: PageWhen,
-        image: ImageRef,
-        rect: Rect,
-    },
-    Line {
-        when: PageWhen,
-        from: Point,
-        to: Point,
-        pen: Pen,
-    },
-    Rect {
-        when: PageWhen,
-        rect: Rect,
-        ink: Ink,
-    },
-    Ellipse {
-        when: PageWhen,
-        rect: Rect,
-        ink: Ink,
-    },
+    Shape(OwnedShape),
     Rotated {
-        when: PageWhen,
-        degrees: f32,
+        degrees: Angle,
         pivot: Point,
         shapes: Vec<OwnedShape>,
     },
 }
 
-fn own_marks<K: FontKey>(
+struct OwnedLayerMark {
+    when: PageWhen,
+    mark: OwnedMark,
+}
+
+fn own_layer_marks<K: FontKey>(
     marks: Vec<LayerMark<K>>,
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
-) -> Vec<OwnedMark> {
-    let mut owned = Vec::with_capacity(marks.len());
-    for mark in marks {
-        match mark {
-            LayerMark::Text {
-                when,
-                text,
-                font,
-                at,
-                style,
-            } => {
-                let Some(family) = family_of(fonts, font, errors) else {
-                    continue;
-                };
-                let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
-                owned.push(OwnedMark::Text {
-                    when,
-                    text,
-                    at,
-                    style,
-                });
-            }
-            LayerMark::Image { when, image, rect } => {
-                owned.push(OwnedMark::Image { when, image, rect });
-            }
-            LayerMark::Line {
-                when,
-                from,
-                to,
-                pen,
-            } => owned.push(OwnedMark::Line {
-                when,
-                from,
-                to,
-                pen,
-            }),
-            LayerMark::Rect { when, rect, ink } => {
-                owned.push(OwnedMark::Rect { when, rect, ink });
-            }
-            LayerMark::Ellipse { when, rect, ink } => {
-                owned.push(OwnedMark::Ellipse { when, rect, ink });
-            }
-            LayerMark::Rotated {
-                when,
-                degrees,
-                pivot,
-                shapes,
-            } => {
-                let shapes = own_shapes(shapes, fonts, errors);
-                owned.push(OwnedMark::Rotated {
-                    when,
-                    degrees,
-                    pivot,
-                    shapes,
-                });
-            }
-        }
+) -> Vec<OwnedLayerMark> {
+    marks
+        .into_iter()
+        .filter_map(|LayerMark { when, child }| {
+            own_mark(child, fonts, errors).map(|mark| OwnedLayerMark { when, mark })
+        })
+        .collect()
+}
+
+fn own_mark<K: FontKey>(
+    mark: Mark<K>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Option<OwnedMark> {
+    match mark {
+        Mark::Shape(shape) => own_shape(shape, fonts, errors).map(OwnedMark::Shape),
+        Mark::Rotated {
+            degrees,
+            pivot,
+            shapes,
+        } => Some(OwnedMark::Rotated {
+            degrees,
+            pivot,
+            shapes: own_shapes(shapes, fonts, errors),
+        }),
     }
-    owned
+}
+
+fn own_shape<K: FontKey>(
+    shape: LayerShape<K>,
+    fonts: &FontTable<K>,
+    errors: &mut ErrorBag,
+) -> Option<OwnedShape> {
+    match shape {
+        LayerShape::Line { from, to, pen } => Some(OwnedShape::Line { from, to, pen }),
+        LayerShape::Rect { rect, ink } => Some(OwnedShape::Rect { rect, ink }),
+        LayerShape::Ellipse { rect, ink } => Some(OwnedShape::Ellipse { rect, ink }),
+        LayerShape::Text {
+            text,
+            font,
+            at,
+            style,
+        } => {
+            let family = family_of(fonts, font, errors)?;
+            let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
+            Some(OwnedShape::Text { text, at, style })
+        }
+        LayerShape::Image { image, rect } => Some(OwnedShape::Image { image, rect }),
+    }
 }
 
 fn own_shapes<K: FontKey>(
@@ -1636,40 +1583,14 @@ fn own_shapes<K: FontKey>(
     fonts: &FontTable<K>,
     errors: &mut ErrorBag,
 ) -> Vec<OwnedShape> {
-    let mut owned = Vec::with_capacity(shapes.len());
-    for shape in shapes {
-        match shape {
-            LayerShape::Line { from, to, pen } => {
-                owned.push(OwnedShape::Line { from, to, pen });
-            }
-            LayerShape::Rect { rect, ink } => {
-                owned.push(OwnedShape::Rect { rect, ink });
-            }
-            LayerShape::Ellipse { rect, ink } => {
-                owned.push(OwnedShape::Ellipse { rect, ink });
-            }
-            LayerShape::Text {
-                text,
-                font,
-                at,
-                style,
-            } => {
-                let Some(family) = family_of(fonts, font, errors) else {
-                    continue;
-                };
-                let style = resolve_run(family, InheritedPaint::seed().patch(style), errors);
-                owned.push(OwnedShape::Text { text, at, style });
-            }
-            LayerShape::Image { image, rect } => {
-                owned.push(OwnedShape::Image { image, rect });
-            }
-        }
-    }
-    owned
+    shapes
+        .into_iter()
+        .filter_map(|shape| own_shape(shape, fonts, errors))
+        .collect()
 }
 
 fn layer_content(
-    marks: Vec<OwnedMark>,
+    marks: Vec<OwnedLayerMark>,
     doc: DocToken,
     images: LoweredImages,
 ) -> Option<LayerContent<'static>> {
@@ -1682,7 +1603,7 @@ fn layer_content(
 }
 
 fn lower_layer_marks(
-    marks: &[OwnedMark],
+    marks: &[OwnedLayerMark],
     info: &PageInfo,
     doc: DocToken,
     images: &LoweredImages,
@@ -1690,95 +1611,25 @@ fn lower_layer_marks(
 ) -> Vec<LayerItem> {
     let page = PageFacts::from(info);
     let mut items = Vec::new();
-    for mark in marks {
-        let when = match mark {
-            OwnedMark::Text { when, .. }
-            | OwnedMark::Image { when, .. }
-            | OwnedMark::Line { when, .. }
-            | OwnedMark::Rect { when, .. }
-            | OwnedMark::Ellipse { when, .. }
-            | OwnedMark::Rotated { when, .. } => *when,
-        };
-        if !when.matches(&page) {
+    for layer in marks {
+        if !layer.when.matches(&page) {
             continue;
         }
-        match mark {
-            OwnedMark::Text {
-                text, at, style, ..
-            } => {
-                items.push(LayerItem::Text(LayerText {
-                    text: render_text(text, &page),
-                    at: *at,
-                    style: *style,
-                }));
-            }
-            OwnedMark::Image { image, rect, .. } => {
-                if let Some(image) = image_for(*image, images) {
-                    if image.doc == doc {
-                        items.push(LayerItem::Image {
-                            image: image.decoded,
-                            rect: *rect,
-                        });
-                    } else {
-                        errors.record(Error::from(ErrorKind::UnknownImage {
-                            id: image.decoded.id.as_u32(),
-                        }));
-                    }
-                }
-            }
-            OwnedMark::Line { from, to, pen, .. } => {
-                push_shape(
-                    &mut items,
-                    errors,
-                    straight_path(*from, *to),
-                    Ink::Stroke(*pen),
-                    EdgeBox::from_points(*from, *to),
-                );
-            }
-            OwnedMark::Rect { rect, ink, .. } => {
-                push_shape(
-                    &mut items,
-                    errors,
-                    Path::rect(*rect),
-                    *ink,
-                    EdgeBox::from_rect(*rect),
-                );
-            }
-            OwnedMark::Ellipse { rect, ink, .. } => {
-                push_shape(
-                    &mut items,
-                    errors,
-                    Path::ellipse(*rect),
-                    *ink,
-                    EdgeBox::from_rect(*rect),
-                );
-            }
-            OwnedMark::Rotated {
-                degrees,
-                pivot,
-                shapes,
-                ..
-            } => {
-                items.extend(lower_rotated(
-                    &Rotation {
-                        degrees: *degrees,
-                        pivot: *pivot,
-                    },
-                    shapes,
-                    &page,
-                    doc,
-                    images,
-                    BandImageErrors::AlreadyValidated,
-                    errors,
-                ));
-            }
-        }
+        lower_mark(
+            &mut items,
+            &layer.mark,
+            &page,
+            doc,
+            images,
+            BandImageErrors::AlreadyValidated,
+            errors,
+        );
     }
     items
 }
 
 fn lower_band_marks(
-    marks: &[OwnedBandMark],
+    marks: &[OwnedMark],
     page: &PageFacts,
     doc: DocToken,
     images: &LoweredImages,
@@ -1787,39 +1638,48 @@ fn lower_band_marks(
 ) -> Vec<LayerItem> {
     let mut items = Vec::new();
     for mark in marks {
-        match mark {
-            OwnedBandMark::Shape(shape) => {
-                push_owned_shape(&mut items, page, doc, images, image_errors, errors, shape);
-            }
-            OwnedBandMark::Rotated {
-                degrees,
-                pivot,
-                shapes,
-            } => items.extend(lower_rotated(
-                &Rotation {
-                    degrees: *degrees,
-                    pivot: *pivot,
-                },
-                shapes,
-                page,
-                doc,
-                images,
-                image_errors,
-                errors,
-            )),
-        }
+        lower_mark(&mut items, mark, page, doc, images, image_errors, errors);
     }
     items
 }
 
-#[derive(Clone, Copy)]
-struct Rotation {
-    degrees: f32,
-    pivot: Point,
+fn lower_mark(
+    items: &mut Vec<LayerItem>,
+    mark: &OwnedMark,
+    page: &PageFacts,
+    doc: DocToken,
+    images: &LoweredImages,
+    image_errors: BandImageErrors,
+    errors: &mut ErrorBag,
+) {
+    match mark {
+        OwnedMark::Shape(shape) => {
+            push_owned_shape(items, page, doc, images, image_errors, errors, shape);
+        }
+        OwnedMark::Rotated {
+            degrees,
+            pivot,
+            shapes,
+        } => items.extend(lower_rotated(
+            *degrees,
+            *pivot,
+            shapes,
+            page,
+            doc,
+            images,
+            image_errors,
+            errors,
+        )),
+    }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "band and layer share this paint path; angle and pivot replace the deleted Rotation wrapper"
+)]
 fn lower_rotated(
-    rotation: &Rotation,
+    degrees: Angle,
+    pivot: Point,
     shapes: &[OwnedShape],
     page: &PageFacts,
     doc: DocToken,
@@ -1827,28 +1687,18 @@ fn lower_rotated(
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
 ) -> Vec<LayerItem> {
-    let Rotation { degrees, pivot } = *rotation;
     if shapes.is_empty() {
-        return Vec::new();
-    }
-    if !degrees.is_finite() {
-        errors.record(GeometryKind::NonFiniteRotation { degrees });
         return Vec::new();
     }
     let mut items = Vec::with_capacity(shapes.len());
     for shape in shapes {
         push_owned_shape(&mut items, page, doc, images, image_errors, errors, shape);
     }
-    if items.is_empty() || is_zero_angle(degrees) {
+    if items.is_empty() || degrees.is_zero() {
         return items;
     }
-    match Affine::rotate_cw_about(degrees, pivot) {
-        Ok(affine) => vec![LayerItem::Group { affine, items }],
-        Err(error) => {
-            errors.record(error);
-            Vec::new()
-        }
-    }
+    let affine = Affine::rotate_cw_about(degrees, pivot);
+    vec![LayerItem::Group { affine, items }]
 }
 
 fn push_owned_shape(
@@ -1951,10 +1801,6 @@ fn straight_path(from: Point, to: Point) -> Fallible<Path> {
     }
 }
 
-fn is_zero_angle(degrees: f32) -> bool {
-    degrees.to_bits() == 0 || degrees.to_bits() == (-0.0f32).to_bits()
-}
-
 impl PageWhen {
     fn matches(self, page: &PageFacts) -> bool {
         match self {
@@ -1979,26 +1825,28 @@ fn validate_section_images<K>(
     validate_blocks(&section.body, images, errors);
 }
 
-fn validate_band_marks<K>(marks: &[BandMark<K>], images: &LoweredImages, errors: &mut ErrorBag) {
+fn validate_band_marks<K>(marks: &[Mark<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for mark in marks {
-        match mark {
-            BandMark::Shape(LayerShape::Image { image, .. }) => {
-                reject_image(*image, images, errors);
-            }
-            BandMark::Rotated { shapes, .. } => {
-                for shape in shapes {
-                    if let LayerShape::Image { image, .. } = shape {
-                        reject_image(*image, images, errors);
-                    }
+        validate_mark(mark, images, errors);
+    }
+}
+
+fn validate_mark<K>(mark: &Mark<K>, images: &LoweredImages, errors: &mut ErrorBag) {
+    match mark {
+        Mark::Shape(LayerShape::Image { image, .. }) => reject_image(*image, images, errors),
+        Mark::Rotated { shapes, .. } => {
+            for shape in shapes {
+                if let LayerShape::Image { image, .. } = shape {
+                    reject_image(*image, images, errors);
                 }
             }
-            BandMark::Shape(
-                LayerShape::Line { .. }
-                | LayerShape::Rect { .. }
-                | LayerShape::Ellipse { .. }
-                | LayerShape::Text { .. },
-            ) => {}
         }
+        Mark::Shape(
+            LayerShape::Line { .. }
+            | LayerShape::Rect { .. }
+            | LayerShape::Ellipse { .. }
+            | LayerShape::Text { .. },
+        ) => {}
     }
 }
 
@@ -2041,20 +1889,7 @@ fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut 
 
 fn validate_marks<K>(marks: &[LayerMark<K>], images: &LoweredImages, errors: &mut ErrorBag) {
     for mark in marks {
-        match mark {
-            LayerMark::Image { image, .. } => reject_image(*image, images, errors),
-            LayerMark::Rotated { shapes, .. } => {
-                for shape in shapes {
-                    if let LayerShape::Image { image, .. } = shape {
-                        reject_image(*image, images, errors);
-                    }
-                }
-            }
-            LayerMark::Text { .. }
-            | LayerMark::Line { .. }
-            | LayerMark::Rect { .. }
-            | LayerMark::Ellipse { .. } => {}
-        }
+        validate_mark(&mark.child, images, errors);
     }
 }
 

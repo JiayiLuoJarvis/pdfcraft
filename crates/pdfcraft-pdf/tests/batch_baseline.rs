@@ -21,8 +21,8 @@ use std::time::Instant;
 
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
-    ImageSpec, Resources, RunStyle, SectionSpec, TableHeader, TableRow, TableSpec, TableStyle,
-    TextRun,
+    ImageSpec, ImageStyle, PageText, Resources, RunStyle, SectionSpec, SectionStyle, TableHeader,
+    TableRow, TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize, Positive,
@@ -121,9 +121,11 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
         let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
         body.push(Block::Image(ImageSpec {
             image: mark,
-            width: Some(Positive::pt(8.0)?),
-            height: None,
-            align: Alignment::Start,
+            style: ImageStyle {
+                width: Some(Positive::pt(8.0)?),
+                height: None,
+                align: Alignment::Start,
+            },
         }));
     }
     layout_spec(DocumentSpec {
@@ -132,18 +134,22 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0)?),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0)?),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(BandSpec {
-                left: Some(BandSlot::Text {
-                    runs: vec![
-                        TextRun::Literal("第 ".into()),
-                        TextRun::PageNumber,
-                        TextRun::Literal(" 页 / 共 ".into()),
-                        TextRun::PageCount,
-                        TextRun::Literal(" 页".into()),
-                    ],
+                left: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![
+                        PageText::Literal("第 ".into()),
+                        PageText::PageNumber,
+                        PageText::Literal(" 页 / 共 ".into()),
+                        PageText::PageCount,
+                        PageText::Literal(" 页".into()),
+                    ],
+                    link: None,
                 }),
                 ..BandSpec::default()
             })),
@@ -184,7 +190,10 @@ fn wide_table_doc(rows: usize, cols: usize) -> Result<Rendered> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0)?),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0)?),
+                ..SectionStyle::default()
+            },
             body: vec![Block::Table(TableSpec {
                 style: TableStyle {
                     tracks: Some(tracks),
@@ -226,7 +235,10 @@ fn paragraphs_doc(count: usize) -> Result<Rendered> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0)?),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0)?),
+                ..SectionStyle::default()
+            },
             body,
             ..SectionSpec::default()
         }],

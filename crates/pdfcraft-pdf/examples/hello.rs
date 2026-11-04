@@ -18,11 +18,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellSpec,
-    CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily,
-    FontRegistry, HLineSpec, ImageSpec, InsetStyle, ListItemSpec, ListKind, ListSpec, ListStyle,
-    MarkerFormat, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
-    TableBorder, TableHeader, TableRow, TableSpec, TableStyle, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, BlankSpec, BlankWidth, Block,
+    CellSpec, CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily,
+    FontRegistry, HLineStyle, ImageSpec, ImageStyle, InsetStyle, ListItemSpec, ListKind, ListSpec,
+    ListStyle, MarkerFormat, PageText, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
+    SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
@@ -62,40 +62,51 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0)?,
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0)?,
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                inset: BandInset::PageMargins,
-                left: Some(BandSlot::Link {
+                style: BandStyle {
+                    inset: BandInset::PageMargins,
+                },
+                left: Some(BandSlot {
                     font: (),
-                    uri: vec![TextRun::Literal("https://example.test/quire".into())],
-                    text: vec![TextRun::Literal("quire demo".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("quire demo".into())],
+                    link: Some(vec![PageText::Literal("https://example.test/quire".into())]),
                 }),
-                right: Some(BandSlot::Text {
-                    runs: vec![
-                        TextRun::Literal("第 ".into()),
-                        TextRun::PageNumber,
-                        TextRun::Literal(" 页 / 共 ".into()),
-                        TextRun::PageCount,
-                        TextRun::Literal(" 页".into()),
-                    ],
+                right: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![
+                        PageText::Literal("第 ".into()),
+                        PageText::PageNumber,
+                        PageText::Literal(" 页 / 共 ".into()),
+                        PageText::PageCount,
+                        PageText::Literal(" 页".into()),
+                    ],
+                    link: None,
                 }),
                 marks: Vec::new(),
             })),
             footer: Some(BandFn::fixed(BandSpec {
-                inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text {
-                    runs: vec![TextRun::Literal("layout smoke".into())],
+                style: BandStyle {
+                    inset: BandInset::PageMargins,
+                },
+                left: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("layout smoke".into())],
+                    link: None,
                 }),
-                right: Some(BandSlot::Link {
+                right: Some(BandSlot {
                     font: (),
-                    uri: vec![TextRun::Literal("https://example.test/footer".into())],
-                    text: vec![TextRun::Literal("footer link".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("footer link".into())],
+                    link: Some(vec![PageText::Literal(
+                        "https://example.test/footer".into(),
+                    )]),
                 }),
                 marks: Vec::new(),
             })),
@@ -168,21 +179,12 @@ fn paragraph(runs: Vec<Span<()>>, align: Alignment, indent: f32) -> Result<Block
     }))
 }
 
-fn rule(
-    width: Option<f32>,
-    align: Alignment,
-    thickness: f32,
-    color: Color,
-    before: f32,
-    after: f32,
-) -> Result<Block<()>> {
-    Ok(Block::HLine(HLineSpec {
+fn rule(width: Option<f32>, align: Alignment, thickness: f32, color: Color) -> Result<Block<()>> {
+    Ok(Block::HLine(HLineStyle {
         width: width.map(pos).transpose()?,
         align,
         thickness: pos(thickness)?,
         color,
-        space_before: nn(before)?,
-        space_after: nn(after)?,
     }))
 }
 
@@ -400,17 +402,19 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                 CellSpec {
                     children: vec![Block::Image(ImageSpec {
                         image: logo,
-                        width: Some(pos(18.0)?),
-                        height: None,
-                        align: Alignment::Center,
+                        style: ImageStyle {
+                            width: Some(pos(18.0)?),
+                            height: None,
+                            align: Alignment::Center,
+                        },
                     })],
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    children: vec![Block::HLine(HLineSpec {
+                    children: vec![Block::HLine(HLineStyle {
                         thickness: pos(0.75)?,
                         color: Color::rgb(120, 0, 0),
-                        ..HLineSpec::default()
+                        ..HLineStyle::default()
                     })],
                     ..CellSpec::default()
                 },
@@ -440,19 +444,16 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
 fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
     Ok(vec![
         paragraph(vec![bold("Quire layout tour")], Alignment::Center, 0.0)?,
-        rule(
-            Some(220.0),
-            Alignment::Center,
-            1.25,
-            Color::rgb(40, 40, 40),
-            6.0,
-            12.0,
-        )?,
+        Block::Spacer(nn(6.0)?),
+        rule(Some(220.0), Alignment::Center, 1.25, Color::rgb(40, 40, 40))?,
+        Block::Spacer(nn(12.0)?),
         Block::Image(ImageSpec {
             image: logo,
-            width: Some(pos(36.0)?),
-            height: None,
-            align: Alignment::Center,
+            style: ImageStyle {
+                width: Some(pos(36.0)?),
+                height: None,
+                align: Alignment::Center,
+            },
         }),
         Block::Spacer(nn(10.0)?),
         paragraph(
@@ -514,14 +515,9 @@ fn title_blocks(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
                 )?,
             ],
         }),
-        rule(
-            Some(160.0),
-            Alignment::Start,
-            1.0,
-            Color::rgb(0, 0, 0),
-            14.0,
-            10.0,
-        )?,
+        Block::Spacer(nn(14.0)?),
+        rule(Some(160.0), Alignment::Start, 1.0, Color::rgb(0, 0, 0))?,
+        Block::Spacer(nn(10.0)?),
     ])
 }
 
@@ -573,14 +569,8 @@ fn closing_blocks() -> Result<Vec<Block<()>>> {
                     Alignment::Start,
                     0.0,
                 )?,
-                rule(
-                    Some(120.0),
-                    Alignment::End,
-                    1.0,
-                    Color::rgb(0, 0, 0),
-                    4.0,
-                    0.0,
-                )?,
+                Block::Spacer(nn(4.0)?),
+                rule(Some(120.0), Alignment::End, 1.0, Color::rgb(0, 0, 0))?,
             ],
         },
         Block::Spacer(nn(8.0)?),

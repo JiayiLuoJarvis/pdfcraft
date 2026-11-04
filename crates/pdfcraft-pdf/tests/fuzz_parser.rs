@@ -27,7 +27,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use pdfcraft_pdf::spec::{Alignment, Block, ImageSpec, Resources, SectionSpec};
+use pdfcraft_pdf::spec::{Alignment, Block, ImageSpec, ImageStyle, Resources, SectionSpec};
 use pdfcraft_pdf::{layout_spec, DocumentSpec, ImageFormat, PageSize};
 
 /// Exact corpus. Removing or adding a seed fails the replay test with a
@@ -130,9 +130,11 @@ fn lay_out(png: Vec<u8>) -> pdfcraft_pdf::Result<pdfcraft_pdf::Rendered> {
         sections: vec![SectionSpec {
             body: vec![Block::Image(ImageSpec {
                 image,
-                width: None,
-                height: None,
-                align: Alignment::Start,
+                style: ImageStyle {
+                    width: None,
+                    height: None,
+                    align: Alignment::Start,
+                },
             })],
             ..SectionSpec::default()
         }],

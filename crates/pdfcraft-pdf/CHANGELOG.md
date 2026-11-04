@@ -35,6 +35,23 @@ section collects them.
 - `Block::KeepTogether` is now `{ children }`. `Block::Inset` is
   `{ style: InsetStyle, children }`. `Block::Anchor.child` is replaced by
   `children`.
+- `ImageSpec` is now `{ image, style: ImageStyle }`. `width`, `height`, and
+  `align` move into `style`.
+- `CanvasSpec` is now `{ size, style: CanvasStyle, marks }`. `align` moves
+  into `style`. `CanvasMark` is unchanged.
+- `Block::HLine` takes `HLineStyle { width, align, thickness, color }`.
+  `HLineSpec` is removed, with no alias. `space_before` and `space_after`
+  are removed.
+- `SectionSpec.page_size` and `SectionSpec.margins` move into
+  `style: SectionStyle`. `BandSpec.inset` moves into `style: BandStyle`.
+- `TextRun` is renamed `PageText`. There is no alias.
+- `BandMark` is renamed `Mark`. There is no alias. `Mark::Rotated.degrees`
+  is `Angle`, not `f32`.
+- `BandSlot` is a struct. The old `Text` variant is `link: None`. The old
+  `Link` variant is `link: Some(uri)` with the visible runs in `children`.
+- `LayerMark` is `{ when, child: Mark }`. The old `Text`, `Image`, `Line`,
+  `Rect`, and `Ellipse` variants are `Mark::Shape`. The old `Rotated`
+  variant is `child: Mark::Rotated`.
 
 ### Added
 
@@ -49,8 +66,16 @@ section collects them.
   related errors.
 - `spec::LineHeight::new(factor)` validates a line-height factor.
 - `Block::Styled` may wrap cell children. Its fields apply to those paragraphs.
-- `ColumnsStyle`, `ColumnStyle`, `ListStyle`, `TableStyle`, `CellStyle`, and
-  `InsetStyle` hold reusable container presentation.
+- `ColumnsStyle`, `ColumnStyle`, `ListStyle`, `TableStyle`, `CellStyle`,
+  `InsetStyle`, `ImageStyle`, `CanvasStyle`, and `HLineStyle` hold reusable
+  presentation. `ImageStyle` defaults to unset width and height with
+  `Alignment::Start`. `CanvasStyle` defaults to `Alignment::Start`.
+  `HLineStyle` defaults to full width, `Alignment::Center`, 1 pt, and black.
+- `SectionStyle` holds `page_size` and `margins`. `None` page size still
+  uses the document page size. `BandStyle` holds `inset`.
+- `Angle::degrees` builds a finite clockwise angle. `as_degrees` reads it
+  back. `+0` and `-0` compare equal. NaN and infinity fail with
+  `GeometryKind::NonFiniteRotation`.
 - `TableHeader { repeat, rows }` makes the header slot and its repetition rule
   explicit. An empty `rows` list is equivalent to no header.
 - `Block::Anchor.children` accepts multiple blocks and body-level page breaks.
@@ -71,6 +96,25 @@ section collects them.
   Empty `CellBlock::Text` counted as zero.
 - A page break directly inside a top-level anchor follows the normal body
   page-break rules. Nested frames still reject page breaks.
+- A horizontal rule's height is now its `thickness`, and the stroke runs
+  `thickness / 2` below its top. It used to add `space_before` and
+  `space_after`. For the old spacing, put `Block::Spacer` before and after
+  the rule. On one page the coordinates are the same.
+- Across a page boundary the migrated form behaves differently. A spacer
+  splits and carries its remainder to the next page, while the rule itself
+  still moves whole. A rule whose spacing used to push it to the next page
+  may now stay on the current page. Spacing that was taller than the body
+  used to fail with `UnsplittableTallerThanFrame` and now flows. Wrap the
+  three blocks in `Block::KeepTogether` to keep the old behavior, including
+  the error.
+- Each spacer counts toward `LimitKind::Blocks`. A migrated rule counts up
+  to 3 blocks, or 4 inside `KeepTogether`.
+- A non-finite angle now fails in `Angle::degrees`, with the same
+  `GeometryKind::NonFiniteRotation { degrees }`. It used to fail inside
+  `layout_spec`. Finite angles, including `+0` and `-0`, still paint the
+  same way. `Affine::rotate_cw_about` takes `Angle` and returns the map
+  directly. A pivot far from the origin can still fail later as
+  `NonFiniteLength` when the rotated bounds are checked.
 
 ## [0.5.0] - 2026-11-03
 

@@ -12,7 +12,7 @@
 //!
 //! - **Assemble time** — your `if` / `for` choose which [`spec::Block`] values
 //!   enter the body. Page count is unknown.
-//! - **Paint time** — headers and footers may be [`spec::BandFn`]. [`spec::TextRun`]
+//! - **Paint time** — headers and footers may be [`spec::BandFn`]. [`spec::PageText`]
 //!   and [`spec::PageWhen`] are filled when painting each page.
 //!
 //! # Coordinates
@@ -54,6 +54,7 @@
 //! # {
 //! use pdfcraft_pdf::spec::{
 //!     Block, DocumentInfo, FontFace, FontFamily, FontRegistry, Resources, SectionSpec,
+//!     SectionStyle,
 //! };
 //! use pdfcraft_pdf::{layout_spec, to_pdf, DocumentSpec, Margins, PageSize, Result};
 //!
@@ -70,7 +71,10 @@
 //!     limits: pdfcraft_pdf::Limits::default(),
 //!     info: DocumentInfo::default(),
 //!     sections: vec![SectionSpec {
-//!         margins: Margins::try_uniform(48.0)?,
+//!         style: SectionStyle {
+//!             margins: Margins::try_uniform(48.0)?,
+//!             ..SectionStyle::default()
+//!         },
 //!         body: vec![Block::paragraph((), "Hello from pdfcraft-pdf.")],
 //!         ..SectionSpec::default()
 //!     }],
@@ -100,9 +104,9 @@ pub use error::{
 };
 #[doc(inline)]
 pub use geom::{
-    Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect, Length,
-    MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path, PathBuilder,
-    PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER, MM_TO_PT,
+    Angle, Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect,
+    Length, MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path,
+    PathBuilder, PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER, MM_TO_PT,
 };
 #[doc(inline)]
 pub use limits::{LimitKind, Limits};

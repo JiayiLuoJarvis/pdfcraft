@@ -362,8 +362,6 @@ fn cell_allows_hline() {
         crate::layout::style::TextAlign::Center,
         Positive::pt(1.0).unwrap(),
         Color::rgb(0, 0, 0),
-        NonNegative::ZERO,
-        NonNegative::ZERO,
     );
     Cell::new(vec![FlowNode::HLine(line)]).unwrap();
 }

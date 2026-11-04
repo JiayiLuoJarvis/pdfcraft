@@ -16,10 +16,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, CellStyle, ColumnSpec,
-    ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily, FontRegistry, HLineSpec,
-    ImageRef, ImageSpec, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
-    TableBorder, TableHeader, TableRow, TableSpec, TableStyle, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, CellSpec, CellStyle,
+    ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily, FontRegistry,
+    HLineStyle, ImageRef, ImageSpec, ImageStyle, PageText, ParagraphSpec, ParagraphStyle,
+    Resources, RunStyle, SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow,
+    TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
@@ -62,38 +63,49 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         limits: Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::try_new(28.0, 40.0, 28.0, 40.0)?,
+            style: SectionStyle {
+                margins: Margins::try_new(28.0, 40.0, 28.0, 40.0)?,
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text {
-                    runs: vec![TextRun::Literal("恒誠商務有限公司".into())],
+                style: BandStyle {
+                    inset: BandInset::PageMargins,
+                },
+                left: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("恒誠商務有限公司".into())],
+                    link: None,
                 }),
-                right: Some(BandSlot::Text {
-                    runs: vec![
-                        TextRun::Literal("第 ".into()),
-                        TextRun::PageNumber,
-                        TextRun::Literal(" / ".into()),
-                        TextRun::PageCount,
-                        TextRun::Literal(" 頁".into()),
-                    ],
+                right: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![
+                        PageText::Literal("第 ".into()),
+                        PageText::PageNumber,
+                        PageText::Literal(" / ".into()),
+                        PageText::PageCount,
+                        PageText::Literal(" 頁".into()),
+                    ],
+                    link: None,
                 }),
                 marks: Vec::new(),
             })),
             footer: Some(BandFn::fixed(BandSpec {
-                inset: BandInset::PageMargins,
-                left: Some(BandSlot::Text {
-                    runs: vec![TextRun::Literal("Tel.: 00852 - 2668 1868".into())],
+                style: BandStyle {
+                    inset: BandInset::PageMargins,
+                },
+                left: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("Tel.: 00852 - 2668 1868".into())],
+                    link: None,
                 }),
-                right: Some(BandSlot::Text {
-                    runs: vec![TextRun::Literal("Web.: www.hc.biz".into())],
+                right: Some(BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("Web.: www.hc.biz".into())],
+                    link: None,
                 }),
                 marks: Vec::new(),
             })),
@@ -144,20 +156,12 @@ fn styled(size: f32, color: Color, children: Vec<Block<()>>) -> Result<Block<()>
     })
 }
 
-fn rule(
-    width: Option<f32>,
-    align: Alignment,
-    thickness: f32,
-    before: f32,
-    after: f32,
-) -> Result<Block<()>> {
-    Ok(Block::HLine(HLineSpec {
+fn rule(width: Option<f32>, align: Alignment, thickness: f32) -> Result<Block<()>> {
+    Ok(Block::HLine(HLineStyle {
         width: width.map(pos).transpose()?,
         align,
         thickness: pos(thickness)?,
         color: NAVY,
-        space_before: nn(before)?,
-        space_after: nn(after)?,
     }))
 }
 
@@ -219,13 +223,17 @@ fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block<()>>> {
                     vec![
                         Block::Image(ImageSpec {
                             image: logo,
-                            width: Some(pos(120.0)?),
-                            height: None,
-                            align: Alignment::Start,
+                            style: ImageStyle {
+                                width: Some(pos(120.0)?),
+                                height: None,
+                                align: Alignment::Start,
+                            },
                         }),
                         Block::Spacer(nn(6.0)?),
                         styled(9.0, NAVY, vec![line("商 業 理 想 同 行 者")])?,
-                        rule(None, Alignment::Center, 0.75, 8.0, 4.0)?,
+                        Block::Spacer(nn(8.0)?),
+                        rule(None, Alignment::Center, 0.75)?,
+                        Block::Spacer(nn(4.0)?),
                     ],
                 )?,
                 ColumnSpec {
@@ -234,9 +242,11 @@ fn letterhead(logo: ImageRef, mark: ImageRef) -> Result<Vec<Block<()>>> {
                     },
                     children: vec![Block::Image(ImageSpec {
                         image: mark,
-                        width: Some(pos(52.0)?),
-                        height: None,
-                        align: Alignment::End,
+                        style: ImageStyle {
+                            width: Some(pos(52.0)?),
+                            height: None,
+                            align: Alignment::End,
+                        },
                     })],
                 },
             ],
@@ -250,8 +260,11 @@ fn bill_to() -> Result<Vec<Block<()>>> {
         styled(16.0, NAVY, vec![line("Service Bill 服務賬單")])?,
         Block::Spacer(nn(18.0)?),
         styled(12.0, NAVY, vec![line("Bill To 計入客欠")])?,
-        rule(Some(96.0), Alignment::Center, 0.75, 4.0, 4.0)?,
-        rule(None, Alignment::End, 2.5, 0.0, 10.0)?,
+        Block::Spacer(nn(4.0)?),
+        rule(Some(96.0), Alignment::Center, 0.75)?,
+        Block::Spacer(nn(4.0)?),
+        rule(None, Alignment::End, 2.5)?,
+        Block::Spacer(nn(10.0)?),
         styled(
             11.0,
             BLACK,
@@ -333,7 +346,8 @@ fn service_table() -> Result<Vec<Block<()>>> {
             body,
         }),
         Block::Spacer(nn(8.0)?),
-        rule(None, Alignment::End, 2.5, 0.0, 8.0)?,
+        rule(None, Alignment::End, 2.5)?,
+        Block::Spacer(nn(8.0)?),
         styled(
             14.0,
             NAVY,
@@ -367,9 +381,11 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
                 CellSpec {
                     children: vec![Block::Image(ImageSpec {
                         image: diamond,
-                        width: Some(pos(8.0)?),
-                        height: None,
-                        align: Alignment::Start,
+                        style: ImageStyle {
+                            width: Some(pos(8.0)?),
+                            height: None,
+                            align: Alignment::Start,
+                        },
                     })],
                     ..CellSpec::default()
                 },
@@ -444,7 +460,8 @@ fn cheque_notes() -> Result<Vec<Block<()>>> {
 fn company_block() -> Result<Vec<Block<()>>> {
     Ok(vec![
         Block::Spacer(nn(20.0)?),
-        rule(None, Alignment::Center, 0.75, 0.0, 8.0)?,
+        rule(None, Alignment::Center, 0.75)?,
+        Block::Spacer(nn(8.0)?),
         styled(
             8.0,
             NAVY,

@@ -20,9 +20,10 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, CellStyle, FontFace, FontFamily,
-    FontRegistry, OutlineEntry, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
-    Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle, TextRun,
+    BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, CellSpec, CellStyle, FontFace,
+    FontFamily, FontRegistry, OutlineEntry, PageText, ParagraphSpec, ParagraphStyle, Resources,
+    RunStyle, SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec,
+    TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
@@ -59,7 +60,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             ..pdfcraft_pdf::spec::DocumentInfo::default()
         },
         sections: vec![SectionSpec {
-            margins: Margins::try_uniform(48.0)?,
+            style: SectionStyle {
+                margins: Margins::try_uniform(48.0)?,
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(page_chrome())),
             body: sample_body()?,
             ..SectionSpec::default()
@@ -108,7 +112,7 @@ fn print_how_to_look(out: &Path) {
   「見付款」                  文内链，落到「付款」标题左上，不是标题下面的说明
   「見表頭」                  文内链，落到第一页表头格左上
                               后面页上重复画出的同一行表头不是目标
-  页眉「頁首外鏈…」            BandSlot::Link，只有 URI，没有文内锚点
+  页眉「頁首外鏈…」            页眉槽的 link 是 URI，没有文内锚点
 
 已知限制
   书签是否默认折叠取决于阅读器是否遵守 outline 的负 Count。
@@ -120,23 +124,26 @@ fn print_how_to_look(out: &Path) {
 
 fn page_chrome() -> BandSpec<()> {
     BandSpec {
-        inset: BandInset::PageMargins,
-        left: Some(BandSlot::Link {
+        style: BandStyle {
+            inset: BandInset::PageMargins,
+        },
+        left: Some(BandSlot {
             font: (),
-            uri: vec![TextRun::Literal("https://example.test/pay".into())],
-            text: vec![TextRun::Literal("頁首外鏈 example.test/pay".into())],
             style: RunStyle::default(),
+            children: vec![PageText::Literal("頁首外鏈 example.test/pay".into())],
+            link: Some(vec![PageText::Literal("https://example.test/pay".into())]),
         }),
-        right: Some(BandSlot::Text {
-            runs: vec![
-                TextRun::Literal("第 ".into()),
-                TextRun::PageNumber,
-                TextRun::Literal(" / ".into()),
-                TextRun::PageCount,
-                TextRun::Literal(" 頁".into()),
-            ],
+        right: Some(BandSlot {
             font: (),
             style: RunStyle::default(),
+            children: vec![
+                PageText::Literal("第 ".into()),
+                PageText::PageNumber,
+                PageText::Literal(" / ".into()),
+                PageText::PageCount,
+                PageText::Literal(" 頁".into()),
+            ],
+            link: None,
         }),
         marks: Vec::new(),
     }

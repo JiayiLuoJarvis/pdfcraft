@@ -694,8 +694,6 @@ fn item_allows_hline() {
         TextAlign::Center,
         Positive::pt(1.0).unwrap(),
         Color::rgb(0, 0, 0),
-        NonNegative::ZERO,
-        NonNegative::ZERO,
     );
     ListItem::new(vec![FlowNode::HLine(line)]).unwrap();
 }
@@ -1060,8 +1058,6 @@ fn rule() -> FlowNode {
         TextAlign::Start,
         Positive::pt(2.0).unwrap(),
         Color::rgb(0, 0, 0),
-        NonNegative::ZERO,
-        NonNegative::ZERO,
     ))
 }
 

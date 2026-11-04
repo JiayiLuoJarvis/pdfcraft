@@ -8,8 +8,8 @@
 //! | [`SectionSpec`] | Margins, bands, layers, flow [`Block`] list |
 //! | [`Resources`] | [`FontRegistry`] and [`Resources::add_image`] → [`ImageRef`] |
 //! | [`Block`] | Paragraphs, tables, columns, lists, images, rules, … |
-//! | [`BandFn`] / [`BandSpec`] / [`TextRun`] | Header/footer; fixed or per page |
-//! | [`LayerMark`] / [`PageWhen`] | Page-anchored marks (`behind` / `front`) |
+//! | [`BandFn`] / [`BandSpec`] / [`PageText`] | Header/footer; fixed or per page |
+//! | [`LayerMark`] / [`Mark`] / [`PageWhen`] | Page-anchored marks (`behind` / `front`) |
 //! | [`layout_spec`] | Lower + lay out → [`Rendered`] |
 //!
 //! Callers assemble these values with ordinary Rust control flow. There is no
@@ -41,8 +41,8 @@ use std::num::{NonZeroU16, NonZeroU32};
 use crate::canvas::ImageFormat;
 use crate::error::Error;
 use crate::geom::{
-    Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive, Rect,
-    Size,
+    Angle, Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive,
+    Rect, Size,
 };
 use crate::limits::Limits;
 
@@ -149,10 +149,8 @@ pub struct ImageRef {
 #[derive(Debug)]
 #[must_use]
 pub struct SectionSpec<K> {
-    /// Paper override. `None` uses [`DocumentSpec::page_size`].
-    pub page_size: Option<PageSize>,
-    /// Page margins and header/footer band heights.
-    pub margins: Margins,
+    /// Page size and margins for this section.
+    pub style: SectionStyle,
     /// Header for this section. `None` is not called.
     pub header: Option<BandFn<K>>,
     /// Footer for this section. `None` is not called.
@@ -165,11 +163,20 @@ pub struct SectionSpec<K> {
     pub body: Vec<Block<K>>,
 }
 
+/// Page size and margins for one [`SectionSpec`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[must_use]
+pub struct SectionStyle {
+    /// Paper override. `None` uses [`DocumentSpec::page_size`].
+    pub page_size: Option<PageSize>,
+    /// Page margins and header/footer band heights.
+    pub margins: Margins,
+}
+
 impl<K> Default for SectionSpec<K> {
     fn default() -> Self {
         Self {
-            page_size: None,
-            margins: Margins::default(),
+            style: SectionStyle::default(),
             header: None,
             footer: None,
             behind: Vec::new(),
@@ -253,7 +260,12 @@ pub enum Block<K> {
     /// A fixed-size vector block. Marks occupy `size` and do not split.
     Canvas(CanvasSpec<K>),
     /// A horizontal rule.
-    HLine(HLineSpec),
+    ///
+    /// The box is `thickness` tall and the stroke runs through its center.
+    /// The rule does not split. Space outside the rule is a sibling
+    /// [`Block::Spacer`]. Wrap the spacers and the rule in
+    /// [`Block::KeepTogether`] when that group must stay on one page.
+    HLine(HLineStyle),
 }
 
 impl<K> Block<K> {
@@ -802,9 +814,17 @@ pub struct CanvasSpec<K> {
     /// Occupied width and height. Both are strictly positive.
     pub size: Size,
     /// Horizontal placement in the current frame.
-    pub align: Alignment,
+    pub style: CanvasStyle,
     /// Drawing commands. Later marks paint over earlier ones.
     pub marks: Vec<CanvasMark<K>>,
+}
+
+/// Horizontal placement for a [`CanvasSpec`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use]
+pub struct CanvasStyle {
+    /// Horizontal placement in the current frame.
+    pub align: Alignment,
 }
 
 /// One drawing command inside a [`CanvasSpec`].
@@ -853,6 +873,16 @@ pub enum CanvasMark<K> {
 pub struct ImageSpec {
     /// Image resource.
     pub image: ImageRef,
+    /// Display size and horizontal placement.
+    pub style: ImageStyle,
+}
+
+/// Display size and placement for an [`ImageSpec`].
+///
+/// A `None` width or height derives the other side, or uses the pixel size.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use]
+pub struct ImageStyle {
     /// Display width. `None` derives it or uses pixel width.
     pub width: Option<Length<Positive>>,
     /// Display height. `None` derives it or uses pixel height.
@@ -861,33 +891,30 @@ pub struct ImageSpec {
     pub align: Alignment,
 }
 
-/// A horizontal rule.
+/// Stroke and placement for [`Block::HLine`].
+///
+/// The rule's box is exactly `thickness` tall. The stroke sits halfway down
+/// that box. Space above or below the rule is a sibling [`Block::Spacer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
-pub struct HLineSpec {
+pub struct HLineStyle {
     /// Rule width. `None` fills the frame.
     pub width: Option<Length<Positive>>,
     /// Horizontal placement for a shorter rule.
     pub align: Alignment,
-    /// Stroke thickness.
+    /// Stroke thickness. This is also the block height.
     pub thickness: Length<Positive>,
     /// Stroke color.
     pub color: Color,
-    /// Blank space above the rule.
-    pub space_before: Length<NonNegative>,
-    /// Blank space below the rule.
-    pub space_after: Length<NonNegative>,
 }
 
-impl Default for HLineSpec {
+impl Default for HLineStyle {
     fn default() -> Self {
         Self {
             width: None,
             align: Alignment::Center,
             thickness: Length::from_trusted_pt(1.0),
             color: Color::rgb(0, 0, 0),
-            space_before: NonNegative::ZERO,
-            space_after: NonNegative::ZERO,
         }
     }
 }
@@ -994,8 +1021,8 @@ impl<K> BandFn<K> {
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct BandSpec<K> {
-    /// Horizontal inset rule.
-    pub inset: BandInset,
+    /// Horizontal inset for the slots.
+    pub style: BandStyle,
     /// Start-aligned slot.
     pub left: Option<BandSlot<K>>,
     /// End-aligned slot.
@@ -1004,13 +1031,22 @@ pub struct BandSpec<K> {
     ///
     /// The origin is the band top-left. A box outside the band fails layout.
     /// The library does not clip the mark and does not grow the margin.
-    pub marks: Vec<BandMark<K>>,
+    /// There is no page filter on a band mark. Choose the page in [`BandFn::from_fn`].
+    pub marks: Vec<Mark<K>>,
+}
+
+/// Horizontal inset for a [`BandSpec`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[must_use]
+pub struct BandStyle {
+    /// Horizontal inset rule.
+    pub inset: BandInset,
 }
 
 impl<K> Default for BandSpec<K> {
     fn default() -> Self {
         Self {
-            inset: BandInset::default(),
+            style: BandStyle::default(),
             left: None,
             right: None,
             marks: Vec::new(),
@@ -1018,20 +1054,20 @@ impl<K> Default for BandSpec<K> {
     }
 }
 
-/// One absolute mark inside a header or footer band.
+/// One absolute mark in a band or a page layer.
 ///
-/// Coordinates are the band top-left. There is no page filter on the mark.
-/// Choose the page in [`BandFn::from_fn`].
-#[derive(Debug, Clone, PartialEq)]
+/// Band marks use band coordinates. [`LayerMark`] uses page coordinates.
+/// A rotated group shares one pivot and one angle.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
-pub enum BandMark<K> {
+pub enum Mark<K> {
     /// One unrotated shape, text line, or image.
     Shape(LayerShape<K>),
     /// Shapes rotated as one group.
     Rotated {
-        /// Clockwise angle in degrees.
-        degrees: f32,
-        /// Rotation pivot in band coordinates.
+        /// Clockwise angle.
+        degrees: Angle,
+        /// Rotation pivot in the mark's coordinates.
         pivot: Point,
         /// Shapes in paint order.
         shapes: Vec<LayerShape<K>>,
@@ -1062,36 +1098,28 @@ impl Default for BandInset {
     }
 }
 
-/// Text or linked text in one band slot.
+/// Text in one band slot.
+///
+/// `link: None` paints `children` as plain text. `link: Some` links that text
+/// to a URI assembled from the same page-time fragments. An empty URI still
+/// fails when the page is painted.
 #[derive(Debug, Clone)]
 #[must_use]
-pub enum BandSlot<K> {
-    /// Unlinked text.
-    Text {
-        /// Page-time runs.
-        runs: Vec<TextRun>,
-        /// Key in the document [`FontRegistry`].
-        font: K,
-        /// Patch over the document seed.
-        style: RunStyle,
-    },
-    /// Text linked to a URI assembled from page-time runs.
-    Link {
-        /// URI runs.
-        uri: Vec<TextRun>,
-        /// Visible text runs.
-        text: Vec<TextRun>,
-        /// Key in the document [`FontRegistry`].
-        font: K,
-        /// Patch over the document seed.
-        style: RunStyle,
-    },
+pub struct BandSlot<K> {
+    /// Key in the document [`FontRegistry`].
+    pub font: K,
+    /// Patch over the document seed.
+    pub style: RunStyle,
+    /// Visible page-time fragments.
+    pub children: Vec<PageText>,
+    /// URI fragments. `None` leaves the slot unlinked.
+    pub link: Option<Vec<PageText>>,
 }
 
 /// One page-time text fragment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
-pub enum TextRun {
+pub enum PageText {
     /// Literal text.
     Literal(String),
     /// One-based document page number.
@@ -1115,71 +1143,15 @@ pub enum PageWhen {
 }
 
 /// One absolute page mark.
-#[derive(Debug)]
+///
+/// Coordinates on `child` are the page top-left. `when` selects the pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
-pub enum LayerMark<K> {
-    /// One unwrapped text line.
-    Text {
-        /// Page selection.
-        when: PageWhen,
-        /// Page-time text runs.
-        text: Vec<TextRun>,
-        /// Key in the document [`FontRegistry`].
-        font: K,
-        /// Line-box top-left in page coordinates.
-        at: Point,
-        /// Patch over the document seed, not an enclosing [`Block::Styled`].
-        style: RunStyle,
-    },
-    /// An image stretched into a page-coordinate rectangle.
-    Image {
-        /// Page selection.
-        when: PageWhen,
-        /// Image resource.
-        image: ImageRef,
-        /// Destination rectangle.
-        rect: Rect,
-    },
-    /// A straight segment.
-    Line {
-        /// Page selection.
-        when: PageWhen,
-        /// Start point.
-        from: Point,
-        /// End point.
-        to: Point,
-        /// Stroke.
-        pen: Pen,
-    },
-    /// A rectangle.
-    Rect {
-        /// Page selection.
-        when: PageWhen,
-        /// Geometry.
-        rect: Rect,
-        /// Fill and/or stroke.
-        ink: Ink,
-    },
-    /// An ellipse.
-    Ellipse {
-        /// Page selection.
-        when: PageWhen,
-        /// Bounding rectangle.
-        rect: Rect,
-        /// Fill and/or stroke.
-        ink: Ink,
-    },
-    /// Shapes rotated as one group.
-    Rotated {
-        /// Page selection.
-        when: PageWhen,
-        /// Clockwise angle in degrees.
-        degrees: f32,
-        /// Rotation pivot.
-        pivot: Point,
-        /// Shapes in paint order. May mix path, text, and image.
-        shapes: Vec<LayerShape<K>>,
-    },
+pub struct LayerMark<K> {
+    /// Pages on which `child` is painted.
+    pub when: PageWhen,
+    /// The mark painted on those pages.
+    pub child: Mark<K>,
 }
 
 /// One shape allowed in a rotated layer group.
@@ -1211,8 +1183,8 @@ pub enum LayerShape<K> {
     },
     /// One unwrapped text line. Coordinates are pre-rotation page space.
     Text {
-        /// Page-time text runs.
-        text: Vec<TextRun>,
+        /// Page-time text fragments.
+        text: Vec<PageText>,
         /// Key in the document [`FontRegistry`].
         font: K,
         /// Line-box top-left before rotation.

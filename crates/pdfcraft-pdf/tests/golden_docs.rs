@@ -43,14 +43,15 @@ mod common;
 use std::num::NonZeroU16;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellSpec,
-    CellStyle, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, LayerMark, LayerShape,
-    PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder,
-    TableHeader, TableRow, TableSpec, TableStyle, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, CanvasMark, CanvasSpec,
+    CanvasStyle, CellSpec, CellStyle, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineStyle,
+    LayerMark, LayerShape, Mark, PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources,
+    RunStyle, SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec,
+    TableStyle,
 };
 use pdfcraft_pdf::{
-    layout_spec, Color, DocumentSpec, Finite, Ink, Length, Limits, Margins, NonNegative, PageSize,
-    Path, Pen, Point, Positive, Rect, Size, Track,
+    layout_spec, Angle, Color, DocumentSpec, Finite, Ink, Length, Limits, Margins, NonNegative,
+    PageSize, Path, Pen, Point, Positive, Rect, Size, Track,
 };
 use snapshot::FontMeta;
 
@@ -177,13 +178,13 @@ fn text_flow_body() -> Vec<Block<()>> {
     };
     vec![
         Block::Paragraph(lead),
-        Block::HLine(HLineSpec {
+        Block::Spacer(nn(6.0)),
+        Block::HLine(HLineStyle {
             thickness: pos(2.0),
             color: Color::rgb(200, 0, 0),
-            space_before: nn(6.0),
-            space_after: nn(6.0),
-            ..HLineSpec::default()
+            ..HLineStyle::default()
         }),
+        Block::Spacer(nn(6.0)),
         styled,
         Block::Paragraph(centered),
     ]
@@ -202,8 +203,10 @@ fn golden_doc_text_flow() {
         limits: Limits::default(),
         info: info.clone(),
         sections: vec![SectionSpec {
-            page_size: None,
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                page_size: None,
+                margins: Margins::try_uniform(48.0).unwrap(),
+            },
             header: None,
             footer: None,
             behind: vec![],
@@ -228,7 +231,9 @@ fn canvas_cell(w: f32, h: f32, marks: Vec<CanvasMark<()>>) -> CellSpec<()> {
     CellSpec {
         children: vec![Block::Canvas(CanvasSpec {
             size: Size::try_pt(w, h).unwrap(),
-            align: Alignment::Start,
+            style: CanvasStyle {
+                align: Alignment::Start,
+            },
             marks,
         })],
         ..CellSpec::default()
@@ -248,10 +253,10 @@ fn golden_doc_table_spans() {
             rows: vec![TableRow {
                 children: vec![
                     span_cell(
-                        vec![Block::HLine(HLineSpec {
+                        vec![Block::HLine(HLineStyle {
                             thickness: pos(1.5),
                             color: Color::rgb(0, 0, 0),
-                            ..HLineSpec::default()
+                            ..HLineStyle::default()
                         })],
                         2,
                         1,
@@ -273,7 +278,9 @@ fn golden_doc_table_spans() {
                     span_cell(
                         vec![Block::Canvas(CanvasSpec {
                             size: Size::try_pt(200.0, 24.0).unwrap(),
-                            align: Alignment::Start,
+                            style: CanvasStyle {
+                                align: Alignment::Start,
+                            },
                             marks: vec![CanvasMark::Rect {
                                 rect: rect(0.0, 0.0, 200.0, 24.0),
                                 ink: Ink::Fill(Color::rgb(0, 0, 200)),
@@ -288,7 +295,9 @@ fn golden_doc_table_spans() {
                         },
                         children: vec![Block::Canvas(CanvasSpec {
                             size: Size::try_pt(40.0, 48.0).unwrap(),
-                            align: Alignment::Start,
+                            style: CanvasStyle {
+                                align: Alignment::Start,
+                            },
                             marks: vec![CanvasMark::Line {
                                 from: pt(0.0, 0.0),
                                 to: pt(40.0, 48.0),
@@ -304,7 +313,9 @@ fn golden_doc_table_spans() {
                 children: vec![span_cell(
                     vec![Block::Canvas(CanvasSpec {
                         size: Size::try_pt(200.0, 12.0).unwrap(),
-                        align: Alignment::Center,
+                        style: CanvasStyle {
+                            align: Alignment::Center,
+                        },
                         marks: vec![CanvasMark::Fill {
                             path: Path::line(pt(0.0, 6.0), pt(200.0, 6.0)),
                             color: Color::rgb(160, 0, 160),
@@ -334,8 +345,10 @@ fn golden_doc_table_spans() {
         limits: Limits::default(),
         info: info.clone(),
         sections: vec![SectionSpec {
-            page_size: None,
-            margins: Margins::try_uniform(48.0).unwrap(),
+            style: SectionStyle {
+                page_size: None,
+                margins: Margins::try_uniform(48.0).unwrap(),
+            },
             header: None,
             footer: None,
             behind: vec![],
@@ -347,89 +360,112 @@ fn golden_doc_table_spans() {
     snapshot::assert_golden(&rendered.pages(), Some(&info), &[], "table_spans");
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "golden lists every band slot and layer mark"
+)]
 fn bands_section() -> SectionSpec<()> {
     SectionSpec {
-        page_size: None,
-        margins: Margins::try_uniform(48.0).unwrap(),
+        style: SectionStyle {
+            page_size: None,
+            margins: Margins::try_uniform(48.0).unwrap(),
+        },
         header: Some(BandFn::fixed(BandSpec {
-            inset: BandInset::PageMargins,
-            left: Some(BandSlot::Text {
-                runs: vec![TextRun::Literal("Golden bands.".to_owned())],
+            style: BandStyle {
+                inset: BandInset::PageMargins,
+            },
+            left: Some(BandSlot {
                 font: (),
                 style: RunStyle::default(),
+                children: vec![PageText::Literal("Golden bands.".to_owned())],
+                link: None,
             }),
-            right: Some(BandSlot::Text {
-                runs: vec![
-                    TextRun::PageNumber,
-                    TextRun::Literal(" / ".to_owned()),
-                    TextRun::PageCount,
-                ],
+            right: Some(BandSlot {
                 font: (),
                 style: RunStyle::default(),
+                children: vec![
+                    PageText::PageNumber,
+                    PageText::Literal(" / ".to_owned()),
+                    PageText::PageCount,
+                ],
+                link: None,
             }),
             marks: Vec::new(),
         })),
         footer: Some(BandFn::fixed(BandSpec {
-            inset: BandInset::PageMargins,
-            left: Some(BandSlot::Text {
-                runs: vec![TextRun::Literal("Footer left.".to_owned())],
+            style: BandStyle {
+                inset: BandInset::PageMargins,
+            },
+            left: Some(BandSlot {
                 font: (),
                 style: RunStyle::default(),
+                children: vec![PageText::Literal("Footer left.".to_owned())],
+                link: None,
             }),
-            right: Some(BandSlot::Link {
-                uri: vec![TextRun::Literal("https://example.test/bands".to_owned())],
-                text: vec![TextRun::Literal("Bands link".to_owned())],
+            right: Some(BandSlot {
                 font: (),
                 style: RunStyle::default(),
+                children: vec![PageText::Literal("Bands link".to_owned())],
+                link: Some(vec![PageText::Literal(
+                    "https://example.test/bands".to_owned(),
+                )]),
             }),
             marks: Vec::new(),
         })),
         behind: vec![
-            LayerMark::Line {
+            LayerMark {
                 when: PageWhen::All,
-                from: pt(20.0, 20.0),
-                to: pt(200.0, 400.0),
-                pen: pen(0, 0, 0, 0.5),
+                child: Mark::Shape(LayerShape::Line {
+                    from: pt(20.0, 20.0),
+                    to: pt(200.0, 400.0),
+                    pen: pen(0, 0, 0, 0.5),
+                }),
             },
-            LayerMark::Ellipse {
+            LayerMark {
                 when: PageWhen::All,
-                rect: rect(400.0, 40.0, 60.0, 30.0),
-                ink: Ink::Stroke(pen(0, 0, 200, 1.0)),
+                child: Mark::Shape(LayerShape::Ellipse {
+                    rect: rect(400.0, 40.0, 60.0, 30.0),
+                    ink: Ink::Stroke(pen(0, 0, 200, 1.0)),
+                }),
             },
         ],
         front: vec![
-            LayerMark::Rotated {
+            LayerMark {
                 when: PageWhen::All,
-                degrees: 30.0,
-                pivot: pt(297.0, 420.0),
-                shapes: vec![
-                    LayerShape::Line {
-                        from: pt(250.0, 420.0),
-                        to: pt(344.0, 420.0),
-                        pen: pen(160, 0, 0, 1.0),
-                    },
-                    LayerShape::Rect {
-                        rect: rect(287.0, 410.0, 20.0, 20.0),
-                        ink: Ink::Fill(Color::rgb(200, 200, 0)),
-                    },
-                ],
+                child: Mark::Rotated {
+                    degrees: Angle::degrees(30.0).unwrap(),
+                    pivot: pt(297.0, 420.0),
+                    shapes: vec![
+                        LayerShape::Line {
+                            from: pt(250.0, 420.0),
+                            to: pt(344.0, 420.0),
+                            pen: pen(160, 0, 0, 1.0),
+                        },
+                        LayerShape::Rect {
+                            rect: rect(287.0, 410.0, 20.0, 20.0),
+                            ink: Ink::Fill(Color::rgb(200, 200, 0)),
+                        },
+                    ],
+                },
             },
-            LayerMark::Rect {
+            LayerMark {
                 when: PageWhen::Last,
-                rect: rect(48.0, 780.0, 100.0, 12.0),
-                ink: Ink::Fill(Color::rgba(0, 160, 0, 128)),
+                child: Mark::Shape(LayerShape::Rect {
+                    rect: rect(48.0, 780.0, 100.0, 12.0),
+                    ink: Ink::Fill(Color::rgba(0, 160, 0, 128)),
+                }),
             },
         ],
         body: vec![
-            Block::HLine(HLineSpec {
+            Block::HLine(HLineStyle {
                 thickness: pos(1.0),
-                ..HLineSpec::default()
+                ..HLineStyle::default()
             }),
             Block::PageBreak,
-            Block::HLine(HLineSpec {
+            Block::HLine(HLineStyle {
                 thickness: pos(3.0),
                 color: Color::rgb(0, 0, 200),
-                ..HLineSpec::default()
+                ..HLineStyle::default()
             }),
         ],
     }

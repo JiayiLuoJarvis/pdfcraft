@@ -9,8 +9,9 @@ use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positi
 use crate::layout_spec;
 use crate::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, LayerMark,
-    LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, MarkerFormat, Numbering, PageWhen,
-    ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TextRun,
+    LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, Mark, MarkerFormat, Numbering,
+    PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
+    SectionStyle, Span,
 };
 use crate::DocumentSpec;
 
@@ -393,19 +394,22 @@ fn an_empty_band_uri_is_located_in_the_header() {
     let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+                ..SectionStyle::default()
+            },
             header: Some(crate::spec::BandFn::fixed(crate::spec::BandSpec {
-                left: Some(crate::spec::BandSlot::Link {
+                left: Some(crate::spec::BandSlot {
                     font: (),
-                    uri: vec![TextRun::Literal(String::new())],
-                    text: vec![TextRun::Literal("Home".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("Home".into())],
+                    link: Some(vec![PageText::Literal(String::new())]),
                 }),
-                right: Some(crate::spec::BandSlot::Link {
+                right: Some(crate::spec::BandSlot {
                     font: (),
-                    uri: vec![TextRun::Literal("https://example.com".into())],
-                    text: vec![TextRun::Literal("Later".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("Later".into())],
+                    link: Some(vec![PageText::Literal("https://example.com".into())]),
                 }),
                 ..crate::spec::BandSpec::default()
             })),
@@ -436,12 +440,16 @@ fn a_missing_header_glyph_is_located_in_the_header() {
     let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+                ..SectionStyle::default()
+            },
             header: Some(crate::spec::BandFn::fixed(crate::spec::BandSpec {
-                left: Some(crate::spec::BandSlot::Text {
-                    runs: vec![TextRun::Literal(MISSING.to_string())],
+                left: Some(crate::spec::BandSlot {
                     font: (),
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal(MISSING.to_string())],
+                    link: None,
                 }),
                 ..crate::spec::BandSpec::default()
             })),
@@ -470,20 +478,23 @@ fn an_empty_band_uri_from_fn_is_located_in_the_header() {
     let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+                ..SectionStyle::default()
+            },
             header: Some(crate::spec::BandFn::from_fn(|_| {
                 Ok(Some(crate::spec::BandSpec {
-                    left: Some(crate::spec::BandSlot::Link {
+                    left: Some(crate::spec::BandSlot {
                         font: (),
-                        uri: vec![TextRun::Literal(String::new())],
-                        text: vec![TextRun::Literal("Home".into())],
                         style: RunStyle::default(),
+                        children: vec![PageText::Literal("Home".into())],
+                        link: Some(vec![PageText::Literal(String::new())]),
                     }),
-                    right: Some(crate::spec::BandSlot::Link {
+                    right: Some(crate::spec::BandSlot {
                         font: (),
-                        uri: vec![TextRun::Literal("https://example.com".into())],
-                        text: vec![TextRun::Literal("Later".into())],
                         style: RunStyle::default(),
+                        children: vec![PageText::Literal("Later".into())],
+                        link: Some(vec![PageText::Literal("https://example.com".into())]),
                     }),
                     ..crate::spec::BandSpec::default()
                 }))
@@ -512,13 +523,17 @@ fn a_missing_header_glyph_from_fn_is_located_in_the_header() {
     let Some(error) = lay(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+            style: SectionStyle {
+                margins: Margins::uniform(NonNegative::pt(36.0).unwrap()),
+                ..SectionStyle::default()
+            },
             header: Some(crate::spec::BandFn::from_fn(|_| {
                 Ok(Some(crate::spec::BandSpec {
-                    left: Some(crate::spec::BandSlot::Text {
-                        runs: vec![TextRun::Literal(MISSING.to_string())],
+                    left: Some(crate::spec::BandSlot {
                         font: (),
                         style: RunStyle::default(),
+                        children: vec![PageText::Literal(MISSING.to_string())],
+                        link: None,
                     }),
                     ..crate::spec::BandSpec::default()
                 }))
@@ -553,16 +568,20 @@ fn a_zero_length_layer_segment_fails_before_any_page() {
         info: crate::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
             behind: vec![
-                LayerMark::Line {
+                LayerMark {
                     when: PageWhen::All,
-                    from: point,
-                    to: point,
-                    pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                    child: Mark::Shape(LayerShape::Line {
+                        from: point,
+                        to: point,
+                        pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                    }),
                 },
-                LayerMark::Rect {
+                LayerMark {
                     when: PageWhen::All,
-                    rect: Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
-                    ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                    child: Mark::Shape(LayerShape::Rect {
+                        rect: Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
+                        ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                    }),
                 },
             ],
             ..SectionSpec::default()
@@ -581,48 +600,19 @@ fn a_zero_length_layer_segment_fails_before_any_page() {
 }
 
 #[test]
-fn a_non_finite_rotation_fails_before_any_page() {
-    let error = layout_spec(DocumentSpec {
-        page_size: PageSize::custom(Size::try_pt(200.0, 100.0).unwrap()),
-        resources: Resources::<()>::default(),
-        limits: crate::Limits::default(),
-        info: crate::spec::DocumentInfo::default(),
-        sections: vec![SectionSpec {
-            behind: vec![LayerMark::Rotated {
-                when: PageWhen::All,
-                degrees: f32::NAN,
-                pivot: Point::ZERO,
-                shapes: vec![LayerShape::Rect {
-                    rect: Rect::try_pt(0.0, 0.0, 10.0, 10.0).unwrap(),
-                    ink: Ink::Fill(Color::rgb(0, 0, 0)),
-                }],
-            }],
-            ..SectionSpec::default()
-        }],
-    })
-    .err()
-    .unwrap();
-    assert!(
-        matches!(
-            error.first().kind,
-            ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees }) if degrees.is_nan()
-        ),
-        "{error:?}"
-    );
-}
-
-#[test]
 fn a_forced_break_in_layer_text_fails_before_any_page() {
     for sample in ["A\nB", "A\r\nB"] {
         let Some(error) = lay(
             PageSize::A4,
             SectionSpec {
-                behind: vec![LayerMark::Text {
-                    font: (),
+                behind: vec![LayerMark {
                     when: PageWhen::All,
-                    text: vec![TextRun::Literal(sample.into())],
-                    at: Point::try_pt(10.0, 10.0).unwrap(),
-                    style: RunStyle::default(),
+                    child: Mark::Shape(LayerShape::Text {
+                        text: vec![PageText::Literal(sample.into())],
+                        font: (),
+                        at: Point::try_pt(10.0, 10.0).unwrap(),
+                        style: RunStyle::default(),
+                    }),
                 }],
                 ..SectionSpec::default()
             },
@@ -677,12 +667,14 @@ fn a_missing_glyph_on_the_last_page_front_is_located_there() {
         PageSize::A4,
         SectionSpec {
             body: vec![Block::paragraph((), "A")],
-            front: vec![LayerMark::Text {
-                font: (),
+            front: vec![LayerMark {
                 when: PageWhen::Last,
-                text: vec![TextRun::Literal(MISSING.to_string())],
-                at: Point::try_pt(10.0, 10.0).unwrap(),
-                style: RunStyle::default(),
+                child: Mark::Shape(LayerShape::Text {
+                    text: vec![PageText::Literal(MISSING.to_string())],
+                    font: (),
+                    at: Point::try_pt(10.0, 10.0).unwrap(),
+                    style: RunStyle::default(),
+                }),
             }],
             ..SectionSpec::default()
         },

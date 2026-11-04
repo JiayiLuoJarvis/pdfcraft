@@ -25,20 +25,20 @@ use skrifa::{FontRef, MetadataProvider};
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
-    CanvasMark, CanvasSpec, CellSpec, CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec,
-    ColumnsStyle, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec, InsetStyle, LayerMark,
-    LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, MarkerFormat, PageWhen, ParagraphSpec,
-    ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableHeader, TableRow,
-    TableSpec, TableStyle, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, BlankSpec, BlankWidth, Block,
+    CanvasMark, CanvasSpec, CanvasStyle, CellSpec, CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec,
+    ColumnsStyle, FontFace, FontFamily, FontRegistry, HLineStyle, ImageSpec, ImageStyle,
+    InsetStyle, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, Mark,
+    MarkerFormat, PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
+    SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
 use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec, Error,
-    ErrorKind, GeometryKind, GlyphRun, ImageFormat, Ink, Length, LimitKind, LinkTarget, Location,
-    MarginPreset, Margins, NonNegative, Numbering, PageSize, Paper, Path, PathVerb, Pen, Point,
-    Positive, Ratio, RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
+    layout_spec, Angle, CanvasCommand, CellSpanReason, Color, ColumnWidthsReason, DocumentSpec,
+    Error, ErrorKind, GeometryKind, GlyphRun, ImageFormat, Ink, Length, LimitKind, LinkTarget,
+    Location, MarginPreset, Margins, NonNegative, Numbering, PageSize, Paper, Path, PathVerb, Pen,
+    Point, Positive, Ratio, RecordedPage, Rect, Region, Rendered, Result, Size, Stroke, Track, A4,
 };
 
 #[expect(
@@ -432,8 +432,8 @@ fn grid(header: Vec<TableRow<()>>, body: Vec<TableRow<()>>) -> Block<()> {
     })
 }
 
-fn rule(spec: HLineSpec) -> Block<()> {
-    Block::HLine(spec)
+fn rule(style: HLineStyle) -> Block<()> {
+    Block::HLine(style)
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -444,57 +444,63 @@ fn image_block(
 ) -> Block<()> {
     Block::Image(ImageSpec {
         image,
-        width: width.map(pos),
-        height: None,
-        align,
+        style: ImageStyle {
+            width: width.map(pos),
+            height: None,
+            align,
+        },
     })
 }
 
 fn left_band(text: &str) -> BandSpec<()> {
     BandSpec {
-        left: Some(BandSlot::Text {
-            runs: vec![TextRun::Literal(text.into())],
+        left: Some(BandSlot {
             font: (),
             style: RunStyle::default(),
+            children: vec![PageText::Literal(text.into())],
+            link: None,
         }),
         ..BandSpec::default()
     }
 }
 
-fn page_label() -> Vec<TextRun> {
+fn page_label() -> Vec<PageText> {
     vec![
-        TextRun::Literal("第 ".into()),
-        TextRun::PageNumber,
-        TextRun::Literal(" 页 / 共 ".into()),
-        TextRun::PageCount,
-        TextRun::Literal(" 页".into()),
+        PageText::Literal("第 ".into()),
+        PageText::PageNumber,
+        PageText::Literal(" 页 / 共 ".into()),
+        PageText::PageCount,
+        PageText::Literal(" 页".into()),
     ]
 }
 
-fn slot_text(runs: Vec<TextRun>) -> BandSlot<()> {
-    BandSlot::Text {
-        runs,
+fn slot_text(runs: Vec<PageText>) -> BandSlot<()> {
+    BandSlot {
         font: (),
         style: RunStyle::default(),
+        children: runs,
+        link: None,
     }
 }
 
-fn slot_link(uri: Vec<TextRun>, text: &str) -> BandSlot<()> {
-    BandSlot::Link {
+fn slot_link(uri: Vec<PageText>, text: &str) -> BandSlot<()> {
+    BandSlot {
         font: (),
-        uri,
-        text: vec![TextRun::Literal(text.into())],
         style: RunStyle::default(),
+        children: vec![PageText::Literal(text.into())],
+        link: Some(uri),
     }
 }
 
 fn mark_text(when: PageWhen, text: &str, x: f32, y: f32, style: RunStyle) -> LayerMark<()> {
-    LayerMark::Text {
-        font: (),
+    LayerMark {
         when,
-        text: vec![TextRun::Literal(text.into())],
-        at: Point::try_pt(x, y).unwrap(),
-        style,
+        child: Mark::Shape(LayerShape::Text {
+            text: vec![PageText::Literal(text.into())],
+            font: (),
+            at: Point::try_pt(x, y).unwrap(),
+            style,
+        }),
     }
 }
 
@@ -596,9 +602,12 @@ fn full_template(c: &Contract, company: &str) -> Result<Rendered> {
     font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                left: Some(slot_text(vec![TextRun::Literal(company.into())])),
+                left: Some(slot_text(vec![PageText::Literal(company.into())])),
                 right: Some(slot_text(page_label())),
                 ..BandSpec::default()
             })),
@@ -680,11 +689,16 @@ fn header_inset_aligns_slots_with_caller_chosen_side_margins() {
     let pages = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                inset: BandInset::PageMargins,
-                left: Some(slot_text(vec![TextRun::Literal("ACME".into())])),
-                right: Some(slot_text(vec![TextRun::Literal("page".into())])),
+                style: BandStyle {
+                    inset: BandInset::PageMargins,
+                },
+                left: Some(slot_text(vec![PageText::Literal("ACME".into())])),
+                right: Some(slot_text(vec![PageText::Literal("page".into())])),
                 marks: Vec::new(),
             })),
             body: vec![para("Body")],
@@ -851,12 +865,15 @@ fn footer_sees_section_counters_equal_to_document_totals() {
     let pages = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(20.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(20.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_text(vec![
-                    TextRun::SectionNumber,
-                    TextRun::Literal("/".into()),
-                    TextRun::SectionCount,
+                    PageText::SectionNumber,
+                    PageText::Literal("/".into()),
+                    PageText::SectionCount,
                 ])),
                 ..BandSpec::default()
             })),
@@ -880,9 +897,12 @@ fn a_later_header_call_replaces_the_earlier_one() {
     let pages = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(20.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(20.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                right: Some(slot_text(vec![TextRun::Literal("new".into())])),
+                right: Some(slot_text(vec![PageText::Literal("new".into())])),
                 ..BandSpec::default()
             })),
             body: vec![para("A")],
@@ -907,7 +927,10 @@ fn two_pages(header: Option<BandFn<()>>, footer: Option<BandFn<()>>) -> Rendered
     font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header,
             footer,
             body: vec![para("A"), Block::PageBreak, para("B")],
@@ -967,7 +990,10 @@ fn footer_fn_none_skips_only_that_page() {
         return;
     }
     let section = |footer| SectionSpec {
-        margins: Margins::uniform(nn(36.0)),
+        style: SectionStyle {
+            margins: Margins::uniform(nn(36.0)),
+            ..SectionStyle::default()
+        },
         footer,
         body: vec![
             para("A"),
@@ -1047,7 +1073,10 @@ fn band_fn_error_is_located() {
     let header_err = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::from_fn(|_| Err(Error::band_fn("boom")))),
             body: vec![para("A"), Block::PageBreak, para("B")],
             ..SectionSpec::default()
@@ -1075,7 +1104,10 @@ fn band_fn_error_is_located() {
     let footer_err = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::from_fn(move |_| Err(failure.clone()))),
             body: vec![para("A"), Block::PageBreak, para("B")],
             ..SectionSpec::default()
@@ -1119,8 +1151,10 @@ fn band_fn_query_size_is_the_final_page_size() {
         })
     };
     let section = |page_size, body: &str, log: &Arc<Mutex<Vec<Size>>>| SectionSpec {
-        page_size,
-        margins: Margins::uniform(nn(36.0)),
+        style: SectionStyle {
+            page_size,
+            margins: Margins::uniform(nn(36.0)),
+        },
         header: Some(band(log)),
         body: vec![para(body)],
         ..SectionSpec::default()
@@ -1171,10 +1205,11 @@ fn ghost_resources() -> Resources<GhostKey> {
 
 fn ghost_band() -> BandSpec<GhostKey> {
     BandSpec {
-        left: Some(BandSlot::Text {
-            runs: vec![TextRun::Literal("H".into())],
+        left: Some(BandSlot {
             font: GhostKey::Missing,
             style: RunStyle::default(),
+            children: vec![PageText::Literal("H".into())],
+            link: None,
         }),
         ..BandSpec::default()
     }
@@ -1187,7 +1222,10 @@ fn ghost_doc(header: BandFn<GhostKey>) -> Result<Rendered> {
         limits: pdfcraft_pdf::Limits::default(),
         info: pdfcraft_pdf::spec::DocumentInfo::default(),
         sections: vec![SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header: Some(header),
             body: vec![
                 Block::paragraph(GhostKey::Body, "A"),
@@ -1231,13 +1269,13 @@ fn from_fn_band_font_error_reports_per_page() {
     }
 }
 
-fn band_rect(rect: Rect, ink: Ink) -> BandMark<()> {
-    BandMark::Shape(LayerShape::Rect { rect, ink })
+fn band_rect(rect: Rect, ink: Ink) -> Mark<()> {
+    Mark::Shape(LayerShape::Rect { rect, ink })
 }
 
-fn band_text_line(text: &str, at: Point, size: f32, color: Color) -> BandMark<()> {
-    BandMark::Shape(LayerShape::Text {
-        text: vec![TextRun::Literal(text.into())],
+fn band_text_line(text: &str, at: Point, size: f32, color: Color) -> Mark<()> {
+    Mark::Shape(LayerShape::Text {
+        text: vec![PageText::Literal(text.into())],
         font: (),
         at,
         style: RunStyle {
@@ -1248,7 +1286,7 @@ fn band_text_line(text: &str, at: Point, size: f32, color: Color) -> BandMark<()
     })
 }
 
-fn marked_band(marks: Vec<BandMark<()>>) -> BandSpec<()> {
+fn marked_band(marks: Vec<Mark<()>>) -> BandSpec<()> {
     BandSpec {
         marks,
         ..BandSpec::default()
@@ -1264,8 +1302,11 @@ fn footer_image_mark_lands_in_band_coordinates() {
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         resources,
         vec![SectionSpec {
-            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
-            footer: Some(BandFn::fixed(marked_band(vec![BandMark::Shape(
+            style: SectionStyle {
+                margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
+            footer: Some(BandFn::fixed(marked_band(vec![Mark::Shape(
                 LayerShape::Image {
                     image,
                     rect: Rect::try_pt(10.0, 5.0, 20.0, 20.0).unwrap(),
@@ -1293,7 +1334,10 @@ fn footer_rect_mark_strokes_at_band_offset() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(marked_band(vec![band_rect(
                 Rect::try_pt(20.0, 2.0, 180.0, 65.0).unwrap(),
                 Ink::Stroke(pen),
@@ -1334,9 +1378,12 @@ fn band_marks_paint_before_slots() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(36.0), nn(0.0), nn(0.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(36.0), nn(0.0), nn(0.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                left: Some(slot_text(vec![TextRun::Literal("H".into())])),
+                left: Some(slot_text(vec![PageText::Literal("H".into())])),
                 marks: vec![band_rect(
                     Rect::try_pt(1.0, 1.0, 10.0, 10.0).unwrap(),
                     Ink::Fill(Color::rgb(1, 2, 3)),
@@ -1365,7 +1412,10 @@ fn band_text_marks_keep_fixed_lines() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(marked_band(vec![
                 band_text_line("first", Point::try_pt(20.0, 4.0).unwrap(), 9.0, black),
                 band_text_line("second", Point::try_pt(20.0, 22.0).unwrap(), 9.0, black),
@@ -1428,7 +1478,10 @@ fn band_mark_below_band_is_taller_than_margin() {
     let result = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(20.0), nn(0.0), nn(30.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(20.0), nn(0.0), nn(30.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(marked_band(vec![band_rect(
                 Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
                 Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
@@ -1452,7 +1505,10 @@ fn band_mark_past_page_width_is_wider_than_frame() {
     let result = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(marked_band(vec![band_rect(
                 Rect::try_pt(190.0, 1.0, 11.0, 10.0).unwrap(),
                 Ink::Fill(Color::rgb(0, 0, 0)),
@@ -1476,7 +1532,10 @@ fn band_mark_above_band_is_outside() {
     let err = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(marked_band(vec![band_rect(
                 Rect::try_pt(10.0, -1.0, 20.0, 10.0).unwrap(),
                 Ink::Fill(Color::rgb(0, 0, 0)),
@@ -1504,9 +1563,12 @@ fn rotated_band_mark_checks_rotated_bounds() {
     let result = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
-            header: Some(BandFn::fixed(marked_band(vec![BandMark::Rotated {
-                degrees: 45.0,
+            style: SectionStyle {
+                margins: Margins::new(nn(30.0), nn(0.0), nn(0.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
+            header: Some(BandFn::fixed(marked_band(vec![Mark::Rotated {
+                degrees: Angle::degrees(45.0).unwrap(),
                 pivot: Point::try_pt(55.0, 25.0).unwrap(),
                 shapes: vec![LayerShape::Rect {
                     rect: Rect::try_pt(50.0, 20.0, 10.0, 10.0).unwrap(),
@@ -1534,7 +1596,7 @@ fn from_fn_odd_even_marks() {
     let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
     let footer = BandFn::from_fn(move |query| {
         let marks = if query.number.get() % 2 == 1 {
-            vec![BandMark::Shape(LayerShape::Image {
+            vec![Mark::Shape(LayerShape::Image {
                 image,
                 rect: Rect::try_pt(220.0, 5.0, 20.0, 20.0).unwrap(),
             })]
@@ -1562,7 +1624,7 @@ fn from_fn_odd_even_marks() {
                     8.0,
                     Color::rgb(120, 120, 120),
                 ),
-                BandMark::Shape(LayerShape::Image {
+                Mark::Shape(LayerShape::Image {
                     image,
                     rect: Rect::try_pt(220.0, 5.0, 55.0, 55.0).unwrap(),
                 }),
@@ -1574,7 +1636,10 @@ fn from_fn_odd_even_marks() {
         PageSize::custom(Size::try_pt(300.0, 200.0).unwrap()),
         resources,
         vec![SectionSpec {
-            margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(20.0), nn(0.0), nn(70.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(footer),
             body: vec![para("A"), Block::PageBreak, para("B")],
             ..SectionSpec::default()
@@ -1603,8 +1668,11 @@ fn fixed_band_foreign_image_reports_once_per_section() {
         PageSize::A4,
         Resources::default(),
         vec![SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
-            footer: Some(BandFn::fixed(marked_band(vec![BandMark::Shape(
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
+            footer: Some(BandFn::fixed(marked_band(vec![Mark::Shape(
                 LayerShape::Image {
                     image: stolen,
                     rect: Rect::try_pt(10.0, 10.0, 10.0, 10.0).unwrap(),
@@ -1635,14 +1703,15 @@ fn from_fn_band_foreign_image_reports_per_page() {
         PageSize::A4,
         Resources::default(),
         vec![SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::from_fn(move |_| {
-                Ok(Some(marked_band(vec![BandMark::Shape(
-                    LayerShape::Image {
-                        image: stolen,
-                        rect: Rect::try_pt(10.0, 10.0, 10.0, 10.0).unwrap(),
-                    },
-                )])))
+                Ok(Some(marked_band(vec![Mark::Shape(LayerShape::Image {
+                    image: stolen,
+                    rect: Rect::try_pt(10.0, 10.0, 10.0, 10.0).unwrap(),
+                })])))
             })),
             body: vec![
                 Block::Spacer(nn(1.0)),
@@ -1671,7 +1740,10 @@ fn empty_marks_and_slots_skip_the_side() {
     let bare = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             body: vec![para("A")],
             ..SectionSpec::default()
         },
@@ -1681,7 +1753,10 @@ fn empty_marks_and_slots_skip_the_side() {
     let empty = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::from_fn(|_| Ok(Some(BandSpec::default())))),
             body: vec![para("A")],
             ..SectionSpec::default()
@@ -2025,7 +2100,10 @@ fn item_table_splits_rows_across_pages_at_the_body_indent() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(300.0, line() * 3.0 + 1.0).unwrap()),
         SectionSpec {
-            margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             body: vec![Block::List(ListSpec {
                 style: ListStyle {
                     kind: ListKind::Ordered {
@@ -3157,9 +3235,11 @@ fn cell_image_and_last_page_seal_share_coordinates() {
                             text_cell("A"),
                             cell(vec![Block::Image(ImageSpec {
                                 image: seal,
-                                width: Some(pos(10.0)),
-                                height: None,
-                                align: Alignment::Start,
+                                style: ImageStyle {
+                                    width: Some(pos(10.0)),
+                                    height: None,
+                                    align: Alignment::Start,
+                                },
                             })]),
                         ],
                     }],
@@ -3168,10 +3248,12 @@ fn cell_image_and_last_page_seal_share_coordinates() {
                 Block::PageBreak,
                 para("B"),
             ],
-            front: vec![LayerMark::Image {
+            front: vec![LayerMark {
                 when: PageWhen::Last,
-                image: seal,
-                rect: Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap(),
+                child: Mark::Shape(LayerShape::Image {
+                    image: seal,
+                    rect: Rect::try_pt(150.0, 40.0, 20.0, 20.0).unwrap(),
+                }),
             }],
             ..SectionSpec::default()
         }],
@@ -3270,7 +3352,10 @@ fn list_item_image_is_drawn_at_the_body_indent() {
         PageSize::A4,
         resources,
         vec![SectionSpec {
-            margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
+            style: SectionStyle {
+                margins: Margins::new(nn(0.0), nn(0.0), nn(0.0), nn(0.0)),
+                ..SectionStyle::default()
+            },
             body: vec![bullet_list(vec![plain_item(vec![image_block(
                 logo,
                 Some(10.0),
@@ -3341,14 +3426,14 @@ fn to_pdf_writes_a_pdf() {
 fn counter_footer() -> BandSpec<()> {
     BandSpec {
         left: Some(slot_text(vec![
-            TextRun::PageNumber,
-            TextRun::Literal("/".into()),
-            TextRun::PageCount,
+            PageText::PageNumber,
+            PageText::Literal("/".into()),
+            PageText::PageCount,
         ])),
         right: Some(slot_text(vec![
-            TextRun::SectionNumber,
-            TextRun::Literal("/".into()),
-            TextRun::SectionCount,
+            PageText::SectionNumber,
+            PageText::Literal("/".into()),
+            PageText::SectionCount,
         ])),
         ..BandSpec::default()
     }
@@ -3365,13 +3450,19 @@ fn two_sections_number_document_pages_and_section_pages() {
         font_resources(),
         vec![
             SectionSpec {
-                margins: margin,
+                style: SectionStyle {
+                    margins: margin,
+                    ..SectionStyle::default()
+                },
                 footer: Some(BandFn::fixed(counter_footer())),
                 body: vec![para("A"), Block::PageBreak, para("B")],
                 ..SectionSpec::default()
             },
             SectionSpec {
-                margins: margin,
+                style: SectionStyle {
+                    margins: margin,
+                    ..SectionStyle::default()
+                },
                 footer: Some(BandFn::fixed(counter_footer())),
                 body: vec![para("C")],
                 ..SectionSpec::default()
@@ -3396,16 +3487,24 @@ fn second_section_header_stays_at_page_edge_until_caller_insets() {
         font_resources(),
         vec![
             SectionSpec {
-                margins: Margins::uniform(nn(20.0)),
+                style: SectionStyle {
+                    margins: Margins::uniform(nn(20.0)),
+                    ..SectionStyle::default()
+                },
                 header: Some(BandFn::fixed(left_band("One"))),
                 body: vec![para("A")],
                 ..SectionSpec::default()
             },
             SectionSpec {
-                margins: Margins::new(nn(20.0), nn(10.0), nn(20.0), nn(48.0)),
+                style: SectionStyle {
+                    margins: Margins::new(nn(20.0), nn(10.0), nn(20.0), nn(48.0)),
+                    ..SectionStyle::default()
+                },
                 header: Some(BandFn::fixed(BandSpec {
-                    inset: BandInset::PageMargins,
-                    left: Some(slot_text(vec![TextRun::Literal("Two".into())])),
+                    style: BandStyle {
+                        inset: BandInset::PageMargins,
+                    },
+                    left: Some(slot_text(vec![PageText::Literal("Two".into())])),
                     right: None,
                     marks: Vec::new(),
                 })),
@@ -3431,7 +3530,10 @@ fn empty_section_is_one_page_and_still_draws_its_footer() {
     let pages = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(20.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(20.0)),
+                ..SectionStyle::default()
+            },
             footer: Some(BandFn::fixed(left_band("foot"))),
             ..SectionSpec::default()
         },
@@ -3466,7 +3568,10 @@ fn two_sections_on_different_paper_write_a_pdf() {
         vec![
             sec(vec![para("A")]),
             SectionSpec {
-                page_size: Some(Paper::Letter.landscape()),
+                style: SectionStyle {
+                    page_size: Some(Paper::Letter.landscape()),
+                    ..SectionStyle::default()
+                },
                 body: vec![para("B")],
                 ..SectionSpec::default()
             },
@@ -3498,50 +3603,63 @@ fn painted_layer_paths() -> Rendered {
     font_pages(
         PageSize::custom(Size::try_pt(200.0, 160.0).unwrap()),
         SectionSpec {
-            margins: Margins::uniform(nn(20.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(20.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(left_band("H"))),
             body: vec![para("A")],
             behind: vec![
-                LayerMark::Line {
+                LayerMark {
                     when: PageWhen::All,
-                    from: Point::try_pt(0.0, 0.0).unwrap(),
-                    to: Point::try_pt(40.0, 40.0).unwrap(),
-                    pen: Pen::new(Color::rgba(200, 0, 0, 64), 0.8).unwrap(),
+                    child: Mark::Shape(LayerShape::Line {
+                        from: Point::try_pt(0.0, 0.0).unwrap(),
+                        to: Point::try_pt(40.0, 40.0).unwrap(),
+                        pen: Pen::new(Color::rgba(200, 0, 0, 64), 0.8).unwrap(),
+                    }),
                 },
-                LayerMark::Rect {
+                LayerMark {
                     when: PageWhen::All,
-                    rect: Rect::try_pt(4.0, 6.0, 10.0, 12.0).unwrap(),
-                    ink: Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
+                    child: Mark::Shape(LayerShape::Rect {
+                        rect: Rect::try_pt(4.0, 6.0, 10.0, 12.0).unwrap(),
+                        ink: Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
+                    }),
                 },
             ],
             front: vec![
                 mark_text(PageWhen::All, "SEAL", 12.0, 30.0, RunStyle::default()),
-                LayerMark::Ellipse {
+                LayerMark {
                     when: PageWhen::All,
-                    rect: Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
-                    ink: Ink::FillStroke(
-                        Color::rgba(200, 0, 0, 40),
-                        Pen::new(Color::rgb(200, 0, 0), 2.0).unwrap(),
-                    ),
+                    child: Mark::Shape(LayerShape::Ellipse {
+                        rect: Rect::try_pt(40.0, 50.0, 20.0, 10.0).unwrap(),
+                        ink: Ink::FillStroke(
+                            Color::rgba(200, 0, 0, 40),
+                            Pen::new(Color::rgb(200, 0, 0), 2.0).unwrap(),
+                        ),
+                    }),
                 },
-                LayerMark::Rotated {
+                LayerMark {
                     when: PageWhen::All,
-                    degrees: 90.0,
-                    pivot: Point::try_pt(10.0, 12.0).unwrap(),
-                    shapes: vec![LayerShape::Rect {
-                        rect: Rect::try_pt(10.0, 12.0, 20.0, 8.0).unwrap(),
-                        ink: Ink::Fill(Color::rgba(0, 0, 255, 128)),
-                    }],
+                    child: Mark::Rotated {
+                        degrees: Angle::degrees(90.0).unwrap(),
+                        pivot: Point::try_pt(10.0, 12.0).unwrap(),
+                        shapes: vec![LayerShape::Rect {
+                            rect: Rect::try_pt(10.0, 12.0, 20.0, 8.0).unwrap(),
+                            ink: Ink::Fill(Color::rgba(0, 0, 255, 128)),
+                        }],
+                    },
                 },
-                LayerMark::Rotated {
+                LayerMark {
                     when: PageWhen::All,
-                    degrees: 0.0,
-                    pivot: Point::ZERO,
-                    shapes: vec![LayerShape::Line {
-                        from: Point::try_pt(1.0, 2.0).unwrap(),
-                        to: Point::try_pt(8.0, 9.0).unwrap(),
-                        pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
-                    }],
+                    child: Mark::Rotated {
+                        degrees: Angle::degrees(0.0).unwrap(),
+                        pivot: Point::ZERO,
+                        shapes: vec![LayerShape::Line {
+                            from: Point::try_pt(1.0, 2.0).unwrap(),
+                            to: Point::try_pt(8.0, 9.0).unwrap(),
+                            pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                        }],
+                    },
                 },
             ],
             ..SectionSpec::default()
@@ -3726,15 +3844,19 @@ fn layer_paths_write_a_pdf() {
         Resources::default(),
         vec![SectionSpec {
             behind: vec![
-                LayerMark::Rect {
+                LayerMark {
                     when: PageWhen::All,
-                    rect: Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
-                    ink: Ink::Fill(Color::rgba(0, 0, 0, 128)),
+                    child: Mark::Shape(LayerShape::Rect {
+                        rect: Rect::try_pt(10.0, 10.0, 20.0, 20.0).unwrap(),
+                        ink: Ink::Fill(Color::rgba(0, 0, 0, 128)),
+                    }),
                 },
-                LayerMark::Ellipse {
+                LayerMark {
                     when: PageWhen::All,
-                    rect: Rect::try_pt(30.0, 30.0, 16.0, 12.0).unwrap(),
-                    ink: Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
+                    child: Mark::Shape(LayerShape::Ellipse {
+                        rect: Rect::try_pt(30.0, 30.0, 16.0, 12.0).unwrap(),
+                        ink: Ink::Stroke(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap()),
+                    }),
                 },
             ],
             ..SectionSpec::default()
@@ -3753,20 +3875,22 @@ fn rotated_layer_text_pushes_transform_on_every_page() {
         PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
         SectionSpec {
             body: vec![para("one"), Block::PageBreak, para("two")],
-            behind: vec![LayerMark::Rotated {
+            behind: vec![LayerMark {
                 when: PageWhen::All,
-                degrees: 45.0,
-                pivot: Point::try_pt(60.0, 40.0).unwrap(),
-                shapes: vec![LayerShape::Text {
-                    text: vec![TextRun::Literal("WM".into())],
-                    font: (),
-                    at: Point::try_pt(50.0, 35.0).unwrap(),
-                    style: RunStyle {
-                        font_size: Some(pos(12.0)),
-                        color: Some(Color::rgba(0, 0, 0, 64)),
-                        ..RunStyle::default()
-                    },
-                }],
+                child: Mark::Rotated {
+                    degrees: Angle::degrees(45.0).unwrap(),
+                    pivot: Point::try_pt(60.0, 40.0).unwrap(),
+                    shapes: vec![LayerShape::Text {
+                        text: vec![PageText::Literal("WM".into())],
+                        font: (),
+                        at: Point::try_pt(50.0, 35.0).unwrap(),
+                        style: RunStyle {
+                            font_size: Some(pos(12.0)),
+                            color: Some(Color::rgba(0, 0, 0, 64)),
+                            ..RunStyle::default()
+                        },
+                    }],
+                },
             }],
             ..SectionSpec::default()
         },
@@ -3801,14 +3925,16 @@ fn rotated_layer_image_keeps_pre_rotation_rect() {
         PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
         resources,
         vec![SectionSpec {
-            front: vec![LayerMark::Rotated {
+            front: vec![LayerMark {
                 when: PageWhen::All,
-                degrees: 90.0,
-                pivot: Point::try_pt(20.0, 20.0).unwrap(),
-                shapes: vec![LayerShape::Image {
-                    image,
-                    rect: Rect::try_pt(10.0, 10.0, 20.0, 15.0).unwrap(),
-                }],
+                child: Mark::Rotated {
+                    degrees: Angle::degrees(90.0).unwrap(),
+                    pivot: Point::try_pt(20.0, 20.0).unwrap(),
+                    shapes: vec![LayerShape::Image {
+                        image,
+                        rect: Rect::try_pt(10.0, 10.0, 20.0, 15.0).unwrap(),
+                    }],
+                },
             }],
             ..SectionSpec::default()
         }],
@@ -3832,23 +3958,25 @@ fn rotated_mixed_path_and_text_keep_shapes_order() {
     let rendered = font_pages(
         PageSize::custom(Size::try_pt(100.0, 80.0).unwrap()),
         SectionSpec {
-            behind: vec![LayerMark::Rotated {
+            behind: vec![LayerMark {
                 when: PageWhen::All,
-                degrees: 30.0,
-                pivot: Point::try_pt(40.0, 40.0).unwrap(),
-                shapes: vec![
-                    LayerShape::Line {
-                        from: Point::try_pt(0.0, 0.0).unwrap(),
-                        to: Point::try_pt(10.0, 0.0).unwrap(),
-                        pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
-                    },
-                    LayerShape::Text {
-                        text: vec![TextRun::Literal("T".into())],
-                        font: (),
-                        at: Point::try_pt(2.0, 4.0).unwrap(),
-                        style: RunStyle::default(),
-                    },
-                ],
+                child: Mark::Rotated {
+                    degrees: Angle::degrees(30.0).unwrap(),
+                    pivot: Point::try_pt(40.0, 40.0).unwrap(),
+                    shapes: vec![
+                        LayerShape::Line {
+                            from: Point::try_pt(0.0, 0.0).unwrap(),
+                            to: Point::try_pt(10.0, 0.0).unwrap(),
+                            pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
+                        },
+                        LayerShape::Text {
+                            text: vec![PageText::Literal("T".into())],
+                            font: (),
+                            at: Point::try_pt(2.0, 4.0).unwrap(),
+                            style: RunStyle::default(),
+                        },
+                    ],
+                },
             }],
             ..SectionSpec::default()
         },
@@ -3878,11 +4006,13 @@ fn empty_rotated_shapes_emit_nothing() {
         PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()),
         Resources::default(),
         vec![SectionSpec {
-            behind: vec![LayerMark::Rotated {
+            behind: vec![LayerMark {
                 when: PageWhen::All,
-                degrees: 45.0,
-                pivot: Point::ZERO,
-                shapes: vec![],
+                child: Mark::Rotated {
+                    degrees: Angle::degrees(45.0).unwrap(),
+                    pivot: Point::ZERO,
+                    shapes: vec![],
+                },
             }],
             ..SectionSpec::default()
         }],
@@ -3892,32 +4022,83 @@ fn empty_rotated_shapes_emit_nothing() {
 }
 
 #[test]
-fn rotated_nan_degrees_fails() {
-    let error = layout_spec(DocumentSpec {
-        page_size: PageSize::custom(Size::try_pt(80.0, 80.0).unwrap()),
-        resources: Resources::<()>::default(),
-        limits: pdfcraft_pdf::Limits::default(),
-        info: pdfcraft_pdf::spec::DocumentInfo::default(),
-        sections: vec![SectionSpec {
-            behind: vec![LayerMark::Rotated {
-                when: PageWhen::All,
-                degrees: f32::NAN,
-                pivot: Point::ZERO,
-                shapes: vec![LayerShape::Line {
-                    from: Point::try_pt(0.0, 0.0).unwrap(),
-                    to: Point::try_pt(1.0, 0.0).unwrap(),
-                    pen: Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap(),
-                }],
-            }],
+fn last_page_rotated_mark_paints_only_on_the_last_page() {
+    let shape = LayerShape::Rect {
+        rect: Rect::try_pt(10.0, 12.0, 20.0, 8.0).unwrap(),
+        ink: Ink::Fill(Color::rgba(0, 0, 255, 128)),
+    };
+    let rotated = |when: PageWhen| LayerMark {
+        when,
+        child: Mark::Rotated {
+            degrees: Angle::degrees(90.0).unwrap(),
+            pivot: Point::try_pt(10.0, 12.0).unwrap(),
+            shapes: vec![shape.clone()],
+        },
+    };
+    let page = PageSize::custom(Size::try_pt(80.0, 40.0).unwrap());
+    let multi = render(
+        page,
+        Resources::default(),
+        vec![SectionSpec {
+            body: vec![
+                Block::Spacer(nn(10.0)),
+                Block::PageBreak,
+                Block::Spacer(nn(10.0)),
+            ],
+            behind: vec![rotated(PageWhen::Last)],
             ..SectionSpec::default()
         }],
-    })
-    .err()
+    )
     .unwrap();
-    assert!(matches!(
-        error.first().kind,
-        ErrorKind::InvalidGeometry(GeometryKind::NonFiniteRotation { degrees }) if degrees.is_nan()
-    ));
+    let pages = multi.pages();
+    assert_eq!(pages.len(), 2, "page break");
+    assert!(
+        !pages[0]
+            .ops()
+            .iter()
+            .any(|op| matches!(op, CanvasCommand::PushTransform { .. })),
+        "earlier page has no rotation",
+    );
+    let one = render(
+        page,
+        Resources::default(),
+        vec![SectionSpec {
+            body: vec![Block::Spacer(nn(10.0))],
+            behind: vec![rotated(PageWhen::All)],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+    let one_pages = one.pages();
+    assert_eq!(one_pages.len(), 1, "one page");
+    let last = transform_group(pages[1].ops());
+    let all = transform_group(one_pages[0].ops());
+    assert!(
+        matches!(last.first(), Some(CanvasCommand::PushTransform { .. })),
+        "last page rotates",
+    );
+    assert!(
+        last.iter()
+            .any(|op| matches!(op, CanvasCommand::FillPath { .. })),
+        "rotated rect is filled",
+    );
+    assert!(
+        matches!(last.last(), Some(CanvasCommand::PopTransform)),
+        "rotation ends",
+    );
+    assert_eq!(last, all, "last page matches an all-pages rotation");
+}
+
+fn transform_group(ops: &[CanvasCommand]) -> &[CanvasCommand] {
+    let start = ops
+        .iter()
+        .position(|op| matches!(op, CanvasCommand::PushTransform { .. }))
+        .expect("PushTransform");
+    let end = ops[start..]
+        .iter()
+        .position(|op| matches!(op, CanvasCommand::PopTransform))
+        .expect("PopTransform");
+    &ops[start..=start + end]
 }
 
 #[cfg(feature = "backend-krilla")]
@@ -3929,16 +4110,18 @@ fn rotated_text_writes_a_pdf() {
     let rendered = font_pages(
         PageSize::custom(Size::try_pt(120.0, 80.0).unwrap()),
         SectionSpec {
-            behind: vec![LayerMark::Rotated {
+            behind: vec![LayerMark {
                 when: PageWhen::All,
-                degrees: 45.0,
-                pivot: Point::try_pt(60.0, 40.0).unwrap(),
-                shapes: vec![LayerShape::Text {
-                    text: vec![TextRun::Literal("X".into())],
-                    font: (),
-                    at: Point::try_pt(50.0, 35.0).unwrap(),
-                    style: RunStyle::default(),
-                }],
+                child: Mark::Rotated {
+                    degrees: Angle::degrees(45.0).unwrap(),
+                    pivot: Point::try_pt(60.0, 40.0).unwrap(),
+                    shapes: vec![LayerShape::Text {
+                        text: vec![PageText::Literal("X".into())],
+                        font: (),
+                        at: Point::try_pt(50.0, 35.0).unwrap(),
+                        style: RunStyle::default(),
+                    }],
+                },
             }],
             ..SectionSpec::default()
         },
@@ -3948,18 +4131,57 @@ fn rotated_text_writes_a_pdf() {
 }
 
 #[test]
-fn hline_moves_whole_and_pins_stroke() {
+fn unwrapped_rule_with_spacers_stays_on_page() {
     let pages = render(
         PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
         Resources::default(),
         vec![sec(vec![
             Block::Spacer(nn(31.0)),
-            rule(HLineSpec {
+            Block::Spacer(nn(4.0)),
+            rule(HLineStyle {
                 thickness: pos(2.0),
-                space_before: nn(4.0),
-                space_after: nn(4.0),
-                ..HLineSpec::default()
+                ..HLineStyle::default()
             }),
+            Block::Spacer(nn(4.0)),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    let CanvasCommand::StrokePath { path, stroke, .. } = &pages[0].ops()[0] else {
+        panic!("expected the rule to stay on page 1");
+    };
+    assert_eq!(*stroke, Stroke::new(pos(2.0)));
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 36.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 36.0).unwrap()),
+        ]
+    );
+    assert!(pages[1]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+}
+
+#[test]
+fn keep_together_restores_fused_rule() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(31.0)),
+            Block::KeepTogether {
+                children: vec![
+                    Block::Spacer(nn(4.0)),
+                    rule(HLineStyle {
+                        thickness: pos(2.0),
+                        ..HLineStyle::default()
+                    }),
+                    Block::Spacer(nn(4.0)),
+                ],
+            },
         ])],
     )
     .unwrap()
@@ -3989,14 +4211,310 @@ fn hline_moves_whole_and_pins_stroke() {
 }
 
 #[test]
-fn hline_taller_than_body_fails_before_any_page() {
+fn spaced_rule_taller_than_body_now_flows() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(12.0)),
+            rule(HLineStyle::default()),
+            Block::Spacer(nn(12.0)),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    let CanvasCommand::StrokePath { path, .. } = &pages[0].ops()[0] else {
+        panic!("expected the rule on page 1");
+    };
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 12.5).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 12.5).unwrap()),
+        ]
+    );
+    assert!(pages[1]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+}
+
+#[test]
+fn keep_together_spaced_rule_taller_than_body_fails() {
     let error = render(
         PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
         Resources::default(),
-        vec![sec(vec![rule(HLineSpec {
-            space_before: nn(12.0),
-            space_after: nn(12.0),
-            ..HLineSpec::default()
+        vec![sec(vec![Block::KeepTogether {
+            children: vec![
+                Block::Spacer(nn(12.0)),
+                rule(HLineStyle::default()),
+                Block::Spacer(nn(12.0)),
+            ],
+        }])],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error.first().kind.clone(),
+        ErrorKind::UnsplittableTallerThanFrame {
+            height: 25.0,
+            avail: 20.0,
+        }
+    );
+    assert_eq!(
+        location(error.first()),
+        (Some(0), Some(1), Some(Region::Body), None)
+    );
+}
+
+#[test]
+fn style_defaults_match_the_leaf_contract() {
+    assert_eq!(
+        ImageStyle::default(),
+        ImageStyle {
+            width: None,
+            height: None,
+            align: Alignment::Start,
+        }
+    );
+    assert_eq!(
+        CanvasStyle::default(),
+        CanvasStyle {
+            align: Alignment::Start,
+        }
+    );
+    assert_eq!(
+        HLineStyle::default(),
+        HLineStyle {
+            width: None,
+            align: Alignment::Center,
+            thickness: pos(1.0),
+            color: Color::rgb(0, 0, 0),
+        }
+    );
+}
+
+#[test]
+fn hline_height_is_thickness() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            rule(HLineStyle {
+                thickness: pos(2.0),
+                ..HLineStyle::default()
+            }),
+            rule(HLineStyle {
+                thickness: pos(3.0),
+                ..HLineStyle::default()
+            }),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    let strokes: Vec<_> = pages[0]
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, CanvasCommand::StrokePath { .. }))
+        .collect();
+    assert_eq!(strokes.len(), 2);
+    let CanvasCommand::StrokePath {
+        path: first,
+        stroke: first_stroke,
+        ..
+    } = strokes[0]
+    else {
+        panic!("first rule");
+    };
+    assert_eq!(*first_stroke, Stroke::new(pos(2.0)));
+    assert_eq!(
+        first.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 1.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 1.0).unwrap()),
+        ]
+    );
+    let CanvasCommand::StrokePath {
+        path: second,
+        stroke: second_stroke,
+        ..
+    } = strokes[1]
+    else {
+        panic!("second rule");
+    };
+    assert_eq!(*second_stroke, Stroke::new(pos(3.0)));
+    assert_eq!(
+        second.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 3.5).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 3.5).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn spacers_reproduce_old_rule_coordinates_on_one_page() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(4.0)),
+            rule(HLineStyle {
+                thickness: pos(2.0),
+                ..HLineStyle::default()
+            }),
+            Block::Spacer(nn(4.0)),
+            rule(HLineStyle {
+                thickness: pos(1.0),
+                ..HLineStyle::default()
+            }),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 1);
+    let strokes: Vec<_> = pages[0]
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, CanvasCommand::StrokePath { .. }))
+        .collect();
+    assert_eq!(strokes.len(), 2);
+    let CanvasCommand::StrokePath { path: first, .. } = strokes[0] else {
+        panic!("first rule");
+    };
+    assert_eq!(
+        first.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 5.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 5.0).unwrap()),
+        ]
+    );
+    let CanvasCommand::StrokePath { path: second, .. } = strokes[1] else {
+        panic!("second rule");
+    };
+    assert_eq!(
+        second.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 10.5).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 10.5).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn spacer_splits_before_an_atomic_rule() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(37.0)),
+            Block::Spacer(nn(4.0)),
+            rule(HLineStyle {
+                thickness: pos(2.0),
+                ..HLineStyle::default()
+            }),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert!(pages[0]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+    let CanvasCommand::StrokePath { path, stroke, .. } = &pages[1].ops()[0] else {
+        panic!("expected the rule on page 2");
+    };
+    assert_eq!(*stroke, Stroke::new(pos(2.0)));
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 2.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 2.0).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn rule_that_does_not_fit_moves_whole() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 40.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(39.0)),
+            rule(HLineStyle {
+                thickness: pos(2.0),
+                ..HLineStyle::default()
+            }),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 2);
+    assert!(pages[0]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+    let CanvasCommand::StrokePath { path, stroke, .. } = &pages[1].ops()[0] else {
+        panic!("expected the rule on page 2");
+    };
+    assert_eq!(*stroke, Stroke::new(pos(2.0)));
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 1.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 1.0).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn spacer_remainder_pushes_an_atomic_rule_to_the_third_page() {
+    let pages = render(
+        PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![
+            Block::Spacer(nn(30.0)),
+            rule(HLineStyle {
+                thickness: pos(12.0),
+                ..HLineStyle::default()
+            }),
+        ])],
+    )
+    .unwrap()
+    .pages();
+    assert_eq!(pages.len(), 3);
+    assert!(pages[0]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+    assert!(pages[1]
+        .ops()
+        .iter()
+        .all(|op| !matches!(op, CanvasCommand::StrokePath { .. })));
+    let CanvasCommand::StrokePath { path, stroke, .. } = &pages[2].ops()[0] else {
+        panic!("expected the rule on page 3");
+    };
+    assert_eq!(*stroke, Stroke::new(pos(12.0)));
+    assert_eq!(
+        path.verbs(),
+        &[
+            PathVerb::MoveTo(Point::try_pt(0.0, 6.0).unwrap()),
+            PathVerb::LineTo(Point::try_pt(100.0, 6.0).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn rule_thicker_than_body_fails() {
+    let error = render(
+        PageSize::custom(Size::try_pt(100.0, 20.0).unwrap()),
+        Resources::default(),
+        vec![sec(vec![rule(HLineStyle {
+            thickness: pos(25.0),
+            ..HLineStyle::default()
         })])],
     )
     .err()
@@ -4022,17 +4540,17 @@ fn hline_in_list_item_and_cell() {
     let page = &font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         sec(vec![
-            bullet_list(vec![plain_item(vec![rule(HLineSpec {
+            bullet_list(vec![plain_item(vec![rule(HLineStyle {
                 width: Some(pos(40.0)),
                 align: Alignment::Start,
-                ..HLineSpec::default()
+                ..HLineStyle::default()
             })])]),
             grid(
                 vec![],
                 vec![TableRow {
-                    children: vec![cell(vec![Block::HLine(HLineSpec {
+                    children: vec![cell(vec![Block::HLine(HLineStyle {
                         color: Color::rgb(9, 9, 9),
-                        ..HLineSpec::default()
+                        ..HLineStyle::default()
                     })])],
                 }],
             ),
@@ -4064,7 +4582,7 @@ fn hline_writes_a_pdf() {
     let rendered = render(
         PageSize::A4,
         Resources::default(),
-        vec![sec(vec![rule(HLineSpec::default())])],
+        vec![sec(vec![rule(HLineStyle::default())])],
     )
     .unwrap();
     assert!(to_pdf(rendered).unwrap().starts_with(b"%PDF"));
@@ -4740,12 +5258,15 @@ fn link_across_pages_restarts_y_at_the_body_top() {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, top + line()).unwrap()),
         SectionSpec {
-            margins: Margins::new(
-                nn(top),
-                NonNegative::ZERO,
-                NonNegative::ZERO,
-                NonNegative::ZERO,
-            ),
+            style: SectionStyle {
+                margins: Margins::new(
+                    nn(top),
+                    NonNegative::ZERO,
+                    NonNegative::ZERO,
+                    NonNegative::ZERO,
+                ),
+                ..SectionStyle::default()
+            },
             body: vec![runs_para(vec![link_run(
                 "https://example.com/page",
                 vec![text_run("A\nA")],
@@ -4775,21 +5296,24 @@ fn header_and_footer_slots_annotate_at_the_band_origin() {
     let pages = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(margin)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(margin)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_link(
-                    vec![TextRun::Literal("https://example.com/left".into())],
+                    vec![PageText::Literal("https://example.com/left".into())],
                     "Left",
                 )),
                 right: Some(slot_link(
-                    vec![TextRun::Literal("https://example.com/right".into())],
+                    vec![PageText::Literal("https://example.com/right".into())],
                     "Right",
                 )),
                 ..BandSpec::default()
             })),
             footer: Some(BandFn::fixed(BandSpec {
                 left: Some(slot_link(
-                    vec![TextRun::Literal("https://example.com/foot".into())],
+                    vec![PageText::Literal("https://example.com/foot".into())],
                     "Foot",
                 )),
                 ..BandSpec::default()
@@ -4842,16 +5366,19 @@ fn header_uri_can_differ_per_page() {
     let pages = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                left: Some(BandSlot::Link {
+                left: Some(BandSlot {
                     font: (),
-                    uri: vec![
-                        TextRun::Literal("https://example.com/".into()),
-                        TextRun::PageNumber,
-                    ],
-                    text: vec![TextRun::Literal("Home".into())],
                     style: RunStyle::default(),
+                    children: vec![PageText::Literal("Home".into())],
+                    link: Some(vec![
+                        PageText::Literal("https://example.com/".into()),
+                        PageText::PageNumber,
+                    ]),
                 }),
                 ..BandSpec::default()
             })),
@@ -4885,9 +5412,12 @@ fn empty_uri_fails_the_document() {
     let band = font_pages(
         PageSize::A4,
         SectionSpec {
-            margins: Margins::uniform(nn(36.0)),
+            style: SectionStyle {
+                margins: Margins::uniform(nn(36.0)),
+                ..SectionStyle::default()
+            },
             header: Some(BandFn::fixed(BandSpec {
-                right: Some(slot_link(vec![TextRun::Literal(String::new())], "Home")),
+                right: Some(slot_link(vec![PageText::Literal(String::new())], "Home")),
                 ..BandSpec::default()
             })),
             body: vec![para("A")],
@@ -5272,9 +5802,9 @@ fn cell_add_matches_sugar() {
     assert_eq!(drawn.text, "Fee 12");
     assert_eq!(drawn.font_size.as_pt().to_bits(), 9.0f32.to_bits());
 
-    let hline_page = cell_page(vec![Block::HLine(HLineSpec {
+    let hline_page = cell_page(vec![Block::HLine(HLineStyle {
         color: Color::rgb(9, 9, 9),
-        ..HLineSpec::default()
+        ..HLineStyle::default()
     })]);
     assert_eq!(stroke_samples(&hline_page)[0].color, Color::rgb(9, 9, 9));
 
@@ -5314,9 +5844,11 @@ fn cell_add_image_matches_sugar() {
             vec![TableRow {
                 children: vec![cell(vec![Block::Image(ImageSpec {
                     image,
-                    width: Some(pos(10.0)),
-                    height: None,
-                    align: Alignment::Start,
+                    style: ImageStyle {
+                        width: Some(pos(10.0)),
+                        height: None,
+                        align: Alignment::Start,
+                    },
                 })])],
             }],
         )])],
@@ -5345,9 +5877,11 @@ fn table_build_cell_image_paints_when_added() {
             vec![TableRow {
                 children: vec![cell(vec![Block::Image(ImageSpec {
                     image,
-                    width: Some(pos(10.0)),
-                    height: None,
-                    align: Alignment::Start,
+                    style: ImageStyle {
+                        width: Some(pos(10.0)),
+                        height: None,
+                        align: Alignment::Start,
+                    },
                 })])],
             }],
         )])],
@@ -5369,7 +5903,7 @@ fn cell_children_stack_in_add_order() {
     }
     let page = cell_page(vec![
         Block::Paragraph(ParagraphSpec::text((), "A")),
-        Block::HLine(HLineSpec::default()),
+        Block::HLine(HLineStyle::default()),
     ]);
     let strokes = stroke_samples(&page);
     assert_eq!(strokes.len(), 1);
@@ -5660,13 +6194,17 @@ fn cell_allows_image_canvas_and_a_list() {
                 children: vec![cell(vec![
                     Block::Image(ImageSpec {
                         image,
-                        width: Some(pos(10.0)),
-                        height: None,
-                        align: Alignment::Start,
+                        style: ImageStyle {
+                            width: Some(pos(10.0)),
+                            height: None,
+                            align: Alignment::Start,
+                        },
                     }),
                     Block::Canvas(CanvasSpec {
                         size: Size::try_pt(8.0, 8.0).unwrap(),
-                        align: Alignment::Start,
+                        style: CanvasStyle {
+                            align: Alignment::Start,
+                        },
                         marks: vec![CanvasMark::Rect {
                             rect: Rect::try_pt(0.0, 0.0, 8.0, 8.0).unwrap(),
                             ink: Ink::Fill(Color::rgb(0, 0, 0)),
@@ -5757,7 +6295,10 @@ fn margin_presets_match_uniform_insets() {
         let pages = font_pages(
             PageSize::A4,
             SectionSpec {
-                margins,
+                style: SectionStyle {
+                    margins,
+                    ..SectionStyle::default()
+                },
                 body: vec![para("Body")],
                 ..SectionSpec::default()
             },
@@ -6046,7 +6587,9 @@ fn canvas_label() -> Block<()> {
     let label = "送貨";
     Block::Canvas(CanvasSpec {
         size: Size::try_pt(120.0, 80.0).unwrap(),
-        align: Alignment::Start,
+        style: CanvasStyle {
+            align: Alignment::Start,
+        },
         marks: vec![
             CanvasMark::Rect {
                 rect: Rect::try_pt(0.0, 0.0, 120.0, 40.0).unwrap(),
@@ -6123,7 +6666,9 @@ fn canvas_moves_whole_when_remainder_is_short() {
             Block::Spacer(nn(30.0)),
             Block::Canvas(CanvasSpec {
                 size: Size::try_pt(40.0, 20.0).unwrap(),
-                align: Alignment::Start,
+                style: CanvasStyle {
+                    align: Alignment::Start,
+                },
                 marks: vec![CanvasMark::Rect {
                     rect: Rect::try_pt(0.0, 0.0, 40.0, 20.0).unwrap(),
                     ink: Ink::Fill(Color::rgb(1, 2, 3)),
@@ -6151,7 +6696,9 @@ fn canvas_taller_than_the_body_fails() {
         Resources::default(),
         vec![sec(vec![Block::Canvas(CanvasSpec {
             size: Size::try_pt(10.0, 50.0).unwrap(),
-            align: Alignment::Start,
+            style: CanvasStyle {
+                align: Alignment::Start,
+            },
             marks: Vec::new(),
         })])],
     )
@@ -6173,7 +6720,9 @@ fn canvas_wider_than_the_column_fails() {
         Resources::default(),
         vec![sec(vec![Block::Canvas(CanvasSpec {
             size: Size::try_pt(150.0, 10.0).unwrap(),
-            align: Alignment::Start,
+            style: CanvasStyle {
+                align: Alignment::Start,
+            },
             marks: Vec::new(),
         })])],
     )
@@ -6232,7 +6781,9 @@ fn empty_canvas_text_fails_layout() {
         PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
         sec(vec![Block::Canvas(CanvasSpec {
             size: Size::try_pt(40.0, 20.0).unwrap(),
-            align: Alignment::Start,
+            style: CanvasStyle {
+                align: Alignment::Start,
+            },
             marks: vec![CanvasMark::Text {
                 text: String::new(),
                 font: (),
@@ -6254,7 +6805,10 @@ fn inch_preset_on_a_narrow_page_is_invalid_geometry() {
     let error = font_pages(
         PageSize::custom(Size::try_pt(100.0, 200.0).unwrap()),
         SectionSpec {
-            margins: MarginPreset::Inch.into(),
+            style: SectionStyle {
+                margins: MarginPreset::Inch.into(),
+                ..SectionStyle::default()
+            },
             body: vec![para("A")],
             ..SectionSpec::default()
         },
@@ -6419,7 +6973,9 @@ fn inset_reports_unbreakable_content_against_the_narrowed_width() {
             20.0,
             vec![Block::Canvas(CanvasSpec {
                 size: Size::try_pt(80.0, 10.0).unwrap(),
-                align: Alignment::Start,
+                style: CanvasStyle {
+                    align: Alignment::Start,
+                },
                 marks: Vec::new(),
             })],
         )])],
@@ -6658,9 +7214,11 @@ fn inset_unknown_image_is_reported() {
             0.0,
             vec![Block::Image(ImageSpec {
                 image: stolen,
-                width: None,
-                height: None,
-                align: Alignment::Start,
+                style: ImageStyle {
+                    width: None,
+                    height: None,
+                    align: Alignment::Start,
+                },
             })],
         )])],
     )
