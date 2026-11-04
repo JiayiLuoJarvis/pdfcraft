@@ -16,8 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, ColumnSpec,
-    ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, ParagraphSpec,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, ColumnSpec, ColumnsSpec,
+    FontFace, FontFamily, FontRegistry, HLineSpec, ImageRef, ImageSpec, ParagraphSpec,
     ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow, TableSpec,
     TextRun,
 };
@@ -168,9 +168,9 @@ fn ratio_col(weight: f32, blocks: Vec<Block<()>>) -> Result<ColumnSpec<()>> {
     })
 }
 
-fn filled(content: Vec<CellBlock<()>>, fill: Color) -> CellSpec<()> {
+fn filled(content: Vec<Block<()>>, fill: Color) -> CellSpec<()> {
     CellSpec {
-        content,
+        children: content,
         fill: Some(fill),
         ..CellSpec::default()
     }
@@ -178,7 +178,7 @@ fn filled(content: Vec<CellBlock<()>>, fill: Color) -> CellSpec<()> {
 
 fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec<()>> {
     Ok(CellSpec {
-        content: vec![CellBlock::Paragraph(ParagraphSpec {
+        children: vec![Block::Paragraph(ParagraphSpec {
             style: ParagraphStyle {
                 text: RunStyle {
                     color: Some(color),
@@ -272,11 +272,11 @@ fn service_table() -> Result<Vec<Block<()>>> {
         body.push(TableRow {
             cells: vec![
                 CellSpec {
-                    content: vec![CellBlock::Spacer(nn(18.0)?)],
+                    children: vec![Block::Spacer(nn(18.0)?)],
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    content: vec![CellBlock::Spacer(nn(18.0)?)],
+                    children: vec![Block::Spacer(nn(18.0)?)],
                     ..CellSpec::default()
                 },
             ],
@@ -305,10 +305,10 @@ fn service_table() -> Result<Vec<Block<()>>> {
             header: vec![TableRow {
                 cells: vec![
                     filled(
-                        para_cell("Key item (s) / outlay (s) 主要項目/代支", 11.0, WHITE)?.content,
+                        para_cell("Key item (s) / outlay (s) 主要項目/代支", 11.0, WHITE)?.children,
                         NAVY,
                     ),
-                    filled(para_cell("Amt. 金額", 10.5, WHITE)?.content, NAVY),
+                    filled(para_cell("Amt. 金額", 10.5, WHITE)?.children, NAVY),
                 ],
             }],
             body,
@@ -356,7 +356,7 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
         body.push(TableRow {
             cells: vec![
                 CellSpec {
-                    content: vec![CellBlock::Image(ImageSpec {
+                    children: vec![Block::Image(ImageSpec {
                         image: diamond,
                         width: Some(pos(8.0)?),
                         height: None,
@@ -372,13 +372,14 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
     Ok(Block::Table(TableSpec {
         header: vec![TableRow {
             cells: vec![
-                filled(vec![CellBlock::Spacer(nn(1.0)?)], NAVY),
+                filled(vec![Block::Spacer(nn(1.0)?)], NAVY),
                 filled(
-                    para_cell("Payment by bank transfer (T/T) and other info", 8.0, WHITE)?.content,
+                    para_cell("Payment by bank transfer (T/T) and other info", 8.0, WHITE)?
+                        .children,
                     NAVY,
                 ),
                 filled(
-                    para_cell("以電匯付款及其他注意事項", 8.0, WHITE)?.content,
+                    para_cell("以電匯付款及其他注意事項", 8.0, WHITE)?.children,
                     NAVY,
                 ),
             ],

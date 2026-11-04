@@ -40,7 +40,7 @@ use super::token::DocToken;
 use super::types::{self, Rendered, Track};
 use super::{
     Alignment, BandCallback, BandFn, BandFnInner, BandInset, BandMark, BandSlot, BandSpec,
-    BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnsSpec,
+    BlankWidth as SpecBlankWidth, Block, CanvasMark, CanvasSpec, CellSpec, ColumnsSpec,
     DocumentSpec, HLineSpec, ImageRef, ImageSpec, LayerMark, LayerShape, ListKind, ListSpec,
     OutlineEntry, PageBandQuery, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
     SectionSpec, Span, TextRun,
@@ -255,7 +255,7 @@ impl InheritedPaint {
         }
     }
 
-    /// Size and color only, for table cell text and list markers.
+    /// Size and color only, for list markers.
     fn plain(self) -> Self {
         Self {
             color: self.color,
@@ -1052,28 +1052,25 @@ fn lower_table_rows<K: FontKey>(
     ok.then_some(out)
 }
 
-fn lower_cell<K: FontKey>(
-    spec: CellSpec<K>,
+/// Lowers `blocks`, then runs `build` only when this call recorded nothing.
+///
+/// `errors` may already hold earlier slots. Cleanliness is `clean_since`,
+/// so a later cell or list item is still checked after an earlier sibling failed.
+/// A dirty slice is not the spec tree, so `build` does not run on it.
+fn lower_checked<K: FontKey, T>(
+    blocks: Vec<Block<K>>,
     env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
-) -> Option<layout_table::Cell<FlowNode>> {
-    let mut bag = ErrorBag::default();
-    let mut content = Vec::new();
-    for block in spec.content {
-        push_cell_block(block, env, anchors, &mut content, &mut bag);
-    }
-    let failed = !bag.is_empty();
-    errors.absorb(bag);
-    if failed {
+    build: impl FnOnce(Vec<FlowNode>) -> Fallible<T>,
+) -> Option<T> {
+    let mark = errors.mark();
+    let nodes = lower_blocks(blocks, env, anchors, errors);
+    if !errors.clean_since(mark) {
         return None;
     }
-    match layout_table::Cell::new(content) {
-        Ok(built) => Some(
-            built
-                .with_span(spec.col_span, spec.row_span)
-                .with_fill(spec.fill),
-        ),
+    match build(nodes) {
+        Ok(value) => Some(value),
         Err(error) => {
             errors.record(error);
             None
@@ -1081,102 +1078,22 @@ fn lower_cell<K: FontKey>(
     }
 }
 
-fn lower_cell_anchor<K: FontKey>(
-    id: String,
-    outline: Option<OutlineEntry>,
-    child: CellBlock<K>,
+fn lower_cell<K: FontKey>(
+    spec: CellSpec<K>,
     env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
-) -> Option<FlowNode> {
-    let id = anchors.register(id, outline, env.at, errors)?;
-    let mut bag = ErrorBag::default();
-    let mut content = Vec::new();
-    push_cell_block(child, env, anchors, &mut content, &mut bag);
-    let failed = !bag.is_empty();
-    errors.absorb(bag);
-    if failed {
-        return None;
-    }
-    let child_node = sole_or_stack(content);
-    Some(FlowNode::Anchor(AnchorNode {
-        id,
-        child: Box::new(child_node),
-        marked: false,
-    }))
-}
-
-fn push_cell_block<K: FontKey>(
-    block: CellBlock<K>,
-    env: &LowerEnv<'_, K>,
-    anchors: &mut AnchorRegistry,
-    content: &mut Vec<FlowNode>,
-    bag: &mut ErrorBag,
-) {
-    let LowerEnv {
-        paint,
-        fonts,
-        doc,
-        images,
-        ..
-    } = *env;
-    match block {
-        CellBlock::Text { text, font } => {
-            if text.is_empty() {
-                return;
-            }
-            if let Some(family) = family_of(fonts, font, bag) {
-                let glyph = resolve_run(family, paint.plain(), bag);
-                let mut cell_style = paint.frame();
-                cell_style.font = Some(glyph.font);
-                content.push(FlowNode::Text(TextNode::new(text, glyph, cell_style)));
-            }
-        }
-        CellBlock::Paragraph(paragraph) => {
-            if let Some(node) = lower_paragraph(paragraph, paint, fonts, bag) {
-                content.push(node);
-            }
-        }
-        CellBlock::HLine(line) => content.push(lower_hline(line)),
-        CellBlock::Image(image) => {
-            if let Some(node) = lower_image(image, doc, images, bag) {
-                content.push(node);
-            }
-        }
-        CellBlock::Canvas(canvas) => {
-            if let Some(node) = lower_canvas(canvas, fonts, bag) {
-                content.push(node);
-            }
-        }
-        CellBlock::Spacer(height) => {
-            content.push(FlowNode::Spacer(SpacerNode { height }));
-        }
-        CellBlock::List(list) => {
-            if let Some(node) = lower_list(list, env, anchors, bag) {
-                content.push(node);
-            }
-        }
-        CellBlock::Anchor { id, outline, child } => {
-            if let Some(node) = lower_cell_anchor(id, outline, *child, env, anchors, bag) {
-                content.push(node);
-            }
-        }
-        CellBlock::Inset {
-            left,
-            right,
-            children,
-        } => {
-            let mut lowered = Vec::new();
-            for child in children {
-                push_cell_block(child, env, anchors, &mut lowered, bag);
-            }
-            content.push(FlowNode::Inset(InsetNode {
-                left,
-                right,
-                child: Box::new(sole_or_stack(lowered)),
-            }));
-        }
-    }
+) -> Option<layout_table::Cell<FlowNode>> {
+    let CellSpec {
+        children,
+        col_span,
+        row_span,
+        fill,
+    } = spec;
+    lower_checked(children, env, anchors, errors, |nodes| {
+        layout_table::Cell::new(nodes)
+            .map(|cell| cell.with_span(col_span, row_span).with_fill(fill))
+    })
 }
 
 fn lower_list<K: FontKey>(
@@ -1189,18 +1106,13 @@ fn lower_list<K: FontKey>(
     let mut bag = ErrorBag::default();
     let mut items = Vec::new();
     for item in spec.items {
-        let mark = bag.mark();
-        let nodes = lower_blocks(item.blocks, env, anchors, &mut bag);
-        if !bag.clean_since(mark) {
-            continue;
-        }
-        let built = match item.marker {
+        let marker = item.marker;
+        let built = lower_checked(item.blocks, env, anchors, &mut bag, |nodes| match marker {
             Some(marker) => ListItem::custom(marker, nodes),
             None => ListItem::new(nodes),
-        };
-        match built {
-            Ok(built) => items.push(built),
-            Err(error) => bag.record(error),
+        });
+        if let Some(built) = built {
+            items.push(built);
         }
     }
     let kind = match spec.kind {
@@ -2091,7 +2003,7 @@ fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut 
             Block::Table(spec) => {
                 for row in spec.header.iter().chain(spec.body.iter()) {
                     for cell in &row.cells {
-                        validate_cell_blocks(&cell.content, images, errors);
+                        validate_blocks(&cell.children, images, errors);
                     }
                 }
             }
@@ -2106,30 +2018,6 @@ fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut 
             | Block::PageBreak
             | Block::HLine(_)
             | Block::Canvas(_) => {}
-        }
-    }
-}
-
-fn validate_cell_blocks<K>(blocks: &[CellBlock<K>], images: &LoweredImages, errors: &mut ErrorBag) {
-    for block in blocks {
-        match block {
-            CellBlock::Image(spec) => reject_image(spec.image, images, errors),
-            CellBlock::List(spec) => {
-                for item in &spec.items {
-                    validate_blocks(&item.blocks, images, errors);
-                }
-            }
-            CellBlock::Text { .. }
-            | CellBlock::Paragraph(_)
-            | CellBlock::HLine(_)
-            | CellBlock::Spacer(_)
-            | CellBlock::Canvas(_) => {}
-            CellBlock::Anchor { child, .. } => {
-                validate_cell_blocks(std::slice::from_ref(child.as_ref()), images, errors);
-            }
-            CellBlock::Inset { children, .. } => {
-                validate_cell_blocks(children, images, errors);
-            }
         }
     }
 }

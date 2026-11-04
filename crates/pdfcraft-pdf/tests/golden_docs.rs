@@ -43,10 +43,10 @@ mod common;
 use std::num::NonZeroU16;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellBlock,
-    CellSpec, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, LayerMark, LayerShape,
-    PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder,
-    TableRow, TableSpec, TextRun,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, Block, CanvasMark, CanvasSpec, CellSpec,
+    DocumentInfo, FontFace, FontFamily, FontRegistry, HLineSpec, LayerMark, LayerShape, PageWhen,
+    ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow,
+    TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, Color, DocumentSpec, Finite, Ink, Length, Limits, Margins, NonNegative, PageSize,
@@ -215,9 +215,9 @@ fn golden_doc_text_flow() {
     snapshot::assert_golden(&rendered.pages(), Some(&info), &[meta], "text_flow");
 }
 
-fn span_cell(content: Vec<CellBlock<()>>, cols: u16, rows: u16) -> CellSpec<()> {
+fn span_cell(content: Vec<Block<()>>, cols: u16, rows: u16) -> CellSpec<()> {
     CellSpec {
-        content,
+        children: content,
         col_span: NonZeroU16::new(cols).unwrap(),
         row_span: NonZeroU16::new(rows).unwrap(),
         ..CellSpec::default()
@@ -226,7 +226,7 @@ fn span_cell(content: Vec<CellBlock<()>>, cols: u16, rows: u16) -> CellSpec<()> 
 
 fn canvas_cell(w: f32, h: f32, marks: Vec<CanvasMark<()>>) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Canvas(CanvasSpec {
+        children: vec![Block::Canvas(CanvasSpec {
             size: Size::try_pt(w, h).unwrap(),
             align: Alignment::Start,
             marks,
@@ -242,7 +242,7 @@ fn golden_doc_table_spans() {
         header: vec![TableRow {
             cells: vec![
                 span_cell(
-                    vec![CellBlock::HLine(HLineSpec {
+                    vec![Block::HLine(HLineSpec {
                         thickness: pos(1.5),
                         color: Color::rgb(0, 0, 0),
                         ..HLineSpec::default()
@@ -264,7 +264,7 @@ fn golden_doc_table_spans() {
             TableRow {
                 cells: vec![
                     span_cell(
-                        vec![CellBlock::Canvas(CanvasSpec {
+                        vec![Block::Canvas(CanvasSpec {
                             size: Size::try_pt(200.0, 24.0).unwrap(),
                             align: Alignment::Start,
                             marks: vec![CanvasMark::Rect {
@@ -276,7 +276,7 @@ fn golden_doc_table_spans() {
                         1,
                     ),
                     CellSpec {
-                        content: vec![CellBlock::Canvas(CanvasSpec {
+                        children: vec![Block::Canvas(CanvasSpec {
                             size: Size::try_pt(40.0, 48.0).unwrap(),
                             align: Alignment::Start,
                             marks: vec![CanvasMark::Line {
@@ -293,7 +293,7 @@ fn golden_doc_table_spans() {
             },
             TableRow {
                 cells: vec![span_cell(
-                    vec![CellBlock::Canvas(CanvasSpec {
+                    vec![Block::Canvas(CanvasSpec {
                         size: Size::try_pt(200.0, 12.0).unwrap(),
                         align: Alignment::Center,
                         marks: vec![CanvasMark::Fill {

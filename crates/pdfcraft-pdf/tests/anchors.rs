@@ -11,9 +11,9 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry,
-    OutlineEntry, ParagraphSpec, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow,
-    TableSpec, TextRun,
+    BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry, OutlineEntry,
+    ParagraphSpec, Resources, RunStyle, SectionSpec, Span, TableBorder, TableRow, TableSpec,
+    TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
@@ -465,25 +465,19 @@ fn repeating_header_anchor_keeps_first_destination() {
     if skip_without_font() {
         return;
     }
-    let cell = |blocks: Vec<CellBlock<()>>| CellSpec {
-        content: blocks,
+    let cell = |blocks: Vec<Block<()>>| CellSpec {
+        children: blocks,
         col_span: std::num::NonZeroU16::new(1).unwrap(),
         row_span: std::num::NonZeroU16::new(1).unwrap(),
         fill: None,
     };
-    let header_anchor = CellBlock::Anchor {
+    let header_anchor = Block::Anchor {
         id: "hdr".into(),
         outline: None,
-        child: Box::new(CellBlock::Text {
-            text: "H".into(),
-            font: (),
-        }),
+        child: Box::new(Block::paragraph((), "H")),
     };
     let row = |text: &str| TableRow {
-        cells: vec![cell(vec![CellBlock::Text {
-            text: text.into(),
-            font: (),
-        }])],
+        cells: vec![cell(vec![Block::paragraph((), text)])],
     };
     // One A4 body is about 746 pt under 48 pt margins. Line height is at least
     // 12 pt * 1.2, so 40 rows can still fit. 80 rows cannot, on any face.

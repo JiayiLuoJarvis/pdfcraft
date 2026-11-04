@@ -20,9 +20,9 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
 use pdfcraft_pdf::spec::{
-    BandFn, BandInset, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily,
-    FontRegistry, OutlineEntry, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
-    Span, TableBorder, TableRow, TableSpec, TextRun,
+    BandFn, BandInset, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
+    OutlineEntry, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    TableBorder, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
@@ -186,13 +186,10 @@ fn sample_body() -> Result<Vec<Block<()>>> {
 fn sample_table() -> Result<Block<()>> {
     let header = TableRow {
         cells: vec![cell(
-            vec![CellBlock::Anchor {
+            vec![Block::Anchor {
                 id: "table-head".into(),
                 outline: None,
-                child: Box::new(CellBlock::Text {
-                    text: "表頭錨點（只登記第一次）".into(),
-                    font: (),
-                }),
+                child: Box::new(Block::paragraph((), "表頭錨點（只登記第一次）")),
             }],
             Some(HEADER_FILL),
         )],
@@ -201,10 +198,10 @@ fn sample_table() -> Result<Block<()>> {
     for index in 1..=BODY_ROWS {
         rows.push(TableRow {
             cells: vec![cell(
-                vec![CellBlock::Text {
-                    text: format!("第 {index} 行。跨頁後的表頭不是連結目標。"),
-                    font: (),
-                }],
+                vec![Block::paragraph(
+                    (),
+                    format!("第 {index} 行。跨頁後的表頭不是連結目標。"),
+                )],
                 None,
             )],
         });
@@ -293,9 +290,9 @@ fn text_run(text: &str) -> Span<()> {
     }
 }
 
-fn cell(content: Vec<CellBlock<()>>, fill: Option<Color>) -> CellSpec<()> {
+fn cell(content: Vec<Block<()>>, fill: Option<Color>) -> CellSpec<()> {
     CellSpec {
-        content,
+        children: content,
         col_span: NonZeroU16::MIN,
         row_span: NonZeroU16::MIN,
         fill,

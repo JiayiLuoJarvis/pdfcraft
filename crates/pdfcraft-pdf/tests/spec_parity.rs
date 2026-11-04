@@ -7,9 +7,7 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 #[cfg(feature = "backend-krilla")]
-use pdfcraft_pdf::spec::{
-    Alignment, CellBlock, CellSpec, ImageRef, ImageSpec, TableRow, TableSpec,
-};
+use pdfcraft_pdf::spec::{Alignment, CellSpec, ImageRef, ImageSpec, TableRow, TableSpec};
 use pdfcraft_pdf::spec::{
     BandInset, BandSlot, Block, FontFace, FontFamily, FontRegistry, LayerMark, PageWhen, Resources,
     RunStyle, SectionSpec, TextRun,
@@ -258,7 +256,7 @@ fn cell_image_section(image: ImageRef) -> SectionSpec<()> {
     section.body.push(Block::Table(TableSpec {
         body: vec![TableRow {
             cells: vec![CellSpec {
-                content: vec![CellBlock::Image(ImageSpec {
+                children: vec![Block::Image(ImageSpec {
                     image,
                     width: None,
                     height: None,

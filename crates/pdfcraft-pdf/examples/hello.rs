@@ -18,8 +18,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellBlock,
-    CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec,
+    Alignment, BandFn, BandInset, BandSlot, BandSpec, BlankSpec, BlankWidth, Block, CellSpec,
+    ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry, HLineSpec, ImageSpec,
     ListItemSpec, ListKind, ListSpec, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
     SectionSpec, Span, TableBorder, TableRow, TableSpec, TextRun,
 };
@@ -292,7 +292,7 @@ fn marked(marker: &str, block: Block<()>) -> ListItemSpec<()> {
 
 fn head_cell(label: &str) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Paragraph(ParagraphSpec {
+        children: vec![Block::Paragraph(ParagraphSpec {
             style: ParagraphStyle {
                 text: RunStyle {
                     color: Some(Color::rgb(255, 255, 255)),
@@ -309,20 +309,14 @@ fn head_cell(label: &str) -> CellSpec<()> {
 
 fn text_cell(value: impl Into<String>) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text {
-            text: value.into(),
-            font: (),
-        }],
+        children: vec![Block::paragraph((), value)],
         ..CellSpec::default()
     }
 }
 
 fn span_text(value: &str, cols: u16) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text {
-            text: value.into(),
-            font: (),
-        }],
+        children: vec![Block::paragraph((), value)],
         col_span: NonZeroU16::MIN.saturating_add(cols.saturating_sub(1)),
         ..CellSpec::default()
     }
@@ -333,22 +327,19 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
         TableRow {
             cells: vec![
                 CellSpec {
-                    content: vec![CellBlock::Text {
-                        text: "A1".into(),
-                        font: (),
-                    }],
+                    children: vec![Block::paragraph((), "A1")],
                     row_span: NonZeroU16::MIN.saturating_add(1),
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    content: vec![CellBlock::Paragraph(ParagraphSpec {
+                    children: vec![Block::Paragraph(ParagraphSpec {
                         children: vec![text("Pen "), bold("set")],
                         ..ParagraphSpec::default()
                     })],
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    content: vec![CellBlock::List(ListSpec {
+                    children: vec![Block::List(ListSpec {
                         items: vec![
                             item(paragraph(vec![text("black")], Alignment::Start, 0.0)?),
                             item(paragraph(vec![text("blue")], Alignment::Start, 0.0)?),
@@ -363,14 +354,14 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
         TableRow {
             cells: vec![
                 CellSpec {
-                    content: vec![CellBlock::Paragraph(ParagraphSpec {
+                    children: vec![Block::Paragraph(ParagraphSpec {
                         children: vec![link("https://example.test/ink", vec![text("Ink")])?],
                         ..ParagraphSpec::default()
                     })],
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    content: vec![CellBlock::List(ListSpec {
+                    children: vec![Block::List(ListSpec {
                         kind: ListKind::Ordered(Numbering::Decimal),
                         items: vec![
                             item(paragraph(vec![text("bottle")], Alignment::Start, 0.0)?),
@@ -387,7 +378,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
             cells: vec![
                 text_cell("B2"),
                 CellSpec {
-                    content: vec![CellBlock::Image(ImageSpec {
+                    children: vec![Block::Image(ImageSpec {
                         image: logo,
                         width: Some(pos(18.0)?),
                         height: None,
@@ -396,7 +387,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    content: vec![CellBlock::HLine(HLineSpec {
+                    children: vec![Block::HLine(HLineSpec {
                         thickness: pos(0.75)?,
                         color: Color::rgb(120, 0, 0),
                         ..HLineSpec::default()
@@ -404,7 +395,7 @@ fn shipment_rows(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<TableRow<()>>
                     ..CellSpec::default()
                 },
                 CellSpec {
-                    content: vec![CellBlock::Spacer(nn(8.0)?)],
+                    children: vec![Block::Spacer(nn(8.0)?)],
                     ..CellSpec::default()
                 },
             ],

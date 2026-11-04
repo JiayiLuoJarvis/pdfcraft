@@ -89,6 +89,7 @@ pub(crate) struct TextNode {
 }
 
 impl TextNode {
+    #[cfg(test)]
     pub(crate) fn new(text: impl Into<String>, glyph: GlyphStyle, style: Style) -> Self {
         let text = text.into();
         let items = if text.is_empty() {

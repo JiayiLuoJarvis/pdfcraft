@@ -191,7 +191,7 @@ pub struct OutlineEntry {
     pub level: u8,
 }
 
-/// A flow block in a section, column, list item, or keep-together group.
+/// A flow block in a section, column, list item, keep-together group, or table cell.
 #[derive(Debug)]
 #[must_use]
 pub enum Block<K> {
@@ -205,8 +205,9 @@ pub enum Block<K> {
     KeepTogether(Vec<Self>),
     /// Applies a parent run style to its children.
     ///
-    /// Paragraph runs inherit every field. Table cell text and list markers
-    /// inherit only size and color. Bands, layers, and canvas text do not see it.
+    /// Paragraph runs, including paragraphs inside table cells, inherit every
+    /// field. List markers inherit only size and color. Bands, layers, and
+    /// canvas text do not see it.
     Styled {
         /// Style patch inherited by descendants.
         style: RunStyle,
@@ -528,11 +529,17 @@ impl Default for TableBorder {
 }
 
 /// One table cell.
+///
+/// `children` are ordinary [`Block`]s, top to bottom. Columns, nested tables,
+/// keep-together groups, and page breaks fail at lowering with
+/// [`ErrorKind::InvalidCellContent`](crate::ErrorKind::InvalidCellContent) and
+/// container `"table cell"`. [`Block::Styled`] is allowed. It is applied while
+/// lowering and is not a node the cell matrix sees.
 #[derive(Debug)]
 #[must_use]
 pub struct CellSpec<K> {
-    /// Allowed cell children in vertical order.
-    pub content: Vec<CellBlock<K>>,
+    /// Flow blocks in the cell, top to bottom.
+    pub children: Vec<Block<K>>,
     /// Horizontal span.
     pub col_span: NonZeroU16,
     /// Vertical span.
@@ -544,59 +551,12 @@ pub struct CellSpec<K> {
 impl<K> Default for CellSpec<K> {
     fn default() -> Self {
         Self {
-            content: Vec::new(),
+            children: Vec::new(),
             col_span: NonZeroU16::MIN,
             row_span: NonZeroU16::MIN,
             fill: None,
         }
     }
-}
-
-/// A child allowed inside a table cell.
-#[derive(Debug)]
-#[must_use]
-pub enum CellBlock<K> {
-    /// Plain text in `font`.
-    Text {
-        /// Cell text.
-        text: String,
-        /// Key in the document [`FontRegistry`].
-        font: K,
-    },
-    /// A paragraph.
-    Paragraph(ParagraphSpec<K>),
-    /// A horizontal rule.
-    HLine(HLineSpec),
-    /// A flow image.
-    Image(ImageSpec),
-    /// A fixed-size vector block.
-    Canvas(CanvasSpec<K>),
-    /// Vertical blank space.
-    Spacer(Length<NonNegative>),
-    /// A nested list.
-    List(ListSpec<K>),
-    /// Marks a destination inside a table cell.
-    Anchor {
-        /// Document-unique, non-empty id.
-        id: String,
-        /// Optional outline entry.
-        outline: Option<OutlineEntry>,
-        /// Wrapped cell content.
-        child: Box<Self>,
-    },
-    /// Same shift as [`Block::Inset`], inside a cell.
-    ///
-    /// Draws nothing and adds no vertical space. `left` is added after the
-    /// cell's own padding. Children follow the same table cell rules as the
-    /// cell itself.
-    Inset {
-        /// Space added at the left of the cell content box.
-        left: Length<NonNegative>,
-        /// Space removed from the right of the cell content box.
-        right: Length<NonNegative>,
-        /// Cell blocks laid out in the narrowed box.
-        children: Vec<Self>,
-    },
 }
 
 /// Suffix or parentheses on a generated ordered-list number.

@@ -26,10 +26,10 @@ use skrifa::{FontRef, MetadataProvider};
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandMark, BandSlot, BandSpec, BlankSpec, BlankWidth, Block,
-    CanvasMark, CanvasSpec, CellBlock, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily,
-    FontRegistry, HLineSpec, ImageSpec, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec,
-    MarkerFormat, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
-    TableBorder, TableRow, TableSpec, TextRun,
+    CanvasMark, CanvasSpec, CellSpec, ColumnSpec, ColumnsSpec, FontFace, FontFamily, FontRegistry,
+    HLineSpec, ImageSpec, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, MarkerFormat,
+    PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span, TableBorder,
+    TableRow, TableSpec, TextRun,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -375,27 +375,21 @@ fn marked_item(marker: &str, blocks: Vec<Block<()>>) -> ListItemSpec<()> {
 
 fn text_cell(text: impl Into<String>) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text {
-            text: text.into(),
-            font: (),
-        }],
+        children: vec![Block::paragraph((), text)],
         ..CellSpec::default()
     }
 }
 
-fn cell(content: Vec<CellBlock<()>>) -> CellSpec<()> {
+fn cell(content: Vec<Block<()>>) -> CellSpec<()> {
     CellSpec {
-        content,
+        children: content,
         ..CellSpec::default()
     }
 }
 
 fn span_cell(text: &str, cols: u16) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text {
-            text: text.into(),
-            font: (),
-        }],
+        children: vec![Block::paragraph((), text)],
         col_span: NonZeroU16::new(cols).unwrap(),
         ..CellSpec::default()
     }
@@ -403,10 +397,7 @@ fn span_cell(text: &str, cols: u16) -> CellSpec<()> {
 
 fn filled_cell(text: &str, fill: Color) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text {
-            text: text.into(),
-            font: (),
-        }],
+        children: vec![Block::paragraph((), text)],
         fill: Some(fill),
         ..CellSpec::default()
     }
@@ -1957,7 +1948,7 @@ fn cell_list(blocks: Vec<Block<()>>) -> Block<()> {
     grid(
         vec![],
         vec![TableRow {
-            cells: vec![cell(vec![CellBlock::List(ListSpec {
+            cells: vec![cell(vec![Block::List(ListSpec {
                 items: vec![plain_item(blocks)],
                 ..ListSpec::default()
             })])],
@@ -2127,6 +2118,94 @@ fn nested_links_count_toward_nesting_depth() {
 }
 
 #[test]
+fn non_empty_cell_paragraph_counts_two_blocks_with_its_table() {
+    if skip_without_font() {
+        return;
+    }
+    let mut limits = pdfcraft_pdf::Limits::default();
+    limits.set_max_blocks(1).unwrap();
+    let error = lay_limited(
+        font_resources(),
+        limits,
+        vec![sec(vec![grid(vec![], vec![text_row(&["A"])])])],
+    )
+    .unwrap_err();
+    assert_eq!(error.len(), 1);
+    assert_eq!(
+        error.first().kind,
+        ErrorKind::LimitExceeded {
+            kind: LimitKind::Blocks,
+            value: 2,
+            max: 1,
+        }
+    );
+}
+
+#[test]
+fn cell_anchor_link_depth_is_three() {
+    let anchored = grid(
+        vec![],
+        vec![TableRow {
+            cells: vec![cell(vec![Block::Anchor {
+                id: "total".into(),
+                outline: None,
+                child: Box::new(Block::Paragraph(ParagraphSpec {
+                    children: vec![link_run("https://example.com", vec![text_run("x")])],
+                    ..ParagraphSpec::default()
+                })),
+            }])],
+        }],
+    );
+    let error = lay_limited(
+        Resources::default(),
+        depth_limits(2),
+        vec![sec(vec![anchored])],
+    )
+    .unwrap_err();
+    assert_eq!(error.len(), 1);
+    assert_eq!(error.first().kind, depth_error(3, 2));
+    assert_eq!(location(error.first()), (Some(0), None, None, None));
+}
+
+#[test]
+fn cell_styled_counts_one_level() {
+    let styled_cell = grid(
+        vec![],
+        vec![TableRow {
+            cells: vec![cell(vec![Block::Styled {
+                style: RunStyle::default(),
+                children: vec![para("x")],
+            }])],
+        }],
+    );
+    let over = lay_limited(
+        Resources::default(),
+        depth_limits(1),
+        vec![sec(vec![styled_cell])],
+    )
+    .unwrap_err();
+    assert_eq!(over.len(), 1);
+    assert_eq!(over.first().kind, depth_error(2, 1));
+    assert_eq!(location(over.first()), (Some(0), None, None, None));
+    assert!(matches!(
+        first_kind(lay_limited(
+            Resources::default(),
+            depth_limits(2),
+            vec![sec(vec![grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![Block::Styled {
+                        style: RunStyle::default(),
+                        children: vec![para("x")],
+                    }])],
+                }],
+            )])],
+        )),
+        ErrorKind::UnregisteredFont { .. }
+    ));
+}
+
+#[test]
 fn mixed_nesting_counts_one_level_per_container() {
     let styled_list = Block::Styled {
         style: RunStyle::default(),
@@ -2137,10 +2216,10 @@ fn mixed_nesting_counts_one_level_per_container() {
             ),
         ])])])],
     };
-    let anchored_cell = CellBlock::Anchor {
+    let anchored_cell = Block::Anchor {
         id: "deep".into(),
         outline: None,
-        child: Box::new(CellBlock::Paragraph(ParagraphSpec {
+        child: Box::new(Block::Paragraph(ParagraphSpec {
             children: vec![link_run("https://example.com", vec![text_run("x")])],
             ..ParagraphSpec::default()
         })),
@@ -2236,10 +2315,10 @@ fn very_deep_lists_columns_and_cell_anchors_fail_without_overflowing_the_stack()
             _ => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::Anchor {
+                    cells: vec![cell(vec![Block::Anchor {
                         id: String::new(),
                         outline: None,
-                        child: Box::new(CellBlock::List(ListSpec {
+                        child: Box::new(Block::List(ListSpec {
                             items: vec![plain_item(vec![block])],
                             ..ListSpec::default()
                         })),
@@ -2267,7 +2346,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             auto_col(vec![grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    cells: vec![cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![deep_link(TOO_DEEP / 4)],
                         ..ParagraphSpec::default()
                     })])],
@@ -2276,7 +2355,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
         ],
     );
     for level in 0..TOO_DEEP {
-        block = match level % 9 {
+        block = match level % 10 {
             0 => Block::KeepTogether(vec![block]),
             1 => styled(None, None, vec![block]),
             2 => Block::Anchor {
@@ -2292,10 +2371,10 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             4 => gap_columns(0.0, vec![auto_col(vec![block])]),
             5 => grid(
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::Anchor {
+                    cells: vec![cell(vec![Block::Anchor {
                         id: String::new(),
                         outline: None,
-                        child: Box::new(CellBlock::List(ListSpec {
+                        child: Box::new(Block::List(ListSpec {
                             items: vec![plain_item(vec![block])],
                             ..ListSpec::default()
                         })),
@@ -2306,7 +2385,7 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             6 => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::List(ListSpec {
+                    cells: vec![cell(vec![Block::List(ListSpec {
                         items: vec![plain_item(vec![block])],
                         ..ListSpec::default()
                     })])],
@@ -2315,13 +2394,22 @@ fn very_deep_tree_of_every_container_fails_without_overflowing_the_stack() {
             7 => grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::Inset {
+                    cells: vec![cell(vec![Block::Inset {
                         left: NonNegative::ZERO,
                         right: NonNegative::ZERO,
-                        children: vec![CellBlock::List(ListSpec {
+                        children: vec![Block::List(ListSpec {
                             items: vec![plain_item(vec![block])],
                             ..ListSpec::default()
                         })],
+                    }])],
+                }],
+            ),
+            8 => grid(
+                vec![],
+                vec![TableRow {
+                    cells: vec![cell(vec![Block::Styled {
+                        style: RunStyle::default(),
+                        children: vec![block],
                     }])],
                 }],
             ),
@@ -2624,7 +2712,7 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
             tracks: Some(vec![Track::Ratio(Ratio::new(1.0).unwrap())]),
             body: vec![TableRow {
                 cells: vec![
-                    cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![link_run("", vec![text_run("x")])],
                         ..ParagraphSpec::default()
                     })]),
@@ -2987,7 +3075,7 @@ fn cell_image_and_last_page_seal_share_coordinates() {
                     body: vec![TableRow {
                         cells: vec![
                             text_cell("A"),
-                            cell(vec![CellBlock::Image(ImageSpec {
+                            cell(vec![Block::Image(ImageSpec {
                                 image: seal,
                                 width: Some(pos(10.0)),
                                 height: None,
@@ -3862,7 +3950,7 @@ fn hline_in_list_item_and_cell() {
             grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::HLine(HLineSpec {
+                    cells: vec![cell(vec![Block::HLine(HLineSpec {
                         color: Color::rgb(9, 9, 9),
                         ..HLineSpec::default()
                     })])],
@@ -3914,7 +4002,7 @@ fn cell_spacer_shifts_the_following_row() {
                 vec![],
                 vec![
                     TableRow {
-                        cells: vec![cell(vec![CellBlock::Spacer(nn(height))])],
+                        cells: vec![cell(vec![Block::Spacer(nn(height))])],
                     },
                     text_row(&["B"]),
                 ],
@@ -3941,7 +4029,7 @@ fn cell_spacer_alone_records_no_ops() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Spacer(nn(24.0))])],
+                cells: vec![cell(vec![Block::Spacer(nn(24.0))])],
             }],
         )])],
     )
@@ -3959,7 +4047,7 @@ fn cell_spacer_taller_than_body_fails_before_any_page() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Spacer(nn(21.0))])],
+                cells: vec![cell(vec![Block::Spacer(nn(21.0))])],
             }],
         )])],
     )
@@ -3989,7 +4077,7 @@ fn short_cell_spacer_does_not_grow_a_text_row() {
             vec![],
             vec![
                 TableRow {
-                    cells: vec![text_cell("A"), cell(vec![CellBlock::Spacer(nn(8.0))])],
+                    cells: vec![text_cell("A"), cell(vec![Block::Spacer(nn(8.0))])],
                 },
                 text_row(&["B", "C"]),
             ],
@@ -4860,7 +4948,7 @@ fn cell_paragraph_pins_bold_blank_and_link() {
             vec![],
             vec![TableRow {
                 cells: vec![
-                    cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![
                             text_run("A"),
                             bold_run("B"),
@@ -4868,7 +4956,7 @@ fn cell_paragraph_pins_bold_blank_and_link() {
                         ],
                         ..ParagraphSpec::default()
                     })]),
-                    cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    cell(vec![Block::Paragraph(ParagraphSpec {
                         children: vec![link_run("https://example.test/a", vec![text_run("Go")])],
                         ..ParagraphSpec::default()
                     })]),
@@ -4904,7 +4992,7 @@ fn cell_paragraph_errors_record_no_pages() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec {
                     children: vec![link_run("", vec![text_run("x")])],
                     ..ParagraphSpec::default()
                 })])],
@@ -4921,7 +5009,7 @@ fn cell_paragraph_errors_record_no_pages() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec {
                     children: vec![
                         blank_run(BlankWidth::ToEndOfLine, None, None, None),
                         text_run("x"),
@@ -4948,7 +5036,7 @@ fn cell_paragraph_indent_uses_cell_width() {
             vec![],
             vec![TableRow {
                 cells: vec![
-                    cell(vec![CellBlock::Paragraph(ParagraphSpec {
+                    cell(vec![Block::Paragraph(ParagraphSpec {
                         style: ParagraphStyle {
                             first_line_indent: nn(24.0),
                             ..ParagraphStyle::default()
@@ -4986,7 +5074,7 @@ fn cell_rich_taller_than_frame_does_not_continue() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec::text(
+                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec::text(
                     (),
                     "A\nB",
                 ))])],
@@ -5012,7 +5100,7 @@ fn cell_rich_taller_than_frame_does_not_continue() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::List(ListSpec {
+                cells: vec![cell(vec![Block::List(ListSpec {
                     items: vec![plain_item(vec![para("A")]), plain_item(vec![para("B")])],
                     ..ListSpec::default()
                 })])],
@@ -5041,7 +5129,7 @@ fn cell_list_can_borrow_a_table_local() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::List(ListSpec {
+                cells: vec![cell(vec![Block::List(ListSpec {
                     items: vec![plain_item(vec![para(label)])],
                     ..ListSpec::default()
                 })])],
@@ -5053,7 +5141,7 @@ fn cell_list_can_borrow_a_table_local() {
     assert!(texts(&pages[0]).iter().any(|s| s == "borrowed"));
 }
 
-fn cell_page(content: Vec<CellBlock<()>>) -> RecordedPage {
+fn cell_page(content: Vec<Block<()>>) -> RecordedPage {
     let pages = font_pages(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         sec(vec![grid(
@@ -5074,7 +5162,7 @@ fn cell_add_matches_sugar() {
     if skip_without_font() {
         return;
     }
-    let page = cell_page(vec![CellBlock::Paragraph(ParagraphSpec {
+    let page = cell_page(vec![Block::Paragraph(ParagraphSpec {
         style: ParagraphStyle {
             text: RunStyle {
                 font_size: Some(pos(9.0)),
@@ -5104,22 +5192,22 @@ fn cell_add_matches_sugar() {
     assert_eq!(drawn.text, "Fee 12");
     assert_eq!(drawn.font_size.as_pt().to_bits(), 9.0f32.to_bits());
 
-    let hline_page = cell_page(vec![CellBlock::HLine(HLineSpec {
+    let hline_page = cell_page(vec![Block::HLine(HLineSpec {
         color: Color::rgb(9, 9, 9),
         ..HLineSpec::default()
     })]);
     assert_eq!(stroke_samples(&hline_page)[0].color, Color::rgb(9, 9, 9));
 
-    let spacer_page = cell_page(vec![CellBlock::Spacer(nn(12.0))]);
+    let spacer_page = cell_page(vec![Block::Spacer(nn(12.0))]);
     assert!(spacer_page.ops().is_empty());
 
-    let bullet_page = cell_page(vec![CellBlock::List(ListSpec {
+    let bullet_page = cell_page(vec![Block::List(ListSpec {
         items: vec![plain_item(vec![para("a")])],
         ..ListSpec::default()
     })]);
     assert!(texts(&bullet_page).iter().any(|text| text == "a"));
 
-    let roman_page = cell_page(vec![CellBlock::List(ListSpec {
+    let roman_page = cell_page(vec![Block::List(ListSpec {
         kind: ListKind::Ordered(Numbering::UpperRoman),
         start: NonZeroU32::new(4).unwrap(),
         items: vec![plain_item(vec![para("a")])],
@@ -5139,7 +5227,7 @@ fn cell_add_image_matches_sugar() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Image(ImageSpec {
+                cells: vec![cell(vec![Block::Image(ImageSpec {
                     image,
                     width: Some(pos(10.0)),
                     height: None,
@@ -5170,7 +5258,7 @@ fn table_build_cell_image_paints_when_added() {
         vec![sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Image(ImageSpec {
+                cells: vec![cell(vec![Block::Image(ImageSpec {
                     image,
                     width: Some(pos(10.0)),
                     height: None,
@@ -5195,8 +5283,8 @@ fn cell_children_stack_in_add_order() {
         return;
     }
     let page = cell_page(vec![
-        CellBlock::Paragraph(ParagraphSpec::text((), "A")),
-        CellBlock::HLine(HLineSpec::default()),
+        Block::Paragraph(ParagraphSpec::text((), "A")),
+        Block::HLine(HLineSpec::default()),
     ]);
     let strokes = stroke_samples(&page);
     assert_eq!(strokes.len(), 1);
@@ -5239,7 +5327,7 @@ fn cell_list_marker_at_cell_x() {
                 TableRow {
                     cells: vec![
                         text_cell("L"),
-                        cell(vec![CellBlock::List(ListSpec {
+                        cell(vec![Block::List(ListSpec {
                             items: vec![
                                 plain_item(vec![para("dot")]),
                                 plain_item(vec![bullet_list(vec![plain_item(vec![para(
@@ -5253,7 +5341,7 @@ fn cell_list_marker_at_cell_x() {
                 TableRow {
                     cells: vec![
                         text_cell("M"),
-                        cell(vec![CellBlock::List(ListSpec {
+                        cell(vec![Block::List(ListSpec {
                             kind: ListKind::Ordered(Numbering::Decimal),
                             items: vec![
                                 plain_item(vec![para("one")]),
@@ -5324,6 +5412,184 @@ fn cell_list_item_reports_the_innermost_forbidding_container() {
     );
 }
 
+#[test]
+fn cell_rejects_forbidden_blocks_at_runtime() {
+    if skip_without_font() {
+        return;
+    }
+    let reject = |node: &'static str, block: Block<()>| {
+        assert_eq!(
+            first_kind(font_pages(
+                PageSize::A4,
+                sec(vec![grid(
+                    vec![],
+                    vec![TableRow {
+                        cells: vec![cell(vec![block])],
+                    }],
+                )]),
+            )),
+            ErrorKind::InvalidCellContent {
+                container: "table cell",
+                node,
+            }
+        );
+    };
+    reject(
+        "columns",
+        gap_columns(
+            0.0,
+            vec![
+                ratio_col(1.0, vec![para("a")]),
+                ratio_col(1.0, vec![para("b")]),
+            ],
+        ),
+    );
+    reject("table", grid(vec![], vec![text_row(&["a"])]));
+    reject("keep together", Block::KeepTogether(vec![para("a")]));
+    reject("page break", Block::PageBreak);
+}
+
+#[test]
+fn cell_matrix_sees_through_styled_anchor_and_inset() {
+    if skip_without_font() {
+        return;
+    }
+    let reject = |node: &'static str, block: Block<()>| {
+        assert_eq!(
+            first_kind(font_pages(
+                PageSize::A4,
+                sec(vec![grid(
+                    vec![],
+                    vec![TableRow {
+                        cells: vec![cell(vec![block])],
+                    }],
+                )]),
+            )),
+            ErrorKind::InvalidCellContent {
+                container: "table cell",
+                node,
+            }
+        );
+    };
+    reject(
+        "columns",
+        Block::Styled {
+            style: RunStyle::default(),
+            children: vec![gap_columns(
+                0.0,
+                vec![
+                    ratio_col(1.0, vec![para("a")]),
+                    ratio_col(1.0, vec![para("b")]),
+                ],
+            )],
+        },
+    );
+    reject(
+        "table",
+        Block::Anchor {
+            id: "nested".into(),
+            outline: None,
+            child: Box::new(grid(vec![], vec![text_row(&["a"])])),
+        },
+    );
+    reject(
+        "keep together",
+        Block::Inset {
+            left: NonNegative::ZERO,
+            right: NonNegative::ZERO,
+            children: vec![Block::KeepTogether(vec![para("a")])],
+        },
+    );
+}
+
+#[test]
+fn cell_child_error_skips_the_matrix_like_a_list_item() {
+    let columns = || {
+        gap_columns(
+            0.0,
+            vec![
+                auto_col(vec![Block::Spacer(nn(1.0))]),
+                fixed_col(4.0, vec![]),
+            ],
+        )
+    };
+    let err = render(
+        PageSize::A4,
+        Resources::default(),
+        vec![sec(vec![grid(
+            vec![],
+            vec![TableRow {
+                cells: vec![cell(vec![para("A"), columns()]), cell(vec![columns()])],
+            }],
+        )])],
+    )
+    .unwrap_err();
+    assert_eq!(err.len(), 2);
+    assert!(matches!(
+        err.as_slice()[0].kind,
+        ErrorKind::UnregisteredFont { .. }
+    ));
+    assert_eq!(
+        err.as_slice()[1].kind,
+        ErrorKind::InvalidCellContent {
+            container: "table cell",
+            node: "columns",
+        }
+    );
+}
+
+#[cfg(feature = "backend-krilla")]
+#[test]
+fn cell_allows_image_canvas_and_a_list() {
+    if skip_without_font() {
+        return;
+    }
+    let mut resources = font_resources();
+    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let page = render(
+        PageSize::A4,
+        resources,
+        vec![sec(vec![grid(
+            vec![],
+            vec![TableRow {
+                cells: vec![cell(vec![
+                    Block::Image(ImageSpec {
+                        image,
+                        width: Some(pos(10.0)),
+                        height: None,
+                        align: Alignment::Start,
+                    }),
+                    Block::Canvas(CanvasSpec {
+                        size: Size::try_pt(8.0, 8.0).unwrap(),
+                        align: Alignment::Start,
+                        marks: vec![CanvasMark::Rect {
+                            rect: Rect::try_pt(0.0, 0.0, 8.0, 8.0).unwrap(),
+                            ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                        }],
+                    }),
+                    Block::List(ListSpec {
+                        items: vec![plain_item(vec![para("A")])],
+                        ..ListSpec::default()
+                    }),
+                ])],
+            }],
+        )])],
+    )
+    .unwrap()
+    .pages()
+    .into_iter()
+    .next()
+    .unwrap();
+    assert_eq!(image_rects(&page).len(), 1);
+    let fills = page
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, CanvasCommand::FillPath { .. }))
+        .count();
+    assert_eq!(fills, 1);
+    assert!(texts(&page).iter().any(|text| text == "A"));
+}
+
 #[cfg(feature = "backend-krilla")]
 #[test]
 fn cell_list_item_may_hold_an_image() {
@@ -5355,7 +5621,7 @@ fn cell_list_narrower_than_marker_is_invalid_geometry() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::List(ListSpec {
+                cells: vec![cell(vec![Block::List(ListSpec {
                     items: vec![plain_item(vec![para("A")])],
                     ..ListSpec::default()
                 })])],
@@ -5441,10 +5707,7 @@ fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
         sec(vec![grid(
             vec![],
             vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec::text(
-                    (),
-                    "A A",
-                ))])],
+                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec::text((), "A A"))])],
             }],
         )]),
     )
@@ -5455,10 +5718,7 @@ fn table_padding_wraps_cell_text_earlier_than_the_open_grid() {
         sec(vec![Block::Table(TableSpec {
             cell_padding: nn(width),
             body: vec![TableRow {
-                cells: vec![cell(vec![CellBlock::Paragraph(ParagraphSpec::text(
-                    (),
-                    "A A",
-                ))])],
+                cells: vec![cell(vec![Block::Paragraph(ParagraphSpec::text((), "A A"))])],
             }],
             ..TableSpec::default()
         })]),
@@ -6134,10 +6394,10 @@ fn cell_inset_draws_after_the_cell_padding() {
         sec(vec![Block::Table(TableSpec {
             body: vec![TableRow {
                 cells: vec![CellSpec {
-                    content: vec![CellBlock::Inset {
+                    children: vec![Block::Inset {
                         left: nn(8.0),
                         right: NonNegative::ZERO,
-                        children: vec![CellBlock::Paragraph(ParagraphSpec::text((), "Net"))],
+                        children: vec![Block::Paragraph(ParagraphSpec::text((), "Net"))],
                     }],
                     ..CellSpec::default()
                 }],
@@ -6210,7 +6470,7 @@ fn inset_page_break_reports_the_enclosing_container() {
                     vec![grid(
                         vec![],
                         vec![TableRow {
-                            cells: vec![cell(vec![CellBlock::Spacer(nn(4.0))])],
+                            cells: vec![cell(vec![Block::Spacer(nn(4.0))])],
                         }],
                     )],
                 )]),
@@ -6233,10 +6493,10 @@ fn cell_inset_list_item_columns_report_the_table_cell() {
             vec![sec(vec![grid(
                 vec![],
                 vec![TableRow {
-                    cells: vec![cell(vec![CellBlock::Inset {
+                    cells: vec![cell(vec![Block::Inset {
                         left: nn(0.0),
                         right: nn(0.0),
-                        children: vec![CellBlock::List(ListSpec {
+                        children: vec![Block::List(ListSpec {
                             items: vec![plain_item(vec![gap_columns(
                                 0.0,
                                 vec![

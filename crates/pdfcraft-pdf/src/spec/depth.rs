@@ -2,11 +2,10 @@
 
 use crate::error::{Error, ErrorKind, LimitKind};
 
-use super::{Block, CellBlock, ListSpec, SectionSpec, Span};
+use super::{Block, ListSpec, SectionSpec, Span};
 
 enum Node<'a, K> {
     Block(&'a Block<K>),
-    Cell(&'a CellBlock<K>),
     Span(&'a Span<K>),
 }
 
@@ -69,7 +68,11 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
             Block::Table(table) => {
                 for row in table.header.iter().chain(&table.body) {
                     for cell in &row.cells {
-                        stack.extend(cell.content.iter().map(|child| (Node::Cell(child), inner)));
+                        stack.extend(
+                            cell.children
+                                .iter()
+                                .map(|child| (Node::Block(child), inner)),
+                        );
                     }
                 }
             }
@@ -79,26 +82,6 @@ fn push_children<'a, K>(node: &Node<'a, K>, depth: u32, stack: &mut Vec<(Node<'a
             | Block::Image(_)
             | Block::Canvas(_)
             | Block::HLine(_) => {}
-        },
-        Node::Cell(cell) => match cell {
-            CellBlock::Paragraph(paragraph) => {
-                stack.extend(
-                    paragraph
-                        .children
-                        .iter()
-                        .map(|span| (Node::Span(span), depth)),
-                );
-            }
-            CellBlock::List(list) => push_items(list, inner, stack),
-            CellBlock::Anchor { child, .. } => stack.push((Node::Cell(child), inner)),
-            CellBlock::Inset { children, .. } => {
-                stack.extend(children.iter().map(|child| (Node::Cell(child), inner)));
-            }
-            CellBlock::Text { .. }
-            | CellBlock::HLine(_)
-            | CellBlock::Image(_)
-            | CellBlock::Canvas(_)
-            | CellBlock::Spacer(_) => {}
         },
         Node::Span(span) => match span {
             Span::Link { children, .. } => {
@@ -117,7 +100,6 @@ fn push_items<'a, K>(list: &'a ListSpec<K>, depth: u32, stack: &mut Vec<(Node<'a
 
 enum Owned<K> {
     Block(Block<K>),
-    Cell(CellBlock<K>),
     Span(Span<K>),
 }
 
@@ -149,7 +131,7 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                     Block::Table(table) => {
                         for row in table.header.into_iter().chain(table.body) {
                             for cell in row.cells {
-                                stack.extend(cell.content.into_iter().map(Owned::Cell));
+                                stack.extend(cell.children.into_iter().map(Owned::Block));
                             }
                         }
                     }
@@ -163,25 +145,6 @@ pub(super) fn dismantle<K>(sections: Vec<SectionSpec<K>>) {
                     | Block::Image(_)
                     | Block::Canvas(_)
                     | Block::HLine(_) => {}
-                },
-                Owned::Cell(cell) => match cell {
-                    CellBlock::Paragraph(paragraph) => {
-                        stack.extend(paragraph.children.into_iter().map(Owned::Span));
-                    }
-                    CellBlock::List(list) => {
-                        for item in list.items {
-                            stack.extend(item.blocks.into_iter().map(Owned::Block));
-                        }
-                    }
-                    CellBlock::Anchor { child, .. } => stack.push(Owned::Cell(*child)),
-                    CellBlock::Inset { children, .. } => {
-                        stack.extend(children.into_iter().map(Owned::Cell));
-                    }
-                    CellBlock::Text { .. }
-                    | CellBlock::HLine(_)
-                    | CellBlock::Image(_)
-                    | CellBlock::Canvas(_)
-                    | CellBlock::Spacer(_) => {}
                 },
                 Owned::Span(span) => match span {
                     Span::Link { children, .. } => {

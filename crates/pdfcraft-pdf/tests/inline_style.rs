@@ -15,8 +15,9 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, HLineSpec,
-    LineHeight, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    Alignment, BlankSpec, BlankWidth, Block, CellSpec, FontFace, FontFamily, FontRegistry,
+    HLineSpec, LineHeight, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,
+    TableRow, TableSpec,
 };
 use pdfcraft_pdf::{
     layout_spec, CanvasCommand, Color, DocumentSpec, ErrorKind, Finite, GeometryKind, Length,
@@ -1140,4 +1141,105 @@ fn paragraph_style_underline_and_tracking_reach_spans() {
     assert!(pt_near(lines[0].thickness, thickness));
     assert!(pt_near(lines[0].x0, glyphs[0].x));
     assert!(pt_near(lines[0].x1, glyphs[0].x + glyphs[0].width));
+}
+
+fn bold_underline() -> RunStyle {
+    RunStyle {
+        bold: Some(true),
+        underline: Some(true),
+        ..RunStyle::default()
+    }
+}
+
+fn cell_table(children: Vec<Block<()>>) -> Block<()> {
+    Block::Table(TableSpec {
+        body: vec![TableRow {
+            cells: vec![CellSpec {
+                children,
+                ..CellSpec::default()
+            }],
+        }],
+        ..TableSpec::default()
+    })
+}
+
+fn styled_cell_table() -> Vec<Block<()>> {
+    vec![Block::Styled {
+        style: bold_underline(),
+        children: vec![cell_table(vec![Block::paragraph((), "A")])],
+    }]
+}
+
+#[test]
+fn cell_paragraph_inherits_outer_styled_bold_and_underline() {
+    let Some(rendered) = render(&WITH_BOLD, styled_cell_table()) else {
+        return;
+    };
+    let page = &rendered.unwrap().pages()[0];
+    let glyphs = glyph_runs(page);
+    assert_eq!(glyphs.len(), 1);
+    assert_eq!(glyphs[0].text, "A");
+    assert_eq!(glyphs[0].font, 1);
+    let lines = strokes(page);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let (offset, thickness) = underline_at(12.0);
+    assert!(pt_near(lines[0].y, glyphs[0].baseline + offset));
+    assert!(pt_near(lines[0].thickness, thickness));
+    assert!(pt_near(lines[0].x0, glyphs[0].x));
+    assert!(pt_near(lines[0].x1, glyphs[0].x + glyphs[0].width));
+
+    let Some(missing) = render(&REGULAR_ONLY, styled_cell_table()) else {
+        return;
+    };
+    assert_eq!(
+        missing.unwrap_err().first().kind.clone(),
+        ErrorKind::BoldFaceRequired
+    );
+}
+
+#[test]
+fn inner_styled_scopes_only_its_cell_paragraphs() {
+    let Some(rendered) = render(
+        &WITH_BOLD,
+        vec![Block::Styled {
+            style: bold_underline(),
+            children: vec![cell_table(vec![
+                Block::paragraph((), "A"),
+                Block::Styled {
+                    style: RunStyle {
+                        bold: Some(false),
+                        underline: Some(false),
+                        ..RunStyle::default()
+                    },
+                    children: vec![Block::paragraph((), "B")],
+                },
+                Block::paragraph((), "C"),
+            ])],
+        }],
+    ) else {
+        return;
+    };
+    let page = &rendered.unwrap().pages()[0];
+    let glyphs = glyph_runs(page);
+    assert_eq!(glyphs.len(), 3);
+    assert_eq!(
+        glyphs
+            .iter()
+            .map(|glyph| (glyph.text.as_str(), glyph.font))
+            .collect::<Vec<_>>(),
+        [("A", 1), ("B", 0), ("C", 1)]
+    );
+    let lines = strokes(page);
+    let (offset, _) = underline_at(12.0);
+    let covers = |glyph: &Glyphs| {
+        lines.iter().any(|line| {
+            pt_near(line.y, glyph.baseline + offset)
+                && pt_near(line.x0, glyph.x)
+                && pt_near(line.x1, glyph.x + glyph.width)
+        })
+    };
+    assert!(covers(&glyphs[0]), "{lines:?}");
+    assert!(!covers(&glyphs[1]), "{lines:?}");
+    assert!(covers(&glyphs[2]), "{lines:?}");
+    assert_eq!(lines.len(), 2, "{lines:?}");
 }

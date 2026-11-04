@@ -743,10 +743,7 @@ fn one_value_path_paints_a_paragraph_and_a_cell() {
             Block::Table(crate::spec::TableSpec {
                 body: vec![crate::spec::TableRow {
                     cells: vec![crate::spec::CellSpec {
-                        content: vec![crate::spec::CellBlock::Text {
-                            text: "cell".into(),
-                            font: (),
-                        }],
+                        children: vec![Block::paragraph((), "cell")],
                         ..crate::spec::CellSpec::default()
                     }],
                 }],

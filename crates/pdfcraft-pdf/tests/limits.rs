@@ -1,8 +1,8 @@
 //! Public `Limits` caps through `layout_spec`.
 
 use pdfcraft_pdf::spec::{
-    Block, CellBlock, CellSpec, FontFace, FontFamily, FontRegistry, Resources, SectionSpec,
-    TableRow, TableSpec,
+    Block, CellSpec, FontFace, FontFamily, FontRegistry, Resources, SectionSpec, TableRow,
+    TableSpec,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::ImageFormat;
@@ -180,17 +180,11 @@ fn table_cell_limit_counts_cells() {
             body: vec![TableRow {
                 cells: vec![
                     CellSpec {
-                        content: vec![CellBlock::Text {
-                            text: "a".into(),
-                            font: (),
-                        }],
+                        children: vec![Block::paragraph((), "a")],
                         ..CellSpec::default()
                     },
                     CellSpec {
-                        content: vec![CellBlock::Text {
-                            text: "b".into(),
-                            font: (),
-                        }],
+                        children: vec![Block::paragraph((), "b")],
                         ..CellSpec::default()
                     },
                 ],

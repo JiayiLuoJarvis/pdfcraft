@@ -8,8 +8,8 @@
 
 use pdfcraft_pdf::canvas::pt_near;
 use pdfcraft_pdf::spec::{
-    Alignment, BandFn, BandSlot, BandSpec, Block, CellBlock, CellSpec, FontFace, FontFamily,
-    FontRegistry, ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
+    Alignment, BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
+    ImageSpec, Resources, RunStyle, SectionSpec, TableRow, TableSpec, TextRun,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, CanvasCommand, DocumentSpec, ImageFormat, Margins, NonNegative, PageSize,
@@ -121,10 +121,7 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
 
 fn text_cell(text: &str) -> CellSpec<()> {
     CellSpec {
-        content: vec![CellBlock::Text {
-            text: text.into(),
-            font: (),
-        }],
+        children: vec![Block::paragraph((), text)],
         ..CellSpec::default()
     }
 }

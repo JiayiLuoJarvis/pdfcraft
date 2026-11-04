@@ -21,6 +21,10 @@ section collects them.
   `..ParagraphSpec::default()` still works.
 - `InlineRun` is renamed `Span`, and `Link.runs` is `Link.children`.
   `InlineRun::split_latin` is `Span::split_latin`. There is no alias.
+- `CellBlock` is removed. `CellSpec.content` is `children: Vec<Block<K>>`.
+  Cell text is `Block::paragraph`. Columns, nested tables, keep-together
+  groups, and page breaks in a cell fail at `layout_spec` with
+  `InvalidCellContent` and container `"table cell"`.
 
 ### Added
 
@@ -34,6 +38,7 @@ section collects them.
   Bold or italic still needs the face, or fails with `BoldFaceRequired` and the
   related errors.
 - `spec::LineHeight::new(factor)` validates a line-height factor.
+- `Block::Styled` may wrap cell children. Its fields apply to those paragraphs.
 
 ### Changed
 
@@ -41,6 +46,13 @@ section collects them.
   when `LineHeight::new` is called, with the same
   `GeometryKind::LineHeightFactor { factor }`. It used to fail inside
   `layout_spec`. Line heights for valid factors are unchanged.
+- A table inside `Block::Styled { bold: Some(true), .. }` paints cell
+  paragraphs in the bold face. Italic, underline, strikethrough, and tracking
+  follow the same way. `CellBlock::Text` used to keep only size and color. A
+  missing bold face fails with `BoldFaceRequired`. List markers stay on size
+  and color.
+- An empty cell paragraph (`Block::paragraph(font, "")`) counts as one block.
+  Empty `CellBlock::Text` counted as zero.
 
 ## [0.5.0] - 2026-11-03
 

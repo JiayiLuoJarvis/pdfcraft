@@ -20,6 +20,10 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
   (`Link.runs` → `children`); the line-height factor is a validated
   `LineHeight`. No aliases. See
   [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+- **Breaking.** `pdfcraft-pdf` `0.6.0` (in progress). `CellBlock` is removed.
+  A table cell stores `children: Vec<Block<K>>`, and cell text is
+  `Block::paragraph`. See
+  [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 
 ## 2026-11-03
 
