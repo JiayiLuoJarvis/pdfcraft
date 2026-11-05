@@ -1,9 +1,14 @@
 //! Fits text into widget rectangles, shrinking the size as needed.
 
 use crate::error::{self, Error, ErrorKind, FontReason, Result};
-use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP, PAD_X};
 use crate::font::{Face, GlyphFault};
-use crate::inspect::PdfRect;
+use crate::geom::PdfRect;
+use crate::request::VAlign;
+
+pub(crate) const LINE_HEIGHT_FACTOR: f32 = 1.2;
+pub(crate) const PAD_X: f32 = 1.0;
+pub(crate) const PAD_BOTTOM: f32 = 1.0;
+pub(crate) const PAD_TOP: f32 = 0.5;
 
 const MIN_MP: i64 = 7_000;
 const STEP_MP: i64 = 500;
@@ -38,6 +43,11 @@ enum FitError {
     TooBig,
 }
 
+enum Paragraph {
+    Blank,
+    Words(Vec<Token>),
+}
+
 impl LaidText {
     pub(crate) fn fit(
         face: &Face<'_>,
@@ -53,10 +63,17 @@ impl LaidText {
                 lines: Vec::new(),
             });
         }
+        let max_w = rect.width() - (PAD_X * 2.0);
+        let inner_h = rect.height() - PAD_TOP - PAD_BOTTOM;
+        if max_w <= 0.0 || inner_h <= 0.0 || face.upem() <= 0.0 {
+            return Err(fail(field_name, &FitError::TooBig));
+        }
+        let paragraphs = prepare_text(face, text).map_err(|err| fail(field_name, &err))?;
+        let mut space = None;
         let rounded = (f64::from(start_size) * 1000.0).round();
         if rounded < 1.0 {
-            return lay_at(face, text, rect, start_size, v_align)
-                .map(|laid| shrink_orphan(face, text, rect, v_align, 0, laid))
+            return layout_at(face, &paragraphs, rect, start_size, v_align, &mut space)
+                .map(|laid| shrink_orphan(face, &paragraphs, rect, v_align, 0, laid, &mut space))
                 .map_err(|err| fail(field_name, &err));
         }
         #[expect(
@@ -70,8 +87,18 @@ impl LaidText {
                 reason = "上限 256_000，f32 能精确表示；不要改除法来躲 lint"
             )]
             let size = mp as f32 / 1000.0;
-            match lay_at(face, text, rect, size, v_align) {
-                Ok(laid) => return Ok(shrink_orphan(face, text, rect, v_align, mp, laid)),
+            match layout_at(face, &paragraphs, rect, size, v_align, &mut space) {
+                Ok(laid) => {
+                    return Ok(shrink_orphan(
+                        face,
+                        &paragraphs,
+                        rect,
+                        v_align,
+                        mp,
+                        laid,
+                        &mut space,
+                    ))
+                }
                 Err(FitError::TooBig) => {
                     if mp <= MIN_MP {
                         return Err(fail(field_name, &FitError::TooBig));
@@ -105,43 +132,46 @@ impl LaidText {
 
 fn fail(field_name: &str, err: &FitError) -> Error {
     match err {
-        FitError::TooBig => ErrorKind::BoxOverflow {
-            field_name: field_name.to_owned(),
-        }
-        .into(),
-        FitError::Missing(scalar) => ErrorKind::MissingGlyph {
-            field_name: field_name.to_owned(),
-            scalar: *scalar,
-        }
-        .into(),
+        FitError::TooBig => Error::new(ErrorKind::BoxOverflow).with_field(field_name),
+        FitError::Missing(scalar) => Error::new(ErrorKind::MissingGlyph)
+            .with_field(field_name)
+            .with_scalar(*scalar),
         FitError::NoAdvance => error::font_unusable(FontReason::NoAdvance),
     }
 }
 
-fn lay_at(
-    face: &Face<'_>,
-    text: &str,
-    rect: PdfRect,
-    size: f32,
-    v_align: VAlign,
-) -> std::result::Result<LaidText, FitError> {
-    let max_w = rect.width() - (PAD_X * 2.0);
-    let inner_h = rect.height() - PAD_TOP - PAD_BOTTOM;
-    if max_w <= 0.0 || inner_h <= 0.0 || face.upem() <= 0.0 {
-        return Err(FitError::TooBig);
-    }
-    let max_units = max_w * face.upem() / size;
-    let mut built = Vec::new();
+fn prepare_text(face: &Face<'_>, text: &str) -> std::result::Result<Vec<Paragraph>, FitError> {
+    let mut paragraphs = Vec::new();
     for para in text.split('\n') {
         if para.is_empty() {
-            built.push(Vec::new());
+            paragraphs.push(Paragraph::Blank);
             continue;
         }
         let tokens = tokenize(face, para)?;
         if tokens.is_empty() {
             continue;
         }
-        built.extend(wrap(face, &tokens, max_units)?);
+        paragraphs.push(Paragraph::Words(tokens));
+    }
+    Ok(paragraphs)
+}
+
+fn layout_at(
+    face: &Face<'_>,
+    paragraphs: &[Paragraph],
+    rect: PdfRect,
+    size: f32,
+    v_align: VAlign,
+    space: &mut Option<GlyphUse>,
+) -> std::result::Result<LaidText, FitError> {
+    let max_w = rect.width() - (PAD_X * 2.0);
+    let max_units = max_w * face.upem() / size;
+    let mut built = Vec::new();
+    for paragraph in paragraphs {
+        match paragraph {
+            Paragraph::Blank => built.push(Vec::new()),
+            Paragraph::Words(tokens) => built.extend(wrap(face, tokens, max_units, space)?),
+        }
     }
     place(face, rect, size, v_align, built)
 }
@@ -212,11 +242,11 @@ fn wrap(
     face: &Face<'_>,
     tokens: &[Token],
     max_units: f32,
+    space: &mut Option<GlyphUse>,
 ) -> std::result::Result<Vec<Vec<GlyphUse>>, FitError> {
     let mut lines = Vec::new();
     let mut current = Vec::new();
     let mut units = 0.0_f32;
-    let mut space: Option<GlyphUse> = None;
     for token in tokens {
         if token.units > max_units {
             flush(&mut lines, &mut current);
@@ -233,7 +263,7 @@ fn wrap(
             continue;
         }
         let gap = if token.space_before && !current.is_empty() {
-            cached_space(face, &mut space)?.units
+            cached_space(face, space)?.units
         } else {
             0.0
         };
@@ -242,7 +272,7 @@ fn wrap(
             units = 0.0;
         }
         if token.space_before && !current.is_empty() {
-            let glyph = cached_space(face, &mut space)?;
+            let glyph = cached_space(face, space)?;
             current.push(glyph);
             units += glyph.units;
         }
@@ -310,11 +340,12 @@ fn line_ink(glyphs: &[GlyphUse]) -> (f32, f32) {
 /// yields fewer lines. `chosen_mp` is the size that already fit, in millipoints.
 fn shrink_orphan(
     face: &Face<'_>,
-    text: &str,
+    paragraphs: &[Paragraph],
     rect: PdfRect,
     v_align: VAlign,
     chosen_mp: i64,
     laid: LaidText,
+    space: &mut Option<GlyphUse>,
 ) -> LaidText {
     let Some(last) = laid.lines.last() else {
         return laid;
@@ -335,7 +366,7 @@ fn shrink_orphan(
             reason = "试探字号上限 256_000，f32 能精确表示"
         )]
         let size = probe as f32 / 1000.0;
-        if let Ok(candidate) = lay_at(face, text, rect, size, v_align) {
+        if let Ok(candidate) = layout_at(face, paragraphs, rect, size, v_align, space) {
             if candidate.lines.len() < laid.lines.len() {
                 return candidate;
             }
@@ -402,10 +433,11 @@ fn place(
 #[cfg(test)]
 mod tests {
     use super::{GlyphUse, LaidText};
+    use super::{LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP};
     use crate::error::ErrorKind;
-    use crate::fields::{VAlign, LINE_HEIGHT_FACTOR, PAD_BOTTOM, PAD_TOP};
     use crate::font::Face;
-    use crate::inspect::PdfRect;
+    use crate::geom::PdfRect;
+    use crate::request::VAlign;
 
     fn with_face<T>(body: impl FnOnce(&Face<'_>) -> T) -> Option<T> {
         let path = std::env::var_os("PDFCRAFT_FORMS_FONT")?;
@@ -482,13 +514,9 @@ mod tests {
     fn reports_a_missing_glyph() {
         let Some(()) = with_face(|face| {
             let err = fit(face, "王", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap_err();
-            assert_eq!(
-                err.kind,
-                ErrorKind::MissingGlyph {
-                    field_name: "employee_name".to_owned(),
-                    scalar: '王',
-                }
-            );
+            assert_eq!(err.kind(), ErrorKind::MissingGlyph);
+            assert_eq!(err.field(), Some("employee_name"));
+            assert_eq!(err.scalar(), Some('王'));
         }) else {
             return;
         };
@@ -504,12 +532,8 @@ mod tests {
                 12.0,
             )
             .unwrap_err();
-            assert_eq!(
-                err.kind,
-                ErrorKind::BoxOverflow {
-                    field_name: "employee_name".to_owned(),
-                }
-            );
+            assert_eq!(err.kind(), ErrorKind::BoxOverflow);
+            assert_eq!(err.field(), Some("employee_name"));
         }) else {
             return;
         };
@@ -637,12 +661,8 @@ mod tests {
     fn tries_a_sub_millipoint_size_once() {
         let Some(()) = with_face(|face| {
             let err = fit(face, "a", PdfRect::new(0.0, 0.0, 0.0, 40.0), 0.0001).unwrap_err();
-            assert_eq!(
-                err.kind,
-                ErrorKind::BoxOverflow {
-                    field_name: "employee_name".to_owned(),
-                }
-            );
+            assert_eq!(err.kind(), ErrorKind::BoxOverflow);
+            assert_eq!(err.field(), Some("employee_name"));
             let laid = fit(face, "a", PdfRect::new(0.0, 0.0, 200.0, 80.0), 0.0001).unwrap();
             assert_eq!(laid.size().to_bits(), 0.0001_f32.to_bits());
             assert_ne!(laid.size().to_bits(), 0.0_f32.to_bits());
@@ -650,5 +670,29 @@ mod tests {
         }) else {
             return;
         };
+    }
+
+    #[test]
+    fn zero_width_is_overflow_before_a_missing_glyph() {
+        let bytes = crate::subset::abc_test_font();
+        let face = Face::load(&bytes, 0).unwrap();
+        let err = fit(&face, "Z", PdfRect::new(0.0, 0.0, 0.0, 40.0), 12.0).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::BoxOverflow);
+        assert_eq!(err.field(), Some("employee_name"));
+    }
+
+    #[test]
+    fn a_drawn_gap_needs_the_space_glyph() {
+        let bytes = crate::subset::abc_test_font();
+        let face = Face::load(&bytes, 0).unwrap();
+        let laid = fit(&face, "AB", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap();
+        assert_eq!(
+            scalars(laid.lines().next().expect("line").2),
+            vec!['A', 'B']
+        );
+        let err = fit(&face, "A B", PdfRect::new(0.0, 0.0, 200.0, 80.0), 12.0).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MissingGlyph);
+        assert_eq!(err.field(), Some("employee_name"));
+        assert_eq!(err.scalar(), Some(' '));
     }
 }

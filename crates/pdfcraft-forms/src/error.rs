@@ -1,22 +1,8 @@
-//! Failures from opening a PDF, reading `AcroForm` widgets, and drawing values
-//! into them.
+//! Failures from opening a PDF, reading widgets, and drawing values into them.
 //!
-//! # Shape
-//!
-//! - [`Error`] — one failure: [`Error::kind`] plus an optional dependency error
-//!   behind [`std::error::Error::source`]
-//! - [`ErrorKind`] — what went wrong; [`ArgumentReason`], [`FlattenReason`], and
-//!   [`FontReason`] subdivide the three largest families
-//! - [`Result<T>`](crate::Result) — `Result<T, Error>`
-//!
-//! # Reporting model
-//!
-//! Every public forms operation reads caller-supplied PDF or font bytes, so its
-//! failures are recoverable: [`crate::list_fields`] and
-//! [`crate::fill_and_flatten`] return `Result` with a specific [`ErrorKind`].
-//! Parser and writer failures are not flattened into the message; they stay
-//! reachable through [`std::error::Error::source`]. No public forms API returns
-//! `Option` for a failure, and none panics on malformed input.
+//! The kind names the failure. The widget name, page index, and missing
+//! character live on [`Error`] and are read with [`Error::field`],
+//! [`Error::page`], and [`Error::scalar`].
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -24,57 +10,87 @@ use std::sync::Arc;
 
 /// A forms failure.
 ///
-/// Equality compares [`kind`](Self::kind) only. The dependency error behind
-/// [`source`](StdError::source) is not compared.
+/// Compare [`kind`](Self::kind). This type does not implement [`PartialEq`].
+/// A parser or writer error stays on [`source`](StdError::source) and is not
+/// copied into [`Display`](fmt::Display).
 #[derive(Debug, Clone)]
 pub struct Error {
-    /// What went wrong.
-    pub kind: ErrorKind,
-    // `Arc` shares the dependency failure across `Error` clones. `Error` is
-    // `Clone` and `Box<dyn StdError>` is not; a borrow would tie every error
-    // to the dependency's lifetime.
+    kind: ErrorKind,
+    field: Option<String>,
+    page: Option<usize>,
+    scalar: Option<char>,
     source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 impl Error {
-    /// The explicit constructor paired with `impl From<ErrorKind> for Error`.
-    ///
-    /// Prefer this over `.into()` at call sites that name the type.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use pdfcraft_forms::{Error, ErrorKind};
-    ///
-    /// let err = Error::new(ErrorKind::NotAPdf);
-    /// assert_eq!(err.to_string(), "not a PDF");
-    /// ```
-    #[must_use]
-    pub fn new(kind: ErrorKind) -> Self {
-        Self { kind, source: None }
+    pub(crate) fn new(kind: ErrorKind) -> Self {
+        Self {
+            kind,
+            field: None,
+            page: None,
+            scalar: None,
+            source: None,
+        }
+    }
+
+    pub(crate) fn with_field(mut self, field: impl Into<String>) -> Self {
+        self.field = Some(field.into());
+        self
+    }
+
+    pub(crate) fn with_page(mut self, page: usize) -> Self {
+        self.page = Some(page);
+        self
+    }
+
+    pub(crate) fn with_scalar(mut self, scalar: char) -> Self {
+        self.scalar = Some(scalar);
+        self
     }
 
     pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
         self.source = Some(Arc::new(source));
         self
     }
-}
 
-impl From<ErrorKind> for Error {
-    fn from(kind: ErrorKind) -> Self {
-        Self::new(kind)
+    /// What failed, without the widget name, page, or character.
+    #[must_use]
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
     }
-}
 
-impl PartialEq for Error {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind
+    /// Widget name for this failure, when the failure names one.
+    #[must_use]
+    pub fn field(&self) -> Option<&str> {
+        self.field.as_deref()
+    }
+
+    /// Page index when a line names a page this document does not have.
+    #[must_use]
+    pub fn page(&self) -> Option<usize> {
+        self.page
+    }
+
+    /// Character missing from the font. Only [`ErrorKind::MissingGlyph`] sets this.
+    #[must_use]
+    pub fn scalar(&self) -> Option<char> {
+        self.scalar
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)
+        write!(f, "{}", self.kind)?;
+        if let Some(field) = &self.field {
+            write!(f, " ({field})")?;
+        }
+        if let Some(page) = self.page {
+            write!(f, " page {page}")?;
+        }
+        if let Some(scalar) = self.scalar {
+            write!(f, " {scalar:?}")?;
+        }
+        Ok(())
     }
 }
 
@@ -87,36 +103,32 @@ impl StdError for Error {
 }
 
 /// Why [`ErrorKind::InvalidArgument`] rejected the call.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ArgumentReason {
-    /// `font_size` 不是有限正数、毫点不是有限值或放不进 `i64`，或大于 256 pt。
-    ///
-    /// `Display` 不区分这几种。句子故意仍是 `font_size must be finite and greater than 0`。
+    /// `font_size` is not a finite positive number, its millipoint form does not
+    /// fit in `i64`, or it is greater than 256 pt.
     FontSize {
         /// Rejected `font_size`, in points.
         value: f32,
     },
-    /// 文本 widget 收到了 `FieldValue::CheckBox`。
+    /// A text widget was given [`crate::FieldValue::CheckBox`].
     CheckboxOnText,
-    /// 列表或组合框收到了 `FieldValue::CheckBox`。
+    /// A list or combo box was given [`crate::FieldValue::CheckBox`].
     CheckboxOnChoice,
-    /// A coordinate or offset is not finite.
+    /// A coordinate, width, color channel, or offset is not finite.
     NonFinite {
         /// Rejected number.
         value: f32,
     },
+    /// A line's `page_index` is not a page in the document.
+    PageOutOfRange,
 }
 
 /// Why [`ErrorKind::FlattenFailed`] could not finish the PDF.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FlattenReason {
-    /// The stamp names a page index this document does not have.
-    PageOutOfRange {
-        /// Index into the document page list.
-        page_index: usize,
-    },
     /// The page content stream could not be extended.
     AppendContent,
     /// The page `Resources` entry could not be replaced.
@@ -138,14 +150,15 @@ pub enum FlattenReason {
         /// Rejected nesting depth.
         depth: usize,
     },
-    /// 内容流数字不是有限值。建议表里没有这一项；`pdf_num` 不允许再写成 `0`，所以必须有。
+    /// A content-stream number is not finite.
     NonFinite,
 }
 
-/// What went wrong.
+/// What failed.
 ///
-/// Field variants carry the widget name from `/T`.
-#[derive(Debug, Clone, PartialEq)]
+/// The widget name, page index, and missing character are not stored here.
+/// Read them from [`Error`].
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// The bytes are not a PDF this crate can open.
@@ -154,65 +167,26 @@ pub enum ErrorKind {
     Encrypted,
     /// The catalog `AcroForm` dictionary has an `/XFA` key.
     HasXfa,
-    /// `fields` names a widget that is not in the PDF.
-    UnknownField {
-        /// Widget name from the caller.
-        field_name: String,
-    },
+    /// A request names a widget that is not in the PDF.
+    UnknownField,
     /// A choice string is not an export value or a display value in `/Opt`.
-    IllegalChoice {
-        /// Widget name.
-        field_name: String,
-    },
+    IllegalChoice,
     /// A checkbox widget was given a value other than [`crate::FieldValue::CheckBox`].
-    InvalidCheckbox {
-        /// Widget name.
-        field_name: String,
-    },
+    InvalidCheckbox,
     /// A size or a value is not usable.
-    InvalidArgument {
-        /// Widget name when the failure is about one field.
-        ///
-        /// `None` when `reason` is [`ArgumentReason::FontSize`].
-        field_name: Option<String>,
-        /// Why the argument was rejected.
-        reason: ArgumentReason,
-    },
-    /// `scalar` has no glyph in the supplied font.
-    MissingGlyph {
-        /// Widget name.
-        field_name: String,
-        /// The character that is missing.
-        scalar: char,
-    },
+    InvalidArgument(ArgumentReason),
+    /// A character has no glyph in the supplied font.
+    MissingGlyph,
     /// The text still exceeds the widget rectangle at the minimum font size.
-    BoxOverflow {
-        /// Widget name.
-        field_name: String,
-    },
-    /// Text or a choice needs a font, and the font is missing or unusable.
-    ///
-    /// [`FontReason::Unreadable`] keeps the parser error on [`Error::source`].
-    /// The other reasons have no source.
-    FontNotConfigured {
-        /// Why the font cannot be used.
-        reason: FontReason,
-    },
-    /// `fields` names a signature widget.
-    SignatureNotWritable {
-        /// Widget name.
-        field_name: String,
-    },
-    /// `fields` names a radio button or a push button.
-    WidgetUnsupported {
-        /// Widget name.
-        field_name: String,
-    },
+    BoxOverflow,
+    /// Text needs a font, and the font is missing or unusable.
+    FontNotConfigured(FontReason),
+    /// The request names a signature widget.
+    SignatureNotWritable,
+    /// The request names a radio button or a push button.
+    WidgetUnsupported,
     /// Overlay merge or PDF write failed.
-    FlattenFailed {
-        /// Which step failed.
-        reason: FlattenReason,
-    },
+    FlattenFailed(FlattenReason),
 }
 
 impl fmt::Display for ErrorKind {
@@ -221,25 +195,20 @@ impl fmt::Display for ErrorKind {
             Self::NotAPdf => write!(f, "not a PDF"),
             Self::Encrypted => write!(f, "encrypted PDF"),
             Self::HasXfa => write!(f, "AcroForm contains XFA"),
-            Self::UnknownField { field_name } => write!(f, "unknown field {field_name}"),
-            Self::IllegalChoice { field_name } => write!(f, "illegal choice for {field_name}"),
-            Self::InvalidCheckbox { field_name } => {
-                write!(f, "invalid checkbox value for {field_name}")
-            }
-            Self::InvalidArgument { field_name, reason } => match reason {
+            Self::UnknownField => write!(f, "unknown field"),
+            Self::IllegalChoice => write!(f, "illegal choice"),
+            Self::InvalidCheckbox => write!(f, "invalid checkbox value"),
+            Self::InvalidArgument(reason) => match reason {
                 ArgumentReason::FontSize { .. } => {
                     write!(f, "font_size must be finite and greater than 0")
                 }
                 ArgumentReason::CheckboxOnText | ArgumentReason::CheckboxOnChoice => {
-                    let name = field_name.as_deref().unwrap_or("field");
-                    write!(f, "{name} does not take a checkbox value")
+                    write!(f, "widget does not take a checkbox value")
                 }
                 ArgumentReason::NonFinite { .. } => write!(f, "value must be finite"),
+                ArgumentReason::PageOutOfRange => write!(f, "page is outside the document"),
             },
-            Self::FlattenFailed { reason } => match reason {
-                FlattenReason::PageOutOfRange { page_index } => {
-                    write!(f, "page {page_index} is outside the document")
-                }
+            Self::FlattenFailed(reason) => match reason {
                 FlattenReason::AppendContent => write!(f, "could not append page content"),
                 FlattenReason::UpdateResources => write!(f, "could not update page resources"),
                 FlattenReason::ResourcesNotDictionary => {
@@ -256,17 +225,11 @@ impl fmt::Display for ErrorKind {
                 }
                 FlattenReason::NonFinite => write!(f, "non-finite number in page content"),
             },
-            Self::MissingGlyph { field_name, scalar } => {
-                write!(f, "missing glyph {scalar:?} in {field_name}")
-            }
-            Self::BoxOverflow { field_name } => write!(f, "text does not fit in {field_name}"),
-            Self::FontNotConfigured { reason } => write!(f, "{reason}"),
-            Self::SignatureNotWritable { field_name } => {
-                write!(f, "signature field {field_name} cannot be filled")
-            }
-            Self::WidgetUnsupported { field_name } => {
-                write!(f, "field {field_name} cannot be filled")
-            }
+            Self::MissingGlyph => write!(f, "missing glyph"),
+            Self::BoxOverflow => write!(f, "text does not fit"),
+            Self::FontNotConfigured(reason) => write!(f, "{reason}"),
+            Self::SignatureNotWritable => write!(f, "signature field cannot be filled"),
+            Self::WidgetUnsupported => write!(f, "field cannot be filled"),
         }
     }
 }
@@ -280,9 +243,9 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FontReason {
-    /// Text is drawn and [`crate::FillOptions::font`] is missing, or a later check found no face.
+    /// Text is drawn and no font was passed.
     Missing,
-    /// A `ttcf` header or face offset could not be read.
+    /// A single face was given a collection, or a collection was given a single face.
     Collection,
     /// The face has no `glyf` table.
     NoGlyf,
@@ -306,7 +269,7 @@ impl fmt::Display for FontReason {
             Self::NoGlyf => "font has no glyf table",
             Self::UpemZero => "units per em is 0",
             Self::NoAdvance => "glyph has no advance",
-            Self::Head => "font head table could not be patched",
+            Self::Head => "font head table could not be read",
             Self::Width => "font width is not a finite i32",
             Self::Unreadable => "font face could not be parsed",
         })
@@ -314,5 +277,23 @@ impl fmt::Display for FontReason {
 }
 
 pub(crate) fn font_unusable(reason: FontReason) -> Error {
-    ErrorKind::FontNotConfigured { reason }.into()
+    Error::new(ErrorKind::FontNotConfigured(reason))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as StdError;
+    use std::io;
+
+    use super::{Error, ErrorKind};
+
+    #[test]
+    fn display_omits_source_text() {
+        let err =
+            Error::new(ErrorKind::NotAPdf).with_source(io::Error::other("unique-source-token"));
+        let shown = err.to_string();
+        let source = StdError::source(&err).unwrap().to_string();
+        assert!(source.contains("unique-source-token"));
+        assert!(!shown.contains("unique-source-token"));
+    }
 }

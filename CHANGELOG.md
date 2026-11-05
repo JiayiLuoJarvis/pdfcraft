@@ -13,6 +13,12 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+## 2026-11-05
+
+### Breaking
+
+- **Breaking.** `pdfcraft-forms` `0.3.0`. Callers use `Form::open`, `Fill::new`, and `Fill::to_pdf`. `list_fields`, `fill_and_flatten`, `FillOptions`, and `FontBytes` are removed. Migration steps and the rest of the notes are in [`crates/pdfcraft-forms/CHANGELOG.md`](crates/pdfcraft-forms/CHANGELOG.md).
+
 ## 2026-11-04
 
 ### Breaking

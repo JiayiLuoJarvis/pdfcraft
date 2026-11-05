@@ -1,6 +1,6 @@
 //! Bounded deterministic replay fuzz for the forms untrusted-byte parsers.
 //!
-//! Scope: `list_fields` (`NotAPdf` / `XFA` paths) and `fill_and_flatten` with
+//! Scope: `Form::open` (`NotAPdf` / `XFA` paths) and `Font` construction with
 //! caller-supplied font bytes. Layout-math fuzzing is out of scope.
 //!
 //! Determinism: every case derives from the checked-in `tests/seeds` corpus
@@ -22,14 +22,12 @@
     reason = "integration test: a panic is the failure report"
 )]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use pdfcraft_forms::{
-    fill_and_flatten, list_fields, ErrorKind, FieldValue, FillOptions, FontBytes,
-};
+use pdfcraft_forms::{ErrorKind, FieldFill, Fill, FillRequest, Font, Form};
 
 /// Exact corpus. Removing or adding a seed fails the replay test with a
 /// corpus-mismatch message instead of silently shrinking coverage.
@@ -121,11 +119,12 @@ fn read_seed(name: &str) -> Vec<u8> {
         .unwrap_or_else(|error| panic!("read fuzz seed {name}: {error}"))
 }
 
-fn text_field() -> HashMap<String, FieldValue> {
-    HashMap::from([(
-        "employee_name".to_owned(),
-        FieldValue::Text("Ada".to_owned()),
-    )])
+fn open_font(bytes: Vec<u8>) -> pdfcraft_forms::Result<()> {
+    if bytes.starts_with(b"ttcf") {
+        Font::from_collection(bytes, 0).map(|_| ())
+    } else {
+        Font::new(bytes).map(|_| ())
+    }
 }
 
 fn check_budget(started: &Instant, case: &str) {
@@ -155,7 +154,6 @@ fn replay_seed_corpus() {
         "seed corpus mismatch: harness covers exactly EXPECTED_SEEDS"
     );
 
-    let form_pdf = read_seed("f01-basic-form.pdf");
     let mut cases = 0_usize;
     for name in &names {
         let seed = read_seed(name);
@@ -173,29 +171,27 @@ fn replay_seed_corpus() {
             let case = format!("{name}#{mutation}");
             eprintln!("fuzz case {case} ({} bytes)", input.len());
             if is_font_seed {
-                let options = FillOptions {
-                    font: Some(FontBytes {
-                        bytes: &input,
-                        index: 0,
-                    }),
-                    ..FillOptions::default()
-                };
-                let result = fill_and_flatten(&form_pdf, &text_field(), &options);
+                let result = open_font(input);
                 let rejected = result
                     .as_ref()
-                    .is_err_and(|error| matches!(error.kind, ErrorKind::FontNotConfigured { .. }));
+                    .is_err_and(|error| matches!(error.kind(), ErrorKind::FontNotConfigured(_)));
                 assert!(
                     rejected,
                     "fuzz case {case}: garbage font bytes must stay FontNotConfigured, got {result:?}"
                 );
             } else {
-                let listed = list_fields(&input);
-                eprintln!("fuzz case {case}: list_fields -> {}", listed.is_ok());
+                let listed = Form::open(&input);
+                eprintln!("fuzz case {case}: Form::open -> {}", listed.is_ok());
                 if name == "f01-basic-form.pdf" && mutation == 0 {
-                    let mut checkbox = HashMap::new();
-                    checkbox.insert("agree".to_owned(), FieldValue::CheckBox(true));
-                    let filled = fill_and_flatten(&input, &checkbox, &FillOptions::default())
-                        .expect("fill base");
+                    let form = listed.expect("open base");
+                    let request = FillRequest::new(BTreeMap::from([(
+                        "agree".to_owned(),
+                        FieldFill::check(true),
+                    )]));
+                    let filled = Fill::new(&form, request, None)
+                        .expect("fill base")
+                        .to_pdf()
+                        .expect("write base");
                     assert!(filled.starts_with(b"%PDF"), "fuzz case {case}: fill output");
                 }
             }
@@ -214,23 +210,15 @@ fn mutated_seed_is_rejected() {
     for byte in corrupted.iter_mut().take(8) {
         *byte = 0;
     }
-    let err = list_fields(&corrupted).expect_err("f01-basic-form.pdf with zeroed header must fail");
-    assert_eq!(err.kind, ErrorKind::NotAPdf, "zeroed header input");
+    let err = Form::open(&corrupted).expect_err("f01-basic-form.pdf with zeroed header must fail");
+    assert_eq!(err.kind(), ErrorKind::NotAPdf, "zeroed header input");
 
     let mut font = read_seed("n01-not-a-font.bin");
     font.extend_from_slice(b"fuzz");
-    let options = FillOptions {
-        font: Some(FontBytes {
-            bytes: &font,
-            index: 0,
-        }),
-        ..FillOptions::default()
-    };
-    let font_err = fill_and_flatten(&read_seed("f01-basic-form.pdf"), &text_field(), &options)
-        .expect_err("n01-not-a-font.bin mutant must fail");
+    let font_err = open_font(font).expect_err("n01-not-a-font.bin mutant must fail");
     assert!(
-        matches!(font_err.kind, ErrorKind::FontNotConfigured { .. }),
+        matches!(font_err.kind(), ErrorKind::FontNotConfigured(_)),
         "mutated font input, got {:?}",
-        font_err.kind
+        font_err.kind()
     );
 }

@@ -12,9 +12,9 @@
 
 冲突时：提案书 > workspace 规格（包边界）> 工程规范 > 本文件 > 设计稿未确认部分。
 
-提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。`list_fields` 与 `fill_and_flatten` 已在 `crates/pdfcraft-forms`，含对齐、按字段字号、`line_below`、`absolute_lines`、TTC 拆面与 TrueType `glyf` 子集。OTF 仍未做。不要把填表写进 `pdfcraft-pdf`。§11 确认 `pdfcraft-post`：对已有 PDF 字节做 `SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`Pipeline`。Watermark 与输入限额延后。不要把加密、合并、后处理写 Info 写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走）不要提前做进公共 API。页眉页脚可以是 `BandFn`，并可放文字、图片和形状，见提案书 §2.10。§2.12 已确认 `LayerMark { when, child: Mark::Rotated { .. } }` 可包 path / Text / Image（`LayerShape<K>`，斜向水印）。流内 canvas 已保留为 `Block::Canvas`（§2.14、§12.7）。具名 images 字典仍不做。
+提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 与 §14 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。公共面是 `Form::open`、`Fill::new` 与 `Fill::to_pdf`，含对齐、按字段字号、`FieldRule`、`AbsoluteLine`、TTC 拆面与 TrueType `glyf` 子集。OTF 仍未做。不要把填表写进 `pdfcraft-pdf`。§11 确认 `pdfcraft-post`：对已有 PDF 字节做 `SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`Pipeline`。Watermark 与输入限额延后。不要把加密、合并、后处理写 Info 写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走）不要提前做进公共 API。页眉页脚可以是 `BandFn`，并可放文字、图片和形状，见提案书 §2.10。§2.12 已确认 `LayerMark { when, child: Mark::Rotated { .. } }` 可包 path / Text / Image（`LayerShape<K>`，斜向水印）。流内 canvas 已保留为 `Block::Canvas`（§2.14、§12.7）。具名 images 字典仍不做。
 
-仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 是 `0.6.0`，`pdfcraft-forms` 是 `0.2.0`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.0`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
+仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 是 `0.6.0`，`pdfcraft-forms` 是 `0.3.0`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.0`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
 
 ## 现阶段姿态（无生产包袱）
 

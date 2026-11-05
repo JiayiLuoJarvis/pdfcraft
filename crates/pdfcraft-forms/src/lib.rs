@@ -1,17 +1,17 @@
 //! Fill `AcroForm` widgets in an existing PDF and flatten the result.
 //!
-//! [`list_fields`] returns one value per widget annotation. [`fill_and_flatten`]
-//! draws text, checks, and choices, then removes every widget annotation and
-//! the catalog `AcroForm` entry. An empty field map still returns a PDF with
-//! the form removed.
+//! [`Form::open`] reads the PDF and lists one [`FieldInfo`] per widget.
+//! [`Fill::new`] checks a [`FillRequest`] and lays out text. [`Fill::to_pdf`]
+//! draws the values, then removes every widget annotation and the catalog
+//! `AcroForm` entry. An empty request still returns a PDF with the form removed.
 //!
 //! This crate does not depend on `pdfcraft-pdf` and does not use `krilla`.
 //!
 //! # Pipeline
 //!
 //! ```text
-//! PDF bytes → list_fields → FieldInfo…
-//! PDF bytes + HashMap<name, FieldValue> + FillOptions → fill_and_flatten → PDF bytes
+//! PDF bytes → Form::open → FieldInfo…
+//! Form + FillRequest + optional Font → Fill::new → Fill::to_pdf → PDF bytes
 //! ```
 //!
 //! # Coordinates
@@ -23,11 +23,11 @@
 //!
 //! # Fonts
 //!
-//! Pass a TrueType face with a `glyf` table on [`FillOptions::font`] as
-//! [`FontBytes`]. Checkbox marks do not need a font. Empty text strings do not
-//! either. `FontBytes.index` selects one face in a TrueType collection before
-//! embed. Successful text embed uses a `glyf` subset that keeps the original
-//! glyph ids. OTF remains out of scope.
+//! Pass a TrueType face with a `glyf` table as [`Font`]. [`Font::new`] reads one
+//! `sfnt`. [`Font::from_collection`] reads one face from a `ttcf`. Checkbox
+//! marks do not need a font. Empty text strings do not either. Successful text
+//! embed uses a `glyf` subset that keeps the original glyph ids. OTF remains
+//! out of scope.
 //!
 //! # Modules
 //!
@@ -36,70 +36,95 @@
 //!
 //! | Item | Role |
 //! | --- | --- |
-//! | [`list_fields`] | One [`FieldInfo`] per widget |
-//! | [`fill_and_flatten`] | Draw values and strip the form |
-//! | [`FieldValue`] / [`FillOptions`] / [`FontBytes`] | Fill inputs |
-//! | [`HAlign`] / [`VAlign`] / [`MissingName`] / [`AbsoluteLine`] | Placement and strokes |
+//! | [`Form`] | Open a PDF and list widgets |
+//! | [`Fill`] | Check a request and write PDF bytes |
+//! | [`Font`] | One TrueType face |
+//! | [`FillRequest`] / [`FieldFill`] / [`FieldRule`] | Values, rules, and placement |
 //! | [`Error`] / [`ErrorKind`] | Failures |
 //!
 //! # Example
 //!
 //! ```no_run
-//! use std::collections::HashMap;
+//! use std::collections::BTreeMap;
 //!
 //! use pdfcraft_forms::{
-//!     fill_and_flatten, list_fields, FieldValue, FillOptions, FontBytes, Result,
+//!     FieldFill, FieldRule, FieldStyle, Fill, FillRequest, FillStyle, Font, Form, HAlign, Result,
 //! };
 //!
 //! # fn main() -> Result<()> {
 //! let pdf = std::fs::read("form.pdf").expect("pdf");
-//! let _widgets = list_fields(&pdf)?;
+//! let form = Form::open(&pdf)?;
+//! let _widgets = form.fields();
 //!
-//! let font = std::fs::read("face.ttf").expect("font");
-//! let mut fields = HashMap::new();
-//! fields.insert("employee_name".into(), FieldValue::Text("Ada".into()));
-//! fields.insert("agree".into(), FieldValue::CheckBox(true)); // checked
-//!
-//! let filled = fill_and_flatten(
-//!     &pdf,
-//!     &fields,
-//!     &FillOptions {
-//!         font: Some(FontBytes {
-//!             bytes: &font,
-//!             index: 0,
-//!         }),
-//!         ..FillOptions::default()
+//! let font_bytes = std::fs::read("face.ttf").expect("font");
+//! let font = Font::new(font_bytes)?;
+//! let name = FieldFill {
+//!     style: FieldStyle {
+//!         h_align: Some(HAlign::Center),
+//!         ..FieldStyle::default()
 //!     },
-//! )?;
+//!     ..FieldFill::text("Ada")
+//! };
+//! let request = FillRequest {
+//!     style: FillStyle {
+//!         font_size: 14.0,
+//!         ..FillStyle::default()
+//!     },
+//!     rules: BTreeMap::from([("employee_name".to_owned(), FieldRule::new(2.0))]),
+//!     ..FillRequest::new(BTreeMap::from([
+//!         ("employee_name".to_owned(), name),
+//!         ("agree".to_owned(), FieldFill::check(true)),
+//!     ]))
+//! };
+//! let filled = Fill::new(&form, request, Some(&font))?.to_pdf()?;
+//! assert!(filled.starts_with(b"%PDF"));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Stripping the form without drawing a value:
+//!
+//! ```no_run
+//! use pdfcraft_forms::{Fill, FillRequest, Form, Result};
+//!
+//! # fn main() -> Result<()> {
+//! let pdf = std::fs::read("form.pdf").expect("pdf");
+//! let form = Form::open(&pdf)?;
+//! let filled = Fill::new(&form, FillRequest::default(), None)?.to_pdf()?;
 //! assert!(filled.starts_with(b"%PDF"));
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! A longer walkthrough ships in `docs/guide.md` next to this crate’s README.
+//!
+//! [`FieldValue::CheckBox`]`(true)` draws the check. `false` draws nothing.
+//! A [`FieldStyle`] on a checkbox is checked and does not change the check mark.
 
 #![forbid(unsafe_code)]
 
-mod content;
 mod error;
-mod fields;
 mod fill;
 mod font;
-mod inspect;
+mod geom;
 mod layout;
+mod paint;
+mod pdf;
+mod request;
+mod sfnt;
 mod subset;
 
 #[doc(inline)]
 pub use error::{ArgumentReason, Error, ErrorKind, FlattenReason, FontReason};
 #[doc(inline)]
-pub use fields::{
-    AbsoluteLine, FieldInfo, FieldType, FieldValue, FillOptions, FontBytes, HAlign, MissingName,
-    VAlign,
+pub use fill::{Fill, Form};
+#[doc(inline)]
+pub use font::Font;
+#[doc(inline)]
+pub use request::{
+    AbsoluteLine, FieldFill, FieldInfo, FieldRule, FieldStyle, FieldType, FieldValue, FillRequest,
+    FillStyle, HAlign, MissingName, StrokeStyle, VAlign,
 };
-#[doc(inline)]
-pub use fill::fill_and_flatten;
-#[doc(inline)]
-pub use inspect::list_fields;
 
 /// A forms result.
 pub type Result<T> = std::result::Result<T, Error>;

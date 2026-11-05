@@ -7,13 +7,14 @@
 //! Production fill in hcsw-pdfcraft also uses:
 //! - Source Han Serif HK for Chinese field values
 //! - center horizontal align, with `fileNumber2` left-aligned
-//! - `line_below` on `idTypeName` only for a China ID card
+//! - a `FieldRule` under `idTypeName` only for a China ID card
 //!
 //! This example fills ASCII fields. Set `PDFCRAFT_FORMS_FONT` to a CJK `glyf`
-//! font to also fill `companyName`, `recipientName`, and `address`.
+//! font to also fill `companyName`, `recipientName`, and `address`. A `ttcf`
+//! collection uses face 0.
 //!
 //! Font resolution order:
-//! 1. `PDFCRAFT_FORMS_FONT` — path to a TrueType (`glyf`) `.ttf` (required)
+//! 1. `PDFCRAFT_FORMS_FONT`, a path to a TrueType (`glyf`) face. Required.
 //!
 //! ```text
 //! cargo run -p pdfcraft-forms --example fill_tax_refund_guarantee
@@ -23,12 +24,12 @@
 
 #![expect(clippy::print_stdout, reason = "example reports the written PDF path")]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use pdfcraft_forms::{fill_and_flatten, FieldValue, FillOptions, FontBytes, HAlign, VAlign};
+use pdfcraft_forms::{FieldFill, FieldStyle, Fill, FillRequest, FillStyle, Font, Form, HAlign};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -37,14 +38,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let font_path =
         env::var_os("PDFCRAFT_FORMS_FONT").ok_or("set PDFCRAFT_FORMS_FONT to a .ttf path")?;
-    let font = fs::read(&font_path)
+    let font_bytes = fs::read(&font_path)
         .map_err(|err| format!("read font {}: {err}", PathBuf::from(&font_path).display()))?;
 
     // ASCII-only sample map. Production also sets companyName / recipientName /
     // address (CJK) and, for China ID, idTypeName = 「中國」.
     // Same-name widgets (money ×3, recipientName ×2, and page-1 repeats of
-    // fileNumber* / year) all receive the same FieldValue.
-    let mut fields = HashMap::new();
+    // fileNumber* / year) all receive the same FieldFill.
+    let mut fields = BTreeMap::new();
     for (name, value) in [
         ("idNumber", "A123456(7)"),
         ("date", "13/10/2026"),
@@ -56,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("fileNumber1", "12"),
         ("fileNumber2", "34567890"),
     ] {
-        fields.insert(name.to_owned(), FieldValue::Text(value.to_owned()));
+        fields.insert(name.to_owned(), FieldFill::text(value));
     }
     if env::var_os("PDFCRAFT_FORMS_FONT").is_some() {
         for (name, value) in [
@@ -65,25 +66,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ("address", "香港中環"),
             ("idTypeName", "中國"),
         ] {
-            fields.insert(name.to_owned(), FieldValue::Text(value.to_owned()));
+            fields.insert(name.to_owned(), FieldFill::text(value));
         }
     }
+    fields.insert(
+        "fileNumber2".to_owned(),
+        FieldFill {
+            style: FieldStyle {
+                h_align: Some(HAlign::Left),
+                ..FieldStyle::default()
+            },
+            ..FieldFill::text("34567890")
+        },
+    );
 
-    let mut h_overrides = HashMap::new();
-    h_overrides.insert("fileNumber2".to_owned(), HAlign::Left);
-    let options = FillOptions {
-        font: Some(FontBytes {
-            bytes: &font,
-            index: 0,
-        }),
-        h_align: HAlign::Center,
-        v_align: VAlign::Bottom,
-        h_align_overrides: Some(&h_overrides),
-        ..FillOptions::default()
+    let request = FillRequest {
+        style: FillStyle {
+            h_align: HAlign::Center,
+            ..FillStyle::default()
+        },
+        ..FillRequest::new(fields)
     };
-
-    let filled = fill_and_flatten(&pdf, &fields, &options)
-        .map_err(|err| format!("fill_and_flatten: {err}"))?;
+    let font = open_font(font_bytes)?;
+    let form = Form::open(&pdf)?;
+    let filled = Fill::new(&form, request, Some(&font))
+        .and_then(|fill| fill.to_pdf())
+        .map_err(|err| format!("fill: {err}"))?;
 
     let out_dir = PathBuf::from("out");
     fs::create_dir_all(&out_dir).map_err(|err| format!("create out/: {err}"))?;
@@ -91,4 +99,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&out_path, &filled).map_err(|err| format!("write {}: {err}", out_path.display()))?;
     println!("wrote {}", out_path.display());
     Ok(())
+}
+
+fn open_font(bytes: Vec<u8>) -> pdfcraft_forms::Result<Font> {
+    if bytes.starts_with(b"ttcf") {
+        Font::from_collection(bytes, 0)
+    } else {
+        Font::new(bytes)
+    }
 }

@@ -1,4 +1,4 @@
-//! `list_fields` against the copied `AcroForm` fixtures.
+//! `Form::open` against the copied `AcroForm` fixtures.
 
 #![expect(
     clippy::unwrap_used,
@@ -9,7 +9,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use pdfcraft_forms::{list_fields, ErrorKind, FieldType};
+use pdfcraft_forms::{ErrorKind, FieldInfo, FieldType, Form};
+
+fn open_fields(pdf: &[u8]) -> Vec<FieldInfo> {
+    Form::open(pdf).unwrap().fields().to_vec()
+}
 
 fn fixture(name: &str) -> Vec<u8> {
     fs::read(
@@ -22,91 +26,84 @@ fn fixture(name: &str) -> Vec<u8> {
 
 #[test]
 fn lists_basic_names_and_types() {
-    let fields = list_fields(&fixture("basic_form.pdf")).unwrap();
+    let fields = open_fields(&fixture("basic_form.pdf"));
     let by_name: BTreeMap<_, _> = fields
         .into_iter()
-        .map(|field| (field.name.clone(), field))
+        .map(|field| (field.name().to_owned(), field))
         .collect();
     assert_eq!(by_name.len(), 3);
-    assert_eq!(by_name["employee_name"].field_type, FieldType::Text);
-    assert_eq!(by_name["employee_name"].page_index, 0);
-    assert_eq!(by_name["employee_name"].options, None);
-    assert_eq!(by_name["agree"].field_type, FieldType::CheckBox);
-    assert_eq!(by_name["agree"].options, None);
-    assert_eq!(by_name["level"].field_type, FieldType::ListBox);
+    assert_eq!(by_name["employee_name"].field_type(), FieldType::Text);
+    assert_eq!(by_name["employee_name"].page_index(), 0);
+    assert_eq!(by_name["employee_name"].options(), None);
+    assert_eq!(by_name["agree"].field_type(), FieldType::CheckBox);
+    assert_eq!(by_name["agree"].options(), None);
+    assert_eq!(by_name["level"].field_type(), FieldType::ListBox);
     assert_eq!(
-        by_name["level"].options,
-        Some(vec![
-            "Junior".to_owned(),
-            "Senior".to_owned(),
-            "Lead".to_owned()
-        ])
+        by_name["level"].options(),
+        Some(&["Junior".to_owned(), "Senior".to_owned(), "Lead".to_owned(),][..])
     );
 }
 
 #[test]
 fn lists_signature_field() {
-    let fields = list_fields(&fixture("signature_form.pdf")).unwrap();
+    let fields = open_fields(&fixture("signature_form.pdf"));
     let signature = fields
         .iter()
-        .find(|field| field.name == "signature")
+        .find(|field| field.name() == "signature")
         .unwrap();
-    assert_eq!(signature.field_type, FieldType::Signature);
+    assert_eq!(signature.field_type(), FieldType::Signature);
 }
 
 #[test]
 fn rejects_xfa() {
-    let err = list_fields(&fixture("xfa_form.pdf")).unwrap_err();
-    assert_eq!(err.kind, ErrorKind::HasXfa);
+    let err = Form::open(&fixture("xfa_form.pdf")).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::HasXfa);
 }
 
 #[test]
 fn lists_chinese_field_name() {
-    let fields = list_fields(&fixture("chinese_form.pdf")).unwrap();
+    let fields = open_fields(&fixture("chinese_form.pdf"));
     assert_eq!(
-        fields
-            .iter()
-            .map(|field| field.name.as_str())
-            .collect::<Vec<_>>(),
+        fields.iter().map(FieldInfo::name).collect::<Vec<_>>(),
         vec!["employee_name_zh"]
     );
-    assert_eq!(fields[0].field_type, FieldType::Text);
+    assert_eq!(fields[0].field_type(), FieldType::Text);
 }
 
 #[test]
 fn rejects_bytes_that_are_not_a_pdf() {
-    let err = list_fields(b"not a pdf").unwrap_err();
-    assert_eq!(err.kind, ErrorKind::NotAPdf);
+    let err = Form::open(b"not a pdf").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::NotAPdf);
 }
 
 #[test]
 fn rejects_an_encrypted_pdf() {
-    let err = list_fields(&encrypted_pdf()).unwrap_err();
-    assert_eq!(err.kind, ErrorKind::Encrypted);
+    let err = Form::open(&encrypted_pdf()).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Encrypted);
 }
 
 #[test]
 fn inherits_name_and_type_from_parent() {
-    let fields = list_fields(&parent_field_pdf()).unwrap();
+    let fields = open_fields(&parent_field_pdf());
     assert_eq!(fields.len(), 1);
-    assert_eq!(fields[0].name, "employee_name");
-    assert_eq!(fields[0].field_type, FieldType::Text);
-    assert_eq!(fields[0].page_index, 0);
+    assert_eq!(fields[0].name(), "employee_name");
+    assert_eq!(fields[0].field_type(), FieldType::Text);
+    assert_eq!(fields[0].page_index(), 0);
 }
 
 #[test]
 fn keeps_a_real_widget_when_an_annotation_reference_is_dangling() {
-    let fields = list_fields(&dangling_annot_pdf()).unwrap();
+    let fields = open_fields(&dangling_annot_pdf());
     assert_eq!(fields.len(), 1);
-    assert_eq!(fields[0].name, "employee_name");
-    assert_eq!(fields[0].field_type, FieldType::Text);
+    assert_eq!(fields[0].name(), "employee_name");
+    assert_eq!(fields[0].field_type(), FieldType::Text);
 }
 
 #[test]
 fn a_dangling_widget_name_does_not_inherit_the_parent_name() {
-    let fields = list_fields(&dangling_name_pdf()).unwrap();
+    let fields = open_fields(&dangling_name_pdf());
     assert!(
-        fields.iter().all(|field| field.name != "parent_name"),
+        fields.iter().all(|field| field.name() != "parent_name"),
         "{fields:?}"
     );
     assert!(fields.is_empty());

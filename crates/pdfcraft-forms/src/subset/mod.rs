@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{self, FontReason, Result};
-use crate::font::checksum;
+use crate::sfnt::checksum;
 
 /// A four-byte SFNT table tag, such as `head` or `glyf`.
 ///
@@ -535,13 +535,18 @@ fn head_error() -> error::Error {
 }
 
 #[cfg(test)]
+pub(crate) fn abc_test_font() -> Vec<u8> {
+    tests::test_font()
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use super::{build_cmap, parse_sfnt, subset_sfnt, write_sfnt};
     use super::{CMAP, GLYF, HEAD, HHEA, HMTX, LOCA, MAXP};
     use crate::error::{ErrorKind, FontReason};
-    use crate::font::{Face, FontFile, GlyphFault};
+    use crate::font::{Face, GlyphFault};
 
     #[test]
     fn keeps_only_used_simple_glyphs_and_notdef() {
@@ -590,8 +595,9 @@ mod tests {
         let second = subset_sfnt(&source, &used([(1, 'A')])).unwrap();
         assert_eq!(first, second);
 
-        let stamped = FontFile::from_source(&first, 0).unwrap();
-        let (_, tables) = parse_sfnt(stamped.bytes()).unwrap();
+        let mut stamped = first;
+        crate::font::zero_head_times(&mut stamped).unwrap();
+        let (_, tables) = parse_sfnt(&stamped).unwrap();
         assert_eq!(&tables[&HEAD][20..36], &[0; 16]);
     }
 
@@ -625,16 +631,11 @@ mod tests {
     }
 
     fn assert_head_error(error: &crate::error::Error) {
-        assert_eq!(
-            error.kind,
-            ErrorKind::FontNotConfigured {
-                reason: FontReason::Head,
-            }
-        );
+        assert_eq!(error.kind(), ErrorKind::FontNotConfigured(FontReason::Head));
         assert!(std::error::Error::source(&error).is_none());
     }
 
-    fn test_font() -> Vec<u8> {
+    pub(crate) fn test_font() -> Vec<u8> {
         let glyph0 = simple_glyph();
         let glyph1 = simple_glyph();
         let glyph2 = simple_glyph();

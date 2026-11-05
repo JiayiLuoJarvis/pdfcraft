@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-forms"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "lopdf",
  "skrifa 0.48.0",

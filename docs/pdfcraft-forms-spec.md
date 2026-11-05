@@ -49,33 +49,36 @@
 
 ## 3. 公共 API
 
-命名以 Rust 习惯为准。下列签名是提案书 §10 确认过的形状。不改变语义时，实现可以调整可见性与模块路径。
+命名以 Rust 习惯为准。下列签名是提案书 §14 确认过的形状。不改变语义时，实现可以调整可见性与模块路径。
 
 ### 3.1 入口
 
 ```rust
-pub fn list_fields(pdf: &[u8]) -> Result<Vec<FieldInfo>, Error>;
+impl Form {
+    pub fn open(pdf: &[u8]) -> Result<Self, Error>;
+    pub fn fields(&self) -> &[FieldInfo];
+}
 
-pub fn fill_and_flatten(
-    pdf: &[u8],
-    fields: &HashMap<String, FieldValue>,
-    options: &FillOptions,
-) -> Result<Vec<u8>, Error>;
+impl Fill {
+    pub fn new(form: &Form, request: FillRequest, font: Option<&Font>) -> Result<Self, Error>;
+    pub fn to_pdf(&self) -> Result<Vec<u8>, Error>;
+}
 ```
 
 - PDF 只接受内存字节。模板路径、缓存、HTTP 在应用层。
-- 字体以 **字节** 出现在 `FillOptions`（见 §3.4）。公共 API 不提供 `set_default_font`。
+- 字体在 `Font::new` 或 `Font::from_collection` 解析（见 §3.4）。`Fill::new` 只在有非空文本要画时读取它。公共 API 不提供 `set_default_font`。
+- `Fill::new` 做请求与数据检查，并完成测字、折行和缩字。`to_pdf` 子集、清零子集 `head`、叠绘、剥离并写出。同一份 `Fill` 调用两次 `to_pdf`，字节相同。
 
 ### 3.2 `FieldInfo`
 
-一次 `list_fields` 对每个 widget 返回一条（同名多框 → 多条）。
+`Form::fields` 对每个 widget 返回一条（同名多框 → 多条）。字段私有，用访问器读取。
 
-| 字段 | 类型 | 含义 |
+| 访问器 | 类型 | 含义 |
 | --- | --- | --- |
-| `name` | `String` | `/T`（沿 Parent 继承，见 §4.1） |
-| `field_type` | `FieldType` | 见下 |
-| `page_index` | `usize` | 0-based 页码 |
-| `options` | `Option<Vec<String>>` | ListBox/ComboBox 的合法值；其它为 `None` |
+| `name()` | `&str` | `/T`（沿 Parent 继承，见 §4.1） |
+| `field_type()` | `FieldType` | 见下 |
+| `page_index()` | `usize` | 0-based 页码 |
+| `options()` | `Option<&[String]>` | ListBox/ComboBox 的合法值；其它为 `None` |
 
 公开 `FieldInfo` **不含** 矩形与 checkbox on-state。矩形与 on-state 仅内部 fill 使用。
 
@@ -91,26 +94,28 @@ FieldValue =
 
 - 不提供松散的 `str | bool | int | float` 联合，避免把 `false` 画成文本 `"False"`。
 - ListBox/ComboBox 使用 `FieldValue::Text`；值必须落在展平后的 `/Opt` 中（export 与 display 皆合法）。画出的是调用方字符串，不改写成 display。
-- 把 Signature 放进 `fields` 会得到 `SignatureNotWritable`。把 RadioButton 或 PushButton 放进 `fields` 会得到 `WidgetUnsupported`。没有放进 `fields` 的这些控件，flatten 时和其它未填控件一起剥掉。
+- 把 Signature 放进 `FillRequest::fields` 会得到 `SignatureNotWritable`。把 RadioButton 或 PushButton 放进 `fields` 会得到 `WidgetUnsupported`。没有放进 `fields` 的这些控件，flatten 时和其它未填控件一起剥掉。
+- `CheckBox(true)` 画勾。`CheckBox(false)` 不画。`FieldType` 与 `FieldValue` 可穷尽匹配。
 
-### 3.4 `FillOptions`
+### 3.4 请求与字体
 
-| 字段 | 默认 | 含义 |
-| --- | --- | --- |
-| `font` | 无默认；文本需要时必填 | `FontBytes { bytes, index }`（TTF/TTC 面索引） |
-| `font_size` | `12.0` | 起始字号（pt），可再自动缩小 |
-| `font_size_overrides` | 空 | 按字段名覆盖起始字号 |
-| `missing` | `Error` | `Error`：未知字段名失败；`Ignore`：忽略 `fields` 与其它 map 中的未知名 |
-| `h_align` / `v_align` | `Left` / `Bottom` | 文本默认对齐 |
-| `h_align_overrides` / `v_align_overrides` | 空 | 按字段覆盖 |
-| `line_below` | 空 | 字段名 → 框底下方 pt 偏移，画与框同宽黑线（线宽 1 pt）。不需要字体 |
-| `absolute_lines` | 空 | 页面绝对坐标线段（PDF 用户空间）。与字段名无关 |
+`FillStyle` 的默认是 12 pt、左对齐、底对齐。单个字段的覆盖在 `FieldFill.style`（`FieldStyle`）。`None` 沿用文档样式。`fields` 与 `rules` 都是 `BTreeMap`，键按字节序比较。同一个名字可以同时出现在两张表里。
 
-上表里的默认对齐、按字段覆盖、`font_size_overrides`、`line_below` 和 `absolute_lines` 都已实现。语义以本表和提案书 §10 为准。
+| 条目 | 含义 |
+| --- | --- |
+| `FillRequest::fields` | 字段名 → `FieldFill`（值必填） |
+| `FieldStyle` | 可选字号、水平对齐、垂直对齐。挂在勾选上时仍检查字号，但不改变勾的几何 |
+| `FillRequest::rules` | 字段名 → `FieldRule`。框底下方一条与框同宽的 1 pt 黑线。不需要字体，也可以没有对应的 `FieldFill` |
+| `FillRequest::lines` | `AbsoluteLine`。笔触在 `style: StrokeStyle`，默认红色 0.8 pt |
+| `FillRequest::missing` | `Error`：未知名字失败。`Ignore`：跳过未知名字 |
+| `Font::new` / `Font::from_shared` | 一个 `sfnt`。字节以 `ttcf` 开头则失败。构造不改调用方字节 |
+| `Font::from_collection` / `Font::from_shared_collection` | 从 `ttcf` 抽出 `index` 这一面。不是 `ttcf` 则失败 |
+
+`FillStyle`、`FieldStyle`、`FieldRule`、`AbsoluteLine` 都已实现。语义以本表和提案书 §14 为准。
 
 ### 3.5 缩字与折行常量（v1 默认）
 
-实现须以命名常量或 `FillOptions` 可覆写字段暴露同等默认值：
+`12.0` 只出现在 `FillStyle::default`。最小字号、步长、行高系数和内边距留在 `layout` 的私有常量里：
 
 | 常量 | 值 |
 | --- | --- |
@@ -144,23 +149,23 @@ FieldValue =
    - `/Ch`：Combo 位 → ComboBox；否则 ListBox  
    - `/Sig` → Signature  
 
-`list_fields` 可返回 Signature 等类型供探查。`fill_and_flatten` 拒绝填写它们。
+`Form::fields` 可返回 Signature 等类型供探查。`Fill::new` 拒绝填写它们。
 
 ### 4.2 Flatten
 
-- 每次成功的 `fill_and_flatten` 都剥离全部 Widget 注释与 catalog `/AcroForm`。
+- 每次成功的 `Fill::to_pdf` 都剥离全部 Widget 注释与 catalog `/AcroForm`。
 - 未出现在本次绘制中的控件区域不保留原有外观；预印页面内容保留。
-- 空 `fields` 仍执行剥离（结果为无表单的 PDF）。
-- 同名多框使用同一 `FieldValue`；类型与 `/Opt` 校验以遍历到的**第一个**同名 widget 为准。
+- 空 `FillRequest` 仍执行剥离（结果为无表单的 PDF）。
+- 同名多框使用同一条 `FieldFill` 和同一条 `FieldRule`；类型与 `/Opt` 校验以遍历到的**第一个**同名 widget 为准。
 
 ### 4.3 字体与缺字
 
-- 至少一个将绘制的文本或 choice 字符串时，必须提供可用 TrueType（含 `glyf`）字体字节。
-- 未配置字体或字体不可用 → `FontNotConfigured { reason: FontReason }`。解析失败是 `FontReason::Unreadable`，解析器错误留在 `source`。
-- `fill_and_flatten` 成功时，`FontFile2` 嵌入用到的 glyph 的 `glyf` 子集，并保留原 glyph id。
-- cmap 缺字 → `MissingGlyph`，不输出降级 PDF。
+- 至少一个将绘制的文本或 choice 字符串时，必须提供可用 TrueType（含 `glyf`）字体。单面用 `Font::new`，集合用 `Font::from_collection`。
+- 有文本而 `font` 为 `None` → `FontNotConfigured(FontReason::Missing)`，发生在 `Fill::new`。字体构造失败也是 `FontNotConfigured`。解析失败是 `FontReason::Unreadable`，解析器错误留在 `source`。
+- `to_pdf` 成功时，`FontFile2` 嵌入用到的 glyph 的 `glyf` 子集，并保留原 glyph id。子集的 `head` 时间戳清零。构造 `Font` 时不清零调用方字节。
+- cmap 缺字 → `MissingGlyph`，从 `Fill::new` 返回，不输出降级 PDF。
 - 无内置 CJK 回退字体。
-- 同一输入两次 `fill_and_flatten` 应得到相同字节（实现须清零字体时间戳或等价手段）。
+- 同一份 `Fill` 两次 `to_pdf` 得到相同字节。
 
 ### 4.4 Checkbox
 
@@ -170,42 +175,38 @@ FieldValue =
 
 ### 4.5 未知字段名
 
-当 `missing = Error` 时，下列 map 中的未知名字均失败（`UnknownField`）：
+当 `missing = Error` 时，`FillRequest::fields` 的键先检查，然后是 `rules` 的键。组内按 `BTreeMap` 的字节序，第一个不在快照里的名字失败（`UnknownField`，`field()` 为该名字）。
 
-- `fields`
-- `font_size_overrides`
-- `h_align_overrides` / `v_align_overrides`
-- `line_below`
+`lines` 不参与字段名检查。线段 `page_index` 不小于文档页数时，`Fill::new` 返回 `InvalidArgument(PageOutOfRange)`，`page()` 为该下标。
 
-`absolute_lines` 不参与字段名检查。页号越界 → flatten/overlay 失败类错误。
-
-`missing = Ignore` 仍跳过未知名字。表单上存在的名字若字号或 `line_below` 不是有限数，仍是 `InvalidArgument`。
+`missing = Ignore` 仍跳过未知名字，并且不检查它们的字号和偏移。表单上存在的名字若字号或 `FieldRule::offset` 不是有限数，仍是 `InvalidArgument`，`field()` 为该名字。
 
 ## 5. 错误模型
 
 形状对齐 `pdfcraft-pdf` 的习惯，类型留在本 crate，**不** `use pdfcraft_pdf::Error`。
 
-- `Error`：`kind: ErrorKind`，可选依赖 `source`。
-- 字段相关错误携带 `field_name`（在 kind 内或并列字段）。
+- `Error` 字段私有。`kind()` 返回种类。`field()`、`page()`、`scalar()` 返回位置。可选 `source`。
+- `Error` 不实现 `PartialEq`。没有公共 `Error::new`，也没有 `From<ErrorKind>`。
+- `Display` 供人读。整句不是合同，且不包含 `source()` 的文本。
 - 不提供面向 HTTP 的 `to_dict`；应用层自行映射。
 
-确认的 `ErrorKind` 名称与提案书 §10 相同。
+确认的 `ErrorKind` 名称与提案书 §14 相同。只有一种故障时，名字与 `0.2.0` 相同。线段页号越界除外：它是 `InvalidArgument(PageOutOfRange)`，不再是 `FlattenFailed`。
 
 | Kind | 何时 |
 | --- | --- |
-| `NotAPdf` | 无法当 PDF 打开 |
-| `Encrypted` | 加密输入 |
-| `HasXfa` | AcroForm 含 `/XFA` |
-| `UnknownField` | 未知字段名（见 §4.5） |
-| `IllegalChoice` | 值不在 `/Opt` |
-| `InvalidCheckbox` | checkbox 值类型非法 |
-| `InvalidArgument` | 非正字号等 |
-| `MissingGlyph` | 缺字 |
-| `BoxOverflow` | 最小字号仍超框 |
-| `FontNotConfigured { reason }` | 需字体而未提供，或字体不可用。原因是 `FontReason` |
-| `SignatureNotWritable` | 试图填写 Signature |
-| `WidgetUnsupported` | 试图填写 RadioButton 或 PushButton |
-| `FlattenFailed` | overlay 合并或写出失败 |
+| `NotAPdf` | 无法当 PDF 打开。`Form::open` |
+| `Encrypted` | 加密输入。`Form::open` |
+| `HasXfa` | AcroForm 含 `/XFA`。`Form::open` |
+| `UnknownField` | 未知字段名（见 §4.5）。`field()` 为该名字 |
+| `IllegalChoice` | 值不在 `/Opt`。`field()` 为该名字 |
+| `InvalidCheckbox` | checkbox 值类型非法。`field()` 为该名字 |
+| `InvalidArgument` | 非正字号、非有限数、勾选值用在文本或选项上，或线段页号越界。页号在 `page()` |
+| `MissingGlyph` | 缺字。`field()` 与 `scalar()`。`Fill::new` |
+| `BoxOverflow` | 最小字号仍超框。`field()`。`Fill::new` |
+| `FontNotConfigured(FontReason)` | 需字体而未提供，或字体不可用。缺字体在 `Fill::new`。坏字体在 `Font` 的构造函数 |
+| `SignatureNotWritable` | 试图填写 Signature。`field()` 为该名字 |
+| `WidgetUnsupported` | 试图填写 RadioButton 或 PushButton。`field()` 为该名字 |
+| `FlattenFailed` | overlay 合并或写出失败。`to_pdf` |
 
 ## 6. 依赖（crate 内）
 
@@ -220,7 +221,7 @@ FieldValue =
 
 禁止：`krilla`、`pdfcraft-pdf`、运行时 PyMuPDF。
 
-版本是 `0.1.0`，可以发布。产品范围已由提案书 §10 确认。OTF 仍未做。
+版本是 `0.3.0`，可以发布。产品范围已由提案书 §10 与 §14 确认。OTF 仍未做。
 
 ## 7. 测试合同
 
@@ -244,7 +245,7 @@ FieldValue =
 
 | pdfcraft-forms | pdfcraft-forms（本规格） |
 | --- | --- |
-| `set_default_font` 进程默认 | 仅 `FillOptions.font` |
+| `set_default_font` 进程默认 | `Font::new` 或 `Font::from_collection`，传给 `Fill::new` |
 | `FormFieldValue = str\|bool\|int\|float` | 类型化 `FieldValue` |
 | 异常树 + `to_dict` | `Error` / `ErrorKind`，无 HTTP 面 |
 | 字体路径 | 字体字节 |

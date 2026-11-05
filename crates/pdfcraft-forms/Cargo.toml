@@ -1,6 +1,6 @@
 [package]
 name = "pdfcraft-forms"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Fill AcroForm fields in an existing PDF and flatten the result"
@@ -11,11 +11,22 @@ documentation = "https://docs.rs/pdfcraft-forms"
 keywords = ["pdf", "acroform", "forms"]
 categories = ["graphics"]
 include = [
-    "src/**/*",
+    "src/lib.rs",
+    "src/error.rs",
+    "src/fill.rs",
+    "src/geom.rs",
+    "src/layout.rs",
+    "src/request.rs",
+    "src/sfnt.rs",
+    "src/font/**/*",
+    "src/paint/**/*",
+    "src/pdf/**/*",
+    "src/subset/**/*",
     "examples/**/*",
     "docs/**/*",
     "tests/fixtures/README.md",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE-MIT",
     "LICENSE-APACHE",
     "Cargo.toml",

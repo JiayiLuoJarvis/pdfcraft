@@ -2,11 +2,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{self, Error, ErrorKind, FlattenReason, FontReason, Result};
-use crate::fields::{HAlign, PAD_X};
-use crate::font::PreparedFont;
-use crate::inspect::{PdfDoc, PdfRect};
+use super::embed::embed;
+use crate::error::{Error, ErrorKind, FlattenReason, Result};
+use crate::geom::PdfRect;
 use crate::layout::LaidText;
+use crate::layout::PAD_X;
+use crate::pdf::PdfDoc;
+use crate::request::HAlign;
+
+use super::PaintFont;
 
 const CHECK_SHORT_SIDE: f32 = 0.7;
 const CHECK_LEFT_DX: f32 = 0.32;
@@ -158,60 +162,58 @@ impl Content {
     }
 }
 
-impl PdfDoc {
-    pub(crate) fn paint(
-        &mut self,
-        stamps: &[Stamp],
-        strokes: &[Stroke],
-        font: Option<&PreparedFont<'_>>,
-    ) -> Result<()> {
-        let font_id = match font {
-            Some(prepared) if !prepared.is_empty() => Some(prepared.embed(self)?),
-            _ => None,
-        };
-        let pages = self.page_ids();
-        let mut by_page: BTreeMap<usize, Vec<&Stamp>> = BTreeMap::new();
-        for stamp in stamps {
-            by_page.entry(stamp.page_index).or_default().push(stamp);
-        }
-        let mut strokes_by_page: BTreeMap<usize, Vec<&Stroke>> = BTreeMap::new();
-        for stroke in strokes {
-            strokes_by_page
-                .entry(stroke.page_index)
-                .or_default()
-                .push(stroke);
-        }
-        let mut pages_to_paint = BTreeSet::new();
-        pages_to_paint.extend(by_page.keys().copied());
-        pages_to_paint.extend(strokes_by_page.keys().copied());
-        for index in pages_to_paint {
-            let page_stamps = by_page.get(&index).map_or(&[][..], Vec::as_slice);
-            let page_strokes = strokes_by_page.get(&index).map_or(&[][..], Vec::as_slice);
-            let page_id = pages.get(index).copied().ok_or_else(|| {
-                Error::from(ErrorKind::FlattenFailed {
-                    reason: FlattenReason::PageOutOfRange { page_index: index },
-                })
-            })?;
-            let needs_font = page_stamps.iter().any(|stamp| {
-                matches!(
-                    &stamp.mark,
-                    Mark::Text { laid, .. }
-                        if laid.lines().any(|(_, _, glyphs)| !glyphs.is_empty())
-                )
-            });
-            let font_name = if needs_font {
-                let font_id = font_id.ok_or_else(|| error::font_unusable(FontReason::Missing))?;
-                Some(self.attach_font(page_id, font_id)?)
-            } else {
-                None
-            };
-            let content = page_bytes(page_stamps, page_strokes, font_name.as_deref())?;
-            self.add_page_contents(page_id, content)?;
-        }
-        self.strip_form()?;
-        self.prune()?;
-        Ok(())
+pub(crate) fn paint(
+    doc: &mut PdfDoc,
+    stamps: &[Stamp],
+    strokes: &[Stroke],
+    font: Option<PaintFont<'_>>,
+) -> Result<()> {
+    let font_id = match font {
+        Some(prepared) if !prepared.used.is_empty() => Some(embed(&prepared, doc)?),
+        _ => None,
+    };
+    let pages = doc.page_ids();
+    let mut by_page: BTreeMap<usize, Vec<&Stamp>> = BTreeMap::new();
+    for stamp in stamps {
+        by_page.entry(stamp.page_index).or_default().push(stamp);
     }
+    let mut strokes_by_page: BTreeMap<usize, Vec<&Stroke>> = BTreeMap::new();
+    for stroke in strokes {
+        strokes_by_page
+            .entry(stroke.page_index)
+            .or_default()
+            .push(stroke);
+    }
+    let mut pages_to_paint = BTreeSet::new();
+    pages_to_paint.extend(by_page.keys().copied());
+    pages_to_paint.extend(strokes_by_page.keys().copied());
+    for index in pages_to_paint {
+        let page_stamps = by_page.get(&index).map_or(&[][..], Vec::as_slice);
+        let page_strokes = strokes_by_page.get(&index).map_or(&[][..], Vec::as_slice);
+        let page_id = pages
+            .get(index)
+            .copied()
+            .ok_or_else(|| Error::new(ErrorKind::FlattenFailed(FlattenReason::ReadPage)))?;
+        let needs_font = page_stamps.iter().any(|stamp| {
+            matches!(
+                &stamp.mark,
+                Mark::Text { laid, .. }
+                    if laid.lines().any(|(_, _, glyphs)| !glyphs.is_empty())
+            )
+        });
+        let font_name = if needs_font {
+            let font_id = font_id
+                .ok_or_else(|| Error::new(ErrorKind::FlattenFailed(FlattenReason::ReadPage)))?;
+            Some(doc.attach_font(page_id, font_id)?)
+        } else {
+            None
+        };
+        let content = page_bytes(page_stamps, page_strokes, font_name.as_deref())?;
+        doc.add_page_contents(page_id, content)?;
+    }
+    doc.strip_form()?;
+    doc.prune()?;
+    Ok(())
 }
 
 fn page_bytes(stamps: &[&Stamp], strokes: &[&Stroke], font_name: Option<&str>) -> Result<Vec<u8>> {
@@ -236,10 +238,9 @@ fn page_bytes(stamps: &[&Stamp], strokes: &[&Stroke], font_name: Option<&str>) -
 fn pdf_num(value: f32) -> Result<String> {
     let scaled = (value * 1000.0).round() / 1000.0;
     if !scaled.is_finite() {
-        return Err(ErrorKind::FlattenFailed {
-            reason: FlattenReason::NonFinite,
-        }
-        .into());
+        return Err(Error::new(ErrorKind::FlattenFailed(
+            FlattenReason::NonFinite,
+        )));
     }
     let mut text = format!("{scaled:.3}");
     if text.contains('.') {
@@ -266,10 +267,8 @@ mod tests {
     fn pdf_num_rejects_nan_and_formats_finite_values() {
         let err = pdf_num(f32::NAN).unwrap_err();
         assert_eq!(
-            err.kind,
-            ErrorKind::FlattenFailed {
-                reason: FlattenReason::NonFinite,
-            }
+            err.kind(),
+            ErrorKind::FlattenFailed(FlattenReason::NonFinite)
         );
         assert_eq!(pdf_num(1.5).unwrap(), "1.5");
         assert_eq!(pdf_num(-0.0).unwrap(), "0");

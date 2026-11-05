@@ -181,3 +181,25 @@ render    mod  chrome  marks  paint  ratio_labels
 - `graph`、`font`、`content`、`page`、`layout` → `paginate`、`render`、`chart`
 - `paginate` → `render`
 - `font` → `graph`、`page`、`content`
+
+## pdfcraft-forms
+
+日期 2026-11-05。来源：[`pdfcraft-forms-reshape-spec.md`](pdfcraft-forms-reshape-spec.md) §8.2。`checksum` 在 `sfnt`。嵌入在 `paint`。`font` 不再调用 `subset_sfnt`，也不再使用 `PdfDoc`。`font` ↔ `subset` 的环已断开。
+
+边由 `rg 'crate::'` 人工核对。`lib` 重导出 `font::Font`，所以另有指向 `font` 的边。目录模块写成 `<name>/mod.rs`。
+
+```text
+sfnt                        无内部依赖
+error                       无内部依赖
+geom                        无内部依赖
+request                     无内部依赖
+subset    → error, sfnt
+font      → error, sfnt
+layout    → error, font, geom, request
+pdf       → error, geom, request
+paint     → error, pdf, font, subset, layout, geom, request
+fill      → error, pdf, layout, paint, request, font
+lib       → fill, error, font, request
+```
+
+`paint` 通过自由函数改文档，不为 `PdfDoc` 写 inherent impl。`lopdf` 只出现在 `pdf` 与 `paint`。`skrifa` 只出现在 `font`。`subset` 的测试仍引用 `font`，生产代码不引用。未跟踪的 `cff_subset.rs` 不在模块树里。

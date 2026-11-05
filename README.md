@@ -40,10 +40,10 @@ cargo test -p pdfcraft-forms
 cargo run -p pdfcraft-forms --example fill_basic
 ```
 
-Needs `PDFCRAFT_FORMS_FONT` for text-fill examples and CJK tests. No OTF or font
-subsetting in v1.
+Needs `PDFCRAFT_FORMS_FONT` for text-fill examples and CJK tests. OTF is not
+implemented. Text embed uses a `glyf` subset that keeps the original glyph ids.
 
-**Status:** `0.2.0`. The API can break before `1.0`.
+**Status:** `0.3.0`. The API can break before `1.0`.
 
 ## pdfcraft-orgchart
 
@@ -61,7 +61,7 @@ cargo run -p pdfcraft-orgchart --example equity_chart
 
 Needs `PDFCRAFT_ORGCHART_FONT` or `PDFCRAFT_CJK_FONT` (single-face).
 
-**Status:** `0.3.0`. The API can break before `1.0`.
+**Status:** `0.3.1`. The API can break before `1.0`.
 
 ## pdfcraft-post
 
