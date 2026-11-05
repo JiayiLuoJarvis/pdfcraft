@@ -207,8 +207,8 @@ let out = merge_pdfs([&a, &b, &c], false)?;
 | Input | Result |
 | --- | --- |
 | Empty list | `MergeEmpty` |
-| One part | Same bytes returned (no forced round-trip) |
-| Two or more | Pages concatenated in list order |
+| One part | Same bytes returned. The part is not opened, so this path does not report `NotAPdf` or `Encrypted` |
+| Two or more | Pages concatenated in list order. A non-PDF part is `NotAPdf`; an encrypted part is `Encrypted` |
 
 `preserve_outlines`:
 
@@ -216,8 +216,9 @@ let out = merge_pdfs([&a, &b, &c], false)?;
 - `true`: keep the **first** part's outlines when present; do not merge outlines
   from later parts.
 
-Attachments and structure trees are not kept. Encrypted parts fail
-(`MergeFailed`). Non-PDF parts fail with `NotAPdf`.
+Attachments and structure trees are not kept. `NotAPdf` and `Encrypted`
+apply only when there are two or more parts. Page copy or save failure is
+`MergeFailed`.
 
 Because merge takes many inputs, run it **outside** `Pipeline`, then pass the
 merged buffer into `Pipeline::run` if you also need metadata or encryption.
@@ -356,13 +357,13 @@ Match on `Error::kind` (`ErrorKind`). Equality compares kind only. Use
 
 | Kind | When |
 | --- | --- |
-| `NotAPdf` | Bytes are not an openable PDF |
-| `Encrypted` | Input PDF is encrypted; the crate never unlocks input |
+| `NotAPdf` | Bytes are not an openable PDF. One `merge_pdfs` part is returned unchanged and does not use this kind |
+| `Encrypted` | Input PDF is encrypted; the crate never unlocks input. One `merge_pdfs` part is returned unchanged and does not use this kind |
 | `ConfigMissing` | Encrypt config missing, or owner password empty after overrides |
-| `EncryptFailed` | Already encrypted, random key failure, or security handler write failed |
-| `MetadataFailed` | Encrypted input, bad `D:` date, or `/Info` write failed |
+| `EncryptFailed` | Random key failure or security handler write failed |
+| `MetadataFailed` | Bad `D:` date, or `/Info` write failed |
 | `MergeEmpty` | `merge_pdfs` received an empty part list |
-| `MergeFailed` | Encrypted part, page copy failure, or merge serialize failure |
+| `MergeFailed` | Page copy failure or merge serialize failure |
 | `SplitFailed` | Page copy or single-page save failed in `split_pdfs` |
 | `ThumbnailFailed` | Page size unresolvable, `thumbnail` feature off, or render/encode failed |
 

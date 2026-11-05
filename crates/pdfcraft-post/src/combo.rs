@@ -2,7 +2,8 @@
 
 use crate::encryption::{encrypt_document, Encrypt};
 use crate::error::{Error, ErrorKind};
-use crate::metadata::{open_pdf, save_pdf, write_docinfo, SetMetadata};
+use crate::metadata::{write_docinfo, SetMetadata};
+use crate::pdf::{open_pdf, save_pdf};
 
 /// Write `/Info` then encrypt in a single open/save path.
 ///
@@ -29,7 +30,7 @@ impl StampAndEncrypt {
     /// and [`ErrorKind::EncryptFailed`] when encryption cannot be written.
     #[must_use = "dropping the PDF discards the only copy"]
     pub fn apply(&self, pdf: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut doc = open_pdf(pdf, ErrorKind::Encrypted)?;
+        let mut doc = open_pdf(pdf)?;
         write_docinfo(&mut doc, &self.metadata)?;
         encrypt_document(&mut doc, &self.encrypt)?;
         save_pdf(&mut doc).map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))

@@ -23,6 +23,21 @@ fn single_part_is_identity() {
 }
 
 #[test]
+fn single_non_pdf_is_returned_unchanged() {
+    let bytes = b"not-a-pdf".to_vec();
+    let out = merge_pdfs([bytes.as_slice()], false).expect("single non-pdf");
+    assert_eq!(out, bytes);
+}
+
+#[test]
+fn single_encrypted_pdf_is_returned_unchanged() {
+    let plain = common::sample_pdf(None, None);
+    let enc = common::encrypted_with_empty_user(&plain);
+    let out = merge_pdfs([enc.as_slice()], false).expect("single encrypted");
+    assert_eq!(out, enc);
+}
+
+#[test]
 fn two_parts_yield_two_pages() {
     let a = common::sample_pdf(Some("A"), None);
     let b = common::sample_pdf(Some("B"), None);

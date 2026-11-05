@@ -9,6 +9,26 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-05
+
+No public API change. Success-path PDF bytes are unchanged.
+
+### Fixed
+
+- Crate rustdoc lists `split_pdfs` and `first_page_jpeg`, and states that
+  output is one or more PDFs or a thumbnail JPEG.
+- `merge_pdfs` rustdoc matches the single-part contract: the input bytes are
+  returned unchanged, so `NotAPdf` and `Encrypted` apply only when there are
+  two or more parts.
+- The usage guide uses that same contract. Encrypted input is `Encrypted`.
+  `MergeFailed`, `MetadataFailed`, and `EncryptFailed` are no longer described
+  as the encrypted-input gate.
+
+### Added
+
+- Tests that `merge_pdfs` returns a single non-PDF buffer and a single
+  encrypted PDF unchanged.
+
 ## [0.3.0] - 2026-11-03
 
 ### Changed

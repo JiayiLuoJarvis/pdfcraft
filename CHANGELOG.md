@@ -19,6 +19,13 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 - **Breaking.** `pdfcraft-forms` `0.3.0`. Callers use `Form::open`, `Fill::new`, and `Fill::to_pdf`. `list_fields`, `fill_and_flatten`, `FillOptions`, and `FontBytes` are removed. Migration steps and the rest of the notes are in [`crates/pdfcraft-forms/CHANGELOG.md`](crates/pdfcraft-forms/CHANGELOG.md).
 
+### Fixed
+
+- `pdfcraft-post` `0.3.1`. Rustdoc and the usage guide match the single-part
+  `merge_pdfs` contract, and the crate docs list split plus the first-page
+  thumbnail. No public API change. Details in
+  [`crates/pdfcraft-post/CHANGELOG.md`](crates/pdfcraft-post/CHANGELOG.md).
+
 ## 2026-11-04
 
 ### Breaking

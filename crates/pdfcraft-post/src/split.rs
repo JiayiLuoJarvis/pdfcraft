@@ -3,8 +3,8 @@
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::error::{Error, ErrorKind};
-use crate::metadata::{open_pdf, save_pdf};
 use crate::pages::import_pages_with;
+use crate::pdf::{open_pdf, save_pdf};
 
 /// Split every page of `pdf` into its own single-page PDF.
 ///
@@ -27,7 +27,7 @@ use crate::pages::import_pages_with;
 /// [`ErrorKind::SplitFailed`] when a page cannot be copied.
 #[must_use = "dropping the split PDFs discards the only copies"]
 pub fn split_pdfs(pdf: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
-    let src = open_pdf(pdf, ErrorKind::Encrypted)?;
+    let src = open_pdf(pdf)?;
     let page_ids: Vec<ObjectId> = src.page_iter().collect();
     let mut out = Vec::with_capacity(page_ids.len());
     for page_id in page_ids {

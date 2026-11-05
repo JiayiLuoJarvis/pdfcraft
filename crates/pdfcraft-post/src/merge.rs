@@ -3,13 +3,16 @@
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::error::{Error, ErrorKind};
-use crate::metadata::{open_pdf, save_pdf};
 use crate::pages::import_pages;
+use crate::pdf::{open_pdf, save_pdf};
 
 /// Concatenate PDFs in order.
 ///
 /// An empty `parts` list fails with [`ErrorKind::MergeEmpty`]. One part is
-/// returned unchanged. Two or more parts append pages in list order.
+/// returned as the original bytes. That path does not call `open_pdf`, so it
+/// does not report [`ErrorKind::NotAPdf`] or [`ErrorKind::Encrypted`]. Those
+/// two kinds appear only when there are two or more parts, which append pages
+/// in list order.
 ///
 /// Attachments and structure trees are not kept.
 ///
@@ -21,12 +24,12 @@ use crate::pages::import_pages;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MergeEmpty`] when `parts` is empty, [`ErrorKind::NotAPdf`] when
-/// a part is not a PDF, [`ErrorKind::Encrypted`] when a part is encrypted
-/// (including files whose empty user password `load_mem` auto-decrypts;
-/// those are still rejected so a merge never re-saves auto-decrypted
-/// bytes), and [`ErrorKind::MergeFailed`] when a part's pages cannot be
-/// copied.
+/// [`ErrorKind::MergeEmpty`] when `parts` is empty. With two or more parts,
+/// [`ErrorKind::NotAPdf`] when a part is not a PDF, [`ErrorKind::Encrypted`]
+/// when a part is encrypted (including files whose empty user password
+/// `load_mem` auto-decrypts; those are still rejected so a merge never
+/// re-saves auto-decrypted bytes), and [`ErrorKind::MergeFailed`] when a
+/// part's pages cannot be copied.
 #[must_use = "dropping the merged PDF discards the only copy"]
 pub fn merge_pdfs<I, B>(parts: I, preserve_outlines: bool) -> Result<Vec<u8>, Error>
 where
@@ -59,7 +62,7 @@ fn pages_only(parts: &[Vec<u8>]) -> Result<Vec<u8>, Error> {
 
     let mut kids = Vec::new();
     for part in parts {
-        let src = open_pdf(part, ErrorKind::Encrypted)?;
+        let src = open_pdf(part)?;
         kids.extend(import_pages(&mut dest, &src, pages_id)?);
     }
 
@@ -83,11 +86,11 @@ fn pages_only(parts: &[Vec<u8>]) -> Result<Vec<u8>, Error> {
 }
 
 fn preserve_first(parts: &[Vec<u8>]) -> Result<Vec<u8>, Error> {
-    let mut dest = open_pdf(&parts[0], ErrorKind::Encrypted)?;
+    let mut dest = open_pdf(&parts[0])?;
     let pages_id = root_pages_id(&dest)?;
     let mut extra = Vec::new();
     for part in &parts[1..] {
-        let src = open_pdf(part, ErrorKind::Encrypted)?;
+        let src = open_pdf(part)?;
         extra.extend(import_pages(&mut dest, &src, pages_id)?);
     }
     append_kids(&mut dest, pages_id, &extra)?;

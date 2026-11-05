@@ -1,8 +1,10 @@
 //! Post-process existing PDF bytes.
 //!
 //! This crate writes `/Info`, encrypts with AES-256 (revision 6), merges page
-//! lists, and runs ordered [`Pipeline`] steps. Input and output are PDF bytes
-//! in memory.
+//! lists, splits one PDF per page, renders an optional first-page JPEG
+//! thumbnail, and runs ordered [`Pipeline`] steps. Input is PDF bytes in
+//! memory. Output is one or more PDF byte buffers, or JPEG bytes for the
+//! thumbnail.
 //!
 //! It does not depend on `pdfcraft-pdf`, `pdfcraft-forms`, or
 //! `pdfcraft-orgchart`. Watermark, input limits, HTTP mapping, and Web
@@ -16,6 +18,8 @@
 //! | [`Encrypt`] | AES-256 encrypt with permission presets |
 //! | [`StampAndEncrypt`] | Metadata then encrypt in one open/save |
 //! | [`merge_pdfs`] | Concatenate pages from several PDFs |
+//! | [`split_pdfs`] | One single-page PDF per page |
+//! | [`first_page_jpeg`] | Page-1 JPEG (`thumbnail` feature) |
 //! | [`Pipeline`] | Run ordered steps on one buffer |
 //!
 //! # Errors
@@ -32,6 +36,7 @@ mod error;
 mod merge;
 mod metadata;
 mod pages;
+mod pdf;
 mod pipeline;
 mod split;
 mod thumbnail;

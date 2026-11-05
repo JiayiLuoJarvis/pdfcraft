@@ -7,7 +7,7 @@ use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{EncryptionState, EncryptionVersion, Permissions};
 
 use crate::error::{Error, ErrorKind};
-use crate::metadata::{open_pdf, save_pdf};
+use crate::pdf::{open_pdf, save_pdf};
 
 /// Full PDF encryption configuration.
 ///
@@ -133,7 +133,7 @@ impl Encrypt {
     /// rejects encrypted input first, so it stays as defense in depth only.
     #[must_use = "dropping the encrypted PDF discards the only copy"]
     pub fn apply(&self, pdf: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut doc = open_pdf(pdf, ErrorKind::Encrypted)?;
+        let mut doc = open_pdf(pdf)?;
         encrypt_document(&mut doc, self)?;
         save_pdf(&mut doc).map_err(|err| Error::from(ErrorKind::EncryptFailed).with_source(err))
     }

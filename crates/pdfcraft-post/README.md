@@ -16,7 +16,7 @@ krilla.
 | API | [docs.rs/pdfcraft-post](https://docs.rs/pdfcraft-post) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.3.0`. The API can break before `1.0` |
+| Status | `0.3.1`. The API can break before `1.0` |
 
 ---
 
@@ -24,7 +24,7 @@ krilla.
 
 ```toml
 [dependencies]
-pdfcraft-post = "0.3.0"
+pdfcraft-post = "0.3.1"
 ```
 
 ---
@@ -87,7 +87,9 @@ PDF bytes ──Pipeline.run───────► PDF bytes   (ordered steps 
 
 1. **Bytes only** — no path API and no network access.
 2. **Processors are values** — each step has `apply` (or `Pipeline::run`).
-3. **Merge is multi-input** — usually merge first, then run a pipeline.
+3. **Merge is multi-input** — usually merge first, then run a pipeline. One part
+   is returned unchanged and is not opened, so it does not report `NotAPdf`
+   or `Encrypted`.
 
 `creator` and `producer` are writable here. That differs from
 `pdfcraft-pdf`'s `DocumentSpec.info`, which keeps Creator fixed as `pdfcraft`

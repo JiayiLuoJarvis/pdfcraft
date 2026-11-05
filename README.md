@@ -8,7 +8,7 @@ its own README, usage guide, and rustdoc.
 | **pdfcraft-pdf** | [`crates/pdfcraft-pdf`](crates/pdfcraft-pdf) | Document layout → vector PDF (main line) |
 | **pdfcraft-forms** | [`crates/pdfcraft-forms`](crates/pdfcraft-forms) | Fill AcroForm fields in an existing PDF and flatten |
 | **pdfcraft-orgchart** | [`crates/pdfcraft-orgchart`](crates/pdfcraft-orgchart) | Equity and outbound-investment charts |
-| **pdfcraft-post** | [`crates/pdfcraft-post`](crates/pdfcraft-post) | Post-process PDF bytes (metadata, encrypt, merge, pipeline) |
+| **pdfcraft-post** | [`crates/pdfcraft-post`](crates/pdfcraft-post) | Post-process PDF bytes (metadata, encrypt, merge, split, thumbnail, pipeline) |
 
 ## pdfcraft-pdf
 
@@ -77,10 +77,10 @@ cargo test -p pdfcraft-post
 cargo run -p pdfcraft-post --example encrypt -- in.pdf out.pdf owner-secret
 ```
 
-Processors: `SetMetadata`, `Encrypt`, `StampAndEncrypt`, `merge_pdfs`, `Pipeline`.
+Processors: `SetMetadata`, `Encrypt`, `StampAndEncrypt`, `merge_pdfs`, `split_pdfs`, `first_page_jpeg`, `Pipeline`.
 No Watermark or input limits in this stack.
 
-**Status:** `0.3.0`. The API can break before `1.0`.
+**Status:** `0.3.1`. The API can break before `1.0`.
 
 ## Contributing
 

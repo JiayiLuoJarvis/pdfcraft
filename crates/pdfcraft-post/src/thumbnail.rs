@@ -9,8 +9,8 @@
 use lopdf::{Document, ObjectId};
 
 use crate::error::{Error, ErrorKind};
-use crate::metadata::open_pdf;
 use crate::pages::materialized_page_with;
+use crate::pdf::open_pdf;
 
 /// Options for [`first_page_jpeg`].
 ///
@@ -96,7 +96,7 @@ pub fn first_page_jpeg(
 /// `Ok(None)` means the document parsed but holds no pages. Rotation swaps
 /// the sides so the scale computed downstream matches the rendered pixels.
 fn first_page_size(pdf: &[u8]) -> Result<Option<(f32, f32)>, Error> {
-    let doc = open_pdf(pdf, ErrorKind::Encrypted)?;
+    let doc = open_pdf(pdf)?;
     let pages = doc.get_pages();
     let Some((_, first_id)) = pages.iter().next() else {
         return Ok(None);

@@ -3,6 +3,7 @@
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::error::{Error, ErrorKind};
+use crate::pdf::{open_pdf, save_pdf};
 
 /// Write or overwrite selected `/Info` fields.
 ///
@@ -45,35 +46,10 @@ impl SetMetadata {
     /// `/Info` dictionary cannot be written.
     #[must_use = "dropping the PDF discards the only copy"]
     pub fn apply(&self, pdf: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut doc = open_pdf(pdf, ErrorKind::Encrypted)?;
+        let mut doc = open_pdf(pdf)?;
         write_docinfo(&mut doc, self)?;
         save_pdf(&mut doc).map_err(|err| Error::from(ErrorKind::MetadataFailed).with_source(err))
     }
-}
-
-pub(crate) fn open_pdf(pdf: &[u8], encrypted: ErrorKind) -> Result<Document, Error> {
-    let doc = match Document::load_mem(pdf) {
-        Ok(doc) => doc,
-        Err(err) if matches!(err, lopdf::Error::Decryption(_)) => {
-            return Err(Error::from(encrypted).with_source(err));
-        }
-        Err(err) => return Err(Error::from(ErrorKind::NotAPdf).with_source(err)),
-    };
-    // `load_mem` auto-decrypts files whose user password is empty: it
-    // decrypts in memory, drops trailer `/Encrypt`, and records the state.
-    // `is_encrypted` alone would pass those through, so reject every trace:
-    // still-encrypted, auto-decrypted (`was_encrypted`), or a leftover
-    // trailer `/Encrypt` entry. No processor re-saves auto-decrypted bytes.
-    if doc.is_encrypted() || doc.was_encrypted() || doc.trailer.get(b"Encrypt").is_ok() {
-        return Err(Error::from(encrypted));
-    }
-    Ok(doc)
-}
-
-pub(crate) fn save_pdf(doc: &mut Document) -> Result<Vec<u8>, lopdf::Error> {
-    let mut out = Vec::new();
-    doc.save_to(&mut out)?;
-    Ok(out)
 }
 
 pub(crate) fn write_docinfo(doc: &mut Document, meta: &SetMetadata) -> Result<(), Error> {
