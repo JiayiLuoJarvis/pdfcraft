@@ -148,7 +148,9 @@ pub(crate) fn cluster_tagged<T: Copy, S: AsRef<str>>(
         let cluster = clustered.cluster(index);
         let count = cluster.scalar_count();
         if !cluster.glyph_range().is_empty() {
-            glyph_tags.extend_from_slice(&normalized_tags[tag_cursor..tag_cursor + count]);
+            if let Some(slice) = normalized_tags.get(tag_cursor..tag_cursor + count) {
+                glyph_tags.extend_from_slice(slice);
+            }
         }
         tag_cursor += count;
     }
@@ -170,12 +172,19 @@ pub(crate) fn cluster_tagged<T: Copy, S: AsRef<str>>(
 
 impl<'a> Cluster<'a> {
     pub(crate) fn as_str(&self) -> &'a str {
-        let record = &self.owner.clusters[self.index];
-        &self.owner.normalized[record.normalized_bytes.clone()]
+        let Some(record) = self.owner.clusters.get(self.index) else {
+            return "";
+        };
+        self.owner
+            .normalized
+            .get(record.normalized_bytes.clone())
+            .unwrap_or("")
     }
 
     pub(crate) fn glyph_range(&self) -> Range<usize> {
-        let record = &self.owner.clusters[self.index];
+        let Some(record) = self.owner.clusters.get(self.index) else {
+            return 0..0;
+        };
         record.start.glyph..record.end.glyph
     }
 
@@ -184,15 +193,32 @@ impl<'a> Cluster<'a> {
     }
 
     pub(crate) fn class(&self) -> BreakClass {
-        self.owner.clusters[self.index].class
+        self.owner
+            .clusters
+            .get(self.index)
+            .map_or(BreakClass::Hard, |c| c.class)
     }
 
     pub(crate) fn start_cursor(&self) -> ClusterCursor {
-        self.owner.clusters[self.index].start
+        self.owner.clusters.get(self.index).map_or(
+            ClusterCursor {
+                cluster: 0,
+                glyph: 0,
+                glyph_byte: 0,
+            },
+            |c| c.start,
+        )
     }
 
     pub(crate) fn end_cursor(&self) -> ClusterCursor {
-        self.owner.clusters[self.index].end
+        self.owner.clusters.get(self.index).map_or(
+            ClusterCursor {
+                cluster: 0,
+                glyph: 0,
+                glyph_byte: 0,
+            },
+            |c| c.end,
+        )
     }
 }
 

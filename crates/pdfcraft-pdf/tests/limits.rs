@@ -85,7 +85,7 @@ fn font_byte_limit_rejects_before_parse() {
 #[test]
 fn image_byte_limit_rejects_before_decode() {
     let mut resources = Resources::default();
-    let _image = resources.add_image(vec![1, 2], ImageFormat::Png);
+    let _image = resources.add_image(vec![1, 2], ImageFormat::Png).unwrap();
     let err = lay(
         resources,
         tighten(|limits| limits.set_max_image_bytes(1).unwrap()),
@@ -322,4 +322,9 @@ fn kept_rule_counts_four_blocks() {
             max: 3,
         }
     );
+}
+
+#[test]
+fn image_limit_kind_display() {
+    assert_eq!(LimitKind::Images.to_string(), "images");
 }

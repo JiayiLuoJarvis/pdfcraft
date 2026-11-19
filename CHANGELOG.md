@@ -13,6 +13,12 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+## 2026-11-19
+
+### Breaking
+
+- **Breaking.** `pdfcraft-pdf` `0.7.0`. Engineering standard hardening per `docs/pdfcraft-pdf-hardening-spec.md`. `Resources::add_image` returns `Result<ImageRef, Error>`. `ImageRef` and `ImageSpec` are no longer `Copy`. Global atomics and `Box<dyn Any>` downcasting eliminated. All production raw slice indexing eliminated with `#![deny(clippy::indexing_slicing)]` enforced. Full notes: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+
 ## 2026-11-05
 
 ### Breaking

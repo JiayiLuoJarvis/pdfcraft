@@ -24,7 +24,6 @@
 //! Coordinates match [`crate::geom`]. The origin is the top left, y increases
 //! downward, and lengths are PDF points.
 
-use std::any::Any;
 use std::fmt;
 use std::ops::Range;
 
@@ -199,7 +198,7 @@ pub struct DecodedImage {
 }
 
 /// Decodes one document's images and keeps whatever the PDF writer needs later.
-pub(crate) trait ImageRegistry: Any + Send + Sync + fmt::Debug {
+pub(crate) trait ImageRegistry: Send + Sync + fmt::Debug {
     /// Copies resource caps used by [`Self::register`].
     fn set_limits(&mut self, limits: &Limits);
 
@@ -456,7 +455,7 @@ impl RecordingCanvas {
         let mut pages = Vec::new();
         let mut index = 0;
         while index < self.commands.len() {
-            let CanvasCommand::StartPage(size) = self.commands[index] else {
+            let Some(&CanvasCommand::StartPage(size)) = self.commands.get(index) else {
                 index += 1;
                 continue;
             };
@@ -464,7 +463,10 @@ impl RecordingCanvas {
             let mut ops = Vec::new();
             let mut closed = false;
             while index < self.commands.len() {
-                match &self.commands[index] {
+                let Some(cmd) = self.commands.get(index) else {
+                    break;
+                };
+                match cmd {
                     CanvasCommand::FinishPage => {
                         index += 1;
                         closed = true;

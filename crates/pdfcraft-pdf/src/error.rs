@@ -232,6 +232,8 @@ pub enum LimitKind {
     Pages,
     /// Total nesting depth of body blocks and inline links.
     NestingDepth,
+    /// Registered image resources in [`crate::spec::Resources`].
+    Images,
 }
 
 impl fmt::Display for LimitKind {
@@ -246,6 +248,7 @@ impl fmt::Display for LimitKind {
             Self::ParagraphBytes => "paragraph bytes",
             Self::Pages => "pages",
             Self::NestingDepth => "nesting depth",
+            Self::Images => "images",
         })
     }
 }
@@ -1035,7 +1038,9 @@ impl IntoIterator for Errors {
 impl fmt::Display for Errors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.items.len() == 1 && !self.truncated {
-            return write!(f, "{}", self.items[0]);
+            if let Some(first) = self.items.first() {
+                return write!(f, "{first}");
+            }
         }
         for (index, error) in self.items.iter().enumerate() {
             if index > 0 {
@@ -1180,7 +1185,9 @@ impl ErrorBag {
         if self.items.len() >= MAX_ERRORS {
             let last = self.items.len() - 1;
             self.note_unknown_font(&hard);
-            self.items[last] = hard;
+            if let Some(item) = self.items.get_mut(last) {
+                *item = hard;
+            }
             if self.seen <= self.items.len() as u64 {
                 self.seen = self.items.len() as u64 + 1;
             }

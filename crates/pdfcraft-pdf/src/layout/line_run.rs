@@ -45,33 +45,41 @@ pub(crate) fn measure_inline<'a>(
     let mut glyphs = Vec::with_capacity(styles.len());
     let mut start = 0usize;
     while start < styles.len() {
-        let font = styles[start].font;
+        let Some(first_style) = styles.get(start) else {
+            break;
+        };
+        let font = first_style.font;
         let mut end = start + 1;
-        while end < styles.len() && styles[end].font == font {
+        while styles.get(end).is_some_and(|s| s.font == font) {
             end += 1;
         }
-        let byte_start = byte_boundaries[start];
-        let measured = measure::measure_text(
-            ctx.fonts,
-            ctx.errors,
-            font,
-            &glyph_text[byte_start..byte_boundaries[end]],
-        )?;
+        let byte_start = byte_boundaries.get(start).copied().unwrap_or(0);
+        let byte_end = byte_boundaries
+            .get(end)
+            .copied()
+            .unwrap_or(glyph_text.len());
+        let sub_text = glyph_text.get(byte_start..byte_end).unwrap_or("");
+        let measured = measure::measure_text(ctx.fonts, ctx.errors, font, sub_text)?;
         debug_assert_eq!(
             measured.glyphs.len(),
             end - start,
             "measured run must return one glyph per cluster"
         );
-        glyphs.extend(measured.glyphs.into_iter().zip(&styles[start..end]).map(
-            |(glyph, style)| InlineGlyph {
-                style: *style,
-                glyph_id: glyph.glyph_id,
-                advance_norm: glyph.advance_norm,
-                byte_range: (glyph.byte_range.start + byte_start)
-                    ..(glyph.byte_range.end + byte_start),
-                omit: glyph.omit,
-            },
-        ));
+        let style_slice = styles.get(start..end).unwrap_or(&[]);
+        glyphs.extend(
+            measured
+                .glyphs
+                .into_iter()
+                .zip(style_slice)
+                .map(|(glyph, style)| InlineGlyph {
+                    style: *style,
+                    glyph_id: glyph.glyph_id,
+                    advance_norm: glyph.advance_norm,
+                    byte_range: (glyph.byte_range.start + byte_start)
+                        ..(glyph.byte_range.end + byte_start),
+                    omit: glyph.omit,
+                }),
+        );
         start = end;
     }
 
@@ -85,7 +93,9 @@ fn cluster_styles(text: &TaggedClusteredText<GlyphStyle>) -> Vec<GlyphStyle> {
     for index in 0..clustered.len() {
         let range = clustered.cluster(index).glyph_range();
         if !range.is_empty() {
-            styles.extend(std::iter::repeat_n(tags[range.start], range.len()));
+            if let Some(&tag) = tags.get(range.start) {
+                styles.extend(std::iter::repeat_n(tag, range.len()));
+            }
         }
     }
     styles
@@ -110,7 +120,7 @@ impl MeasuredInline {
             });
         };
         let size = style.font_size.as_pt();
-        let cluster = &self.glyphs[glyphs];
+        let cluster = self.glyphs.get(glyphs).unwrap_or(&[]);
         let body: f32 = cluster.iter().map(|glyph| glyph.advance_norm * size).sum();
         let gap = match cluster.iter().rev().find(|glyph| !glyph.omit) {
             Some(receiver) => {
@@ -224,7 +234,7 @@ impl LinePainter {
             };
             self.saw_text = true;
             let size = style.font_size.as_pt();
-            let cluster = &measured.glyphs[glyphs.clone()];
+            let cluster = measured.glyphs.get(glyphs.clone()).unwrap_or(&[]);
             let body: f32 = cluster.iter().map(|glyph| glyph.advance_norm * size).sum();
             let extra_norm = (draw.as_pt() - body) / size;
             if run
@@ -338,28 +348,44 @@ impl LinePainter {
         if run.glyphs.is_empty() {
             return Ok(());
         }
-        let byte_start = measured.glyphs[run.start].byte_range.start;
-        let byte_end = measured.glyphs[run.end - 1].byte_range.end;
+        let Some(first_glyph) = measured.glyphs.get(run.start) else {
+            return Ok(());
+        };
+        let Some(last_glyph) = run
+            .end
+            .checked_sub(1)
+            .and_then(|idx| measured.glyphs.get(idx))
+        else {
+            return Ok(());
+        };
+        let byte_start = first_glyph.byte_range.start;
+        let byte_end = last_glyph.byte_range.end;
         let glyphs = run
             .glyphs
             .iter()
-            .map(|&(index, advance_norm)| {
-                let glyph = &measured.glyphs[index];
-                GlyphPlacement {
+            .filter_map(|&(index, advance_norm)| {
+                let glyph = measured.glyphs.get(index)?;
+                Some(GlyphPlacement {
                     glyph_id: glyph.glyph_id,
                     advance_norm,
-                    byte_range: (glyph.byte_range.start - byte_start)
-                        ..(glyph.byte_range.end - byte_start),
-                }
+                    byte_range: (glyph.byte_range.start.saturating_sub(byte_start))
+                        ..(glyph.byte_range.end.saturating_sub(byte_start)),
+                })
             })
             .collect();
+        let sub_text = measured
+            .text
+            .clustered()
+            .glyph_text()
+            .get(byte_start..byte_end)
+            .unwrap_or("");
         self.pieces.push(LinePiece::Glyphs(GlyphRun {
             font: run.font,
             font_size: run.font_size,
             color: run.color,
             origin: Point::try_pt(run.x, self.baseline)?,
             glyphs,
-            text: measured.text.clustered().glyph_text()[byte_start..byte_end].to_owned(),
+            text: sub_text.to_owned(),
         }));
         Ok(())
     }

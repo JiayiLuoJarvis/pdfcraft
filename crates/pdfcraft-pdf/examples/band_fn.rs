@@ -141,7 +141,7 @@ fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
     BandFn::from_fn(move |query| {
         let marks = if query.number.get() % 2 == 1 {
             vec![Mark::Shape(LayerShape::Image {
-                image: odd_image,
+                image: odd_image.clone(),
                 rect: Rect::try_pt(270.0, 12.5, 55.0, 55.0)?,
             })]
         } else {
@@ -179,7 +179,7 @@ fn odd_even_marks(odd_image: ImageRef, even_image: ImageRef) -> BandFn<()> {
                     },
                 }),
                 Mark::Shape(LayerShape::Image {
-                    image: even_image,
+                    image: even_image.clone(),
                     rect: Rect::try_pt(156.0, 12.5, 55.0, 55.0)?,
                 }),
             ]
@@ -305,8 +305,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         italic: None,
         bold_italic: None,
     }));
-    let odd_image = resources.add_image(MARK.to_vec(), ImageFormat::Png);
-    let even_image = resources.add_image(DIAMOND.to_vec(), ImageFormat::Png);
+    let odd_image = resources.add_image(MARK.to_vec(), ImageFormat::Png)?;
+    let even_image = resources.add_image(DIAMOND.to_vec(), ImageFormat::Png)?;
     let sections = sections_for(&case, odd_image, even_image)?;
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,

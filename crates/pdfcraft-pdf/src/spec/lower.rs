@@ -88,10 +88,10 @@ where
         return Err(crate::error::Errors::from(error));
     }
 
-    let doc = DocToken::next();
+    let doc = DocToken::new();
     let mut errors = ErrorBag::default();
     let (mut fonts, font_table, images, image_handles) =
-        lower_resources(resources, limits, doc, &mut errors);
+        lower_resources(resources, limits, &doc, &mut errors);
     let mut configs = Vec::with_capacity(sections.len());
     let mut roots = Vec::with_capacity(sections.len());
     let mut decorations = Vec::with_capacity(sections.len());
@@ -104,7 +104,7 @@ where
             section,
             page_size,
             &font_table,
-            doc,
+            doc.clone(),
             &image_handles,
             Location::section(index),
             &mut anchors,
@@ -368,14 +368,9 @@ fn is_face_choice(kind: &ErrorKind) -> bool {
 fn lower_resources<K: FontKey>(
     resources: Resources<K>,
     limits: Limits,
-    doc: DocToken,
+    doc: &DocToken,
     errors: &mut ErrorBag,
-) -> (
-    FontStore,
-    FontTable<K>,
-    Box<dyn ImageRegistry>,
-    LoweredImages,
-) {
+) -> (FontStore, FontTable<K>, crate::ImageStorage, LoweredImages) {
     let mut fonts = FontStore::new();
     fonts.set_max_bytes(limits.max_font_bytes());
     let mut by_key = HashMap::new();
@@ -412,7 +407,10 @@ fn lower_resources<K: FontKey>(
     let mut handles = Vec::with_capacity(resources.images.len());
     for image in resources.images {
         match registry.register(image.bytes, image.format) {
-            Ok(decoded) => handles.push(Some(HeldImage { decoded, doc })),
+            Ok(decoded) => handles.push(Some(HeldImage {
+                decoded,
+                doc: doc.clone(),
+            })),
             Err(error) => {
                 errors.record(error);
                 handles.push(None);
@@ -430,7 +428,7 @@ fn lower_resources<K: FontKey>(
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct HeldImage {
     decoded: DecodedImage,
     doc: DocToken,
@@ -487,7 +485,7 @@ impl AnchorRegistry {
 
 /// Immutable inputs shared by block lowering. Anchors and errors stay separate
 /// so a child can record into its own bag.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct LowerEnv<'a, K: FontKey> {
     paint: &'a InheritedPaint,
     fonts: &'a FontTable<K>,
@@ -519,21 +517,21 @@ fn lower_section<K: FontKey + 'static>(
     let env = LowerEnv {
         paint: &seed,
         fonts,
-        doc,
+        doc: doc.clone(),
         images,
         at,
     };
     let nodes = lower_blocks(body, &env, anchors, &mut errors);
     let header =
-        header.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
+        header.and_then(|band| install_band(band, fonts, doc.clone(), images.clone(), &mut errors));
     let footer =
-        footer.and_then(|band| install_band(band, fonts, doc, images.clone(), &mut errors));
+        footer.and_then(|band| install_band(band, fonts, doc.clone(), images.clone(), &mut errors));
     let behind = own_layer_marks(behind, fonts, &mut errors);
     let front = own_layer_marks(front, fonts, &mut errors);
     let decorations = Decorations {
         header,
         footer,
-        behind: layer_content(behind, doc, images.clone()),
+        behind: layer_content(behind, doc.clone(), images.clone()),
         front: layer_content(front, doc, images.clone()),
     };
     let config = PaginateConfig {
@@ -549,13 +547,9 @@ fn lower_blocks<K: FontKey>(
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
 ) -> Vec<FlowNode> {
-    let LowerEnv {
-        paint,
-        fonts,
-        doc,
-        images,
-        ..
-    } = *env;
+    let paint = env.paint;
+    let fonts = env.fonts;
+    let images = env.images;
     let mut nodes = Vec::new();
     for block in blocks {
         match block {
@@ -595,7 +589,7 @@ fn lower_blocks<K: FontKey>(
                 let inner = paint.patch(patch);
                 let styled = LowerEnv {
                     paint: &inner,
-                    ..*env
+                    ..env.clone()
                 };
                 nodes.extend(lower_blocks(children, &styled, anchors, errors));
             }
@@ -615,7 +609,7 @@ fn lower_blocks<K: FontKey>(
                 }
             }
             Block::Image(spec) => {
-                if let Some(node) = lower_image(spec, doc, images, errors) {
+                if let Some(node) = lower_image(spec, &env.doc, images, errors) {
                     nodes.push(node);
                 }
             }
@@ -813,7 +807,7 @@ fn lower_hline(style: HLineStyle) -> FlowNode {
 
 fn lower_image(
     spec: ImageSpec,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
 ) -> Option<FlowNode> {
@@ -825,8 +819,8 @@ fn lower_image(
             align,
         },
     } = spec;
-    let image = image_for(image, images)?;
-    if image.doc != doc {
+    let image = image_for(&image, images)?;
+    if &image.doc != doc {
         errors.record(Error::from(ErrorKind::UnknownImage {
             id: image.decoded.id.as_u32(),
         }));
@@ -1252,7 +1246,7 @@ fn band_content(
         Ok(lower_band(
             &spec,
             info,
-            doc,
+            &doc,
             &images,
             BandImageErrors::AlreadyValidated,
             errors,
@@ -1305,7 +1299,7 @@ fn dynamic_band<K: FontKey + 'static>(
         Ok(lower_band(
             &owned,
             info,
-            doc,
+            &doc,
             &images,
             BandImageErrors::PerPage,
             errors,
@@ -1353,7 +1347,7 @@ impl PageFacts {
 fn lower_band(
     spec: &OwnedBand,
     info: &PageInfo,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
@@ -1598,14 +1592,14 @@ fn layer_content(
         return None;
     }
     Some(Box::new(move |info, errors| {
-        Ok(lower_layer_marks(&marks, info, doc, &images, errors))
+        Ok(lower_layer_marks(&marks, info, &doc, &images, errors))
     }))
 }
 
 fn lower_layer_marks(
     marks: &[OwnedLayerMark],
     info: &PageInfo,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     errors: &mut ErrorBag,
 ) -> Vec<LayerItem> {
@@ -1631,7 +1625,7 @@ fn lower_layer_marks(
 fn lower_band_marks(
     marks: &[OwnedMark],
     page: &PageFacts,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
@@ -1647,7 +1641,7 @@ fn lower_mark(
     items: &mut Vec<LayerItem>,
     mark: &OwnedMark,
     page: &PageFacts,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
@@ -1682,7 +1676,7 @@ fn lower_rotated(
     pivot: Point,
     shapes: &[OwnedShape],
     page: &PageFacts,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
@@ -1704,7 +1698,7 @@ fn lower_rotated(
 fn push_owned_shape(
     items: &mut Vec<LayerItem>,
     page: &PageFacts,
-    doc: DocToken,
+    doc: &DocToken,
     images: &LoweredImages,
     image_errors: BandImageErrors,
     errors: &mut ErrorBag,
@@ -1745,8 +1739,8 @@ fn push_owned_shape(
                 style: *style,
             }));
         }
-        OwnedShape::Image { image, rect } => match image_for(*image, images) {
-            Some(image) if image.doc == doc => {
+        OwnedShape::Image { image, rect } => match image_for(image, images) {
+            Some(image) if &image.doc == doc => {
                 items.push(LayerItem::Image {
                     image: image.decoded,
                     rect: *rect,
@@ -1833,11 +1827,11 @@ fn validate_band_marks<K>(marks: &[Mark<K>], images: &LoweredImages, errors: &mu
 
 fn validate_mark<K>(mark: &Mark<K>, images: &LoweredImages, errors: &mut ErrorBag) {
     match mark {
-        Mark::Shape(LayerShape::Image { image, .. }) => reject_image(*image, images, errors),
+        Mark::Shape(LayerShape::Image { image, .. }) => reject_image(image, images, errors),
         Mark::Rotated { shapes, .. } => {
             for shape in shapes {
                 if let LayerShape::Image { image, .. } = shape {
-                    reject_image(*image, images, errors);
+                    reject_image(image, images, errors);
                 }
             }
         }
@@ -1877,7 +1871,7 @@ fn validate_blocks<K>(blocks: &[Block<K>], images: &LoweredImages, errors: &mut 
                     validate_blocks(&item.children, images, errors);
                 }
             }
-            Block::Image(spec) => reject_image(spec.image, images, errors),
+            Block::Image(spec) => reject_image(&spec.image, images, errors),
             Block::Paragraph(_)
             | Block::Spacer(_)
             | Block::PageBreak
@@ -1893,24 +1887,27 @@ fn validate_marks<K>(marks: &[LayerMark<K>], images: &LoweredImages, errors: &mu
     }
 }
 
-fn reject_image(image: ImageRef, images: &LoweredImages, errors: &mut ErrorBag) {
+fn reject_image(image: &ImageRef, images: &LoweredImages, errors: &mut ErrorBag) {
     if unknown_image(image, images) {
         errors.record(Error::from(ErrorKind::UnknownImage { id: image.index }));
     }
 }
 
-fn image_for(image: ImageRef, images: &LoweredImages) -> Option<HeldImage> {
+fn image_for(image: &ImageRef, images: &LoweredImages) -> Option<HeldImage> {
     if unknown_image(image, images) {
         return None;
     }
     images
         .handles
         .get(image.index as usize)
-        .and_then(|slot| *slot)
+        .as_ref()
+        .and_then(|slot| slot.as_ref())
+        .cloned()
 }
 
-fn unknown_image(image: ImageRef, images: &LoweredImages) -> bool {
-    image.resources != images.resources || images.handles.get(image.index as usize).is_none()
+fn unknown_image(image: &ImageRef, images: &LoweredImages) -> bool {
+    !image.resources.is_same_resources(&images.resources)
+        || images.handles.get(image.index as usize).is_none()
 }
 
 #[cfg(test)]

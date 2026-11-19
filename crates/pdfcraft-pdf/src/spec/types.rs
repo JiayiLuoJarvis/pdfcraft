@@ -1,7 +1,7 @@
 //! Public value types used by [`super::DocumentSpec`].
 
 use super::{MarkerAlign, MarkerFormat};
-use crate::canvas::{DocumentInfo, ImageRegistry, OutlineItem, RecordedPage, RecordingCanvas};
+use crate::canvas::{DocumentInfo, OutlineItem, RecordedPage, RecordingCanvas};
 use crate::error::{ColumnWidthsReason, Error, ErrorKind, Fallible};
 use crate::fonts::FontStore;
 use crate::geom::{Length, Positive};
@@ -161,7 +161,7 @@ pub struct Rendered {
         not(feature = "backend-krilla"),
         expect(dead_code, reason = "only to_pdf reads images when the backend is on")
     )]
-    pub(crate) images: Box<dyn ImageRegistry>,
+    pub(crate) images: crate::ImageStorage,
     #[cfg_attr(
         not(feature = "backend-krilla"),
         expect(dead_code, reason = "only to_pdf reads info when the backend is on")

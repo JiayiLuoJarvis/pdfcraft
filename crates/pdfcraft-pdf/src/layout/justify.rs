@@ -53,6 +53,9 @@ impl StretchInventory {
             }
         }
         for index in 0..roles.len().saturating_sub(1) {
+            let (Some(&r1), Some(&r2)) = (roles.get(index), roles.get(index + 1)) else {
+                continue;
+            };
             let (
                 DrawRole::Ink {
                     stretchable: left_ok,
@@ -60,7 +63,7 @@ impl StretchInventory {
                 DrawRole::Ink {
                     stretchable: right_ok,
                 },
-            ) = (roles[index], roles[index + 1])
+            ) = (r1, r2)
             else {
                 continue;
             };
@@ -195,7 +198,9 @@ impl StretchPlan {
         let (space_adds, r2) = water_fill(&caps, r);
         for (slot, add) in inventory.spaces.iter().zip(&space_adds) {
             if *add > 0.0 {
-                adds[slot.draw_index] += *add;
+                if let Some(target) = adds.get_mut(slot.draw_index) {
+                    *target += *add;
+                }
                 last_positive = Some(slot.draw_index);
             }
         }
@@ -211,18 +216,27 @@ impl StretchPlan {
             let equal = r / m as f32;
             let mut allocated = 0.0f32;
             for gap in inventory.gaps.iter().take(m - 1) {
-                adds[gap.left_draw_index] += equal;
+                if let Some(target) = adds.get_mut(gap.left_draw_index) {
+                    *target += equal;
+                }
                 allocated += equal;
             }
-            let last = inventory.gaps[m - 1].left_draw_index;
-            let residual = r - allocated;
-            adds[last] += residual;
+            if let Some(last_gap) = inventory.gaps.get(m - 1) {
+                let last = last_gap.left_draw_index;
+                let residual = r - allocated;
+                if let Some(target) = adds.get_mut(last) {
+                    *target += residual;
+                }
+            }
         } else if r > 0.0 {
             // Phase-1 float dust only. Underfill past caps stays as trailing slack.
             if let Some(index) = last_positive {
                 if let Some(slot) = inventory.spaces.iter().find(|s| s.draw_index == index) {
-                    let room = (slot.cap.as_pt() - adds[index]).max(0.0);
-                    adds[index] += r.min(room);
+                    let cur = adds.get(index).copied().unwrap_or(0.0);
+                    let room = (slot.cap.as_pt() - cur).max(0.0);
+                    if let Some(target) = adds.get_mut(index) {
+                        *target += r.min(room);
+                    }
                 }
             }
         }
@@ -288,7 +302,7 @@ pub(crate) fn water_fill(caps: &[f32], mut remainder: f32) -> (Vec<f32>, f32) {
         let open: Vec<usize> = adds
             .iter()
             .enumerate()
-            .filter(|(index, add)| **add < caps[*index])
+            .filter(|(index, add)| caps.get(*index).is_some_and(|cap| **add < *cap))
             .map(|(index, _)| index)
             .collect();
         if open.is_empty() {
@@ -302,10 +316,14 @@ pub(crate) fn water_fill(caps: &[f32], mut remainder: f32) -> (Vec<f32>, f32) {
         let share = remainder / open.len() as f32;
         let mut progressed = false;
         for index in open {
-            let room = caps[index] - adds[index];
+            let cap_val = caps.get(index).copied().unwrap_or(0.0);
+            let add_val = adds.get(index).copied().unwrap_or(0.0);
+            let room = cap_val - add_val;
             let delta = share.min(room);
             if delta > 0.0 {
-                adds[index] += delta;
+                if let Some(target) = adds.get_mut(index) {
+                    *target += delta;
+                }
                 remainder -= delta;
                 progressed = true;
             }
@@ -324,7 +342,9 @@ pub(crate) fn build_roles<T>(groups: &[MeasuredInline], segs: &[Seg<T>]) -> Vec<
         match *seg {
             Seg::Blank { .. } => roles.push(DrawRole::Blank),
             Seg::Glyphs { group, start, end } => {
-                let measured = &groups[group];
+                let Some(measured) = groups.get(group) else {
+                    continue;
+                };
                 let tape = measured.text.clustered();
                 for cluster_index in start.cluster..end.cluster {
                     let cluster = tape.cluster(cluster_index);

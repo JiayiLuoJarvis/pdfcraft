@@ -53,9 +53,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         italic: None,
         bold_italic: None,
     }));
-    let logo = resources.add_image(LOGO.to_vec(), ImageFormat::Png);
-    let mark = resources.add_image(MARK.to_vec(), ImageFormat::Png);
-    let diamond = resources.add_image(DIAMOND.to_vec(), ImageFormat::Png);
+    let logo = resources.add_image(LOGO.to_vec(), ImageFormat::Png)?;
+    let mark = resources.add_image(MARK.to_vec(), ImageFormat::Png)?;
+    let diamond = resources.add_image(DIAMOND.to_vec(), ImageFormat::Png)?;
 
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
@@ -109,7 +109,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }),
                 marks: Vec::new(),
             })),
-            body: bill_body(logo, mark, diamond)?,
+            body: bill_body(logo, mark, &diamond)?,
             ..SectionSpec::default()
         }],
     })?;
@@ -203,7 +203,7 @@ fn para_cell(text: &str, size: f32, color: Color) -> Result<CellSpec<()>> {
     })
 }
 
-fn bill_body(logo: ImageRef, mark: ImageRef, diamond: ImageRef) -> Result<Vec<Block<()>>> {
+fn bill_body(logo: ImageRef, mark: ImageRef, diamond: &ImageRef) -> Result<Vec<Block<()>>> {
     let mut body = letterhead(logo, mark)?;
     body.extend(bill_to()?);
     body.extend(service_table()?);
@@ -357,7 +357,7 @@ fn service_table() -> Result<Vec<Block<()>>> {
     ])
 }
 
-fn payment(diamond: ImageRef) -> Result<Block<()>> {
+fn payment(diamond: &ImageRef) -> Result<Block<()>> {
     let rows = [
         (
             "Beneficiary Bank Name：Hang Seng Bank Ltd",
@@ -380,7 +380,7 @@ fn payment(diamond: ImageRef) -> Result<Block<()>> {
             children: vec![
                 CellSpec {
                     children: vec![Block::Image(ImageSpec {
-                        image: diamond,
+                        image: diamond.clone(),
                         style: ImageStyle {
                             width: Some(pos(8.0)?),
                             height: None,

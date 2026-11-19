@@ -1297,7 +1297,9 @@ fn marked_band(marks: Vec<Mark<()>>) -> BandSpec<()> {
 #[test]
 fn footer_image_mark_lands_in_band_coordinates() {
     let mut resources = Resources::default();
-    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         resources,
@@ -1593,11 +1595,13 @@ fn from_fn_odd_even_marks() {
         return;
     }
     let mut resources = font_resources();
-    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let footer = BandFn::from_fn(move |query| {
         let marks = if query.number.get() % 2 == 1 {
             vec![Mark::Shape(LayerShape::Image {
-                image,
+                image: image.clone(),
                 rect: Rect::try_pt(220.0, 5.0, 20.0, 20.0).unwrap(),
             })]
         } else {
@@ -1625,7 +1629,7 @@ fn from_fn_odd_even_marks() {
                     Color::rgb(120, 120, 120),
                 ),
                 Mark::Shape(LayerShape::Image {
-                    image,
+                    image: image.clone(),
                     rect: Rect::try_pt(220.0, 5.0, 55.0, 55.0).unwrap(),
                 }),
             ]
@@ -1662,7 +1666,9 @@ fn from_fn_odd_even_marks() {
 fn fixed_band_foreign_image_reports_once_per_section() {
     let stolen = {
         let mut other = Resources::<()>::default();
-        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        other
+            .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+            .unwrap()
     };
     let err = render(
         PageSize::A4,
@@ -1697,7 +1703,9 @@ fn fixed_band_foreign_image_reports_once_per_section() {
 fn from_fn_band_foreign_image_reports_per_page() {
     let stolen = {
         let mut other = Resources::<()>::default();
-        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        other
+            .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+            .unwrap()
     };
     let err = render(
         PageSize::A4,
@@ -1709,7 +1717,7 @@ fn from_fn_band_foreign_image_reports_per_page() {
             },
             footer: Some(BandFn::from_fn(move |_| {
                 Ok(Some(marked_band(vec![Mark::Shape(LayerShape::Image {
-                    image: stolen,
+                    image: stolen.clone(),
                     rect: Rect::try_pt(10.0, 10.0, 10.0, 10.0).unwrap(),
                 })])))
             })),
@@ -3151,7 +3159,9 @@ fn mixed_bold_and_indent_write_a_pdf() {
 #[test]
 fn load_image_without_decoder_is_an_image_error() {
     let mut resources = Resources::default();
-    let _image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let _image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let err = render(PageSize::A4, resources, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -3197,7 +3207,9 @@ fn rect_bits(rect: Rect) -> (u32, u32, u32, u32) {
 #[test]
 fn image_only_document_needs_no_font() {
     let mut resources = Resources::default();
-    let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let logo = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::custom(Size::try_pt(200.0, 400.0).unwrap()),
         resources,
@@ -3223,7 +3235,9 @@ fn cell_image_and_last_page_seal_share_coordinates() {
         return;
     }
     let mut resources = font_resources();
-    let seal = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let seal = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::custom(Size::try_pt(200.0, 80.0).unwrap()),
         resources,
@@ -3234,7 +3248,7 @@ fn cell_image_and_last_page_seal_share_coordinates() {
                         children: vec![
                             text_cell("A"),
                             cell(vec![Block::Image(ImageSpec {
-                                image: seal,
+                                image: seal.clone(),
                                 style: ImageStyle {
                                     width: Some(pos(10.0)),
                                     height: None,
@@ -3280,8 +3294,10 @@ fn cell_image_and_last_page_seal_share_coordinates() {
 #[test]
 fn three_pages_of_one_image_share_one_xobject() {
     let mut resources = Resources::default();
-    let seal = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
-    let image = || image_block(seal, None, Alignment::Start);
+    let seal = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
+    let image = || image_block(seal.clone(), None, Alignment::Start);
     let rendered = render(
         PageSize::custom(Size::try_pt(120.0, 40.0).unwrap()),
         resources,
@@ -3305,7 +3321,9 @@ fn three_pages_of_one_image_share_one_xobject() {
 #[test]
 fn garbage_empty_and_foreign_handles_are_image_errors() {
     let mut garbage = Resources::default();
-    let _image = garbage.add_image(b"not a png".to_vec(), ImageFormat::Png);
+    let _image = garbage
+        .add_image(b"not a png".to_vec(), ImageFormat::Png)
+        .unwrap();
     let garbage = render(PageSize::A4, garbage, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -3315,7 +3333,7 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
     ));
 
     let mut empty = Resources::default();
-    let _empty = empty.add_image(Vec::new(), ImageFormat::Png);
+    let _empty = empty.add_image(Vec::new(), ImageFormat::Png).unwrap();
     let empty = render(PageSize::A4, empty, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -3325,7 +3343,9 @@ fn garbage_empty_and_foreign_handles_are_image_errors() {
 
     let stolen = {
         let mut other = Resources::<()>::default();
-        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        other
+            .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+            .unwrap()
     };
     let foreign = render(
         PageSize::A4,
@@ -3347,7 +3367,9 @@ fn list_item_image_is_drawn_at_the_body_indent() {
         return;
     }
     let mut resources = font_resources();
-    let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let logo = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::A4,
         resources,
@@ -3377,7 +3399,9 @@ fn list_item_image_is_drawn_at_the_body_indent() {
 #[test]
 fn overwide_image_fails() {
     let mut wide_resources = Resources::default();
-    let wide_logo = wide_resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let wide_logo = wide_resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let wide = render(
         PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
         wide_resources,
@@ -3403,7 +3427,9 @@ fn overwide_image_fails() {
 #[test]
 fn damaged_png_pixels_fail_at_load() {
     let mut resources = Resources::default();
-    let _image = resources.add_image(BAD_IDAT.to_vec(), ImageFormat::Png);
+    let _image = resources
+        .add_image(BAD_IDAT.to_vec(), ImageFormat::Png)
+        .unwrap();
     let err = render(PageSize::A4, resources, vec![SectionSpec::default()])
         .err()
         .unwrap();
@@ -3920,7 +3946,9 @@ fn rotated_layer_image_keeps_pre_rotation_rect() {
         return;
     }
     let mut resources = font_resources();
-    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::custom(Size::try_pt(100.0, 100.0).unwrap()),
         resources,
@@ -5835,7 +5863,9 @@ fn cell_add_matches_sugar() {
 #[test]
 fn cell_add_image_matches_sugar() {
     let mut resources = Resources::default();
-    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let pages = render(
         PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
         resources,
@@ -5868,7 +5898,9 @@ fn cell_add_image_matches_sugar() {
 #[test]
 fn table_build_cell_image_paints_when_added() {
     let mut resources = Resources::default();
-    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::custom(Size::try_pt(200.0, 80.0).unwrap()),
         resources,
@@ -6184,7 +6216,9 @@ fn cell_allows_image_canvas_and_a_list() {
         return;
     }
     let mut resources = font_resources();
-    let image = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let image = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let page = render(
         PageSize::A4,
         resources,
@@ -6240,7 +6274,9 @@ fn cell_list_item_may_hold_an_image() {
         return;
     }
     let mut resources = font_resources();
-    let logo = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let logo = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .unwrap();
     let rendered = render(
         PageSize::A4,
         resources,
@@ -7204,7 +7240,9 @@ fn cell_inset_list_item_columns_report_the_table_cell() {
 fn inset_unknown_image_is_reported() {
     let stolen = {
         let mut other = Resources::<()>::default();
-        other.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        other
+            .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+            .unwrap()
     };
     let err = render(
         PageSize::A4,

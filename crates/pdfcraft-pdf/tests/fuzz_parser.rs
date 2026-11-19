@@ -121,7 +121,7 @@ fn read_seed(name: &str) -> Vec<u8> {
 /// bytes are the only untrusted input.
 fn lay_out(png: Vec<u8>) -> pdfcraft_pdf::Result<pdfcraft_pdf::Rendered> {
     let mut resources: Resources<()> = Resources::default();
-    let image = resources.add_image(png, ImageFormat::Png);
+    let image = resources.add_image(png, ImageFormat::Png)?;
     layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources,

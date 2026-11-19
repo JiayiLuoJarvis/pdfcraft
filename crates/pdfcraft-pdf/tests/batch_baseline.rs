@@ -118,7 +118,7 @@ fn letter_doc(copies: usize) -> Result<Rendered> {
             ],
             ..TableSpec::default()
         }));
-        let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+        let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)?;
         body.push(Block::Image(ImageSpec {
             image: mark,
             style: ImageStyle {

@@ -39,7 +39,7 @@ use std::fmt;
 use std::num::{NonZeroU16, NonZeroU32};
 
 use crate::canvas::ImageFormat;
-use crate::error::Error;
+use crate::error::{Error, ErrorKind, LimitKind};
 use crate::geom::{
     Angle, Color, Finite, Ink, Length, Margins, NonNegative, PageSize, Path, Pen, Point, Positive,
     Rect, Size,
@@ -98,7 +98,7 @@ impl<K> Default for Resources<K> {
     fn default() -> Self {
         Self {
             fonts: FontRegistry::new(),
-            token: DocToken::next(),
+            token: DocToken::new(),
             images: Vec::new(),
         }
     }
@@ -119,15 +119,33 @@ impl<K> Resources<K> {
     ///
     /// The bytes are not decoded here. A malformed image, an unsupported format,
     /// or a [`Limits`] cap is reported by [`layout_spec`] as
-    /// [`ErrorKind::Image`](crate::ErrorKind::Image) or
-    /// [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded).
-    pub fn add_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> ImageRef {
-        let index = u32::try_from(self.images.len()).unwrap_or(u32::MAX);
-        self.images.push(ImageResource { bytes, format });
-        ImageRef {
-            resources: self.token,
-            index,
+    /// [`ErrorKind::Image`] or
+    /// [`ErrorKind::LimitExceeded`].
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::LimitExceeded`] when the number of images exceeds [`u32::MAX`].
+    pub fn add_image(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Result<ImageRef, Error> {
+        let max = u32::MAX as usize;
+        if self.images.len() >= max {
+            return Err(Error::from(ErrorKind::LimitExceeded {
+                kind: LimitKind::Images,
+                value: (self.images.len() + 1) as u64,
+                max: max as u64,
+            }));
         }
+        let index = u32::try_from(self.images.len()).map_err(|_| {
+            Error::from(ErrorKind::LimitExceeded {
+                kind: LimitKind::Images,
+                value: (self.images.len() + 1) as u64,
+                max: max as u64,
+            })
+        })?;
+        self.images.push(ImageResource { bytes, format });
+        Ok(ImageRef {
+            resources: self.token.clone(),
+            index,
+        })
     }
 }
 
@@ -138,7 +156,7 @@ struct ImageResource {
 }
 
 /// A specification-local image handle returned by [`Resources::add_image`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct ImageRef {
     resources: DocToken,
@@ -609,7 +627,7 @@ impl Default for TableBorder {
 ///
 /// `children` are ordinary [`Block`]s, top to bottom. Columns, nested tables,
 /// keep-together groups, and page breaks fail at lowering with
-/// [`ErrorKind::InvalidCellContent`](crate::ErrorKind::InvalidCellContent) and
+/// [`ErrorKind::InvalidCellContent`] and
 /// container `"table cell"`. [`Block::Styled`] is allowed. It is applied while
 /// lowering and is not a node the cell matrix sees.
 #[derive(Debug)]
@@ -868,7 +886,7 @@ pub enum CanvasMark<K> {
 }
 
 /// A flow image and its display box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct ImageSpec {
     /// Image resource.

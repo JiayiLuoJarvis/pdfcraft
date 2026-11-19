@@ -199,14 +199,14 @@ fn foreign_cell_image_ref_is_unknown() {
         italic: None,
         bold_italic: None,
     }));
-    let foreign = other.add_image(png.to_vec(), ImageFormat::Png);
+    let foreign = other.add_image(png.to_vec(), ImageFormat::Png).unwrap();
     let mut dest = Resources::with_fonts(FontRegistry::single(FontFamily {
         regular: FontFace::new(font_bytes(), 0),
         bold: None,
         italic: None,
         bold_italic: None,
     }));
-    let _owned = dest.add_image(png.to_vec(), ImageFormat::Png);
+    let _owned = dest.add_image(png.to_vec(), ImageFormat::Png).unwrap();
     let err = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: dest,
@@ -237,7 +237,7 @@ fn local_cell_image_ref_draws() {
         italic: None,
         bold_italic: None,
     }));
-    let owned = dest.add_image(png.to_vec(), ImageFormat::Png);
+    let owned = dest.add_image(png.to_vec(), ImageFormat::Png).unwrap();
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources: dest,

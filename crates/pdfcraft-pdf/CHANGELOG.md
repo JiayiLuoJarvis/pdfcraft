@@ -9,6 +9,22 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-19
+
+Engineering standard hardening per `docs/pdfcraft-pdf-hardening-spec.md`.
+
+### Breaking
+
+- `Resources::add_image` returns `Result<ImageRef, Error>` instead of `ImageRef`. If image count exceeds $2^{32}-1$, it returns `ErrorKind::LimitExceeded` with `LimitKind::Images`.
+- `ImageRef` and `ImageSpec` no longer implement `Copy` (`Clone` is retained).
+
+### Changed
+
+- Eliminated `DocToken` global `AtomicU32` counter; replaced with heap-isolated `Arc<()>` and `Arc::ptr_eq` pointer equality (ARC-5).
+- Eliminated `Box<dyn Any>` downcast in `backend/mod.rs` by introducing statically typed `ImageStorage` (ARC-6).
+- Eliminated all 79 raw indexing and slicing operations in production code across layout, text, error, and canvas modules (PAN-8).
+- Enforced `#![deny(clippy::indexing_slicing)]` on the crate root.
+
 ## [0.6.0] - 2026-11-04
 
 Shape refactor (proposal §12.7). Public value fields split into reusable

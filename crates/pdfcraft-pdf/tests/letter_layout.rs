@@ -59,7 +59,9 @@ fn letter() -> Option<Result<pdfcraft_pdf::Rendered>> {
         italic: None,
         bold_italic: None,
     }));
-    let mark = resources.add_image(ONE_PIXEL.to_vec(), ImageFormat::Png);
+    let mark = resources
+        .add_image(ONE_PIXEL.to_vec(), ImageFormat::Png)
+        .ok()?;
     let margin = NonNegative::pt(MARGIN).ok()?;
     Some(layout_spec(DocumentSpec {
         page_size: PageSize::A4,

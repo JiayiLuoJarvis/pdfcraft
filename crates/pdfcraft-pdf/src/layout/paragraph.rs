@@ -201,7 +201,16 @@ impl ParagraphNode {
                 first: first_width,
                 rest: width,
             },
-            |group, cluster| prepared.groups[group].ink_width(cluster.glyph_range()),
+            |group, cluster| {
+                if let Some(g) = prepared.groups.get(group) {
+                    g.ink_width(cluster.glyph_range())
+                } else {
+                    Ok(line_break::InkWidth {
+                        body: NonNegative::ZERO,
+                        gap: Finite::ZERO,
+                    })
+                }
+            },
         )?;
 
         let mut lines = Vec::with_capacity(broken.len());
@@ -280,7 +289,9 @@ impl ParagraphNode {
         }
 
         let tops = line_tops(&self.lines);
-        let max_lines = tops[1..]
+        let max_lines = tops
+            .get(1..)
+            .unwrap_or(&[])
             .iter()
             .take_while(|&&bottom| bottom <= avail.height.as_pt())
             .count();
@@ -289,14 +300,14 @@ impl ParagraphNode {
         }
 
         if max_lines >= self.lines.len() {
-            let height = Length::from_trusted_pt(tops[self.lines.len()]);
+            let height = Length::from_trusted_pt(tops.last().copied().unwrap_or(0.0));
             let fragment = fragment_from_lines(&self.lines, self.spacing_after)?;
             return Ok(Split::Fit { height, fragment });
         }
 
         let mut lines = self.lines;
         let tail_lines = lines.split_off(max_lines);
-        let height = Length::from_trusted_pt(tops[max_lines]);
+        let height = Length::from_trusted_pt(tops.get(max_lines).copied().unwrap_or(0.0));
         let head = fragment_from_lines(&lines, NonNegative::ZERO)?;
         let tail = ParagraphNode {
             lines: tail_lines,
@@ -322,7 +333,7 @@ fn line_tops(lines: &[LineBox]) -> Vec<f32> {
         let count = match run {
             Some((height, count)) if height == line.height && count < u16::MAX => count + 1,
             _ => {
-                base = tops[tops.len() - 1];
+                base = tops.last().copied().unwrap_or(0.0);
                 1
             }
         };
@@ -339,7 +350,7 @@ fn fragment_from_lines(lines: &[LineBox], spacing_after: Length<NonNegative>) ->
         line_run::append_commands(&mut commands, &line.pieces, 0.0, *top, line.height.as_pt())?;
     }
     Ok(Fragment {
-        height: Length::from_trusted_pt(tops[lines.len()]),
+        height: Length::from_trusted_pt(tops.last().copied().unwrap_or(0.0)),
         spacing_after,
         commands,
         anchors: Vec::new(),
@@ -455,7 +466,9 @@ fn glyph_extent(
         let Seg::Glyphs { group, start, end } = *seg else {
             continue;
         };
-        let group = &groups[group];
+        let Some(group) = groups.get(group) else {
+            continue;
+        };
         for range in seg_clusters(group, start, end) {
             let Some(style) = group.style_of(range) else {
                 continue;
@@ -506,8 +519,10 @@ fn place_line(
     for seg in line.segs() {
         match *seg {
             Seg::Glyphs { group, start, end } => {
-                for range in seg_clusters(&groups[group], start, end) {
-                    parts.push(WidthPart::Ink(groups[group].ink_width(range)?));
+                if let Some(group_inline) = groups.get(group) {
+                    for range in seg_clusters(group_inline, start, end) {
+                        parts.push(WidthPart::Ink(group_inline.ink_width(range)?));
+                    }
                 }
             }
             Seg::Blank { width, .. } => parts.push(WidthPart::Blank(width)),
@@ -542,14 +557,19 @@ fn place_line(
     for seg in line.segs() {
         match *seg {
             Seg::Glyphs { group, start, end } => {
-                let clusters: Vec<_> = seg_clusters(&groups[group], start, end).collect();
+                let Some(group_inline) = groups.get(group) else {
+                    continue;
+                };
+                let clusters: Vec<_> = seg_clusters(group_inline, start, end).collect();
                 let count = clusters.len();
-                painter.text(&groups[group], &clusters, &draws[at..at + count])?;
+                let draw_slice = draws.get(at..at + count).unwrap_or(&[]);
+                painter.text(group_inline, &clusters, draw_slice)?;
                 at += count;
             }
             Seg::Blank { payload, .. } => {
+                let blank_draw = draws.get(at).copied().unwrap_or(NonNegative::ZERO);
                 painter.blank(
-                    draws[at],
+                    blank_draw,
                     BlankStroke {
                         offset: payload.baseline_offset.as_pt(),
                         color: payload.color.unwrap_or(style.color),

@@ -55,7 +55,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         italic: None,
         bold_italic: None,
     }));
-    let logo = resources.add_image(PIXEL.to_vec(), ImageFormat::Png);
+    let logo = resources.add_image(PIXEL.to_vec(), ImageFormat::Png)?;
     let rendered = layout_spec(pdfcraft_pdf::DocumentSpec {
         page_size: PageSize::A4,
         resources,
@@ -643,7 +643,7 @@ fn closing_blocks() -> Result<Vec<Block<()>>> {
 }
 
 fn hello_body(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Vec<Block<()>>> {
-    let mut body = title_blocks(logo)?;
+    let mut body = title_blocks(logo.clone())?;
     body.push(paragraph(
         vec![bold("Shipment table")],
         Alignment::Start,

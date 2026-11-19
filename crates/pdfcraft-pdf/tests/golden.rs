@@ -382,7 +382,7 @@ fn golden_glyph_runs_render_exact_text_and_font_header() {
 fn golden_image_ops_use_dense_slots() {
     let bytes = include_bytes!("fixtures/one-pixel.png").to_vec();
     let mut resources = Resources::<()>::default();
-    let image = resources.add_image(bytes, ImageFormat::Png);
+    let image = resources.add_image(bytes, ImageFormat::Png).unwrap();
     let rendered = layout_spec(DocumentSpec {
         page_size: PageSize::A4,
         resources,

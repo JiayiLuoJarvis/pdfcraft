@@ -914,3 +914,10 @@ fn a_styled_paragraph_keeps_the_marker_on_its_first_line() {
     };
     assert_eq!(marker, text);
 }
+
+#[test]
+fn add_image_returns_ok_handle() {
+    let mut res = Resources::<()>::default();
+    let img = res.add_image(vec![1, 2, 3], crate::canvas::ImageFormat::Png);
+    assert!(img.is_ok());
+}

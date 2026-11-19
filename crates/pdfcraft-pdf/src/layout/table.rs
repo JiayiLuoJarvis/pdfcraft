@@ -143,7 +143,13 @@ impl<N: Flowable> TableNode<N> {
             let row_limit = if row < header_rows { header_rows } else { rows };
             let mut col = 0;
             for cell in row_cells {
-                while col < cols && taken[row][col] {
+                while col < cols
+                    && taken
+                        .get(row)
+                        .and_then(|r| r.get(col))
+                        .copied()
+                        .unwrap_or(false)
+                {
                     col += 1;
                 }
                 let col_span = usize::from(cell.col_span.get());
@@ -156,15 +162,19 @@ impl<N: Flowable> TableNode<N> {
                     };
                     return Err(Error::from(ErrorKind::InvalidCellSpan(reason)).in_cell(row, col));
                 }
-                for (r, slots) in taken[row..row + row_span].iter_mut().enumerate() {
-                    for (c, slot) in slots[col..col + col_span].iter_mut().enumerate() {
-                        if *slot {
-                            return Err(Error::from(ErrorKind::InvalidCellSpan(
-                                CellSpanReason::Overlap,
-                            ))
-                            .in_cell(row + r, col + c));
+                if let Some(row_slice) = taken.get_mut(row..row + row_span) {
+                    for (r, slots) in row_slice.iter_mut().enumerate() {
+                        if let Some(col_slice) = slots.get_mut(col..col + col_span) {
+                            for (c, slot) in col_slice.iter_mut().enumerate() {
+                                if *slot {
+                                    return Err(Error::from(ErrorKind::InvalidCellSpan(
+                                        CellSpanReason::Overlap,
+                                    ))
+                                    .in_cell(row + r, col + c));
+                                }
+                                *slot = true;
+                            }
                         }
-                        *slot = true;
                     }
                 }
                 cells.push(PlacedCell {
@@ -254,41 +264,7 @@ fn measure<N: Flowable>(
     }
     let inner_full = Length::<Positive>::from_trusted_pt(inner_full_pt);
 
-    let mut laid = Vec::with_capacity(grid.cells.len());
-    let mut row_h = vec![NonNegative::ZERO; grid.rows];
-    for PlacedCell {
-        span: cell,
-        body,
-        fill,
-    } in grid.cells
-    {
-        let inner_w = xs[cell.col + cell.cols].as_pt() - xs[cell.col].as_pt() - 2.0 * inset;
-        if inner_w <= 0.0 {
-            return Err(Error::from(ErrorKind::ColumnWidths {
-                reason: ColumnWidthsReason::ContentWidth,
-            })
-            .in_cell(cell.row, cell.col));
-        }
-        let frame = Frame {
-            width: Length::from_trusted_pt(inner_w),
-            height: inner_full.into(),
-            full_height: inner_full,
-        };
-        let (h, content) = ctx.located(
-            &crate::error::Location::at_cell(cell.row, cell.col),
-            |ctx| frame::natural_height(body.into_node(), ctx, frame),
-        )?;
-        let cell_h = Length::<NonNegative>::from_trusted_pt(h.as_pt() + 2.0 * inset);
-        if cell.rows == 1 {
-            row_h[cell.row] = row_h[cell.row].max(cell_h);
-        }
-        laid.push(LaidCell {
-            span: cell,
-            height: cell_h,
-            content,
-            fill,
-        });
-    }
+    let (laid, row_h) = lay_cells(grid.cells, grid.rows, &xs, inset, inner_full, ctx)?;
     let col_x: Vec<f32> = xs.iter().map(|value| value.as_pt()).collect();
     let row_y = row_offsets(row_h, &laid);
     let groups = row_groups(&laid, grid.header_rows, grid.rows);
@@ -344,6 +320,56 @@ fn measure<N: Flowable>(
     })
 }
 
+fn lay_cells<N: Flowable>(
+    cells: Vec<PlacedCell<N>>,
+    rows: usize,
+    xs: &[Length<NonNegative>],
+    inset: f32,
+    inner_full: Length<Positive>,
+    ctx: &mut LayoutCtx<'_>,
+) -> Result<(Vec<LaidCell>, Vec<Length<NonNegative>>)> {
+    let mut laid = Vec::with_capacity(cells.len());
+    let mut row_h = vec![NonNegative::ZERO; rows];
+    for PlacedCell {
+        span: cell,
+        body,
+        fill,
+    } in cells
+    {
+        let x_start = xs.get(cell.col).copied().unwrap_or(NonNegative::ZERO);
+        let x_end = xs.get(cell.col + cell.cols).copied().unwrap_or(x_start);
+        let inner_w = x_end.as_pt() - x_start.as_pt() - 2.0 * inset;
+        if inner_w <= 0.0 {
+            return Err(Error::from(ErrorKind::ColumnWidths {
+                reason: ColumnWidthsReason::ContentWidth,
+            })
+            .in_cell(cell.row, cell.col));
+        }
+        let frame = Frame {
+            width: Length::from_trusted_pt(inner_w),
+            height: inner_full.into(),
+            full_height: inner_full,
+        };
+        let (cell_content_h, content) = ctx.located(
+            &crate::error::Location::at_cell(cell.row, cell.col),
+            |ctx| frame::natural_height(body.into_node(), ctx, frame),
+        )?;
+        let cell_h = Length::<NonNegative>::from_trusted_pt(cell_content_h.as_pt() + 2.0 * inset);
+        if cell.rows == 1 {
+            if let Some(entry) = row_h.get_mut(cell.row) {
+                *entry = (*entry).max(cell_h);
+            }
+        }
+        laid.push(LaidCell {
+            span: cell,
+            height: cell_h,
+            content,
+            fill,
+        });
+    }
+    Ok((laid, row_h))
+}
+
 /// Shared grid geometry used while turning measured cells into draw commands.
 struct GridPaint<'a> {
     col_x: &'a [f32],
@@ -358,12 +384,16 @@ impl GridPaint<'_> {
         let mut fragments: Vec<Fragment> = self
             .groups
             .iter()
-            .map(|rows| Fragment {
-                height: Length::from_trusted_pt(self.row_y[rows.end] - self.row_y[rows.start]),
-                spacing_after: NonNegative::ZERO,
-                commands: Vec::new(),
-                anchors: Vec::new(),
-                first_baseline: None,
+            .map(|rows| {
+                let y_start = self.row_y.get(rows.start).copied().unwrap_or(0.0);
+                let y_end = self.row_y.get(rows.end).copied().unwrap_or(y_start);
+                Fragment {
+                    height: Length::from_trusted_pt(y_end - y_start),
+                    spacing_after: NonNegative::ZERO,
+                    commands: Vec::new(),
+                    anchors: Vec::new(),
+                    first_baseline: None,
+                }
             })
             .collect();
         for LaidCell {
@@ -382,11 +412,25 @@ impl GridPaint<'_> {
                 .iter()
                 .position(|rows| rows.contains(&cell.row))
                 .expect("every row belongs to a group");
-            let x = self.col_x[cell.col];
-            let y = self.row_y[cell.row] - self.row_y[self.groups[group].start];
-            let w = self.col_x[cell.col + cell.cols] - x;
-            let h = self.row_y[cell.row + cell.rows] - self.row_y[cell.row];
-            let fragment = &mut fragments[group];
+            let group_start_row = self.groups.get(group).map_or(0, |r| r.start);
+            let group_y0 = self.row_y.get(group_start_row).copied().unwrap_or(0.0);
+
+            let x = self.col_x.get(cell.col).copied().unwrap_or(0.0);
+            let x_end = self.col_x.get(cell.col + cell.cols).copied().unwrap_or(x);
+            let y_cell = self.row_y.get(cell.row).copied().unwrap_or(0.0);
+            let y_cell_end = self
+                .row_y
+                .get(cell.row + cell.rows)
+                .copied()
+                .unwrap_or(y_cell);
+
+            let y = y_cell - group_y0;
+            let w = x_end - x;
+            let h = y_cell_end - y_cell;
+
+            let Some(fragment) = fragments.get_mut(group) else {
+                continue;
+            };
             if let Some(color) = fill {
                 fragment.commands.push(FragmentCommand::Fill {
                     path: rect_path(x, y, w, h)?,
@@ -397,7 +441,7 @@ impl GridPaint<'_> {
                 Length::from_trusted_pt(x + self.content_inset),
                 Length::from_trusted_pt(y + self.content_inset),
             )?;
-            if cell.row == self.groups[group].start {
+            if cell.row == group_start_row {
                 fragment.first_baseline =
                     frame::earlier_baseline(fragment.first_baseline, offset.first_baseline);
             }
@@ -420,13 +464,19 @@ fn row_offsets(mut row_h: Vec<Length<NonNegative>>, laid: &[LaidCell]) -> Vec<f3
     spanning.sort_by_key(|cell| cell.span.rows);
     for cell in spanning {
         let rows = cell.span.row..cell.span.row + cell.span.rows;
-        let have: f32 = row_h[rows.clone()]
+        let have: f32 = row_h
+            .get(rows.clone())
+            .unwrap_or(&[])
             .iter()
             .map(|height| height.as_pt())
             .sum();
         if cell.height.as_pt() > have {
-            let grown = row_h[rows.end - 1].as_pt() + cell.height.as_pt() - have;
-            row_h[rows.end - 1] = Length::from_trusted_pt(grown);
+            if let Some(last_row_idx) = rows.end.checked_sub(1) {
+                if let Some(last_h) = row_h.get_mut(last_row_idx) {
+                    let grown = last_h.as_pt() + cell.height.as_pt() - have;
+                    *last_h = Length::from_trusted_pt(grown);
+                }
+            }
         }
     }
     let mut row_y = Vec::with_capacity(row_h.len() + 1);
@@ -442,7 +492,9 @@ fn row_offsets(mut row_h: Vec<Length<NonNegative>>, laid: &[LaidCell]) -> Vec<f3
 fn row_groups(laid: &[LaidCell], header_rows: usize, rows: usize) -> Vec<Range<usize>> {
     let mut reach: Vec<usize> = (0..rows).collect();
     for LaidCell { span, .. } in laid {
-        reach[span.row] = reach[span.row].max(span.row + span.rows - 1);
+        if let Some(entry) = reach.get_mut(span.row) {
+            *entry = (*entry).max(span.row + span.rows - 1);
+        }
     }
     let mut groups = Vec::new();
     if header_rows > 0 {
@@ -453,7 +505,9 @@ fn row_groups(laid: &[LaidCell], header_rows: usize, rows: usize) -> Vec<Range<u
         let mut end = start;
         let mut row = start;
         while row <= end {
-            end = end.max(reach[row]);
+            if let Some(&r) = reach.get(row) {
+                end = end.max(r);
+            }
             row += 1;
         }
         groups.push(start..end + 1);

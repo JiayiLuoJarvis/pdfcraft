@@ -112,7 +112,11 @@ fn is_al(cp: u32) -> bool {
 
 /// Pair-table lookup. `Hard` cannot be passed.
 pub(crate) fn allows(prev: PairClass, next: PairClass) -> bool {
-    ALLOW[prev as usize][next as usize]
+    ALLOW
+        .get(prev as usize)
+        .and_then(|row| row.get(next as usize))
+        .copied()
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

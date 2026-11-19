@@ -28,6 +28,8 @@
 //! Each text run names a key in that registry. A character with no cmap entry
 //! fails the document ([`ErrorKind::MissingGlyph`]). There is no fallback font
 //! and no `.notdef` box. v1 targets horizontal Chinese and Latin (no bidi,
+
+#![cfg_attr(not(test), deny(clippy::indexing_slicing))]
 //! vertical writing, kerning, or ligatures). [`spec::Alignment::Justify`]
 //! stretches paragraph lines. Bold, italic, and
 //! bold italic are separate registered faces. A run that needs a face its
@@ -140,15 +142,60 @@ pub(crate) mod layout;
 #[cfg(feature = "backend-krilla")]
 pub(crate) mod backend;
 
-pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
+#[derive(Debug)]
+pub(crate) enum ImageStorage {
     #[cfg(feature = "backend-krilla")]
-    {
-        Box::new(backend::ImageTable::default())
-    }
+    Table(backend::ImageTable),
     #[cfg(not(feature = "backend-krilla"))]
-    {
-        Box::new(canvas::RejectingImageRegistry)
+    Rejecting(canvas::RejectingImageRegistry),
+}
+
+impl ImageStorage {
+    pub(crate) fn new() -> Self {
+        #[cfg(feature = "backend-krilla")]
+        {
+            Self::Table(backend::ImageTable::default())
+        }
+        #[cfg(not(feature = "backend-krilla"))]
+        {
+            Self::Rejecting(canvas::RejectingImageRegistry)
+        }
     }
+
+    #[cfg(feature = "backend-krilla")]
+    pub(crate) fn into_table(self) -> backend::ImageTable {
+        match self {
+            Self::Table(table) => table,
+        }
+    }
+}
+
+impl canvas::ImageRegistry for ImageStorage {
+    fn set_limits(&mut self, limits: &Limits) {
+        match self {
+            #[cfg(feature = "backend-krilla")]
+            Self::Table(table) => table.set_limits(limits),
+            #[cfg(not(feature = "backend-krilla"))]
+            Self::Rejecting(rejecting) => rejecting.set_limits(limits),
+        }
+    }
+
+    fn register(
+        &mut self,
+        bytes: Vec<u8>,
+        format: ImageFormat,
+    ) -> std::result::Result<DecodedImage, Error> {
+        match self {
+            #[cfg(feature = "backend-krilla")]
+            Self::Table(table) => table.register(bytes, format),
+            #[cfg(not(feature = "backend-krilla"))]
+            Self::Rejecting(rejecting) => rejecting.register(bytes, format),
+        }
+    }
+}
+
+pub(crate) fn image_registry() -> ImageStorage {
+    ImageStorage::new()
 }
 
 /// Writes the pages of `rendered` as PDF bytes.
@@ -168,12 +215,13 @@ pub(crate) fn image_registry() -> Box<dyn canvas::ImageRegistry> {
 /// [`std::error::Error::source`].
 #[cfg(feature = "backend-krilla")]
 pub fn to_pdf(rendered: Rendered) -> Result<Vec<u8>> {
-    backend::write_pdf(
-        &rendered.recording,
-        rendered.fonts,
-        rendered.images,
-        &rendered.info,
-        &rendered.outline,
-    )
-    .map_err(Errors::from)
+    let Rendered {
+        recording,
+        fonts,
+        images,
+        info,
+        outline,
+    } = rendered;
+    backend::write_pdf(&recording, fonts, images.into_table(), &info, &outline)
+        .map_err(Errors::from)
 }

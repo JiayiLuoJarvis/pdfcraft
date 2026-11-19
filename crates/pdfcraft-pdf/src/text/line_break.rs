@@ -228,7 +228,9 @@ fn project_atoms<T: Copy>(
     for span in spans {
         match *span {
             Span::Group(group) => {
-                let text = groups[group];
+                let Some(text) = groups.get(group) else {
+                    continue;
+                };
                 for index in 0..text.len() {
                     let cluster = text.cluster(index);
                     match cluster.class() {
@@ -297,10 +299,10 @@ fn pack_lines<T: Copy>(
     while i < atoms.len() {
         let avail = budget.for_line(records.len());
         if line_start == i {
-            if let Atom::Ink {
+            if let Some(Atom::Ink {
                 pair: PairClass::Sp,
                 ..
-            } = atoms[i]
+            }) = atoms.get(i)
             {
                 i += 1;
                 line_start = i;
@@ -308,7 +310,11 @@ fn pack_lines<T: Copy>(
             }
         }
 
-        match atoms[i] {
+        let Some(current_atom) = atoms.get(i) else {
+            break;
+        };
+
+        match current_atom {
             Atom::Hard { .. } => {
                 let width = closed_width(settled, tail);
                 records.push(emit_line(
@@ -343,7 +349,7 @@ fn pack_lines<T: Copy>(
                 } else {
                     NonNegative::ZERO
                 };
-                if let Atom::Blank { width: slot, .. } = &mut atoms[i] {
+                if let Some(Atom::Blank { width: slot, .. }) = atoms.get_mut(i) {
                     *slot = width;
                 }
                 settled = avail.into();
@@ -356,7 +362,7 @@ fn pack_lines<T: Copy>(
                     clippy::expect_used,
                     reason = "this arm matches only ink and blank, and both store a width"
                 )]
-                let part = width_part(&atoms[i]).expect("ink and blank atoms have widths");
+                let part = width_part(current_atom).expect("ink and blank atoms have widths");
                 let (before, trial) = append_width(settled, tail, part);
                 if trial.as_pt() <= avail.as_pt() {
                     settled = before;
@@ -366,7 +372,7 @@ fn pack_lines<T: Copy>(
                 }
                 match nearest_break(&atoms, line_start, i) {
                     Some(split) => {
-                        let committed = line_width(&atoms[line_start..split]);
+                        let committed = line_width(atoms.get(line_start..split).unwrap_or(&[]));
                         records.push(emit_line(
                             groups,
                             &atoms,
@@ -462,10 +468,13 @@ fn overflow_text<T>(
     end: usize,
 ) -> Option<String> {
     let mut text = String::new();
-    for atom in &atoms[start..=end] {
+    let slice = atoms.get(start..=end).unwrap_or(&[]);
+    for atom in slice {
         match *atom {
             Atom::Ink { group, cluster, .. } | Atom::Hard { group, cluster } => {
-                text.push_str(groups[group].cluster(cluster).as_str());
+                if let Some(text_group) = groups.get(group) {
+                    text.push_str(text_group.cluster(cluster).as_str());
+                }
             }
             Atom::Blank { .. } => {}
         }
@@ -480,10 +489,13 @@ fn overflow_text<T>(
 
 fn nearest_break<T>(atoms: &[Atom<T>], line_start: usize, overflow_at: usize) -> Option<usize> {
     for k in (line_start + 1..=overflow_at).rev() {
-        if is_fixed_blank(&atoms[k]) {
+        let Some(atom) = atoms.get(k) else {
+            continue;
+        };
+        if is_fixed_blank(atom) {
             return Some(k);
         }
-        let Some(next) = ink_pair(&atoms[k]) else {
+        let Some(next) = ink_pair(atom) else {
             continue;
         };
         match left_ink(atoms, line_start, k) {
@@ -505,9 +517,12 @@ fn left_ink<T>(atoms: &[Atom<T>], line_start: usize, k: usize) -> LeftInk {
     let mut index = k;
     while index > line_start {
         index -= 1;
-        match atoms[index] {
+        let Some(atom) = atoms.get(index) else {
+            break;
+        };
+        match atom {
             Atom::Blank { .. } => {}
-            Atom::Ink { pair, .. } => return LeftInk::Class(pair),
+            Atom::Ink { pair, .. } => return LeftInk::Class(*pair),
             Atom::Hard { .. } => return LeftInk::Blocked,
         }
     }
@@ -560,7 +575,10 @@ fn emit_line<T: Copy>(
     let mut segs = Vec::new();
     let mut index = start;
     while index < end {
-        match atoms[index] {
+        let Some(atom) = atoms.get(index) else {
+            break;
+        };
+        match atom {
             #[expect(
                 clippy::unreachable,
                 reason = "pack_lines emits hard breaks as line ends, not as span contents"
@@ -572,32 +590,37 @@ fn emit_line<T: Copy>(
                 ..
             } => {
                 segs.push(Seg::Blank {
-                    width: blank_width,
-                    payload,
+                    width: *blank_width,
+                    payload: *payload,
                 });
                 index += 1;
             }
             Atom::Ink { group, cluster, .. } => {
-                let start_cursor = groups[group].cluster(cluster).start_cursor();
-                let mut last = cluster;
+                let group = *group;
+                let Some(text_group) = groups.get(group) else {
+                    index += 1;
+                    continue;
+                };
+                let start_cursor = text_group.cluster(*cluster).start_cursor();
+                let mut last = *cluster;
                 index += 1;
                 while index < end {
-                    match atoms[index] {
-                        Atom::Ink {
+                    match atoms.get(index) {
+                        Some(Atom::Ink {
                             group: next_group,
                             cluster: next_cluster,
                             ..
-                        } if next_group == group => {
-                            last = next_cluster;
+                        }) if *next_group == group => {
+                            last = *next_cluster;
                             index += 1;
                         }
-                        Atom::Hard { .. } | Atom::Ink { .. } | Atom::Blank { .. } => break,
+                        _ => break,
                     }
                 }
                 segs.push(Seg::Glyphs {
                     group,
                     start: start_cursor,
-                    end: groups[group].cluster(last).end_cursor(),
+                    end: text_group.cluster(last).end_cursor(),
                 });
             }
         }
@@ -627,11 +650,13 @@ fn eof_cursor<T>(
     let mut index = atom_index;
     while index > 0 {
         index -= 1;
-        match atoms[index] {
-            Atom::Hard { group, cluster } | Atom::Ink { group, cluster, .. } => {
-                return (group, groups[group].cluster(cluster).end_cursor());
+        match atoms.get(index) {
+            Some(Atom::Hard { group, cluster } | Atom::Ink { group, cluster, .. }) => {
+                if let Some(text_group) = groups.get(*group) {
+                    return (*group, text_group.cluster(*cluster).end_cursor());
+                }
             }
-            Atom::Blank { .. } => {}
+            Some(Atom::Blank { .. }) | None => {}
         }
     }
     (0, origin)
