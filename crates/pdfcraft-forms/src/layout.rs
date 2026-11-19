@@ -143,6 +143,7 @@ fn fail(field_name: &str, err: &FitError) -> Error {
 fn prepare_text(face: &Face<'_>, text: &str) -> std::result::Result<Vec<Paragraph>, FitError> {
     let mut paragraphs = Vec::new();
     for para in text.split('\n') {
+        let para = para.strip_suffix('\r').unwrap_or(para);
         if para.is_empty() {
             paragraphs.push(Paragraph::Blank);
             continue;

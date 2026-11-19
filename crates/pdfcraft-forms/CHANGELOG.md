@@ -9,6 +9,12 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Fixed
+
+- Dereference indirect `/Subtype` annotation objects during form flattening so widget annotations are cleanly stripped.
+- Validate all widgets sharing a field name across all pages to ensure signature and unsupported widgets are rejected even when another widget of the same name is text.
+- Strip trailing `\r` from lines before empty paragraph checks to preserve blank lines in CRLF formatted text.
+
 ## [0.3.0] - 2026-11-05
 
 ### Breaking

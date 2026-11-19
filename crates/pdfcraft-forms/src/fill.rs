@@ -223,6 +223,11 @@ fn compile_plan<'a>(form: &'a Form, request: &'a FillRequest) -> Result<BTreeMap
             );
         }
     }
+    for info in &form.fields {
+        if let Some(fill) = request.fields.get(info.name()) {
+            accept(info, &fill.value)?;
+        }
+    }
     let mut planned = BTreeMap::new();
     for (name, fill) in &request.fields {
         let Some(info) = known.get(name.as_str()) else {

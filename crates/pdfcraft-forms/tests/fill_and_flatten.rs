@@ -969,3 +969,179 @@ fn field_info_name_is_readable() {
     let first = fields.first().expect("one widget");
     assert!(!first.name().is_empty());
 }
+
+#[test]
+fn indirect_subtype_widgets_are_stripped() {
+    let mut doc = lopdf::Document::with_version("1.4");
+    let subtype_id = doc.add_object(lopdf::Object::Name(b"Widget".to_vec()));
+    let widget_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Annot".to_vec())),
+        ("Subtype", lopdf::Object::Reference(subtype_id)),
+        ("T", lopdf::Object::string_literal("field1")),
+        ("FT", lopdf::Object::Name(b"Tx".to_vec())),
+        (
+            "Rect",
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(10),
+                lopdf::Object::Integer(10),
+                lopdf::Object::Integer(100),
+                lopdf::Object::Integer(30),
+            ]),
+        ),
+    ]));
+    let page_tree = doc.new_object_id();
+    let page = doc.new_object_id();
+    doc.set_object(
+        page,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(page_tree)),
+            (
+                "MediaBox",
+                lopdf::Object::Array(vec![
+                    lopdf::Object::Integer(0),
+                    lopdf::Object::Integer(0),
+                    lopdf::Object::Integer(200),
+                    lopdf::Object::Integer(200),
+                ]),
+            ),
+            (
+                "Annots",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(widget_id)]),
+            ),
+        ]),
+    );
+    doc.set_object(
+        page_tree,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Count", lopdf::Object::Integer(1)),
+            (
+                "Kids",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(page)]),
+            ),
+        ]),
+    );
+    let catalog_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(page_tree)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+
+    let before = Form::open(&bytes).unwrap();
+    assert_eq!(before.fields().len(), 1);
+
+    let pdf = draw(&bytes, FillRequest::default(), None).unwrap();
+    let out = lopdf::Document::load_mem(&pdf).unwrap();
+    let page_id = out.page_iter().next().unwrap();
+    let page_dict = out.get_dictionary(page_id).unwrap();
+    assert!(page_dict.get(b"Annots").is_err());
+    assert!(Form::open(&pdf).unwrap().fields().is_empty());
+}
+
+fn test_page_dict(page_tree: lopdf::ObjectId, annot: lopdf::ObjectId) -> lopdf::Dictionary {
+    lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Page".to_vec())),
+        ("Parent", lopdf::Object::Reference(page_tree)),
+        (
+            "MediaBox",
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(0),
+                lopdf::Object::Integer(0),
+                lopdf::Object::Integer(200),
+                lopdf::Object::Integer(200),
+            ]),
+        ),
+        (
+            "Annots",
+            lopdf::Object::Array(vec![lopdf::Object::Reference(annot)]),
+        ),
+    ])
+}
+
+#[test]
+fn multi_widget_signature_is_rejected() {
+    let mut doc = lopdf::Document::with_version("1.4");
+    let page_tree = doc.new_object_id();
+    let page0 = doc.new_object_id();
+    let page1 = doc.new_object_id();
+    let rect = lopdf::Object::Array(vec![
+        lopdf::Object::Integer(10),
+        lopdf::Object::Integer(10),
+        lopdf::Object::Integer(100),
+        lopdf::Object::Integer(30),
+    ]);
+    let text_widget = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Annot".to_vec())),
+        ("Subtype", lopdf::Object::Name(b"Widget".to_vec())),
+        ("T", lopdf::Object::string_literal("field1")),
+        ("FT", lopdf::Object::Name(b"Tx".to_vec())),
+        ("Rect", rect.clone()),
+    ]));
+    let sig_widget = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Annot".to_vec())),
+        ("Subtype", lopdf::Object::Name(b"Widget".to_vec())),
+        ("T", lopdf::Object::string_literal("field1")),
+        ("FT", lopdf::Object::Name(b"Sig".to_vec())),
+        ("Rect", rect),
+    ]));
+    doc.set_object(page0, test_page_dict(page_tree, text_widget));
+    doc.set_object(page1, test_page_dict(page_tree, sig_widget));
+    doc.set_object(
+        page_tree,
+        lopdf::Dictionary::from_iter([
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Count", lopdf::Object::Integer(2)),
+            (
+                "Kids",
+                lopdf::Object::Array(vec![
+                    lopdf::Object::Reference(page0),
+                    lopdf::Object::Reference(page1),
+                ]),
+            ),
+        ]),
+    );
+    let catalog_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(page_tree)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+
+    let form = Form::open(&bytes).unwrap();
+    assert_eq!(form.fields().len(), 2);
+    assert_eq!(form.fields()[0].field_type(), FieldType::Text);
+    assert_eq!(form.fields()[1].field_type(), FieldType::Signature);
+
+    let request = FillRequest::new(BTreeMap::from([(
+        "field1".to_owned(),
+        FieldFill::text("hello"),
+    )]));
+    let err = Fill::new(&form, request, None).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::SignatureNotWritable);
+    assert_eq!(err.field(), Some("field1"));
+}
+
+#[test]
+fn crlf_blank_lines_match_lf_blank_lines() {
+    let Some(bytes) = font_bytes() else {
+        return;
+    };
+    let font = load_font(bytes);
+    let request_lf = FillRequest::new(BTreeMap::from([(
+        "employee_name".to_owned(),
+        FieldFill::text("A\n\nB"),
+    )]));
+    let request_crlf = FillRequest::new(BTreeMap::from([(
+        "employee_name".to_owned(),
+        FieldFill::text("A\r\n\r\nB"),
+    )]));
+    let pdf_lf = draw(&fixture("basic_form.pdf"), request_lf, Some(&font)).unwrap();
+    let pdf_crlf = draw(&fixture("basic_form.pdf"), request_crlf, Some(&font)).unwrap();
+    assert_eq!(pdf_lf, pdf_crlf);
+}

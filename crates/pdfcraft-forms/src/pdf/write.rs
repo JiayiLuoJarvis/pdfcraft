@@ -186,7 +186,13 @@ impl PdfDoc {
         let Lookup::Found(Object::Dictionary(dict)) = self.lookup(annot.clone()) else {
             return true;
         };
-        dict.get(b"Subtype").ok().and_then(super::read::name_str) != Some("Widget")
+        let is_widget = dict.get(b"Subtype").is_ok_and(|subtype| {
+            matches!(
+                self.lookup(subtype.clone()),
+                Lookup::Found(found) if super::read::name_str(&found) == Some("Widget")
+            )
+        });
+        !is_widget
     }
     fn reachable(&self) -> Result<BTreeSet<ObjectId>> {
         let mut stack = Vec::new();
