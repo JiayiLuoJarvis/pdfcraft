@@ -51,13 +51,13 @@ python3 scripts/check_pdfcraft_pdf_modules.py
 python3 scripts/check_readme_identity.py
 cargo fmt --all -- --check
 cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --all-targets -- -D warnings
-cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings
-cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
+cargo clippy -p pdfcraft-pdf --all-targets --no-default-features -- -D warnings
+cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla -- -D warnings
 cargo test -p pdfcraft-forms
 cargo test -p pdfcraft-post
 cargo test -p pdfcraft-orgchart
-cargo test -p pdfcraft-pdf --no-default-features --features test-utils
-cargo test -p pdfcraft-pdf --features backend-krilla,test-utils
+cargo test -p pdfcraft-pdf --no-default-features
+cargo test -p pdfcraft-pdf --features backend-krilla
 cargo doc -p pdfcraft-pdf --no-deps --no-default-features
 cargo doc -p pdfcraft-pdf --no-deps --features backend-krilla
 cargo doc -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --no-deps
@@ -134,7 +134,7 @@ cargo deny check advisories licenses bans sources
 | API-6 | 私有模块里的条目写 `pub(crate)`，不写 `pub`。`pub` 只给真正对外的条目。 | API#c-struct-private；本仓库拍板 | `lint:unreachable_pub`、`lint:unnameable_types`、`lint:clippy::pub_without_shorthand` |
 | API-7 | 公共类型实现 `Debug`，输出非空。按语义实现 `Clone`、`PartialEq`、`Eq`、`Hash`、`Default`。能 derive 的不手写。 | API#c-common-traits、#c-debug；MS M-PUBLIC-DEBUG | `lint:missing_debug_implementations`、`lint:clippy::missing_fields_in_debug`、`lint:clippy::derivable_impls` |
 | API-8 | 重要返回值和构造器加 `#[must_use]`。 | G#must_use…；API | `lint:clippy::must_use_candidate`、`lint:clippy::return_self_not_must_use`（pedantic） |
-| API-9 | 对外 enum 和带公有字段的 struct 加 `#[non_exhaustive]`。五类例外：描述既有本体的闭集；调用方需要穷尽匹配的文档语言 enum（提案书 §2 / §12 已确认）；要保留 `..Default::default()` 初始化的 Options struct（`DocumentSpec`）；各 crate 里类型名以 `Style` 结尾的样式结构体（`FillStyle`、`FieldStyle`、`StrokeStyle`、orgchart 的 `ChartStyle`，公有字段 + `Default` + 字面量，提案书 §12.7）；调用方用字面量构造的协议记录（`Node`、`Edge`、`PaidIn`、`ChartRequest`、`FieldFill`、`FieldRule`、`FillRequest`、`AbsoluteLine`）。例外登记在 Google disposition 的延后项里。 | G#apply-non_exhaustive…；SV#attr-adding-non-exhaustive | 评审（`exhaustive_*` 不开，见 §14） |
+| API-9 | 对外 enum 和带公有字段的 struct 加 `#[non_exhaustive]`。五类例外：描述既有本体的闭集；调用方需要穷尽匹配的文档语言 enum（提案书 §2 / §12 已确认）；要保留 `..Default::default()` 初始化的 Options struct（`DocumentSpec`、`SectionSpec`、`ParagraphSpec`、`TableSpec`、`CellSpec`、`BandSpec`、`BandSlot`、`BlankSpec`、`ColumnSpec`、`ColumnsSpec`、`ListSpec`、`ListItemSpec`、`CanvasSpec`、`ImageSpec`）；各 crate 里类型名以 `Style` 结尾的样式结构体（`FillStyle`、`FieldStyle`、`StrokeStyle`、orgchart 的 `ChartStyle`，以及 `pdfcraft-pdf` 的 `*Style`，公有字段 + `Default` + 字面量，提案书 §12.7）；调用方用字面量构造的协议记录（`Node`、`Edge`、`PaidIn`、`ChartRequest`、`FieldFill`、`FieldRule`、`FillRequest`、`AbsoluteLine`、`LayerMark`、`OutlineEntry`）。例外登记在 Google disposition 的延后项里。 | G#apply-non_exhaustive…；SV#attr-adding-non-exhaustive | 评审（`exhaustive_*` 不开，见 §14） |
 | API-10 | crate 根的 `pub use` 加 `#[doc(inline)]`。不 glob 重导出。新增双路径须在 MS disposition 的路径审计表登记。 | MS M-DOC-INLINE、M-NO-GLOB-REEXPORTS、M-SINGLE-ITEM-PATH | 评审 |
 | API-11 | 公共签名不出现依赖的类型（krilla、lopdf、skrifa、hayro、image）。 | MS M-DONT-LEAK-TYPES；API#c-stable | 评审 |
 | API-12 | `Rc` / `Arc` 只在借用结构会不合理地复杂时用，并在旁边写一行论证。现有论证：错误的 `source`（`Error: Clone`）、`FontFace.bytes` 与 orgchart `Font` 内部的 `Arc<Vec<u8>>`（克隆不复制字体内容）。forms 的 `Font` 持有 `Arc<Vec<u8>>`，克隆不复制面字节，`from_shared` 保存调用方的 `Arc`，`from_shared` 与 `from_shared_collection` 不修改该 `Arc`。 | G#avoid-rc-and-arc；MS M-AVOID-WRAPPERS | `lint:clippy::clone_on_ref_ptr`、`lint:clippy::rc_mutex`；论证靠评审 |

@@ -22,11 +22,11 @@ use std::path::{Path, PathBuf};
 use pdfcraft_pdf::spec::{
     BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, CellSpec, CellStyle, FontFace,
     FontFamily, FontRegistry, OutlineEntry, PageText, ParagraphSpec, ParagraphStyle, Resources,
-    RunStyle, SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec,
+    RunStyle, SectionSpec, SectionStyle, Span, TableHeader, TableRow, TableRules, TableSpec,
     TableStyle,
 };
 use pdfcraft_pdf::{
-    layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize,
+    layout_spec, to_pdf, Color, DocumentSpec, Length, Limits, Margins, NonNegative, PageSize, Pen,
     Positive, Ratio, Result, Track,
 };
 
@@ -219,10 +219,7 @@ fn sample_table() -> Result<Block<()>> {
                 Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?,
             )]),
             cell_padding: nn(4.0)?,
-            border: TableBorder {
-                width: nn(0.5)?,
-                color: Color::rgb(0x99, 0x99, 0x99),
-            },
+            rules: TableRules::Grid(Pen::new(Color::rgb(0x99, 0x99, 0x99), 0.5)?),
         },
         header: Some(TableHeader {
             repeat: true,

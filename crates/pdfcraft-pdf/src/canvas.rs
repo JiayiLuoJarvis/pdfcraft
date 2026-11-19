@@ -50,18 +50,52 @@ pub struct DocumentInfo {
     pub language: Option<String>,
 }
 
-/// Hyperlink target. Callers construct [`Uri`](Self::Uri) or [`Anchor`](Self::Anchor).
-/// [`Xyz`](Self::Xyz) is written only by layout after resolving an anchor id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Destination of a recorded hyperlink annotation.
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 #[must_use]
-pub enum LinkTarget {
-    /// External URI (same rules as §8 / former newtype).
+pub enum LinkDest {
+    /// External URI.
     Uri(String),
-    /// In-document anchor id (must match some `Block::Anchor.id`).
-    Anchor(String),
-    /// Resolved page destination. Not a caller-facing “jump to page N” API.
-    Xyz(LinkXyz),
+    /// Resolved page destination in the document.
+    Page(LinkXyz),
+}
+
+impl LinkDest {
+    /// Builds a URI destination.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::EmptyLink`] when `uri` is empty.
+    pub fn uri(uri: &str) -> Result<Self, Error> {
+        if uri.is_empty() {
+            return Err(Error::from(ErrorKind::EmptyLink));
+        }
+        Ok(Self::Uri(uri.to_owned()))
+    }
+
+    /// Builds a page destination.
+    pub fn page(page_index: usize, point: Point) -> Self {
+        Self::Page(LinkXyz::new(page_index, point))
+    }
+
+    /// The URI string when this destination is [`Self::Uri`].
+    #[must_use]
+    pub fn uri_str(&self) -> Option<&str> {
+        match self {
+            Self::Uri(uri) => Some(uri.as_str()),
+            Self::Page(_) => None,
+        }
+    }
+
+    /// The page destination when this destination is [`Self::Page`].
+    #[must_use]
+    pub fn page_dest(&self) -> Option<LinkXyz> {
+        match self {
+            Self::Uri(_) => None,
+            Self::Page(xyz) => Some(*xyz),
+        }
+    }
 }
 
 /// Page-local XYZ point in pdfcraft page space (origin top-left, y down).
@@ -99,52 +133,6 @@ pub(crate) struct OutlineItem {
     pub(crate) xyz: LinkXyz,
 }
 
-impl LinkTarget {
-    /// Builds a URI target.
-    ///
-    /// Spaces are kept.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::EmptyLink`] when `uri` is empty.
-    pub fn uri(uri: &str) -> Result<Self, Error> {
-        if uri.is_empty() {
-            return Err(Error::from(ErrorKind::EmptyLink));
-        }
-        Ok(Self::Uri(uri.to_owned()))
-    }
-
-    /// Builds an in-document anchor target.
-    ///
-    /// Spaces are kept (same emptiness rule as URI).
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::EmptyAnchorId`] when `id` is empty.
-    pub fn anchor(id: &str) -> Result<Self, Error> {
-        if id.is_empty() {
-            return Err(Error::from(ErrorKind::EmptyAnchorId));
-        }
-        Ok(Self::Anchor(id.to_owned()))
-    }
-
-    pub(crate) fn xyz(page_index: usize, point: Point) -> Self {
-        Self::Xyz(LinkXyz::new(page_index, point))
-    }
-
-    /// The URI string when this target is [`Self::Uri`].
-    ///
-    /// `None` for [`Self::Anchor`] and [`Self::Xyz`]. Absence is a property of
-    /// the variant, not a failure, so this accessor returns `Option`.
-    #[must_use]
-    pub fn uri_str(&self) -> Option<&str> {
-        match self {
-            Self::Uri(uri) => Some(uri.as_str()),
-            Self::Anchor(_) | Self::Xyz(_) => None,
-        }
-    }
-}
-
 /// Encoded format of image bytes passed to [`crate::spec::Resources::add_image`].
 ///
 /// GIF and WebP draw their first frame as a still image.
@@ -153,7 +141,7 @@ impl LinkTarget {
 pub enum ImageFormat {
     /// PNG bytes.
     Png,
-    /// JPEG bytes.
+    /// JPEG bytes. Layout only validates the header; scan data is embedded as-is.
     Jpeg,
     /// GIF bytes. The first frame is the still image.
     Gif,
@@ -313,8 +301,8 @@ pub enum CanvasCommand {
     AnnotateLink {
         /// Annotation rectangle.
         rect: Rect,
-        /// Non-empty URI.
-        target: LinkTarget,
+        /// Hyperlink destination.
+        dest: LinkDest,
     },
     /// Concatenate an affine onto the current transform stack.
     PushTransform {
@@ -364,9 +352,7 @@ pub(crate) trait Canvas {
     fn draw_glyph_run(&mut self, run: &GlyphRun) -> Result<(), Error>;
 
     /// Records a hyperlink over `rect`.
-    ///
-    /// `target` is already a non-empty URI.
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<(), Error>;
+    fn annotate_link(&mut self, rect: Rect, dest: LinkDest) -> Result<(), Error>;
 
     /// Concatenate `affine` onto the current CTM. Must pair with [`Self::pop_transform`].
     fn push_transform(&mut self, affine: &Affine) -> Result<(), Error>;
@@ -542,9 +528,9 @@ impl Canvas for RecordingCanvas {
         Ok(())
     }
 
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<(), Error> {
+    fn annotate_link(&mut self, rect: Rect, dest: LinkDest) -> Result<(), Error> {
         self.commands
-            .push(CanvasCommand::AnnotateLink { rect, target });
+            .push(CanvasCommand::AnnotateLink { rect, dest });
         Ok(())
     }
 
@@ -581,8 +567,8 @@ pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Re
             } => canvas.stroke_path(path, paint, stroke)?,
             CanvasCommand::DrawImage { image, rect } => canvas.draw_image(image, *rect)?,
             CanvasCommand::DrawGlyphRun { run } => canvas.draw_glyph_run(run)?,
-            CanvasCommand::AnnotateLink { rect, target } => {
-                canvas.annotate_link(*rect, target.clone())?;
+            CanvasCommand::AnnotateLink { rect, dest } => {
+                canvas.annotate_link(*rect, dest.clone())?;
             }
             CanvasCommand::PushTransform { affine } => canvas.push_transform(affine)?,
             CanvasCommand::PopTransform => canvas.pop_transform()?,
@@ -592,15 +578,11 @@ pub(crate) fn replay(recording: &RecordingCanvas, canvas: &mut dyn Canvas) -> Re
 }
 
 /// Absolute tolerance for coordinate asserts, in PDF points.
-///
-/// Also at the crate root under feature `test-utils`.
-pub const PT_ABS_TOLERANCE: f32 = 0.01;
+pub(crate) const PT_ABS_TOLERANCE: f32 = 0.01;
 
 /// Reports whether `a` and `b` differ by at most [`PT_ABS_TOLERANCE`] points.
-///
-/// Also at the crate root under feature `test-utils`.
 #[must_use]
-pub fn pt_near(a: f32, b: f32) -> bool {
+pub(crate) fn pt_near(a: f32, b: f32) -> bool {
     (a - b).abs() <= PT_ABS_TOLERANCE
 }
 
@@ -608,7 +590,7 @@ pub fn pt_near(a: f32, b: f32) -> bool {
 mod tests {
     use super::{
         pt_near, with_transform, Canvas, CanvasCommand, DecodedImage, DocumentInfo, GlyphPlacement,
-        GlyphRun, ImageFormat, ImageId, ImageRegistry, LinkTarget, RecordingCanvas,
+        GlyphRun, ImageFormat, ImageId, ImageRegistry, LinkDest, LinkXyz, RecordingCanvas,
         RejectingImageRegistry,
     };
     use crate::error::{Error, ErrorKind};
@@ -672,7 +654,7 @@ mod tests {
             ],
         };
         let link_rect = Rect::try_pt(72.0, 90.0, 40.0, 14.0)?;
-        let link = LinkTarget::uri("https://example.test/a")?;
+        let link = LinkDest::uri("https://example.test/a")?;
 
         let mut rec = RecordingCanvas::new();
         rec.set_document_info(&info)?;
@@ -739,21 +721,30 @@ mod tests {
 
     #[test]
     fn empty_link_is_rejected_and_not_recorded() -> Result<(), Error> {
-        let error = LinkTarget::uri("").expect_err("empty uri");
+        let error = LinkDest::uri("").expect_err("empty uri");
         assert!(matches!(error.kind, ErrorKind::EmptyLink));
         assert_eq!(error.to_string(), "link URI is empty");
 
-        let spaced = LinkTarget::uri(" ")?;
+        let spaced = LinkDest::uri(" ")?;
         assert_eq!(spaced.uri_str(), Some(" "));
 
         let mut rec = RecordingCanvas::new();
         rec.start_page(A4)?;
         assert!(matches!(
-            LinkTarget::uri("").map_err(|rejected| rejected.kind),
+            LinkDest::uri("").map_err(|rejected| rejected.kind),
             Err(ErrorKind::EmptyLink)
         ));
         assert!(matches!(rec.commands(), [CanvasCommand::StartPage(_)]));
         Ok(())
+    }
+
+    #[test]
+    fn link_dest_page_destination() {
+        let xyz = LinkXyz::new(2, Point::try_pt(10.0, 20.0).unwrap());
+        let dest = LinkDest::Page(xyz);
+        assert_eq!(dest.uri_str(), None);
+        assert_eq!(dest.page_dest(), Some(xyz));
+        assert_eq!(dest.page_dest().unwrap().page_index(), 2);
     }
 
     #[test]
@@ -787,7 +778,7 @@ mod tests {
             glyphs: Vec::new(),
             text: String::new(),
         })?;
-        source.annotate_link(Rect::try_pt(0.0, 0.0, 1.0, 1.0)?, LinkTarget::uri("u")?)?;
+        source.annotate_link(Rect::try_pt(0.0, 0.0, 1.0, 1.0)?, LinkDest::uri("u")?)?;
         source.finish_page()?;
 
         let mut copy = RecordingCanvas::new();

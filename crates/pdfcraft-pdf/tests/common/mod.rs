@@ -85,3 +85,10 @@ pub(crate) fn advance_pt(font: &[u8], ch: char, size: f32) -> f32 {
         .expect("advance");
     advance * size / upem
 }
+
+pub(crate) const PT_ABS_TOLERANCE: f32 = 0.01;
+
+#[must_use]
+pub(crate) fn pt_near(a: f32, b: f32) -> bool {
+    (a - b).abs() <= PT_ABS_TOLERANCE
+}

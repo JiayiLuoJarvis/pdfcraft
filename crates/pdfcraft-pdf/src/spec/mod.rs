@@ -36,7 +36,7 @@ pub use lower::layout_spec;
 pub use types::{LineHeight, Numbering, Ratio, Rendered, Track};
 
 use std::fmt;
-use std::num::{NonZeroU16, NonZeroU32};
+use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
 use crate::canvas::ImageFormat;
 use crate::error::{Error, ErrorKind, LimitKind};
@@ -121,6 +121,7 @@ impl<K> Resources<K> {
     /// or a [`Limits`] cap is reported by [`layout_spec`] as
     /// [`ErrorKind::Image`] or
     /// [`ErrorKind::LimitExceeded`].
+    /// Note that for [`ImageFormat::Jpeg`], layout only validates the header.
     ///
     /// # Errors
     ///
@@ -415,16 +416,77 @@ pub struct ParagraphStyle {
     pub first_line_indent: Length<NonNegative>,
     /// `None` keeps the document seed (1.2).
     pub line_height: Option<LineHeight>,
+    /// Minimum lines that must stay on the current page before a split.
+    pub orphans: NonZeroU8,
+    /// Minimum lines that must carry over to the next page after a split.
+    pub widows: NonZeroU8,
+    /// Whether this paragraph must stay on the same page as the following block.
+    pub keep_with_next: bool,
 }
 
+const DEFAULT_ORPHANS_WIDOWS: NonZeroU8 = NonZeroU8::MIN.saturating_add(1);
+
 impl Default for ParagraphStyle {
-    /// `RunStyle::default()`, `Start`, zero indent, `None`.
+    /// `RunStyle::default()`, `Start`, zero indent, `None`, orphans 2, widows 2, `keep_with_next` false.
     fn default() -> Self {
         Self {
             text: RunStyle::default(),
             align: Alignment::Start,
             first_line_indent: NonNegative::ZERO,
             line_height: None,
+            orphans: DEFAULT_ORPHANS_WIDOWS,
+            widows: DEFAULT_ORPHANS_WIDOWS,
+            keep_with_next: false,
+        }
+    }
+}
+
+/// Hyperlink target in document content. Callers construct [`Uri`](Self::Uri) or [`Anchor`](Self::Anchor).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+#[must_use]
+pub enum LinkTarget {
+    /// External URI.
+    Uri(String),
+    /// In-document anchor id (must match some `Block::Anchor.id`).
+    Anchor(String),
+}
+
+impl LinkTarget {
+    /// Builds a URI target.
+    ///
+    /// Spaces are kept.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::EmptyLink`] when `uri` is empty.
+    pub fn uri(uri: &str) -> Result<Self, Error> {
+        if uri.is_empty() {
+            return Err(Error::from(ErrorKind::EmptyLink));
+        }
+        Ok(Self::Uri(uri.to_owned()))
+    }
+
+    /// Builds an in-document anchor target.
+    ///
+    /// Spaces are kept (same emptiness rule as URI).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::EmptyAnchorId`] when `id` is empty.
+    pub fn anchor(id: &str) -> Result<Self, Error> {
+        if id.is_empty() {
+            return Err(Error::from(ErrorKind::EmptyAnchorId));
+        }
+        Ok(Self::Anchor(id.to_owned()))
+    }
+
+    /// The URI string when this target is [`Self::Uri`].
+    #[must_use]
+    pub fn uri_str(&self) -> Option<&str> {
+        match self {
+            Self::Uri(uri) => Some(uri.as_str()),
+            Self::Anchor(_) => None,
         }
     }
 }
@@ -446,8 +508,8 @@ pub enum Span<K> {
     },
     /// Spans linked to a URI or in-document anchor.
     Link {
-        /// `Uri` or `Anchor` at the call site. Layout may replace `Anchor` with `Xyz` before paint.
-        target: crate::canvas::LinkTarget,
+        /// Target at the call site.
+        target: LinkTarget,
         /// Linked spans.
         children: Vec<Self>,
     },
@@ -563,8 +625,8 @@ pub struct TableStyle {
     pub tracks: Option<Vec<Track>>,
     /// Padding on every side of every cell.
     pub cell_padding: Length<NonNegative>,
-    /// Grid-line border. Zero width omits the border.
-    pub border: TableBorder,
+    /// Table rules (grid, three-line, or none).
+    pub rules: TableRules,
 }
 
 impl Default for TableStyle {
@@ -572,7 +634,7 @@ impl Default for TableStyle {
         Self {
             tracks: None,
             cell_padding: NonNegative::ZERO,
-            border: TableBorder::default(),
+            rules: TableRules::default(),
         }
     }
 }
@@ -604,23 +666,24 @@ pub struct TableRow<K> {
     pub children: Vec<CellSpec<K>>,
 }
 
-/// Grid-line stroke centered on cell edges. Width zero draws nothing.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[must_use]
-pub struct TableBorder {
-    /// Grid-line width. Zero omits the border.
-    pub width: Length<NonNegative>,
-    /// Grid-line color.
-    pub color: Color,
-}
-
-impl Default for TableBorder {
-    fn default() -> Self {
-        Self {
-            width: NonNegative::ZERO,
-            color: Color::rgb(0, 0, 0),
-        }
-    }
+/// Rules for grid or three-line tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum TableRules {
+    /// Full grid lines around every cell.
+    Grid(Pen),
+    /// Three-line academic table with top line, header line, and bottom line.
+    ThreeLine {
+        /// Line at the top of the table fragment.
+        top: Pen,
+        /// Line directly below the header rows.
+        header: Pen,
+        /// Line at the bottom of the table fragment.
+        bottom: Pen,
+    },
+    /// No border or rule lines drawn.
+    #[default]
+    None,
 }
 
 /// One table cell.

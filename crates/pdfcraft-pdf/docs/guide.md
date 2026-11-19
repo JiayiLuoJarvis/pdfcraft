@@ -624,7 +624,7 @@ when the cap is raised above 16.
 `layout_spec` and `to_pdf` return `Result<T, Errors>`:
 
 - Up to **64** failures, discovery order
-- Inspect with `first()`, `as_slice()`, `iter()`, `truncated()`
+- Inspect with `first()`, `len()`, `iter()`, `truncated()`
 - Each `Error` has `kind: ErrorKind` and optional `at: Location` (section, page,
   region, cell)
 - Skrifa, krilla, and `Error::band_fn` failures: `std::error::Error::source()`
@@ -648,9 +648,7 @@ let pages = rendered.pages();
 assert!(pt_near(x, expected_x));
 ```
 
-`canvas::pt_near` is available without extra features. Feature `test-utils`
-re-exports the same function at the crate root. For PDF smoke tests, checking
-that bytes start with `%PDF` is enough.
+For PDF smoke tests, checking that bytes start with `%PDF` is enough.
 
 ---
 
@@ -659,7 +657,6 @@ that bytes start with `%PDF` is enough.
 | Feature | Default | Purpose |
 | --- | --- | --- |
 | `backend-krilla` | yes | Private PDF backend and `to_pdf` |
-| `test-utils` | no | `pt_near`, `PT_ABS_TOLERANCE` |
 
 Without `backend-krilla`, layout and recording still compile; image registration
 rejects draws, and `to_pdf` is unavailable.

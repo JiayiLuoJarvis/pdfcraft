@@ -44,10 +44,10 @@ jobs:
         run: cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --all-targets -- -D warnings
 
       - name: clippy pdfcraft-pdf (no default features)
-        run: cargo clippy -p pdfcraft-pdf --all-targets --no-default-features --features test-utils -- -D warnings
+        run: cargo clippy -p pdfcraft-pdf --all-targets --no-default-features -- -D warnings
 
       - name: clippy pdfcraft-pdf (backend-krilla)
-        run: cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla,test-utils -- -D warnings
+        run: cargo clippy -p pdfcraft-pdf --all-targets --features backend-krilla -- -D warnings
 
   deny:
     name: cargo-deny
@@ -173,10 +173,10 @@ jobs:
         run: cargo nextest run -p pdfcraft-orgchart
 
       - name: test pdfcraft-pdf (no default features)
-        run: cargo nextest run -p pdfcraft-pdf --no-default-features --features test-utils
+        run: cargo nextest run -p pdfcraft-pdf --no-default-features
 
       - name: test pdfcraft-pdf (backend-krilla)
-        run: cargo nextest run -p pdfcraft-pdf --features backend-krilla,test-utils
+        run: cargo nextest run -p pdfcraft-pdf --features backend-krilla
 
       - name: doc-test pdfcraft-forms
         run: cargo test --doc -p pdfcraft-forms
@@ -188,10 +188,10 @@ jobs:
         run: cargo test --doc -p pdfcraft-orgchart
 
       - name: doc-test pdfcraft-pdf (no default features)
-        run: cargo test --doc -p pdfcraft-pdf --no-default-features --features test-utils
+        run: cargo test --doc -p pdfcraft-pdf --no-default-features
 
       - name: doc-test pdfcraft-pdf (backend-krilla)
-        run: cargo test --doc -p pdfcraft-pdf --features backend-krilla,test-utils
+        run: cargo test --doc -p pdfcraft-pdf --features backend-krilla
 
       - name: doc pdfcraft-pdf (no default features)
         run: cargo doc -p pdfcraft-pdf --no-deps --no-default-features
@@ -263,7 +263,7 @@ jobs:
         with:
           package: pdfcraft-pdf
           feature-group: only-explicit-features
-          features: backend-krilla,test-utils
+          features: backend-krilla
 
       # The remaining workspace crates take the default feature heuristic.
       - name: semver rest of workspace

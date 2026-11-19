@@ -9,15 +9,15 @@
     reason = "integration test: a panic is the failure report"
 )]
 
-use pdfcraft_pdf::canvas::pt_near;
+use common::pt_near;
 use pdfcraft_pdf::spec::{
     BandFn, BandSlot, BandSpec, Block, CellSpec, CellStyle, FontFace, FontFamily, FontRegistry,
     InsetStyle, OutlineEntry, PageText, ParagraphSpec, Resources, RunStyle, SectionSpec,
-    SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
+    SectionStyle, Span, TableHeader, TableRow, TableRules, TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
-    layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkTarget, Margins, NonNegative,
-    PageSize, Region, Rendered, Result, Track,
+    layout_spec, CanvasCommand, DocumentSpec, ErrorKind, LinkDest, LinkTarget, Margins,
+    NonNegative, PageSize, Region, Rendered, Result, Track,
 };
 
 #[expect(
@@ -103,7 +103,7 @@ fn xyz_destinations(rendered: &Rendered) -> Vec<(usize, f32, f32)> {
         .flat_map(pdfcraft_pdf::RecordedPage::ops)
         .filter_map(|op| match op {
             CanvasCommand::AnnotateLink {
-                target: LinkTarget::Xyz(xyz),
+                dest: LinkDest::Page(xyz),
                 ..
             } => Some((
                 xyz.page_index(),
@@ -131,7 +131,7 @@ fn uri_hits(rendered: &Rendered) -> Vec<String> {
         .iter()
         .flat_map(pdfcraft_pdf::RecordedPage::ops)
         .filter_map(|op| match op {
-            CanvasCommand::AnnotateLink { target, .. } => target.uri_str().map(str::to_owned),
+            CanvasCommand::AnnotateLink { dest, .. } => dest.uri_str().map(str::to_owned),
             CanvasCommand::SetDocumentInfo(_)
             | CanvasCommand::StartPage(_)
             | CanvasCommand::FinishPage
@@ -706,7 +706,7 @@ fn repeating_header_anchor_keeps_first_destination() {
         style: TableStyle {
             tracks: Some(vec![Track::Auto]),
             cell_padding: NonNegative::ZERO,
-            border: TableBorder::default(),
+            rules: TableRules::None,
         },
         header: Some(TableHeader {
             repeat: true,

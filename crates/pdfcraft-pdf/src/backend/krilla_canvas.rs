@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::backend::emit;
 use crate::backend::images::{ImageTable, Raster};
 use crate::canvas::{
-    Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkTarget, OutlineItem,
+    Canvas, DecodedImage, DocumentInfo, GlyphPlacement, GlyphRun, LinkDest, OutlineItem,
 };
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::fonts::FontStore;
@@ -97,7 +97,7 @@ pub(super) enum Mark {
 #[derive(Debug, Clone)]
 pub(super) struct QueuedLink {
     pub(super) rect: Rect,
-    pub(super) target: LinkTarget,
+    pub(super) dest: LinkDest,
 }
 
 /// Private krilla-backed canvas. Holds no live krilla document.
@@ -323,9 +323,9 @@ impl Canvas for KrillaCanvas {
         Ok(())
     }
 
-    fn annotate_link(&mut self, rect: Rect, target: LinkTarget) -> Result<()> {
+    fn annotate_link(&mut self, rect: Rect, dest: LinkDest) -> Result<()> {
         let page = self.open_page_mut("annotate_link")?;
-        page.links.push(QueuedLink { rect, target });
+        page.links.push(QueuedLink { rect, dest });
         Ok(())
     }
 

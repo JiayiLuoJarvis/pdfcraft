@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::canvas::{LinkTarget, LinkXyz, OutlineItem};
+use crate::canvas::{LinkDest, LinkXyz, OutlineItem};
 use crate::error::{Error, ErrorKind, Fallible as Result, Location};
 use crate::geom::Point;
-use crate::layout::frame::FragmentCommand;
+use crate::layout::frame::{FragmentCommand, FragmentLink, LayoutLink};
 use crate::layout::paginate::LaidDocument;
 
 /// Outline candidate recorded at lower time.
@@ -58,28 +58,33 @@ pub(crate) fn collect_anchors(laid: &LaidDocument) -> AnchorTable {
     table
 }
 
-/// Rewrite `LinkTarget::Anchor` commands to `Xyz`. Missing ids → [`ErrorKind::UnknownAnchor`].
+/// Rewrite unresolved link commands to `LinkDest`. Missing anchor ids → [`ErrorKind::UnknownAnchor`].
 pub(crate) fn resolve_link_commands(laid: &mut LaidDocument, table: &AnchorTable) -> Result<()> {
     for (page_index, page) in laid.pages_mut().iter_mut().enumerate() {
         let page_at = Location::page_index(page_index).with_region(crate::error::Region::Body);
         for placed in &mut page.placed {
             for command in &mut placed.fragment.commands {
-                let FragmentCommand::Link { target, at, .. } = command else {
+                let FragmentCommand::Link { link, at, .. } = command else {
                     continue;
                 };
-                let LinkTarget::Anchor(id) = target else {
-                    continue;
-                };
-                let Some(xyz) = table.get(id) else {
-                    let mut error = Error::from(ErrorKind::UnknownAnchor);
-                    if *at == Location::default() {
-                        error.fill_missing(&page_at);
-                    } else {
-                        error.fill_missing(at);
+                match link {
+                    FragmentLink::Unresolved(LayoutLink::Anchor(id)) => {
+                        let Some(xyz) = table.get(id) else {
+                            let mut error = Error::from(ErrorKind::UnknownAnchor);
+                            if *at == Location::default() {
+                                error.fill_missing(&page_at);
+                            } else {
+                                error.fill_missing(at);
+                            }
+                            return Err(error);
+                        };
+                        *link = FragmentLink::Resolved(LinkDest::Page(xyz));
                     }
-                    return Err(error);
-                };
-                *target = LinkTarget::xyz(xyz.page_index(), xyz.point());
+                    FragmentLink::Unresolved(LayoutLink::Uri(uri)) => {
+                        *link = FragmentLink::Resolved(LinkDest::Uri(std::mem::take(uri)));
+                    }
+                    FragmentLink::Resolved(_) => {}
+                }
             }
         }
     }

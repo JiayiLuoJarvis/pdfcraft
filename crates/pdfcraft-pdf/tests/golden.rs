@@ -32,8 +32,8 @@ use pdfcraft_pdf::spec::{ImageSpec, ImageStyle};
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::ImageFormat;
 use pdfcraft_pdf::{
-    layout_spec, Angle, CanvasCommand, Color, DocumentSpec, Ink, LinkTarget, Margins, PageSize,
-    Path, Pen, Point, Positive, Rect, Size,
+    layout_spec, Angle, CanvasCommand, Color, DocumentSpec, Ink, LinkDest, Margins, PageSize, Path,
+    Pen, Point, Positive, Rect, Size,
 };
 use snapshot::{FontMeta, GoldenError};
 
@@ -206,16 +206,9 @@ fn golden_each_constructible_op_has_stable_text() {
         (
             CanvasCommand::AnnotateLink {
                 rect: rect(72.0, 90.0, 40.0, 14.0),
-                target: LinkTarget::uri("https://example.test/a").unwrap(),
+                dest: LinkDest::uri("https://example.test/a").unwrap(),
             },
             "link rect=72.000 90.000 40.000 14.000 uri=\"https://example.test/a\"",
-        ),
-        (
-            CanvasCommand::AnnotateLink {
-                rect: rect(0.0, 0.0, 5.0, 5.0),
-                target: LinkTarget::anchor("sec-1").unwrap(),
-            },
-            "link rect=0.000 0.000 5.000 5.000 anchor=\"sec-1\"",
         ),
         (
             CanvasCommand::PushTransform {

@@ -5,11 +5,11 @@
 use std::collections::VecDeque;
 
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind};
-use crate::geom::{Finite, Length, NonNegative, Point};
+use crate::geom::{Finite, Length, NonNegative, Point, Positive};
 use crate::layout::canvas::CanvasNode;
 use crate::layout::columns::ColumnsNode;
 use crate::layout::frame::{
-    self, AnchorMark, Flowable, Fragment, Frame, LayoutCtx, NodeKind, Split,
+    self, AnchorMark, Flowable, Fragment, FragmentCommand, Frame, LayoutCtx, NodeKind, Split,
 };
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
@@ -132,7 +132,89 @@ impl Flowable for FlowNode {
     }
 }
 
-fn fragment_is_effective(fragment: &Fragment) -> bool {
+impl FlowNode {
+    pub(crate) fn keep_with_next(&self) -> bool {
+        match self {
+            FlowNode::Paragraph(p) => p.keep_with_next(),
+            FlowNode::Text(t) => t.keep_with_next(),
+            FlowNode::Spacer(_)
+            | FlowNode::PageBreak
+            | FlowNode::KeepTogether(_)
+            | FlowNode::Anchor(_)
+            | FlowNode::Inset(_)
+            | FlowNode::Stack(_)
+            | FlowNode::Columns(_)
+            | FlowNode::Table(_)
+            | FlowNode::List(_)
+            | FlowNode::Image(_)
+            | FlowNode::Canvas(_)
+            | FlowNode::HLine(_) => false,
+        }
+    }
+
+    pub(crate) fn is_page_break(&self) -> bool {
+        matches!(self, FlowNode::PageBreak)
+    }
+
+    pub(crate) fn paragraph_total_height_with_spacing(
+        &self,
+        ctx: &mut LayoutCtx<'_>,
+        width: Length<Positive>,
+    ) -> Result<Length<NonNegative>> {
+        match self {
+            FlowNode::Paragraph(p) => Ok(p.total_height() + p.spacing_after),
+            FlowNode::Text(t) => {
+                let h = t.total_height(ctx, width)?;
+                Ok(h + t.spacing_after())
+            }
+            FlowNode::Spacer(_)
+            | FlowNode::PageBreak
+            | FlowNode::KeepTogether(_)
+            | FlowNode::Anchor(_)
+            | FlowNode::Inset(_)
+            | FlowNode::Stack(_)
+            | FlowNode::Columns(_)
+            | FlowNode::Table(_)
+            | FlowNode::List(_)
+            | FlowNode::Image(_)
+            | FlowNode::Canvas(_)
+            | FlowNode::HLine(_) => Ok(NonNegative::ZERO),
+        }
+    }
+
+    pub(crate) fn opening_height(
+        &mut self,
+        ctx: &mut LayoutCtx<'_>,
+        avail: Frame,
+    ) -> Result<Length<NonNegative>> {
+        match self {
+            FlowNode::Paragraph(p) => Ok(p.opening_height()),
+            FlowNode::Text(t) => t.opening_height(ctx, avail.width),
+            FlowNode::Table(table) => table.opening_height(ctx, avail),
+            other @ (FlowNode::Spacer(_)
+            | FlowNode::PageBreak
+            | FlowNode::KeepTogether(_)
+            | FlowNode::Anchor(_)
+            | FlowNode::Inset(_)
+            | FlowNode::Stack(_)
+            | FlowNode::Columns(_)
+            | FlowNode::List(_)
+            | FlowNode::Image(_)
+            | FlowNode::Canvas(_)
+            | FlowNode::HLine(_)) => {
+                let full = Frame {
+                    width: avail.width,
+                    height: avail.full_height.into(),
+                    full_height: avail.full_height,
+                };
+                let (h, _) = frame::natural_height(other.clone(), ctx, full)?;
+                Ok(h)
+            }
+        }
+    }
+}
+
+pub(crate) fn fragment_is_effective(fragment: &Fragment) -> bool {
     fragment.height > NonNegative::ZERO || !fragment.commands.is_empty()
 }
 
@@ -386,11 +468,116 @@ fn split_stack_for_anchor(
     split_stack_inner(ctx, avail, kids, Some((id, landed)))
 }
 
+fn should_push_chain_in_stack(
+    first: &FlowNode,
+    rest: &mut VecDeque<FlowNode>,
+    ctx: &mut LayoutCtx<'_>,
+    avail: Frame,
+    placed_any: bool,
+) -> Result<bool> {
+    if !placed_any {
+        return Ok(false);
+    }
+    let mut chain_end = 0;
+    while let Some(node) = rest.get(chain_end) {
+        if node.keep_with_next() {
+            chain_end += 1;
+        } else {
+            break;
+        }
+    }
+    if chain_end >= rest.len() {
+        return Ok(false);
+    }
+    if let Some(node) = rest.get(chain_end) {
+        if node.is_page_break() {
+            return Ok(false);
+        }
+    }
+    let mut needed = first.paragraph_total_height_with_spacing(ctx, avail.width)?;
+    for node in rest.iter().take(chain_end) {
+        needed += node.paragraph_total_height_with_spacing(ctx, avail.width)?;
+    }
+    let Some(target) = rest.get_mut(chain_end) else {
+        return Ok(false);
+    };
+    let target_opening = target.opening_height(ctx, avail)?;
+    needed += target_opening;
+    Ok(needed > avail.height)
+}
+
+fn split_stack_finish(
+    head: Fragment,
+    tail_items: Vec<FlowNode>,
+    placed_any: bool,
+) -> Split<FlowNode> {
+    if placed_any {
+        Split::Partial {
+            head_height: head.height,
+            head,
+            tail: FlowNode::Stack(tail_items),
+        }
+    } else {
+        Split::MoveToNextPage(FlowNode::Stack(tail_items))
+    }
+}
+
+struct StackPlacer<'a> {
+    commands: Vec<FragmentCommand>,
+    anchors: Vec<AnchorMark>,
+    y: Length<NonNegative>,
+    first_baseline: Option<Length<Finite>>,
+    baseline_chosen: bool,
+    landing: Option<(&'a str, &'a mut bool)>,
+}
+
+impl<'a> StackPlacer<'a> {
+    fn new(landing: Option<(&'a str, &'a mut bool)>) -> Self {
+        Self {
+            commands: Vec::new(),
+            anchors: Vec::new(),
+            y: NonNegative::ZERO,
+            first_baseline: None,
+            baseline_chosen: false,
+            landing,
+        }
+    }
+
+    fn place_fragment(&mut self, mut frag: Fragment) -> Result<Length<NonNegative>> {
+        land_nested_fragment(&mut self.landing, &mut frag);
+        let spacing = frag.spacing_after;
+        let offset = frag.with_offset(Finite::ZERO, self.y.into())?;
+        note_first_baseline(&mut self.baseline_chosen, &mut self.first_baseline, &offset);
+        self.commands.extend(offset.commands);
+        self.anchors.extend(offset.anchors);
+        Ok(spacing)
+    }
+
+    fn finish(
+        self,
+        spacing_after: Length<NonNegative>,
+        tail: Vec<FlowNode>,
+        placed_any: bool,
+    ) -> Split<FlowNode> {
+        split_stack_finish(
+            Fragment {
+                height: self.y,
+                spacing_after,
+                commands: self.commands,
+                anchors: self.anchors,
+                first_baseline: self.first_baseline,
+            },
+            tail,
+            placed_any,
+        )
+    }
+}
+
 fn split_stack_inner(
     ctx: &mut LayoutCtx<'_>,
     mut avail: Frame,
     kids: Vec<FlowNode>,
-    mut landing: Option<(&str, &mut bool)>,
+    landing: Option<(&str, &mut bool)>,
 ) -> Result<Split<FlowNode>> {
     if kids.is_empty() {
         return Ok(Split::Fit {
@@ -400,101 +587,73 @@ fn split_stack_inner(
     }
 
     let mut kids: VecDeque<FlowNode> = kids.into();
-    let mut commands = Vec::new();
-    let mut anchors = Vec::new();
-    let mut y = NonNegative::ZERO;
     let mut trailing_spacing = NonNegative::ZERO;
     let mut placed_any = false;
-    let mut first_baseline = None;
-    let mut baseline_chosen = false;
+    let mut placer = StackPlacer::new(landing);
 
     while let Some(child) = kids.pop_front() {
+        if child.keep_with_next()
+            && should_push_chain_in_stack(&child, &mut kids, ctx, avail, placed_any)?
+        {
+            let mut rest = Vec::with_capacity(kids.len() + 1);
+            rest.push(child);
+            rest.extend(kids);
+            return Ok(placer.finish(trailing_spacing, rest, placed_any));
+        }
         match child.split(ctx, avail)? {
             Split::Fit {
                 height,
-                fragment: mut child_frag,
+                fragment: child_frag,
             } => {
-                land_nested_fragment(&mut landing, &mut child_frag);
-                let spacing = child_frag.spacing_after;
-                let offset = child_frag.with_offset(Finite::ZERO, y.into())?;
-                note_first_baseline(&mut baseline_chosen, &mut first_baseline, &offset);
-                commands.extend(offset.commands);
-                anchors.extend(offset.anchors);
-                y += height;
+                let spacing = placer.place_fragment(child_frag)?;
+                placer.y += height;
                 avail.height = avail.height.saturating_sub(height);
                 placed_any = true;
 
                 if kids.is_empty() {
                     trailing_spacing = spacing;
                 } else if spacing > NonNegative::ZERO && avail.height >= spacing {
-                    y += spacing;
+                    placer.y += spacing;
                     avail.height = avail.height.sub_exact(spacing);
                 } else if spacing > NonNegative::ZERO && ctx.natural {
-                    y += spacing;
+                    placer.y += spacing;
                     avail.height = NonNegative::ZERO;
                 }
             }
             Split::Partial {
                 head_height,
-                mut head,
+                head,
                 tail,
             } => {
-                land_nested_fragment(&mut landing, &mut head);
-                let offset = head.with_offset(Finite::ZERO, y.into())?;
-                note_first_baseline(&mut baseline_chosen, &mut first_baseline, &offset);
-                commands.extend(offset.commands);
-                anchors.extend(offset.anchors);
-                y += head_height;
+                let spacing = placer.place_fragment(head)?;
+                placer.y += head_height;
                 let mut rest = Vec::with_capacity(kids.len() + 1);
                 rest.push(tail);
                 rest.extend(kids);
-                return Ok(Split::Partial {
-                    head_height: y,
-                    head: Fragment {
-                        height: y,
-                        // Only natural-height measurement needs a cut-off gap on the head.
-                        spacing_after: if ctx.natural {
-                            offset.spacing_after
-                        } else {
-                            NonNegative::ZERO
-                        },
-                        commands,
-                        anchors,
-                        first_baseline,
-                    },
-                    tail: FlowNode::Stack(rest),
-                });
+                let spacing_after = if ctx.natural {
+                    spacing
+                } else {
+                    NonNegative::ZERO
+                };
+                return Ok(placer.finish(spacing_after, rest, true));
             }
             Split::MoveToNextPage(node) => {
                 let mut rest = Vec::with_capacity(kids.len() + 1);
                 rest.push(node);
                 rest.extend(kids);
-                if !placed_any {
-                    return Ok(Split::MoveToNextPage(FlowNode::Stack(rest)));
-                }
-                return Ok(Split::Partial {
-                    head_height: y,
-                    head: Fragment {
-                        height: y,
-                        spacing_after: NonNegative::ZERO,
-                        commands,
-                        anchors,
-                        first_baseline,
-                    },
-                    tail: FlowNode::Stack(rest),
-                });
+                return Ok(placer.finish(NonNegative::ZERO, rest, placed_any));
             }
         }
     }
 
     Ok(Split::Fit {
-        height: y,
+        height: placer.y,
         fragment: Fragment {
-            height: y,
+            height: placer.y,
             spacing_after: trailing_spacing,
-            commands,
-            anchors,
-            first_baseline,
+            commands: placer.commands,
+            anchors: placer.anchors,
+            first_baseline: placer.first_baseline,
         },
     })
 }

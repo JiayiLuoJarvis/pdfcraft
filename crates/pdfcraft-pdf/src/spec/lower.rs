@@ -1,9 +1,10 @@
 //! Pure-function lowering from [`DocumentSpec`] to layout nodes.
 
-use crate::canvas::{DecodedImage, ImageRegistry, LinkTarget, RecordingCanvas};
+use super::LinkTarget;
+use crate::canvas::{DecodedImage, ImageRegistry, RecordingCanvas};
 use crate::error::{
-    ColumnWidthsReason, DecorationKind, Error, ErrorBag, ErrorKind, Fallible, GeometryKind,
-    Location, Result,
+    CellIndex, ColumnWidthsReason, DecorationKind, Error, ErrorBag, ErrorKind, Fallible,
+    GeometryKind, Location, Result,
 };
 use crate::fonts::{EmOffset, FaceDecorations, FontFace, FontId, FontKey, FontSource, FontStore};
 use crate::geom::{
@@ -18,7 +19,7 @@ use crate::layout::decorate::{
     BandNodes, Decorations, LayerContent, LayerItem, LayerText, PageInfo,
 };
 use crate::layout::flow::{self, AnchorNode, FlowNode, KeepTogetherNode, SpacerNode};
-use crate::layout::frame::LayoutCtx;
+use crate::layout::frame::{LayoutCtx, LayoutLink};
 use crate::layout::hline::HLineNode;
 use crate::layout::image::ImageNode;
 use crate::layout::inset::InsetNode;
@@ -44,6 +45,7 @@ use super::{
     ColumnsSpec, DocumentSpec, HLineStyle, ImageRef, ImageSpec, ImageStyle, LayerMark, LayerShape,
     ListKind, ListSpec, Mark, MarkerFormat, OutlineEntry, PageBandQuery, PageText, PageWhen,
     ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, SectionStyle, Span,
+    TableRules,
 };
 
 /// Lowers a data-only specification and records its laid-out pages.
@@ -636,6 +638,9 @@ fn lower_paragraph<K: FontKey>(
         align,
         first_line_indent,
         line_height,
+        orphans,
+        widows,
+        keep_with_next,
     } = style;
     let paint = parent.patch(text);
     let mut bag = ErrorBag::default();
@@ -669,6 +674,9 @@ fn lower_paragraph<K: FontKey>(
     if let Some(line_height) = line_height {
         frame.line_height_factor = line_height.get();
     }
+    frame.orphans = orphans;
+    frame.widows = widows;
+    frame.keep_with_next = keep_with_next;
     Some(FlowNode::Text(TextNode::from_items(items, frame)))
 }
 
@@ -696,12 +704,21 @@ fn first_run_font(items: &[InlineItem]) -> Option<FontId> {
     })
 }
 
+impl From<&LinkTarget> for LayoutLink {
+    fn from(target: &LinkTarget) -> Self {
+        match target {
+            LinkTarget::Uri(uri) => Self::uri(uri),
+            LinkTarget::Anchor(id) => Self::anchor(id),
+        }
+    }
+}
+
 fn push_spans<K: FontKey>(
     spans: Vec<Span<K>>,
     paint: &InheritedPaint,
     fonts: &FontTable<K>,
     items: &mut Vec<InlineItem>,
-    active_link: &mut Option<LinkTarget>,
+    active_link: &mut Option<LayoutLink>,
     errors: &mut ErrorBag,
 ) {
     for span in spans {
@@ -725,15 +742,9 @@ fn push_spans<K: FontKey>(
                         errors.record(Error::from(ErrorKind::EmptyAnchorId));
                         continue;
                     }
-                    LinkTarget::Xyz(_) => {
-                        errors.record(Error::from(ErrorKind::Backend {
-                            message: "LinkTarget::Xyz is layout-only".to_owned(),
-                        }));
-                        continue;
-                    }
                     LinkTarget::Uri(_) | LinkTarget::Anchor(_) => {}
                 }
-                let previous = active_link.replace(target);
+                let previous = active_link.replace(LayoutLink::from(&target));
                 push_spans(children, paint, fonts, items, active_link, errors);
                 *active_link = previous;
             }
@@ -774,7 +785,7 @@ fn append_text(
     items: &mut Vec<InlineItem>,
     style: GlyphStyle,
     text: &str,
-    active_link: Option<&LinkTarget>,
+    active_link: Option<&LayoutLink>,
     errors: &mut ErrorBag,
 ) {
     if text.is_empty() {
@@ -954,8 +965,26 @@ fn lower_table<K: FontKey>(
             .map(|cell| usize::from(cell.col_span.get()))
             .sum()
     });
-    let header = lower_table_rows(header, env, anchors, &mut bag);
-    let body = lower_table_rows(body, env, anchors, &mut bag);
+
+    let placement = match layout_table::place_table_grid(
+        cols,
+        header
+            .iter()
+            .map(|r| r.children.iter().map(|c| (c.col_span, c.row_span))),
+        body.iter()
+            .map(|r| r.children.iter().map(|c| (c.col_span, c.row_span))),
+    ) {
+        Ok(p) => p,
+        Err(error) => {
+            bag.record(error);
+            errors.absorb(bag);
+            return None;
+        }
+    };
+
+    let mut span_iter = placement.spans.iter().copied();
+    let header = lower_table_rows(header, &mut span_iter, env, anchors, &mut bag);
+    let body = lower_table_rows(body, &mut span_iter, env, anchors, &mut bag);
     let mut blocked = !bag.is_empty() || header.is_none() || body.is_none();
     let widths = match style.tracks {
         Some(tracks) => table_widths(tracks, cols, &mut blocked, &mut bag),
@@ -981,19 +1010,25 @@ fn lower_table<K: FontKey>(
         body,
         repeat_header,
         padding: style.cell_padding,
-        border: layout_table::Border {
-            width: style.border.width,
-            color: style.border.color,
+        rules: match style.rules {
+            TableRules::Grid(pen) => layout_table::Rules::Grid(pen),
+            TableRules::ThreeLine {
+                top,
+                header: hdr_pen,
+                bottom,
+            } => layout_table::Rules::ThreeLine {
+                top,
+                header: hdr_pen,
+                bottom,
+            },
+            TableRules::None => layout_table::Rules::None,
         },
         ..LayoutTableSpec::new(widths)
     };
-    match TableNode::new(layout_spec) {
-        Ok(node) => Some(FlowNode::Table(node)),
-        Err(error) => {
-            errors.record(error);
-            None
-        }
-    }
+    Some(FlowNode::Table(TableNode::with_placement(
+        layout_spec,
+        placement,
+    )))
 }
 
 fn table_widths(
@@ -1028,6 +1063,7 @@ fn table_widths(
 
 fn lower_table_rows<K: FontKey>(
     rows: Vec<super::TableRow<K>>,
+    spans: &mut impl Iterator<Item = layout_table::CellSpan>,
     env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
@@ -1037,7 +1073,13 @@ fn lower_table_rows<K: FontKey>(
     for row in rows {
         let mut stored = Vec::with_capacity(row.children.len());
         for cell in row.children {
-            match lower_cell(cell, env, anchors, errors) {
+            let span = spans.next().unwrap_or(layout_table::CellSpan {
+                row: 0,
+                col: 0,
+                cols: 1,
+                rows: 1,
+            });
+            match lower_cell(cell, span, env, anchors, errors) {
                 Some(built) => stored.push(built),
                 None => ok = false,
             }
@@ -1075,6 +1117,7 @@ fn lower_checked<K: FontKey, T>(
 
 fn lower_cell<K: FontKey>(
     spec: CellSpec<K>,
+    span: layout_table::CellSpan,
     env: &LowerEnv<'_, K>,
     anchors: &mut AnchorRegistry,
     errors: &mut ErrorBag,
@@ -1085,10 +1128,20 @@ fn lower_cell<K: FontKey>(
         col_span,
         row_span,
     } = spec;
-    lower_checked(children, env, anchors, errors, |nodes| {
+    let mut loc = env.at;
+    loc.cell = Some(CellIndex {
+        row: span.row,
+        col: span.col,
+    });
+    let mut cell_env = env.clone();
+    cell_env.at = loc;
+    let mark = errors.mark();
+    let built = lower_checked(children, &cell_env, anchors, errors, |nodes| {
         layout_table::Cell::new(nodes)
             .map(|cell| cell.with_span(col_span, row_span).with_fill(style.fill))
-    })
+    });
+    errors.locate_since(mark, &loc);
+    built
 }
 
 fn lower_list<K: FontKey>(
@@ -1429,7 +1482,7 @@ fn lower_band_flow(spec: &OwnedBand, info: &PageInfo, errors: &mut ErrorBag) -> 
 
 struct BandSlotResolved {
     text: String,
-    link: Option<LinkTarget>,
+    link: Option<LayoutLink>,
     style: GlyphStyle,
 }
 
@@ -1442,7 +1495,7 @@ fn band_slot(
     let link = if let Some(uri_runs) = &slot.link {
         let uri = render_text(uri_runs, page);
         match LinkTarget::uri(&uri) {
-            Ok(target) => Some(target),
+            Ok(target) => Some(LayoutLink::from(&target)),
             Err(error) => {
                 errors.record(error);
                 return None;

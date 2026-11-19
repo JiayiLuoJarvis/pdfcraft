@@ -1,7 +1,12 @@
 //! Crate-internal paragraph and glyph styles for flow layout.
 
+use std::num::NonZeroU8;
+
 use crate::fonts::{EmOffset, FontId};
 use crate::geom::{Color, Finite, Length, NonNegative, Positive};
+
+#[cfg(test)]
+const DEFAULT_ORPHANS_WIDOWS: NonZeroU8 = NonZeroU8::MIN.saturating_add(1);
 
 /// Horizontal alignment within the current frame width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +33,9 @@ pub(crate) struct Style {
     pub(crate) paragraph_spacing: Length<NonNegative>,
     pub(crate) first_line_indent: Length<NonNegative>,
     pub(crate) align: TextAlign,
+    pub(crate) orphans: NonZeroU8,
+    pub(crate) widows: NonZeroU8,
+    pub(crate) keep_with_next: bool,
 }
 
 /// One run's underline or strikethrough at its font size.
@@ -102,6 +110,9 @@ impl Style {
             paragraph_spacing,
             first_line_indent: NonNegative::ZERO,
             align,
+            orphans: DEFAULT_ORPHANS_WIDOWS,
+            widows: DEFAULT_ORPHANS_WIDOWS,
+            keep_with_next: false,
         })
     }
 }

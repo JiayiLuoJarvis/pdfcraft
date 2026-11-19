@@ -3,7 +3,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 use crate::canvas::{pt_near, CanvasCommand, RecordedPage};
 use crate::error::{Error, ErrorBag, ErrorKind, GeometryKind};
 use crate::fonts::FontStore;
-use crate::geom::{Color, Finite, NonNegative, Point, Positive, Size};
+use crate::geom::{Color, Finite, NonNegative, Pen, Point, Positive, Size};
 use crate::layout::canvas::{CanvasMarkNode, CanvasNode};
 use crate::layout::column_width::ColumnWidth;
 use crate::layout::columns::ColumnsNode;
@@ -18,7 +18,7 @@ use crate::layout::list::{
 };
 use crate::layout::paragraph::{BlankWidth, InlineBlank, InlineItem, TextNode};
 use crate::layout::style::{GlyphStyle, Style, TextAlign};
-use crate::layout::table::{Cell, TableNode, TableSpec};
+use crate::layout::table::{Cell, Rules, TableNode, TableSpec};
 use crate::layout::test_util::{bits, fonts_and_style, metrics, page, render, runs, text, texts};
 
 fn spec(
@@ -1080,7 +1080,11 @@ fn canvas_text(style: &Style) -> FlowNode {
 fn text_table(style: &Style, padding: f32, border: f32, header: bool) -> FlowNode {
     let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(80.0).unwrap())]);
     spec.padding = NonNegative::pt(padding).unwrap();
-    spec.border.width = NonNegative::pt(border).unwrap();
+    if let Ok(width) = Positive::pt(border) {
+        spec.rules = Rules::Grid(Pen::new(Color::rgb(0, 0, 0), width).unwrap());
+    } else {
+        spec.rules = Rules::None;
+    }
     let cell = |label: &str| Cell::new(vec![text(label, style)]).unwrap();
     if header {
         spec.header = vec![vec![cell("H")]];

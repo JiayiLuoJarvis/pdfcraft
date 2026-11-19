@@ -108,7 +108,7 @@ pub use error::{
 #[doc(inline)]
 pub use geom::{
     Angle, Color, Finite, Ink, IntoFinite, IntoNonNegative, IntoPoint, IntoPositive, IntoRect,
-    Length, MarginPreset, Margins, NonNegative, Orientation, PageSize, Paint, Paper, Path,
+    Length, MarginPreset, Margins, NonNegative, Offset, Orientation, PageSize, Paint, Paper, Path,
     PathBuilder, PathVerb, Pen, Point, Positive, Rect, Size, Stroke, A4, LETTER, MM_TO_PT,
 };
 #[doc(inline)]
@@ -120,17 +120,14 @@ pub mod spec;
 
 #[doc(inline)]
 pub use spec::{
-    layout_spec, BandFn, DocumentSpec, Numbering, OutlineEntry, PageBandQuery, Ratio, Rendered,
-    Track,
+    layout_spec, BandFn, DocumentSpec, LinkTarget, Numbering, OutlineEntry, PageBandQuery, Ratio,
+    Rendered, TableRules, Track,
 };
 
-#[cfg(feature = "test-utils")]
-#[doc(inline)]
-pub use canvas::{pt_near, PT_ABS_TOLERANCE};
 #[doc(inline)]
 pub use canvas::{
-    CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId, LinkTarget,
-    LinkXyz, RecordedPage, RecordingCanvas,
+    CanvasCommand, DecodedImage, GlyphPlacement, GlyphRun, ImageFormat, ImageId, LinkDest, LinkXyz,
+    RecordedPage, RecordingCanvas,
 };
 #[doc(inline)]
 pub use fonts::{FontFace, FontFamily, FontId, FontRegistry};

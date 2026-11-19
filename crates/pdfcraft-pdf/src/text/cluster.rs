@@ -4,6 +4,11 @@ use std::ops::Range;
 
 use crate::text::break_class::{self, BreakClass};
 
+/// Tests whether a scalar is a Unicode variation selector (VS1..VS256).
+pub(crate) fn is_variation_selector(scalar: char) -> bool {
+    matches!(scalar, '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
+}
+
 /// Immutable cluster tape over normalized text and BK-free glyph text.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClusteredText {
@@ -44,7 +49,7 @@ pub(crate) struct Cluster<'a> {
 impl ClusteredText {
     /// Normalize CRLF, segment graphemes, omit BK from `glyph_text`.
     pub(crate) fn new(source: &str) -> Self {
-        let (normalized, _) = normalize_tagged(source.chars().map(|scalar| (scalar, ())));
+        let (normalized, _) = normalize_runs([((), source)]);
         Self::from_normalized(normalized)
     }
 
@@ -54,6 +59,7 @@ impl ClusteredText {
         let mut clusters = Vec::new();
         let mut glyph = 0usize;
         let mut glyph_byte = 0usize;
+        let mut prev_class = None;
 
         for (byte_start, grapheme) in normalized.grapheme_indices(true) {
             let byte_end = byte_start + grapheme.len();
@@ -62,14 +68,23 @@ impl ClusteredText {
                 reason = "Unicode grapheme clusters contain at least one scalar"
             )]
             let first = grapheme.chars().next().expect("grapheme non-empty");
-            let class = break_class::classify(first);
+            let is_zwsp = first == '\u{200B}';
+            let class = if is_zwsp {
+                BreakClass::Pair(break_class::PairClass::Sp)
+            } else {
+                break_class::classify(first, prev_class)
+            };
+            prev_class = match class {
+                BreakClass::Pair(pair) => Some(pair),
+                BreakClass::Hard => None,
+            };
             let start = ClusterCursor {
                 cluster: clusters.len(),
                 glyph,
                 glyph_byte,
             };
             let is_hard = matches!(class, BreakClass::Hard);
-            if !is_hard {
+            if !is_hard && !is_zwsp {
                 glyph_text.push_str(grapheme);
                 glyph += grapheme.chars().count();
                 glyph_byte += grapheme.len();
@@ -134,13 +149,7 @@ impl<T> TaggedClusteredText<T> {
 pub(crate) fn cluster_tagged<T: Copy, S: AsRef<str>>(
     runs: impl IntoIterator<Item = (T, S)>,
 ) -> TaggedClusteredText<T> {
-    let tagged_scalars = runs.into_iter().flat_map(|(tag, text)| {
-        text.as_ref()
-            .chars()
-            .map(move |scalar| (scalar, tag))
-            .collect::<Vec<_>>()
-    });
-    let (normalized, normalized_tags) = normalize_tagged(tagged_scalars);
+    let (normalized, normalized_tags) = normalize_runs(runs);
     let clustered = ClusteredText::from_normalized(normalized);
     let mut glyph_tags = Vec::with_capacity(clustered.glyph_text().chars().count());
     let mut tag_cursor = 0usize;
@@ -222,24 +231,58 @@ impl<'a> Cluster<'a> {
     }
 }
 
-fn normalize_tagged<T: Copy>(
-    tagged_scalars: impl IntoIterator<Item = (char, T)>,
+fn normalize_runs<T: Copy, S: AsRef<str>>(
+    runs: impl IntoIterator<Item = (T, S)>,
 ) -> (String, Vec<T>) {
     let mut text = String::new();
     let mut tags = Vec::new();
-    let mut scalars = tagged_scalars.into_iter().peekable();
-    while let Some((scalar, tag)) = scalars.next() {
+    let mut scalars = runs
+        .into_iter()
+        .flat_map(|(tag, s)| {
+            let s = s.as_ref().to_owned();
+            s.chars()
+                .enumerate()
+                .map(move |(i, c)| (c, tag, i == 0))
+                .collect::<Vec<_>>()
+        })
+        .peekable();
+
+    let mut prev_char: Option<char> = None;
+    while let Some((scalar, tag, is_span_start)) = scalars.next() {
+        if is_span_start {
+            prev_char = None;
+        }
         match scalar {
+            '\u{FEFF}' | '\u{200C}' | '\u{200D}' => {
+                prev_char = None;
+            }
             '\r' => {
-                if matches!(scalars.peek(), Some(('\n', _))) {
+                if matches!(scalars.peek(), Some(('\n', _, _))) {
                     scalars.next();
                 }
                 text.push('\n');
                 tags.push(tag);
+                prev_char = Some('\n');
+            }
+            '\u{2028}' | '\u{2029}' => {
+                text.push('\n');
+                tags.push(tag);
+                prev_char = Some('\n');
+            }
+            vs if is_variation_selector(vs) => {
+                let isolated = prev_char.is_none()
+                    || matches!(prev_char, Some('\n' | ' ' | '\u{3000}' | '\u{200B}'))
+                    || prev_char.is_some_and(is_variation_selector);
+                if !isolated {
+                    text.push(vs);
+                    tags.push(tag);
+                    prev_char = Some(vs);
+                }
             }
             other => {
                 text.push(other);
                 tags.push(tag);
+                prev_char = Some(other);
             }
         }
     }
@@ -284,5 +327,52 @@ mod tests {
         assert_eq!(text.clustered().normalized_text(), "A\nB");
         assert_eq!(text.clustered().glyph_text(), "AB");
         assert_eq!(text.glyph_tags(), [0, 1]);
+    }
+
+    #[test]
+    fn r3_invisible_characters_stripped() {
+        let text = ClusteredText::new("A\u{FEFF}\u{200C}\u{200D}B");
+        assert_eq!(text.normalized_text(), "AB");
+        assert_eq!(text.glyph_text(), "AB");
+    }
+
+    #[test]
+    fn r3_line_separators_normalized_to_hard_break() {
+        let text = ClusteredText::new("A\u{2028}B\u{2029}C");
+        assert_eq!(text.normalized_text(), "A\nB\nC");
+        assert_eq!(text.glyph_text(), "ABC");
+    }
+
+    #[test]
+    fn r3_zero_width_space_becomes_cluster_without_glyphs() {
+        let text = ClusteredText::new("A\u{200B}B");
+        assert_eq!(text.normalized_text(), "A\u{200B}B");
+        assert_eq!(text.glyph_text(), "AB");
+        assert_eq!(text.len(), 3);
+        assert_eq!(
+            text.cluster(1).class(),
+            BreakClass::Pair(break_class::PairClass::Sp)
+        );
+        assert!(text.cluster(1).glyph_range().is_empty());
+    }
+
+    #[test]
+    fn r3_variation_selectors_handled() {
+        // Isolated VS at start stripped
+        let text_start = ClusteredText::new("\u{FE00}A");
+        assert_eq!(text_start.normalized_text(), "A");
+
+        // VS following base character preserved
+        let text_base = ClusteredText::new("A\u{FE00}B");
+        assert_eq!(text_base.normalized_text(), "A\u{FE00}B");
+        assert_eq!(text_base.glyph_text(), "A\u{FE00}B");
+
+        // Isolated VS after space stripped
+        let text_space = ClusteredText::new(" \u{FE00}A");
+        assert_eq!(text_space.normalized_text(), " A");
+
+        // Isolated VS at span start stripped
+        let tagged = cluster_tagged([(0, "A"), (1, "\u{FE00}B")]);
+        assert_eq!(tagged.clustered().normalized_text(), "AB");
     }
 }

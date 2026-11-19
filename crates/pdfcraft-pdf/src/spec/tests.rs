@@ -2,15 +2,15 @@
 
 use std::sync::Arc;
 
-use crate::canvas::{pt_near, CanvasCommand, LinkTarget};
+use crate::canvas::{pt_near, CanvasCommand};
 use crate::error::{ErrorKind, GeometryKind, Location, Region};
 use crate::fonts::fixture_bytes;
 use crate::geom::{Color, Ink, Margins, NonNegative, PageSize, Pen, Point, Positive, Rect, Size};
 use crate::layout_spec;
 use crate::spec::{
     Alignment, BlankSpec, BlankWidth, Block, FontFace, FontFamily, FontRegistry, LayerMark,
-    LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, Mark, MarkerFormat, Numbering,
-    PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
+    LayerShape, LinkTarget, ListItemSpec, ListKind, ListSpec, ListStyle, Mark, MarkerFormat,
+    Numbering, PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec,
     SectionStyle, Span,
 };
 use crate::DocumentSpec;
@@ -88,7 +88,7 @@ fn targets(rendered: &crate::Rendered) -> Vec<String> {
         .iter()
         .flat_map(crate::canvas::RecordedPage::ops)
         .filter_map(|op| match op {
-            CanvasCommand::AnnotateLink { target, .. } => target.uri_str().map(str::to_owned),
+            CanvasCommand::AnnotateLink { dest, .. } => dest.uri_str().map(str::to_owned),
             CanvasCommand::SetDocumentInfo(_)
             | CanvasCommand::StartPage(_)
             | CanvasCommand::FinishPage
@@ -920,4 +920,138 @@ fn add_image_returns_ok_handle() {
     let mut res = Resources::<()>::default();
     let img = res.add_image(vec![1, 2, 3], crate::canvas::ImageFormat::Png);
     assert!(img.is_ok());
+}
+
+#[test]
+fn cell_error_with_unregistered_font_has_cell_index() {
+    let spec = DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::default(),
+        limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            body: vec![Block::Table(super::TableSpec {
+                style: super::TableStyle::default(),
+                header: None,
+                body: vec![super::TableRow {
+                    children: vec![super::CellSpec {
+                        style: super::CellStyle::default(),
+                        col_span: std::num::NonZeroU16::MIN,
+                        row_span: std::num::NonZeroU16::MIN,
+                        children: vec![Block::paragraph("UnknownFontKey", "content")],
+                    }],
+                }],
+            })],
+            ..SectionSpec::default()
+        }],
+    };
+    let Err(errors) = layout_spec(spec) else {
+        panic!("expected layout to fail on unregistered font in cell");
+    };
+    let first = errors.first();
+    assert!(matches!(first.kind, ErrorKind::UnregisteredFont { .. }));
+    assert_eq!(
+        first.at.and_then(|at| at.cell),
+        Some(crate::error::CellIndex { row: 0, col: 0 })
+    );
+}
+
+#[test]
+fn cell_error_with_row_span_matches_placed_cell_index() {
+    let spec = DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::default(),
+        limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            body: vec![Block::Table(super::TableSpec {
+                style: super::TableStyle {
+                    tracks: Some(vec![super::Track::Auto, super::Track::Auto]),
+                    ..super::TableStyle::default()
+                },
+                header: None,
+                body: vec![
+                    super::TableRow {
+                        children: vec![
+                            super::CellSpec {
+                                style: super::CellStyle::default(),
+                                col_span: std::num::NonZeroU16::MIN,
+                                row_span: std::num::NonZeroU16::new(2).unwrap(),
+                                children: vec![Block::Spacer(NonNegative::ZERO)],
+                            },
+                            super::CellSpec {
+                                style: super::CellStyle::default(),
+                                col_span: std::num::NonZeroU16::MIN,
+                                row_span: std::num::NonZeroU16::MIN,
+                                children: vec![Block::Spacer(NonNegative::ZERO)],
+                            },
+                        ],
+                    },
+                    super::TableRow {
+                        children: vec![super::CellSpec {
+                            style: super::CellStyle::default(),
+                            col_span: std::num::NonZeroU16::MIN,
+                            row_span: std::num::NonZeroU16::MIN,
+                            children: vec![Block::paragraph("UnknownFontKey", "in (1, 1)")],
+                        }],
+                    },
+                ],
+            })],
+            ..SectionSpec::default()
+        }],
+    };
+    let Err(errors) = layout_spec(spec) else {
+        panic!("expected layout to fail on unregistered font in cell (1, 1)");
+    };
+    let first = errors.first();
+    assert_eq!(
+        first.at.and_then(|at| at.cell),
+        Some(crate::error::CellIndex { row: 1, col: 1 })
+    );
+}
+
+#[test]
+fn cell_error_invalid_content_columns_has_cell_index() {
+    let spec = DocumentSpec {
+        page_size: PageSize::A4,
+        resources: Resources::<()>::default(),
+        limits: crate::Limits::default(),
+        info: crate::spec::DocumentInfo::default(),
+        sections: vec![SectionSpec {
+            body: vec![Block::Table(super::TableSpec {
+                style: super::TableStyle::default(),
+                header: None,
+                body: vec![super::TableRow {
+                    children: vec![super::CellSpec {
+                        style: super::CellStyle::default(),
+                        col_span: std::num::NonZeroU16::MIN,
+                        row_span: std::num::NonZeroU16::MIN,
+                        children: vec![Block::Columns(super::ColumnsSpec {
+                            style: super::ColumnsStyle::default(),
+                            children: vec![
+                                super::ColumnSpec {
+                                    style: super::ColumnStyle::default(),
+                                    children: vec![],
+                                },
+                                super::ColumnSpec {
+                                    style: super::ColumnStyle::default(),
+                                    children: vec![],
+                                },
+                            ],
+                        })],
+                    }],
+                }],
+            })],
+            ..SectionSpec::default()
+        }],
+    };
+    let Err(errors) = layout_spec(spec) else {
+        panic!("expected invalid cell content");
+    };
+    let first = errors.first();
+    assert!(matches!(first.kind, ErrorKind::InvalidCellContent { .. }));
+    assert_eq!(
+        first.at.and_then(|at| at.cell),
+        Some(crate::error::CellIndex { row: 0, col: 0 })
+    );
 }

@@ -9,6 +9,7 @@ use skrifa::instance::{LocationRef, Size};
 use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault};
 use crate::fonts::{self, FaceMetrics, FontFace, FontId, FontStore};
 use crate::geom::{Finite, Length, Positive};
+use crate::text::cluster;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MeasuredGlyph {
@@ -164,14 +165,38 @@ pub(crate) fn measure_text(
 
     let mut glyphs = Vec::new();
     let mut total_norm = 0.0;
-    for (start, scalar) in text.char_indices() {
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, scalar)) = chars.next() {
         let end = start + scalar.len_utf8();
-        let Some(gid) = charmap.map(scalar) else {
+        if cluster::is_variation_selector(scalar) {
+            glyphs.push(omitted_glyph(scalar, start..end));
+            continue;
+        }
+        let (gid, vs_opt) = if let Some(&(_, next)) = chars.peek() {
+            if cluster::is_variation_selector(next) {
+                let (vs_start, vs_scalar) = chars.next().unwrap_or((0, next));
+                let vs_end = vs_start + vs_scalar.len_utf8();
+                let mapped = match charmap.map_variant(scalar, vs_scalar) {
+                    Some(skrifa::charmap::MapVariant::Variant(variant_gid)) => Some(variant_gid),
+                    Some(skrifa::charmap::MapVariant::UseDefault) | None => charmap.map(scalar),
+                };
+                (mapped, Some((vs_scalar, vs_start..vs_end)))
+            } else {
+                (charmap.map(scalar), None)
+            }
+        } else {
+            (charmap.map(scalar), None)
+        };
+
+        let Some(gid) = gid else {
             errors.record(FontFault::MissingGlyph {
                 font: font.as_u32(),
                 scalar,
             });
             glyphs.push(omitted_glyph(scalar, start..end));
+            if let Some((vs_scalar, vs_range)) = vs_opt {
+                glyphs.push(omitted_glyph(vs_scalar, vs_range));
+            }
             continue;
         };
         let glyph_id = gid.to_u32();
@@ -201,6 +226,9 @@ pub(crate) fn measure_text(
             byte_range: start..end,
             omit: false,
         });
+        if let Some((vs_scalar, vs_range)) = vs_opt {
+            glyphs.push(omitted_glyph(vs_scalar, vs_range));
+        }
     }
 
     Ok(MeasuredText {
@@ -258,8 +286,27 @@ impl FontFace {
         let charmap = font_ref.charmap();
         let glyph_metrics = font_ref.glyph_metrics(Size::unscaled(), LocationRef::default());
         let mut total = 0.0;
-        for scalar in text.chars() {
-            let Some(gid) = charmap.map(scalar) else {
+        let mut chars = text.chars().peekable();
+        while let Some(scalar) = chars.next() {
+            if cluster::is_variation_selector(scalar) {
+                continue;
+            }
+            let gid = if let Some(&next) = chars.peek() {
+                if cluster::is_variation_selector(next) {
+                    chars.next();
+                    match charmap.map_variant(scalar, next) {
+                        Some(skrifa::charmap::MapVariant::Variant(variant_gid)) => {
+                            Some(variant_gid)
+                        }
+                        Some(skrifa::charmap::MapVariant::UseDefault) | None => charmap.map(scalar),
+                    }
+                } else {
+                    charmap.map(scalar)
+                }
+            } else {
+                charmap.map(scalar)
+            };
+            let Some(gid) = gid else {
                 return Err(Error::from(ErrorKind::MissingGlyph { font: 0, scalar }));
             };
             let units = glyph_metrics.advance_width(gid).ok_or_else(|| {
@@ -317,8 +364,8 @@ mod tests {
         assert!(measured.glyphs[1].advance_norm.abs() <= f32::EPSILON);
         let found = errors.finish(()).unwrap_err();
         assert_eq!(
-            found.as_slice(),
-            &[Error::from(ErrorKind::MissingGlyph {
+            found.iter().cloned().collect::<Vec<_>>(),
+            vec![Error::from(ErrorKind::MissingGlyph {
                 font: id.as_u32(),
                 scalar: '\u{FFFF}',
             })]

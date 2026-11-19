@@ -135,6 +135,8 @@ pub(crate) fn reject_auto_with_ratio(widths: &[ColumnWidth]) -> Fallible<()> {
     }
 }
 
+const DEFAULT_ORPHANS_WIDOWS: std::num::NonZeroU8 = std::num::NonZeroU8::MIN.saturating_add(1);
+
 pub(crate) fn default_style() -> Style {
     Style {
         font: None,
@@ -144,6 +146,9 @@ pub(crate) fn default_style() -> Style {
         paragraph_spacing: crate::geom::NonNegative::ZERO,
         first_line_indent: crate::geom::NonNegative::ZERO,
         align: TextAlign::Start,
+        orphans: DEFAULT_ORPHANS_WIDOWS,
+        widows: DEFAULT_ORPHANS_WIDOWS,
+        keep_with_next: false,
     }
 }
 

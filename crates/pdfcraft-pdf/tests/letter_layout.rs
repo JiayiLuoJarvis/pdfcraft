@@ -6,7 +6,7 @@
     reason = "integration test: a panic is the failure report"
 )]
 
-use pdfcraft_pdf::canvas::pt_near;
+use common::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandSlot, BandSpec, Block, CellSpec, FontFace, FontFamily, FontRegistry,
     ImageSpec, ImageStyle, PageText, Resources, RunStyle, SectionSpec, SectionStyle, TableHeader,
@@ -182,7 +182,7 @@ fn confirmation_letter_records_body_table_image_and_footer() {
     let rendered = match result {
         Ok(rendered) => rendered,
         Err(errors)
-            if errors.as_slice().iter().any(|error| {
+            if errors.iter().any(|error| {
                 matches!(error.kind, pdfcraft_pdf::ErrorKind::MissingGlyph { .. })
             }) =>
         {
@@ -260,7 +260,7 @@ fn confirmation_letter_pdf_starts_with_pdf_header() {
     let rendered = match result {
         Ok(rendered) => rendered,
         Err(errors)
-            if errors.as_slice().iter().any(|error| {
+            if errors.iter().any(|error| {
                 matches!(error.kind, pdfcraft_pdf::ErrorKind::MissingGlyph { .. })
             }) =>
         {

@@ -1,14 +1,14 @@
 use std::num::NonZeroU16;
 
 use crate::error::{CellSpanReason, Error, ErrorKind};
-use crate::geom::{Color, Margins, NonNegative, Positive, Size};
+use crate::geom::{Color, Margins, NonNegative, Pen, Positive, Size};
 use crate::layout::column_width::{ColumnWidth, Ratio};
 use crate::layout::columns::{default_column_gap, ColumnsNode};
 use crate::layout::decorate::Decorations;
 use crate::layout::flow::{FlowNode, KeepTogetherNode, SpacerNode};
 use crate::layout::paginate::PaginateConfig;
 use crate::layout::style::Style;
-use crate::layout::table::{Border, Cell, TableNode, TableSpec};
+use crate::layout::table::{Cell, Rules, TableNode, TableSpec};
 use crate::layout::test_util::{
     bits, fills, fonts_and_style, metrics, page, pt, render, runs, strokes, text, texts,
 };
@@ -184,7 +184,7 @@ fn borders_stroke_each_cell_centered_on_grid_lines() {
         ColumnWidth::Auto,
     ]);
     spec.padding = pt(4.0);
-    spec.border.width = pt(2.0);
+    spec.rules = Rules::Grid(Pen::new(Color::rgb(0, 0, 0), 2.0).unwrap());
     spec.body = vec![
         vec![cell("A", &style), cell("B", &style)],
         vec![cell("C", &style), cell("D", &style)],
@@ -203,23 +203,25 @@ fn borders_stroke_each_cell_centered_on_grid_lines() {
     result.unwrap();
     let page = &rec.pages()[0];
     let row = m.line_height.as_pt() + 10.0;
-    let rect = |x0: f32, x1: f32, y0: f32, y1: f32| {
-        vec![
-            Some((x0, y0)),
-            Some((x1, y0)),
-            Some((x1, y1)),
-            Some((x0, y1)),
-            None,
-        ]
-    };
+    let y0 = 16.0;
+    let y1 = row + 16.0;
+    let y2 = row + row + 16.0;
     assert_eq!(
         strokes(page),
-        [
-            rect(10.0, 60.0, 0.0 + 15.0, row + 15.0),
-            rect(60.0, 210.0, 0.0 + 15.0, row + 15.0),
-            rect(10.0, 60.0, row + 15.0, row + row + 15.0),
-            rect(60.0, 210.0, row + 15.0, row + row + 15.0),
-        ]
+        [vec![
+            Some((11.0, y0)),
+            Some((209.0, y0)),
+            Some((11.0, y1)),
+            Some((209.0, y1)),
+            Some((11.0, y2)),
+            Some((209.0, y2)),
+            Some((11.0, y0)),
+            Some((11.0, y2)),
+            Some((61.0, y0)),
+            Some((61.0, y2)),
+            Some((209.0, y0)),
+            Some((209.0, y2)),
+        ]]
     );
     let baseline = (15.0 + 5.0 + m.baseline.as_pt()).to_bits();
     assert_eq!(
@@ -320,10 +322,7 @@ fn cell_fill_paints_behind_content_and_border() {
     };
     let navy = Color::rgb(0x19, 0x2d, 0x74);
     let mut spec = TableSpec::new(vec![ColumnWidth::Fixed(Positive::pt(40.0).unwrap())]);
-    spec.border = Border {
-        width: NonNegative::pt(1.0).unwrap(),
-        color: Color::rgb(0, 0, 0),
-    };
+    spec.rules = Rules::Grid(Pen::new(Color::rgb(0, 0, 0), 1.0).unwrap());
     spec.header = vec![vec![filled("H", &style, navy)]];
     spec.body = vec![vec![cell("b", &style)]];
     let table = TableNode::new(spec).unwrap();
@@ -336,7 +335,7 @@ fn cell_fill_paints_behind_content_and_border() {
     result.unwrap();
     let page = &rec.pages()[0];
     assert_eq!(fills(page).len(), 1);
-    assert_eq!(strokes(page).len(), 2);
+    assert_eq!(strokes(page).len(), 1);
     assert_eq!(texts(page), ["H", "b"]);
     let ops = page.ops();
     let fill_at = ops
@@ -431,4 +430,129 @@ fn spans_past_the_grid_or_out_of_the_header_are_rejected() {
         TableNode::new(gap).unwrap_err(),
         span_error(CellSpanReason::EmptySlot, 0, 1)
     );
+}
+
+#[test]
+fn table_rules_none_and_three_line_r9_tests() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let top = Pen::new(Color::rgb(0, 0, 0), 1.5).unwrap();
+    let header_pen = Pen::new(Color::rgb(0, 0, 0), 0.75).unwrap();
+    let bottom = Pen::new(Color::rgb(0, 0, 0), 1.5).unwrap();
+
+    // 1. None: zero stroke commands
+    {
+        let mut spec = TableSpec::new(halves());
+        spec.rules = Rules::None;
+        spec.header = vec![vec![cell("H1", &style), cell("H2", &style)]];
+        spec.body = vec![vec![cell("B1", &style), cell("B2", &style)]];
+        let table = TableNode::new(spec).unwrap();
+        let (result, rec) = render(
+            FlowNode::Table(table),
+            &mut fonts,
+            page(200.0, 400.0),
+            &Decorations::none(),
+        );
+        result.unwrap();
+        assert_eq!(rec.pages().len(), 1);
+        assert!(strokes(&rec.pages()[0]).is_empty());
+    }
+
+    // 2. ThreeLine with header: exactly 3 horizontal lines; no vertical lines
+    {
+        let mut spec = TableSpec::new(halves());
+        spec.rules = Rules::ThreeLine {
+            top,
+            header: header_pen,
+            bottom,
+        };
+        spec.header = vec![vec![cell("H1", &style), cell("H2", &style)]];
+        spec.body = vec![vec![cell("B1", &style), cell("B2", &style)]];
+        let table = TableNode::new(spec).unwrap();
+        let (result, rec) = render(
+            FlowNode::Table(table),
+            &mut fonts,
+            page(200.0, 400.0),
+            &Decorations::none(),
+        );
+        result.unwrap();
+        assert_eq!(rec.pages().len(), 1);
+        let s = strokes(&rec.pages()[0]);
+        assert_eq!(s.len(), 3, "must have exactly 3 strokes");
+        for line in &s {
+            assert_eq!(line.len(), 2);
+            let p0 = line[0].unwrap();
+            let p1 = line[1].unwrap();
+            assert!((p0.1 - p1.1).abs() < 1e-4, "must be horizontal");
+            assert!((p0.0 - 0.0).abs() < 1e-4);
+            assert!((p1.0 - 200.0).abs() < 1e-4);
+        }
+    }
+
+    // 3. ThreeLine without header: each page has 2 lines
+    {
+        let mut spec = TableSpec::new(halves());
+        spec.rules = Rules::ThreeLine {
+            top,
+            header: header_pen,
+            bottom,
+        };
+        spec.body = vec![vec![cell("B1", &style), cell("B2", &style)]];
+        let table = TableNode::new(spec).unwrap();
+        let (result, rec) = render(
+            FlowNode::Table(table),
+            &mut fonts,
+            page(200.0, 400.0),
+            &Decorations::none(),
+        );
+        result.unwrap();
+        assert_eq!(rec.pages().len(), 1);
+        let s = strokes(&rec.pages()[0]);
+        assert_eq!(s.len(), 2, "without header must have 2 lines");
+        for line in &s {
+            assert_eq!(line.len(), 2);
+            let p0 = line[0].unwrap();
+            let p1 = line[1].unwrap();
+            assert!((p0.1 - p1.1).abs() < 1e-4, "must be horizontal");
+            assert!((p0.0 - 0.0).abs() < 1e-4);
+            assert!((p1.0 - 200.0).abs() < 1e-4);
+        }
+    }
+}
+
+#[test]
+fn table_rules_multipage_r9_tests() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let top = Pen::new(Color::rgb(0, 0, 0), 1.5).unwrap();
+    let header_pen = Pen::new(Color::rgb(0, 0, 0), 0.75).unwrap();
+    let bottom = Pen::new(Color::rgb(0, 0, 0), 1.5).unwrap();
+
+    // 4. ThreeLine spanning 2 pages with repeated header: each page has 3 lines
+    let m = metrics(&fonts, &style);
+    let mut spec = TableSpec::new(halves());
+    spec.rules = Rules::ThreeLine {
+        top,
+        header: header_pen,
+        bottom,
+    };
+    spec.repeat_header = true;
+    spec.header = vec![vec![cell("H1", &style), cell("H2", &style)]];
+    spec.body = numbered_rows(&style, 8);
+    let table = TableNode::new(spec).unwrap();
+    let config = page(200.0, m.line_height.as_pt() * 6.0 + 10.0);
+    let (result, rec) = render(
+        FlowNode::Table(table),
+        &mut fonts,
+        config,
+        &Decorations::none(),
+    );
+    result.unwrap();
+    assert_eq!(rec.pages().len(), 2);
+    let s0 = strokes(&rec.pages()[0]);
+    let s1 = strokes(&rec.pages()[1]);
+    assert_eq!(s0.len(), 3, "page 1 must have 3 lines");
+    assert_eq!(s1.len(), 3, "page 2 must have 3 lines");
 }

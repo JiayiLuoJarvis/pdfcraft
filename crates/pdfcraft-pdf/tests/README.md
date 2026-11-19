@@ -24,9 +24,9 @@ slots in order of first appearance. Identity affines always print in full.
 ## Bless workflow
 
 ```bash
-UPDATE_GOLDEN=1 cargo test -p pdfcraft-pdf --features backend-krilla,test-utils golden_docs
+UPDATE_GOLDEN=1 cargo test -p pdfcraft-pdf --features backend-krilla golden_docs
 git diff crates/pdfcraft-pdf/tests/goldens/   # review every line as behavior, then keep
-cargo test -p pdfcraft-pdf --features backend-krilla,test-utils   # must be green without the flag
+cargo test -p pdfcraft-pdf --features backend-krilla   # must be green without the flag
 ```
 
 Rules:

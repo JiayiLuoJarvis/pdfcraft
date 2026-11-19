@@ -60,7 +60,7 @@ use std::path::{Path as FsPath, PathBuf};
 use pdfcraft_pdf::geom::Affine;
 use pdfcraft_pdf::spec::DocumentInfo;
 use pdfcraft_pdf::{
-    CanvasCommand, Color, DecodedImage, GlyphRun, LinkTarget, Path, PathVerb, Point, RecordedPage,
+    CanvasCommand, Color, DecodedImage, GlyphRun, LinkDest, Path, PathVerb, Point, RecordedPage,
     Rect, Size,
 };
 
@@ -361,12 +361,8 @@ fn fmt_page_op(
         image_op(image, rect, slots)
     } else if let CanvasCommand::DrawGlyphRun { run } = op {
         glyph_op(run, slots, fonts)
-    } else if let CanvasCommand::AnnotateLink { rect, target } = op {
-        Ok(format!(
-            "link rect={} {}",
-            fmt_rect(*rect),
-            fmt_target(target)?
-        ))
+    } else if let CanvasCommand::AnnotateLink { rect, dest } = op {
+        Ok(format!("link rect={} {}", fmt_rect(*rect), fmt_dest(dest)?))
     } else if let CanvasCommand::PushTransform { affine } = op {
         Ok(format!("push affine={}", fmt_affine(affine)))
     } else if matches!(op, CanvasCommand::PopTransform) {
@@ -414,19 +410,17 @@ fn glyph_op(run: &GlyphRun, slots: &Slots, fonts: &[FontMeta]) -> Result<String,
     Ok(fmt_glyphs(run, slot))
 }
 
-fn fmt_target(target: &LinkTarget) -> Result<String, GoldenError> {
-    if let LinkTarget::Uri(uri) = target {
+fn fmt_dest(dest: &LinkDest) -> Result<String, GoldenError> {
+    if let LinkDest::Uri(uri) = dest {
         Ok(format!("uri={uri:?}"))
-    } else if let LinkTarget::Anchor(id) = target {
-        Ok(format!("anchor={id:?}"))
-    } else if let LinkTarget::Xyz(xyz) = target {
+    } else if let LinkDest::Page(xyz) = dest {
         Ok(format!(
-            "xyz page={} {}",
+            "page={} {}",
             xyz.page_index(),
             fmt_point(xyz.point())
         ))
     } else {
-        Err(GoldenError::unsupported(&format!("{target:?}")))
+        Err(GoldenError::unsupported(&format!("{dest:?}")))
     }
 }
 

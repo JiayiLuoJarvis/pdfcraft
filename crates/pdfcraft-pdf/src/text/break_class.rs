@@ -39,22 +39,35 @@ const ALLOW: [[bool; 6]; 6] = [
 
 const OP: &[char] = &[
     '(', '[', '{', '\u{FF08}', '\u{3010}', '\u{300A}', '\u{300C}', '\u{300E}', '\u{3008}',
-    '\u{3014}', '\u{FF5B}',
+    '\u{3014}', '\u{FF5B}', '\u{201C}', '\u{2018}',
 ];
 
 const CL: &[char] = &[
     ')', ']', '}', '\u{FF09}', '\u{FF0C}', '\u{3002}', '\u{3001}', '\u{FF1B}', '\u{FF1A}',
     '\u{FF01}', '\u{FF1F}', '\u{3011}', '\u{300B}', '\u{300D}', '\u{300F}', '\u{3009}', '\u{3015}',
-    '\u{FF5D}', '\u{FF0E}',
+    '\u{FF5D}', '\u{FF0E}', '\u{201D}', '\u{00B7}', '\u{30FB}', '\u{FF5E}',
 ];
 
-/// Classify a cluster by its first scalar.
-pub(crate) fn classify(scalar: char) -> BreakClass {
+/// Classify a cluster by its first scalar and the previous cluster's pair class.
+pub(crate) fn classify(scalar: char, prev_class: Option<PairClass>) -> BreakClass {
     if scalar == '\n' {
         return BreakClass::Hard;
     }
     if scalar == ' ' {
         return BreakClass::Pair(PairClass::Sp);
+    }
+    if scalar == '\u{2019}' {
+        let pair = if prev_class == Some(PairClass::Al) {
+            PairClass::Other
+        } else {
+            PairClass::Cl
+        };
+        return BreakClass::Pair(pair);
+    }
+    if prev_class == Some(PairClass::Id)
+        && matches!(scalar, ',' | '.' | ';' | ':' | '!' | '?' | '%')
+    {
+        return BreakClass::Pair(PairClass::Cl);
     }
     if OP.contains(&scalar) {
         return BreakClass::Pair(PairClass::Op);
@@ -125,20 +138,51 @@ mod tests {
 
     #[test]
     fn classifies_design_edges() {
-        assert_eq!(classify('\n'), BreakClass::Hard);
-        assert_eq!(classify(' '), BreakClass::Pair(PairClass::Sp));
-        assert_eq!(classify('\u{3000}'), BreakClass::Pair(PairClass::Id));
-        assert_eq!(classify('A'), BreakClass::Pair(PairClass::Al));
-        assert_eq!(classify('好'), BreakClass::Pair(PairClass::Id));
-        assert_eq!(classify('（'), BreakClass::Pair(PairClass::Op));
-        assert_eq!(classify('。'), BreakClass::Pair(PairClass::Cl));
-        assert_eq!(classify('\u{00D7}'), BreakClass::Pair(PairClass::Other));
-        assert_eq!(classify('\u{00F7}'), BreakClass::Pair(PairClass::Other));
-        assert_eq!(classify('\u{F900}'), BreakClass::Pair(PairClass::Other));
-        assert_eq!(classify('\u{FF21}'), BreakClass::Pair(PairClass::Other));
-        assert_eq!(classify('\u{20000}'), BreakClass::Pair(PairClass::Other));
-        assert_eq!(classify('\r'), BreakClass::Pair(PairClass::Other));
-        assert_eq!(classify('\t'), BreakClass::Pair(PairClass::Other));
+        assert_eq!(classify('\n', None), BreakClass::Hard);
+        assert_eq!(classify(' ', None), BreakClass::Pair(PairClass::Sp));
+        assert_eq!(classify('\u{3000}', None), BreakClass::Pair(PairClass::Id));
+        assert_eq!(classify('A', None), BreakClass::Pair(PairClass::Al));
+        assert_eq!(classify('好', None), BreakClass::Pair(PairClass::Id));
+        assert_eq!(classify('（', None), BreakClass::Pair(PairClass::Op));
+        assert_eq!(classify('。', None), BreakClass::Pair(PairClass::Cl));
+        assert_eq!(
+            classify('\u{00D7}', None),
+            BreakClass::Pair(PairClass::Other)
+        );
+        assert_eq!(
+            classify('\u{00F7}', None),
+            BreakClass::Pair(PairClass::Other)
+        );
+        assert_eq!(
+            classify('\u{F900}', None),
+            BreakClass::Pair(PairClass::Other)
+        );
+        assert_eq!(
+            classify('\u{FF21}', None),
+            BreakClass::Pair(PairClass::Other)
+        );
+        assert_eq!(
+            classify('\u{20000}', None),
+            BreakClass::Pair(PairClass::Other)
+        );
+        assert_eq!(classify('\r', None), BreakClass::Pair(PairClass::Other));
+        assert_eq!(classify('\t', None), BreakClass::Pair(PairClass::Other));
+    }
+
+    #[test]
+    fn curved_quotes_classification() {
+        assert_eq!(classify('“', None), BreakClass::Pair(PairClass::Op));
+        assert_eq!(classify('‘', None), BreakClass::Pair(PairClass::Op));
+        assert_eq!(classify('”', None), BreakClass::Pair(PairClass::Cl));
+        assert_eq!(
+            classify('’', Some(PairClass::Al)),
+            BreakClass::Pair(PairClass::Other)
+        );
+        assert_eq!(
+            classify('’', Some(PairClass::Id)),
+            BreakClass::Pair(PairClass::Cl)
+        );
+        assert_eq!(classify('’', None), BreakClass::Pair(PairClass::Cl));
     }
 
     #[test]
@@ -176,5 +220,50 @@ mod tests {
         assert!(!is_justify_cluster('\u{F900}'));
         assert!(is_id(u32::from('あ')));
         assert!(!is_justify_cluster('あ'));
+    }
+
+    #[test]
+    fn r2_chinese_break_rules_middle_dots_and_tilde() {
+        assert_eq!(classify('·', None), BreakClass::Pair(PairClass::Cl));
+        assert_eq!(classify('・', None), BreakClass::Pair(PairClass::Cl));
+        assert_eq!(classify('～', None), BreakClass::Pair(PairClass::Cl));
+        assert_eq!(
+            classify('·', Some(PairClass::Id)),
+            BreakClass::Pair(PairClass::Cl)
+        );
+        assert_eq!(
+            classify('·', Some(PairClass::Al)),
+            BreakClass::Pair(PairClass::Cl)
+        );
+    }
+
+    #[test]
+    fn r2_halfwidth_punctuation_after_id() {
+        let halfwidth = [',', '.', ';', ':', '!', '?', '%'];
+        for p in halfwidth {
+            assert_eq!(
+                classify(p, Some(PairClass::Id)),
+                BreakClass::Pair(PairClass::Cl)
+            );
+            assert_eq!(
+                classify(p, Some(PairClass::Al)),
+                BreakClass::Pair(PairClass::Other)
+            );
+            assert_eq!(classify(p, None), BreakClass::Pair(PairClass::Other));
+        }
+    }
+
+    #[test]
+    fn r2_closing_brackets_remain_cl() {
+        for b in [')', ']', '}'] {
+            assert_eq!(
+                classify(b, Some(PairClass::Id)),
+                BreakClass::Pair(PairClass::Cl)
+            );
+            assert_eq!(
+                classify(b, Some(PairClass::Al)),
+                BreakClass::Pair(PairClass::Cl)
+            );
+        }
     }
 }

@@ -16,6 +16,10 @@
     clippy::unwrap_used,
     reason = "integration test: a panic is the failure report"
 )]
+#![expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "integration test: filters specific canvas commands and drops the rest"
+)]
 
 use std::error::Error as StdError;
 use std::num::{NonZeroU16, NonZeroU32};
@@ -23,14 +27,14 @@ use std::sync::{Arc, Mutex};
 
 use skrifa::{FontRef, MetadataProvider};
 
-use pdfcraft_pdf::canvas::pt_near;
+use common::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, BlankSpec, BlankWidth, Block,
     CanvasMark, CanvasSpec, CanvasStyle, CellSpec, CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec,
     ColumnsStyle, FontFace, FontFamily, FontRegistry, HLineStyle, ImageSpec, ImageStyle,
     InsetStyle, LayerMark, LayerShape, ListItemSpec, ListKind, ListSpec, ListStyle, Mark,
     MarkerFormat, PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
-    SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
+    SectionSpec, SectionStyle, Span, TableHeader, TableRow, TableRules, TableSpec, TableStyle,
 };
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::to_pdf;
@@ -284,6 +288,7 @@ fn paragraph(
             align,
             first_line_indent: nn(indent),
             line_height: None,
+            ..ParagraphStyle::default()
         },
         children: runs,
     })
@@ -839,10 +844,7 @@ fn table_cell_fill_is_painted() {
             }),
             body: vec![text_row(&["b"])],
             style: TableStyle {
-                border: TableBorder {
-                    width: nn(0.5),
-                    ..TableBorder::default()
-                },
+                rules: TableRules::Grid(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
                 ..TableStyle::default()
             },
         })]),
@@ -1260,7 +1262,7 @@ fn from_fn_band_font_error_reports_per_page() {
     }
     let err = ghost_doc(BandFn::from_fn(|_| Ok(Some(ghost_band())))).unwrap_err();
     assert_eq!(err.len(), 2);
-    for (error, page) in err.as_slice().iter().zip(1..=2) {
+    for (error, page) in err.iter().zip(1..=2) {
         assert!(matches!(error.kind, ErrorKind::UnregisteredFont { .. }));
         let at = error.at.unwrap();
         assert_eq!(at.section, Some(0));
@@ -1731,7 +1733,7 @@ fn from_fn_band_foreign_image_reports_per_page() {
     )
     .unwrap_err();
     assert_eq!(err.len(), 2);
-    for (error, page) in err.as_slice().iter().zip(1..=2) {
+    for (error, page) in err.iter().zip(1..=2) {
         assert_eq!(error.kind, ErrorKind::UnknownImage { id: 0 });
         assert_eq!(
             location(error),
@@ -2825,7 +2827,6 @@ fn assembly_errors_follow_discovery_order() {
     .unwrap();
     assert_eq!(
         errors
-            .as_slice()
             .iter()
             .map(|error| error.kind.clone())
             .collect::<Vec<_>>(),
@@ -2837,7 +2838,7 @@ fn assembly_errors_follow_discovery_order() {
         ]
     );
     assert_eq!(
-        location(&errors.as_slice()[1]),
+        location(errors.iter().nth(1).unwrap()),
         (Some(0), None, None, Some((1, 1)))
     );
     assert!(!errors.truncated());
@@ -2854,7 +2855,6 @@ fn empty_header_and_body_reports_column_count() {
     .unwrap();
     assert_eq!(
         errors
-            .as_slice()
             .iter()
             .map(|error| error.kind.clone())
             .collect::<Vec<_>>(),
@@ -2892,7 +2892,6 @@ fn a_cell_error_is_kept_when_the_table_also_fails() {
     .unwrap();
     assert_eq!(
         errors
-            .as_slice()
             .iter()
             .map(|error| error.kind.clone())
             .collect::<Vec<_>>(),
@@ -2918,7 +2917,6 @@ fn missing_glyphs_in_later_paragraphs_are_all_reported() {
     .unwrap();
     assert_eq!(
         errors
-            .as_slice()
             .iter()
             .map(|error| error.kind.clone())
             .collect::<Vec<_>>(),
@@ -2942,9 +2940,9 @@ fn assembly_keeps_sixty_four_errors_and_marks_truncation() {
     }
     let body = (0..65).map(|_| para("\u{FFFF}")).collect();
     let errors = font_pages(PageSize::A4, sec(body)).err().unwrap();
-    assert_eq!(errors.as_slice().len(), 64);
+    assert_eq!(errors.len(), 64);
     assert!(errors.truncated());
-    assert!(errors.as_slice().iter().all(|error| {
+    assert!(errors.iter().all(|error| {
         matches!(
             &error.kind,
             ErrorKind::MissingGlyph {
@@ -4769,12 +4767,12 @@ fn links(page: &RecordedPage) -> Vec<LinkHit> {
     page.ops()
         .iter()
         .filter_map(|op| match op {
-            CanvasCommand::AnnotateLink { rect, target } => Some(LinkHit {
+            CanvasCommand::AnnotateLink { rect, dest } => Some(LinkHit {
                 x: rect.origin().x().as_pt(),
                 y: rect.origin().y().as_pt(),
                 width: rect.size().width().as_pt(),
                 height: rect.size().height().as_pt(),
-                target: target.uri_str().unwrap_or("").to_owned(),
+                target: dest.uri_str().unwrap_or("").to_owned(),
             }),
             CanvasCommand::SetDocumentInfo(_)
             | CanvasCommand::StartPage(_)
@@ -6196,12 +6194,13 @@ fn cell_child_error_skips_the_matrix_like_a_list_item() {
     )
     .unwrap_err();
     assert_eq!(err.len(), 2);
+    let err_list: Vec<_> = err.iter().collect();
     assert!(matches!(
-        err.as_slice()[0].kind,
+        err_list[0].kind,
         ErrorKind::UnregisteredFont { .. }
     ));
     assert_eq!(
-        err.as_slice()[1].kind,
+        err_list[1].kind,
         ErrorKind::InvalidCellContent {
             container: "table cell",
             node: "columns",
@@ -6435,10 +6434,7 @@ fn table_zero_border_draws_no_stroke_and_a_positive_border_does() {
         page,
         sec(vec![Block::Table(TableSpec {
             style: TableStyle {
-                border: TableBorder {
-                    width: nn(0.5),
-                    ..TableBorder::default()
-                },
+                rules: TableRules::Grid(Pen::new(Color::rgb(0, 0, 0), 0.5).unwrap()),
                 ..TableStyle::default()
             },
             body: vec![text_row(&["A"])],
@@ -7312,4 +7308,586 @@ fn inset_counts_as_one_block_then_its_child() {
             max: 1,
         }
     );
+}
+
+#[test]
+fn footer_rotated_mark_paints_at_correct_page_coordinates() {
+    let rendered = render(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        Resources::default(),
+        vec![SectionSpec {
+            style: SectionStyle {
+                margins: Margins::new(
+                    NonNegative::ZERO,
+                    NonNegative::ZERO,
+                    nn(30.0),
+                    NonNegative::ZERO,
+                ),
+                ..SectionStyle::default()
+            },
+            footer: Some(BandFn::fixed(BandSpec {
+                marks: vec![Mark::Rotated {
+                    degrees: Angle::degrees(90.0).unwrap(),
+                    pivot: Point::try_pt(15.0, 10.0).unwrap(),
+                    shapes: vec![LayerShape::Rect {
+                        rect: Rect::try_pt(10.0, 5.0, 10.0, 10.0).unwrap(),
+                        ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                    }],
+                }],
+                ..BandSpec::default()
+            })),
+            body: vec![Block::Spacer(nn(10.0))],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+
+    let page = &rendered.pages()[0];
+    let ops = page.ops();
+
+    let mut affine = None;
+    let mut path = None;
+    for op in ops {
+        if let CanvasCommand::PushTransform { affine: a } = op {
+            affine = Some(*a);
+        } else if let CanvasCommand::FillPath { path: p, .. } = op {
+            path = Some(p);
+        }
+    }
+
+    let affine = affine.expect("pushed affine transform");
+    let path = path.expect("filled path");
+
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+
+    for verb in path.verbs() {
+        let pt = match verb {
+            PathVerb::MoveTo(pt) | PathVerb::LineTo(pt) => *pt,
+            PathVerb::CubicTo { to, .. } => *to,
+            PathVerb::Close => continue,
+        };
+        let px = pt.x().as_pt();
+        let py = pt.y().as_pt();
+        let x = affine.a * px + affine.b * py + affine.tx;
+        let y = affine.c * px + affine.d * py + affine.ty;
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+
+    assert!(pt_near(min_x, 10.0), "min_x: {min_x}");
+    assert!(pt_near(min_y, 175.0), "min_y: {min_y}");
+    assert!(pt_near(max_x, 20.0), "max_x: {max_x}");
+    assert!(pt_near(max_y, 185.0), "max_y: {max_y}");
+    assert!(ops
+        .iter()
+        .any(|op| matches!(op, CanvasCommand::PopTransform)));
+}
+
+#[test]
+fn footer_rotated_asymmetric_mark_paints_at_correct_page_coordinates() {
+    let rendered = render(
+        PageSize::custom(Size::try_pt(200.0, 200.0).unwrap()),
+        Resources::default(),
+        vec![SectionSpec {
+            style: SectionStyle {
+                margins: Margins::new(
+                    NonNegative::ZERO,
+                    NonNegative::ZERO,
+                    nn(30.0),
+                    NonNegative::ZERO,
+                ),
+                ..SectionStyle::default()
+            },
+            footer: Some(BandFn::fixed(BandSpec {
+                marks: vec![Mark::Rotated {
+                    degrees: Angle::degrees(30.0).unwrap(),
+                    pivot: Point::try_pt(20.0, 10.0).unwrap(),
+                    shapes: vec![LayerShape::Rect {
+                        rect: Rect::try_pt(10.0, 5.0, 20.0, 10.0).unwrap(),
+                        ink: Ink::Fill(Color::rgb(0, 0, 0)),
+                    }],
+                }],
+                ..BandSpec::default()
+            })),
+            body: vec![Block::Spacer(nn(10.0))],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+
+    let page = &rendered.pages()[0];
+    let ops = page.ops();
+
+    let mut affine = None;
+    let mut path = None;
+    for op in ops {
+        if let CanvasCommand::PushTransform { affine: a } = op {
+            affine = Some(*a);
+        } else if let CanvasCommand::FillPath { path: p, .. } = op {
+            path = Some(p);
+        }
+    }
+
+    let affine = affine.expect("pushed affine transform");
+    let path = path.expect("filled path");
+
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+
+    for verb in path.verbs() {
+        let pt = match verb {
+            PathVerb::MoveTo(pt) | PathVerb::LineTo(pt) => *pt,
+            PathVerb::CubicTo { to, .. } => *to,
+            PathVerb::Close => continue,
+        };
+        let px = pt.x().as_pt();
+        let py = pt.y().as_pt();
+        let x = affine.a * px + affine.b * py + affine.tx;
+        let y = affine.c * px + affine.d * py + affine.ty;
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+
+    let (sin, cos) = 30.0_f32.to_radians().sin_cos();
+    let expected_min_x = 20.0 - 10.0 * cos - 5.0 * sin;
+    let expected_max_x = 20.0 + 10.0 * cos + 5.0 * sin;
+    let expected_min_y = 180.0 - 10.0 * sin - 5.0 * cos;
+    let expected_max_y = 180.0 + 10.0 * sin + 5.0 * cos;
+
+    assert!(
+        pt_near(min_x, expected_min_x),
+        "min_x: {min_x} vs {expected_min_x}"
+    );
+    assert!(
+        pt_near(min_y, expected_min_y),
+        "min_y: {min_y} vs {expected_min_y}"
+    );
+    assert!(
+        pt_near(max_x, expected_max_x),
+        "max_x: {max_x} vs {expected_max_x}"
+    );
+    assert!(
+        pt_near(max_y, expected_max_y),
+        "max_y: {max_y} vs {expected_max_y}"
+    );
+    assert!(ops
+        .iter()
+        .any(|op| matches!(op, CanvasCommand::PopTransform)));
+}
+
+#[test]
+fn page_break_and_ineffective_blocks_page_count() {
+    if skip_without_font() {
+        return;
+    }
+    let count_pages = |body| font_pages(PageSize::A4, sec(body)).unwrap().pages().len();
+
+    // [PageBreak, B] -> 1 page
+    assert_eq!(count_pages(vec![Block::PageBreak, para("B")]), 1);
+
+    // [Spacer(0), PageBreak, B] -> 1 page
+    assert_eq!(
+        count_pages(vec![Block::Spacer(nn(0.0)), Block::PageBreak, para("B")]),
+        1
+    );
+
+    // [Inset { children: [] }, PageBreak, B] -> 1 page
+    assert_eq!(
+        count_pages(vec![
+            Block::Inset {
+                style: InsetStyle::default(),
+                children: vec![],
+            },
+            Block::PageBreak,
+            para("B"),
+        ]),
+        1
+    );
+
+    // [B, PageBreak, Spacer(0)] -> 1 page
+    assert_eq!(
+        count_pages(vec![para("B"), Block::PageBreak, Block::Spacer(nn(0.0))]),
+        1
+    );
+
+    // [Spacer(0), PageBreak, PageBreak, B] -> 2 pages
+    assert_eq!(
+        count_pages(vec![
+            Block::Spacer(nn(0.0)),
+            Block::PageBreak,
+            Block::PageBreak,
+            para("B"),
+        ]),
+        2
+    );
+}
+
+#[test]
+fn negative_tracking_combining_character_succeeds() {
+    if skip_without_font() {
+        return;
+    }
+    let rendered = font_pages(
+        PageSize::A4,
+        sec(vec![Block::Paragraph(ParagraphSpec {
+            style: ParagraphStyle {
+                text: RunStyle {
+                    tracking: pdfcraft_pdf::Finite::pt(-0.5).ok(),
+                    ..RunStyle::default()
+                },
+                ..ParagraphStyle::default()
+            },
+            children: vec![text_run("cafe\u{301}")],
+        })]),
+    )
+    .unwrap();
+    assert_eq!(rendered.pages().len(), 1);
+}
+
+#[test]
+fn curved_quotes_kinzoku_rules() {
+    if skip_without_font() {
+        return;
+    }
+    // Column fits 10 characters exactly
+    let width = common::advance_pt(&font_bytes(), '一', 12.0);
+    let page_width = width * 10.0;
+
+    // ” must not fall at line start
+    let rendered = font_pages(
+        PageSize::custom(Size::try_pt(page_width, 200.0).unwrap()),
+        sec(vec![para("一二三四五六七八九十”好")]),
+    )
+    .unwrap();
+    let text_runs: Vec<String> = rendered.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_runs.len(), 2);
+    assert_eq!(text_runs[0], "一二三四五六七八九");
+    assert_eq!(text_runs[1], "十”好");
+
+    // “ must not stay at line end
+    let rendered2 = font_pages(
+        PageSize::custom(Size::try_pt(page_width, 200.0).unwrap()),
+        sec(vec![para("一二三四五六七八九“十好")]),
+    )
+    .unwrap();
+    let text_runs2: Vec<String> = rendered2.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_runs2.len(), 2);
+    assert_eq!(text_runs2[0], "一二三四五六七八九");
+    assert_eq!(text_runs2[1], "“十好");
+
+    // don’t stop does not break between ’ and t
+    let dont_width = "don't"
+        .chars()
+        .map(|c| common::advance_pt(&font_bytes(), c, 12.0))
+        .sum::<f32>()
+        + 1.0;
+    let rendered3 = font_pages(
+        PageSize::custom(Size::try_pt(dont_width, 200.0).unwrap()),
+        sec(vec![para("don’t stop")]),
+    )
+    .unwrap();
+    let text_runs3: Vec<String> = rendered3.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_runs3.len(), 2);
+    assert_eq!(text_runs3[0], "don’t");
+    assert_eq!(text_runs3[1], "stop");
+}
+
+#[test]
+fn trailing_spaces_dropped_from_line_width_alignments_and_decorations() {
+    if skip_without_font() {
+        return;
+    }
+    let a_width = common::advance_pt(&font_bytes(), 'A', 12.0);
+    let page_width = a_width * 6.0;
+
+    // 1. End alignment: line 1 ink right margin matches bounds
+    let rendered_end = font_pages(
+        PageSize::custom(Size::try_pt(page_width, 200.0).unwrap()),
+        sec(vec![Block::Paragraph(ParagraphSpec {
+            style: ParagraphStyle {
+                align: Alignment::End,
+                ..ParagraphStyle::default()
+            },
+            children: vec![text_run("AAAA BBBB")],
+        })]),
+    )
+    .unwrap();
+    let runs_end: Vec<_> = rendered_end.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(runs_end.len(), 2);
+    let right_edge_1 = runs_end[0].origin.x().as_pt() + a_width * 4.0;
+    assert!(pt_near(right_edge_1, page_width));
+
+    // 2. Center alignment: ink bounds are centered without trailing space
+    let rendered_center = font_pages(
+        PageSize::custom(Size::try_pt(page_width, 200.0).unwrap()),
+        sec(vec![Block::Paragraph(ParagraphSpec {
+            style: ParagraphStyle {
+                align: Alignment::Center,
+                ..ParagraphStyle::default()
+            },
+            children: vec![text_run("AAAA BBBB")],
+        })]),
+    )
+    .unwrap();
+    let runs_center: Vec<_> = rendered_center.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.clone()),
+            _ => None,
+        })
+        .collect();
+    let expected_center_x = (page_width - a_width * 4.0) / 2.0;
+    assert!(pt_near(
+        runs_center[0].origin.x().as_pt(),
+        expected_center_x
+    ));
+
+    // 3. Underline: right end equals last visible glyph right edge
+    let rendered_under = font_pages(
+        PageSize::custom(Size::try_pt(page_width, 200.0).unwrap()),
+        sec(vec![Block::Paragraph(ParagraphSpec {
+            style: ParagraphStyle {
+                text: RunStyle {
+                    underline: Some(true),
+                    ..RunStyle::default()
+                },
+                ..ParagraphStyle::default()
+            },
+            children: vec![text_run("AAAA BBBB")],
+        })]),
+    )
+    .unwrap();
+    let paths_under: Vec<_> = rendered_under.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::StrokePath { path, .. } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut line1_stroke_max_x = 0.0f32;
+    for verb in paths_under[0].verbs() {
+        if let PathVerb::LineTo(pt) = verb {
+            line1_stroke_max_x = line1_stroke_max_x.max(pt.x().as_pt());
+        }
+    }
+    assert!(pt_near(line1_stroke_max_x, a_width * 4.0));
+
+    // 4. Multi-line link: line 1 link rect excludes trailing space
+    let rendered_link = font_pages(
+        PageSize::custom(Size::try_pt(page_width, 200.0).unwrap()),
+        sec(vec![Block::Paragraph(ParagraphSpec {
+            children: vec![link_run("https://example.com", vec![text_run("AAAA BBBB")])],
+            ..ParagraphSpec::default()
+        })]),
+    )
+    .unwrap();
+    let link_rects: Vec<_> = rendered_link.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::AnnotateLink { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(link_rects.len(), 2);
+    assert!(pt_near(link_rects[0].size().width().as_pt(), a_width * 4.0));
+}
+
+#[test]
+fn invisible_characters_normalization_r3() {
+    if skip_without_font() {
+        return;
+    }
+    // "A\u{200D}B" has identical DrawGlyphRun glyph sequence as "AB"
+    let rendered_zwj = font_pages(PageSize::A4, sec(vec![para("A\u{200D}B")])).unwrap();
+    let rendered_plain = font_pages(PageSize::A4, sec(vec![para("AB")])).unwrap();
+    let glyphs_zwj: Vec<_> = rendered_zwj.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.glyphs.clone()),
+            _ => None,
+        })
+        .collect();
+    let glyphs_plain: Vec<_> = rendered_plain.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.glyphs.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(glyphs_zwj, glyphs_plain);
+
+    // FEFF does not produce MissingGlyph error
+    let rendered_bom = font_pages(PageSize::A4, sec(vec![para("\u{FEFF}Hello World")]));
+    assert!(rendered_bom.is_ok());
+
+    // U+2028 produces line break equivalent to \n
+    let rendered_u2028 = font_pages(PageSize::A4, sec(vec![para("A\u{2028}B")])).unwrap();
+    let rendered_nl = font_pages(PageSize::A4, sec(vec![para("A\nB")])).unwrap();
+    let runs_u2028: Vec<_> = rendered_u2028.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect();
+    let runs_nl: Vec<_> = rendered_nl.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(runs_u2028.len(), runs_nl.len());
+
+    // "AA\u{200B}BB" breaks at U+200B in narrow box without visible glyph
+    let char_w = common::advance_pt(&font_bytes(), 'A', 12.0);
+    let narrow = PageSize::custom(Size::try_pt(char_w * 2.5, 200.0).unwrap());
+    let rendered_zwsp = font_pages(narrow, sec(vec![para("AA\u{200B}BB")])).unwrap();
+    let text_zwsp: Vec<_> = rendered_zwsp.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::DrawGlyphRun { run } => Some(run.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_zwsp.len(), 2);
+    assert_eq!(text_zwsp[0], "AA");
+    assert_eq!(text_zwsp[1], "BB");
+}
+
+#[test]
+fn table_border_deduplication_and_outer_inset_r5() {
+    let w = 2.0f32;
+    let custom_page = PageSize::custom(Size::try_pt(200.0, 200.0).unwrap());
+
+    // 2x2 grid with borders
+    let rendered = render(
+        custom_page,
+        Resources::default(),
+        vec![SectionSpec {
+            style: SectionStyle {
+                page_size: Some(custom_page),
+                margins: Margins::default(),
+            },
+            body: vec![Block::Table(TableSpec {
+                style: TableStyle {
+                    rules: TableRules::Grid(Pen::new(Color::rgb(0, 0, 0), w).unwrap()),
+                    tracks: Some(vec![Track::Fixed(pos(99.0)), Track::Fixed(pos(99.0))]),
+                    ..TableStyle::default()
+                },
+                header: None,
+                body: vec![
+                    TableRow {
+                        children: vec![
+                            CellSpec {
+                                style: CellStyle::default(),
+                                col_span: NonZeroU16::MIN,
+                                row_span: NonZeroU16::MIN,
+                                children: vec![Block::Spacer(nn(20.0))],
+                            },
+                            CellSpec {
+                                style: CellStyle::default(),
+                                col_span: NonZeroU16::MIN,
+                                row_span: NonZeroU16::MIN,
+                                children: vec![Block::Spacer(nn(20.0))],
+                            },
+                        ],
+                    },
+                    TableRow {
+                        children: vec![
+                            CellSpec {
+                                style: CellStyle::default(),
+                                col_span: NonZeroU16::MIN,
+                                row_span: NonZeroU16::MIN,
+                                children: vec![Block::Spacer(nn(20.0))],
+                            },
+                            CellSpec {
+                                style: CellStyle::default(),
+                                col_span: NonZeroU16::MIN,
+                                row_span: NonZeroU16::MIN,
+                                children: vec![Block::Spacer(nn(20.0))],
+                            },
+                        ],
+                    },
+                ],
+            })],
+            ..SectionSpec::default()
+        }],
+    )
+    .unwrap();
+    let stroke_paths: Vec<_> = rendered.pages()[0]
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            CanvasCommand::StrokePath { path, .. } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    for (i, p) in stroke_paths.iter().enumerate() {
+        println!("stroke path {}: {:?}", i, p.verbs());
+    }
+    assert_eq!(stroke_paths.len(), 1);
+
+    // Verify outer border inset:
+    // Left edge of stroke is at x - w/2 = w/2 - w/2 = 0.0
+    // Right edge of stroke is at x + w/2 = (200 - w/2) + w/2 = 200.0
+    let verbs = stroke_paths[0].verbs();
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    for verb in verbs {
+        match verb {
+            PathVerb::MoveTo(pt) | PathVerb::LineTo(pt) => {
+                min_x = min_x.min(pt.x().as_pt());
+                max_x = max_x.max(pt.x().as_pt());
+            }
+            _ => {}
+        }
+    }
+    assert!(pt_near(min_x, w / 2.0));
+    assert!(pt_near(max_x, 200.0 - w / 2.0));
 }

@@ -1,6 +1,6 @@
 [package]
 name = "pdfcraft-pdf"
-version = "0.7.0"
+version = "0.8.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Lay out DocumentSpec values (flow, bands, layers) and emit vector PDF via a sealed krilla backend"
@@ -27,11 +27,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["backend-krilla"]
-backend-krilla = ["dep:krilla", "dep:png"]
-# Floating-point helpers for integration tests (`pt_near`, `PT_ABS_TOLERANCE`).
-test-utils = []
+backend-krilla = ["dep:krilla", "dep:png", "dep:gif", "dep:image-webp"]
 
 [dependencies]
+gif = { workspace = true, optional = true }
+image-webp = { workspace = true, optional = true }
 krilla = { workspace = true, optional = true, features = ["raster-images"] }
 png = { workspace = true, optional = true }
 skrifa = { workspace = true, features = ["std", "autohint_shaping"] }

@@ -5,7 +5,7 @@
     reason = "integration test: a panic is the failure report"
 )]
 
-use pdfcraft_pdf::canvas::pt_near;
+use common::pt_near;
 #[cfg(feature = "backend-krilla")]
 use pdfcraft_pdf::spec::{
     Alignment, CellSpec, ImageRef, ImageSpec, ImageStyle, TableRow, TableSpec,
@@ -63,7 +63,7 @@ fn links(page: &pdfcraft_pdf::RecordedPage) -> Vec<&str> {
     page.ops()
         .iter()
         .filter_map(|command| match command {
-            CanvasCommand::AnnotateLink { target, .. } => target.uri_str(),
+            CanvasCommand::AnnotateLink { dest, .. } => dest.uri_str(),
             CanvasCommand::SetDocumentInfo(_)
             | CanvasCommand::StartPage(_)
             | CanvasCommand::FinishPage
@@ -216,7 +216,7 @@ fn foreign_cell_image_ref_is_unknown() {
     })
     .err()
     .unwrap();
-    assert_eq!(err.as_slice().len(), 1);
+    assert_eq!(err.len(), 1);
     assert!(matches!(
         err.first().kind.clone(),
         ErrorKind::UnknownImage { id: 0 }

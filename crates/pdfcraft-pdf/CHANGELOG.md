@@ -7,7 +7,43 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 while remaining `0.x`. See the [workspace changelog](../../CHANGELOG.md) for
 cross-crate history.
 
-## [Unreleased]
+## [0.8.0] - 2026-11-19
+
+### Breaking
+
+- Replaced `TableBorder` and `TableStyle.border` with `TableRules` (`Grid(Pen)`, `ThreeLine { top, header, bottom }`, and `None`) under `TableStyle.rules` (R9). Deleted `TableBorder`.
+- Added `orphans: NonZeroU8`, `widows: NonZeroU8`, and `keep_with_next: bool` fields to `ParagraphStyle` with non-zero defaults `orphans: 2`, `widows: 2`, and `keep_with_next: false` (R10).
+
+### Added
+
+- `TableRules` enum supporting full grid borders, academic three-line tables (with separate top, header, and bottom pens without vertical rules), and borderless tables (R9).
+- Widow and orphan pagination control in paragraph splitting (`ParagraphNode::split`), ensuring minimum orphan lines at the bottom of a page and minimum widow lines on the continuation page, with graceful fallback on empty pages (R10).
+- Paragraph `keep_with_next` chaining support in `paginate` and `flow`, binding consecutive headings or lead paragraphs with the opening lines of following paragraphs or table headers/first rows to avoid heading orphans (R10).
+
+## [0.7.2] - 2026-11-19
+
+### Changed
+
+- Table outer grid borders are inset by half the border width, resolving column tracks against `W - w` and shifting content by `w/2` so borders remain strictly within allocated frame bounds; this slightly adjusts column widths and table height for bordered tables (R5).
+
+### Fixed
+
+- Expanded Chinese punctuation prohibition (kinzoku shori) rules to cover curved quotation marks (`“`, `”`, `‘`, `’`), halfwidth punctuation directly following Chinese characters, and middle dots / tildes (`·`, `・`, `～`), preventing invalid line starts and ends (R2).
+- Normalized invisible Unicode formatting characters, including zero-width spaces (ZWSP, `\u{200B}`), zero-width joiners (ZWJ, `\u{200D}`), byte order marks (BOM, `\u{FEFF}`), line separators (`\u{2028}`), and variation selectors, eliminating spurious missing glyph errors and supporting soft line breaks (R3).
+- Added lower cell coordinate tracking `(row, col)` into error reporting locations, ensuring validation and geometry errors inside table cells report their exact cell position (R4).
+- Deduplicated table grid borders across row groups and continuation pages into a single stroke path per fragment, avoiding double strokes at row group boundaries and omitting interior line segments for merged cell spans (R5).
+
+## [0.7.1] - 2026-11-19
+
+### Fixed
+
+- Fixed rotated marks inside footer bands being drawn at incorrect page coordinates due to non-conjugate transform composition (B1).
+- Fixed curved quotation marks (`“`, `”`, `‘`, `’`) not following Chinese punctuation prohibition rules (B2).
+- Fixed zero-height or ineffective body blocks (such as `Spacer(0)`, empty `Inset`, empty `Stack`) causing spurious blank pages when placed adjacent to `PageBreak` (B3).
+- Fixed trailing spaces on soft breaks, hard breaks, and paragraph ends being counted towards line width, misaligning right/center/justified text and extending decorations/link annotations (B4). Callers using underlined trailing spaces for fill-in blanks should use `Blank`.
+- Fixed `NegativeTracking` error triggered on decomposing combining characters when negative tracking is applied; tracking is now validated and applied at the cluster level (B5).
+- Fixed GIF and WebP images only being validated/decoded at PDF finish serialization time; decoding and pixel limits are now fully checked during `Resources::add_image` (B6).
+- Fixed `Length<NonNegative>` addition and summation overflowing to infinity, which caused subtraction to yield `NaN` and violated `Eq` invariants (B7).
 
 ## [0.7.0] - 2026-11-19
 

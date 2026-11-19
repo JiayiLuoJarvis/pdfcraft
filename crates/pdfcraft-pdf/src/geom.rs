@@ -250,7 +250,7 @@ impl std::ops::Add for Length<NonNegative> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
-        Self::from_trusted_pt(self.pt + rhs.pt)
+        Self::from_trusted_pt((self.pt + rhs.pt).min(f32::MAX))
     }
 }
 
@@ -258,7 +258,7 @@ impl std::ops::Add<Length<Positive>> for Length<NonNegative> {
     type Output = Self;
 
     fn add(self, rhs: Length<Positive>) -> Self {
-        Self::from_trusted_pt(self.pt + rhs.as_pt())
+        Self::from_trusted_pt((self.pt + rhs.as_pt()).min(f32::MAX))
     }
 }
 
@@ -266,7 +266,7 @@ impl std::ops::Add<Length<NonNegative>> for Length<Positive> {
     type Output = Length<NonNegative>;
 
     fn add(self, rhs: Length<NonNegative>) -> Length<NonNegative> {
-        Length::from_trusted_pt(self.as_pt() + rhs.as_pt())
+        Length::from_trusted_pt((self.as_pt() + rhs.as_pt()).min(f32::MAX))
     }
 }
 
@@ -496,6 +496,84 @@ impl Point {
     /// Vertical position, increasing downward.
     pub const fn y(self) -> Length<Finite> {
         self.y
+    }
+
+    /// Converts this point into an offset with the same coordinates.
+    pub const fn to_offset(self) -> Offset {
+        Offset::new(self.x, self.y)
+    }
+}
+
+/// A 2D displacement in page space. Both axes are finite and may be negative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub struct Offset {
+    dx: Length<Finite>,
+    dy: Length<Finite>,
+}
+
+impl Offset {
+    /// The zero offset, `(0, 0)`.
+    pub const ZERO: Self = Self::new(Length::from_trusted_pt(0.0), Length::from_trusted_pt(0.0));
+
+    /// Builds an offset from lengths that are already finite.
+    pub const fn new(dx: Length<Finite>, dy: Length<Finite>) -> Self {
+        Self { dx, dy }
+    }
+
+    /// Builds an offset with horizontal displacement only.
+    pub const fn x(dx: Length<Finite>) -> Self {
+        Self::new(dx, Length::from_trusted_pt(0.0))
+    }
+
+    /// Builds an offset with vertical displacement only.
+    pub const fn y(dy: Length<Finite>) -> Self {
+        Self::new(Length::from_trusted_pt(0.0), dy)
+    }
+
+    /// Builds an offset from finite point values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `dx` or `dy` is NaN or infinite.
+    pub fn try_pt(dx: f32, dy: f32) -> Result<Self, Error> {
+        Ok(Self::new(Finite::pt(dx)?, Finite::pt(dy)?))
+    }
+
+    /// Builds an offset from finite millimeter values.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::NonFiniteLength`] when `dx`, `dy`, or either point equivalent is NaN or infinite.
+    pub fn try_mm(dx: f32, dy: f32) -> Result<Self, Error> {
+        Ok(Self::new(Finite::mm(dx)?, Finite::mm(dy)?))
+    }
+
+    /// Horizontal displacement.
+    pub const fn dx(self) -> Length<Finite> {
+        self.dx
+    }
+
+    /// Vertical displacement, increasing downward.
+    pub const fn dy(self) -> Length<Finite> {
+        self.dy
+    }
+
+    /// Converts this displacement into a point with the same coordinates.
+    pub const fn to_point(self) -> Point {
+        Point::new(self.dx, self.dy)
+    }
+}
+
+impl From<Point> for Offset {
+    fn from(point: Point) -> Self {
+        Self::new(point.x(), point.y())
+    }
+}
+
+impl From<Offset> for Point {
+    fn from(offset: Offset) -> Self {
+        Self::new(offset.dx(), offset.dy())
     }
 }
 
@@ -1897,5 +1975,19 @@ mod tests {
                 _ => panic!("verb shape changed"),
             }
         }
+    }
+
+    #[test]
+    fn length_add_saturates_at_max() {
+        let max = NonNegative::pt(f32::MAX).unwrap();
+        let sum = max + max;
+        assert_eq!(sum, max);
+        assert!(sum.as_pt().is_finite());
+
+        let triple: Length<NonNegative> = [max, max, max].into_iter().sum();
+        assert_eq!(triple, max);
+
+        let diff = (max + max) - (max + max);
+        assert_eq!(diff.as_pt().to_bits(), 0.0f32.to_bits());
     }
 }

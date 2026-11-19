@@ -3,11 +3,11 @@
 //! Not part of the public API. Containers are generic over their child node,
 //! so no node module names the concrete `FlowNode` enum.
 
-use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkTarget};
+use crate::canvas::{Canvas, DecodedImage, GlyphRun, LinkDest};
 use crate::error::{Error, ErrorBag, ErrorKind, Fallible as Result, FontFault, Location};
 use crate::fonts::FontStore;
 use crate::geom::{
-    Affine, Finite, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke,
+    Affine, Finite, Length, NonNegative, Offset, Paint, Path, Point, Positive, Rect, Stroke,
 };
 
 /// Fonts and the document error bag available while splitting.
@@ -82,38 +82,53 @@ impl Fragment {
     }
 
     pub(crate) fn with_offset(mut self, dx: Length<Finite>, dy: Length<Finite>) -> Result<Self> {
-        let dx = dx.as_pt();
-        let dy = dy.as_pt();
+        let offset = Offset::new(dx, dy);
         for command in &mut self.commands {
-            match command {
-                FragmentCommand::Glyphs(run) => {
-                    run.origin =
-                        Point::try_pt(run.origin.x().as_pt() + dx, run.origin.y().as_pt() + dy)?;
-                }
-                FragmentCommand::Fill { path, .. } | FragmentCommand::Stroke { path, .. } => {
-                    *path = path.translated(dx, dy)?;
-                }
-                FragmentCommand::Image { rect, .. } | FragmentCommand::Link { rect, .. } => {
-                    *rect = rect.translated(dx, dy)?;
-                }
-                FragmentCommand::PushTransform { affine } => {
-                    *affine = Affine::translate(dx, dy).then(*affine);
-                }
-                FragmentCommand::PopTransform => {}
-            }
+            translate_command(command, offset)?;
         }
         for mark in &mut self.anchors {
             mark.relative = Point::try_pt(
-                mark.relative.x().as_pt() + dx,
-                mark.relative.y().as_pt() + dy,
+                mark.relative.x().as_pt() + dx.as_pt(),
+                mark.relative.y().as_pt() + dy.as_pt(),
             )?;
         }
         self.first_baseline = self
             .first_baseline
-            .map(|baseline| Finite::pt(baseline.as_pt() + dy))
+            .map(|baseline| Finite::pt(baseline.as_pt() + dy.as_pt()))
             .transpose()?;
         Ok(self)
     }
+}
+
+/// Translates one fragment command by the displacement `offset`.
+///
+/// Returns immediately when `offset` is zero. Rotations and other
+/// transforms are conjugated by the translation so nested local coordinates
+/// map correctly to page space.
+pub(crate) fn translate_command(command: &mut FragmentCommand, offset: Offset) -> Result<()> {
+    let dx = offset.dx().as_pt();
+    let dy = offset.dy().as_pt();
+    if dx == 0.0 && dy == 0.0 {
+        return Ok(());
+    }
+    match command {
+        FragmentCommand::Glyphs(run) => {
+            run.origin = Point::try_pt(run.origin.x().as_pt() + dx, run.origin.y().as_pt() + dy)?;
+        }
+        FragmentCommand::Fill { path, .. } | FragmentCommand::Stroke { path, .. } => {
+            *path = path.translated(dx, dy)?;
+        }
+        FragmentCommand::Image { rect, .. } | FragmentCommand::Link { rect, .. } => {
+            *rect = rect.translated(dx, dy)?;
+        }
+        FragmentCommand::PushTransform { affine } => {
+            *affine = Affine::translate(-dx, -dy)
+                .then(*affine)
+                .then(Affine::translate(dx, dy));
+        }
+        FragmentCommand::PopTransform => {}
+    }
+    Ok(())
 }
 
 /// The baseline closer to the top. A `None` sibling has no text baseline.
@@ -126,6 +141,47 @@ pub(crate) fn earlier_baseline(
         (Some(current), None) => Some(current),
         (None, Some(next)) => Some(next),
         (None, None) => None,
+    }
+}
+
+/// Unresolved link held during layout before anchor resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LayoutLink {
+    Uri(String),
+    Anchor(String),
+}
+
+impl LayoutLink {
+    pub(crate) fn uri(uri: &str) -> Self {
+        Self::Uri(uri.to_owned())
+    }
+
+    pub(crate) fn anchor(id: &str) -> Self {
+        Self::Anchor(id.to_owned())
+    }
+
+    pub(crate) fn uri_str(&self) -> Option<&str> {
+        match self {
+            Self::Uri(uri) => Some(uri.as_str()),
+            Self::Anchor(_) => None,
+        }
+    }
+}
+
+/// Link in an unplaced or placed fragment.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FragmentLink {
+    Unresolved(LayoutLink),
+    Resolved(LinkDest),
+}
+
+impl FragmentLink {
+    #[cfg_attr(not(test), expect(dead_code, reason = "tests call uri_str on hits"))]
+    pub(crate) fn uri_str(&self) -> Option<&str> {
+        match self {
+            Self::Unresolved(t) => t.uri_str(),
+            Self::Resolved(d) => d.uri_str(),
+        }
     }
 }
 
@@ -147,7 +203,7 @@ pub(crate) enum FragmentCommand {
     },
     Link {
         rect: Rect,
-        target: LinkTarget,
+        link: FragmentLink,
         at: Location,
     },
     PushTransform {
@@ -297,39 +353,42 @@ pub(crate) fn draw_fragment(
     canvas: &mut dyn Canvas,
     origin: Point,
 ) -> Result<()> {
-    let ox = origin.x().as_pt();
-    let oy = origin.y().as_pt();
     let mut depth = 0usize;
     let drawn = (|| {
         for command in &fragment.commands {
-            match command {
+            let mut cmd = command.clone();
+            translate_command(&mut cmd, origin.to_offset())?;
+            match cmd {
                 FragmentCommand::Glyphs(run) => {
-                    let mut placed = run.clone();
-                    placed.origin =
-                        Point::try_pt(ox + run.origin.x().as_pt(), oy + run.origin.y().as_pt())?;
-                    canvas.draw_glyph_run(&placed)?;
+                    canvas.draw_glyph_run(&run)?;
                 }
                 FragmentCommand::Fill { path, paint } => {
-                    canvas.fill_path(&path.translated(ox, oy)?, paint)?;
+                    canvas.fill_path(&path, &paint)?;
                 }
                 FragmentCommand::Stroke {
                     path,
                     paint,
                     stroke,
-                } => canvas.stroke_path(&path.translated(ox, oy)?, paint, stroke)?,
+                } => canvas.stroke_path(&path, &paint, &stroke)?,
                 FragmentCommand::Image { image, rect } => {
-                    canvas.draw_image(image, rect.translated(ox, oy)?)?;
+                    canvas.draw_image(&image, rect)?;
                 }
-                FragmentCommand::Link { rect, target, .. } => {
-                    canvas.annotate_link(rect.translated(ox, oy)?, target.clone())?;
+                FragmentCommand::Link { rect, link, .. } => {
+                    let dest = match link {
+                        FragmentLink::Resolved(dest) => dest.clone(),
+                        FragmentLink::Unresolved(LayoutLink::Uri(uri)) => {
+                            LinkDest::Uri(uri.clone())
+                        }
+                        FragmentLink::Unresolved(LayoutLink::Anchor(_)) => {
+                            return Err(Error::from(ErrorKind::Backend {
+                                message: "unresolved anchor link reached canvas".to_owned(),
+                            }));
+                        }
+                    };
+                    canvas.annotate_link(rect, dest)?;
                 }
                 FragmentCommand::PushTransform { affine } => {
-                    let composed = if ox == 0.0 && oy == 0.0 {
-                        *affine
-                    } else {
-                        Affine::translate(ox, oy).then(*affine)
-                    };
-                    canvas.push_transform(&composed)?;
+                    canvas.push_transform(&affine)?;
                     depth += 1;
                 }
                 FragmentCommand::PopTransform => {

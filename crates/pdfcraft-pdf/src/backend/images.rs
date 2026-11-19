@@ -59,10 +59,11 @@ impl ImageRegistry for ImageTable {
                 max: max_bytes as u64,
             }));
         }
-        if format == ImageFormat::Png {
-            // krilla stores a PNG decode error until document finish, which
-            // becomes Backend with no page. Inflate the pixels here instead.
-            validate_png_pixels(&bytes, &self.limits)?;
+        match format {
+            ImageFormat::Png => validate_png_pixels(&bytes, &self.limits)?,
+            ImageFormat::Gif => validate_gif_pixels(&bytes, &self.limits)?,
+            ImageFormat::Webp => validate_webp_pixels(&bytes, &self.limits)?,
+            ImageFormat::Jpeg => {}
         }
         let image = decode(bytes, format)?;
         let (width, height) = image.size();
@@ -155,6 +156,112 @@ fn validate_png_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
 fn png_error(error: &png::DecodingError) -> Error {
     Error::from(ErrorKind::Image {
         message: format!("Png decode failed: {error}"),
+    })
+}
+
+fn validate_gif_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
+    let mut options = gif::DecodeOptions::new();
+    options.set_color_output(gif::ColorOutput::RGBA);
+    let mut reader = options
+        .read_info(std::io::Cursor::new(bytes))
+        .map_err(|error| gif_error(&error))?;
+    let screen_width = reader.width();
+    let screen_height = reader.height();
+    if screen_width == 0 || screen_height == 0 {
+        return Err(Error::from(ErrorKind::Image {
+            message: "has an empty side".to_owned(),
+        }));
+    }
+    let frame = reader
+        .next_frame_info()
+        .map_err(|error| gif_error(&error))?
+        .ok_or_else(|| {
+            Error::from(ErrorKind::Image {
+                message: "Gif decode failed: no frames".to_owned(),
+            })
+        })?;
+    let max_edge = limits.max_image_edge();
+    let edge = frame.width.max(frame.height);
+    if u32::from(edge) > max_edge {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::ImageEdge,
+            value: u64::from(edge),
+            max: u64::from(max_edge),
+        }));
+    }
+    let pixels = u64::from(frame.width).saturating_mul(u64::from(frame.height));
+    let max_pixels = limits.max_image_pixels();
+    if pixels > max_pixels {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::ImagePixels,
+            value: pixels,
+            max: max_pixels,
+        }));
+    }
+    if frame.left != 0
+        || frame.top != 0
+        || frame.width != screen_width
+        || frame.height != screen_height
+    {
+        return Err(Error::from(ErrorKind::Image {
+            message: "Gif frame dimensions do not match screen".to_owned(),
+        }));
+    }
+    let mut buf = vec![0u8; reader.buffer_size()];
+    reader
+        .read_into_buffer(&mut buf)
+        .map_err(|error| gif_error(&error))?;
+    Ok(())
+}
+
+fn gif_error(error: &gif::DecodingError) -> Error {
+    Error::from(ErrorKind::Image {
+        message: format!("Gif decode failed: {error}"),
+    })
+}
+
+fn validate_webp_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
+    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes))
+        .map_err(|error| webp_error(&error))?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 {
+        return Err(Error::from(ErrorKind::Image {
+            message: "has an empty side".to_owned(),
+        }));
+    }
+    let max_edge = limits.max_image_edge();
+    let edge = width.max(height);
+    if edge > max_edge {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::ImageEdge,
+            value: u64::from(edge),
+            max: u64::from(max_edge),
+        }));
+    }
+    let pixels = u64::from(width).saturating_mul(u64::from(height));
+    let max_pixels = limits.max_image_pixels();
+    if pixels > max_pixels {
+        return Err(Error::from(ErrorKind::LimitExceeded {
+            kind: LimitKind::ImagePixels,
+            value: pixels,
+            max: max_pixels,
+        }));
+    }
+    let size = decoder.output_buffer_size().ok_or_else(|| {
+        Error::from(ErrorKind::Image {
+            message: "Webp decode failed: image is too large".to_owned(),
+        })
+    })?;
+    let mut buf = vec![0u8; size];
+    decoder
+        .read_image(&mut buf)
+        .map_err(|error| webp_error(&error))?;
+    Ok(())
+}
+
+fn webp_error(error: &image_webp::DecodingError) -> Error {
+    Error::from(ErrorKind::Image {
+        message: format!("Webp decode failed: {error}"),
     })
 }
 
@@ -337,5 +444,69 @@ mod tests {
             }
         }
         !crc
+    }
+
+    fn make_gif(
+        screen: (u16, u16),
+        frame_pos: (u16, u16),
+        frame_size: (u16, u16),
+        lzw: &[u8],
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"GIF89a");
+        bytes.extend_from_slice(&screen.0.to_le_bytes());
+        bytes.extend_from_slice(&screen.1.to_le_bytes());
+        bytes.push(0x80); // GCT follows, 2 entries
+        bytes.push(0);
+        bytes.push(0);
+        bytes.extend_from_slice(&[0, 0, 0, 255, 255, 255]); // GCT
+        bytes.push(0x2C); // Image descriptor
+        bytes.extend_from_slice(&frame_pos.0.to_le_bytes());
+        bytes.extend_from_slice(&frame_pos.1.to_le_bytes());
+        bytes.extend_from_slice(&frame_size.0.to_le_bytes());
+        bytes.extend_from_slice(&frame_size.1.to_le_bytes());
+        bytes.push(0); // no local color table
+        bytes.push(2); // LZW min code size
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "lzw test payload is shorter than 255 bytes"
+        )]
+        bytes.push(lzw.len() as u8);
+        bytes.extend_from_slice(lzw);
+        bytes.push(0); // block terminator
+        bytes.push(0x3B); // trailer
+        bytes
+    }
+
+    #[test]
+    fn gif_validation_edges() {
+        let mut table = ImageTable::default();
+
+        // 1. Mismatched GIF dimensions
+        let mismatched = make_gif((10, 10), (0, 0), (5, 5), &[0x44, 0x01]);
+        let err_mismatched = table.register(mismatched, ImageFormat::Gif).unwrap_err();
+        assert!(matches!(err_mismatched.kind, ErrorKind::Image { .. }));
+
+        // 2. Frame exceeds max_image_pixels
+        let mut limited_table = ImageTable::default();
+        let mut limits = Limits::default();
+        limits.set_max_image_pixels(10).unwrap();
+        limited_table.set_limits(&limits);
+        let huge_frame = make_gif((1, 1), (0, 0), (20, 20), &[0x44, 0x01]);
+        let err_pixels = limited_table
+            .register(huge_frame, ImageFormat::Gif)
+            .unwrap_err();
+        assert!(matches!(
+            err_pixels.kind,
+            ErrorKind::LimitExceeded {
+                kind: LimitKind::ImagePixels,
+                ..
+            }
+        ));
+
+        // 3. Corrupted LZW payload
+        let corrupt = make_gif((1, 1), (0, 0), (1, 1), &[0xFF, 0xFF]);
+        let err_corrupt = table.register(corrupt, ImageFormat::Gif).unwrap_err();
+        assert!(matches!(err_corrupt.kind, ErrorKind::Image { .. }));
     }
 }

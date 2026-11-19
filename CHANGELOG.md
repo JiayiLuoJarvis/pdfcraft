@@ -17,6 +17,7 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ### Breaking
 
+- **Breaking.** `pdfcraft-pdf` `0.8.0`. Replaced `TableBorder` with `TableRules` (`Grid`, `ThreeLine`, `None`) on `TableStyle.rules`. Added `orphans`, `widows`, and `keep_with_next` to `ParagraphStyle`. Layout engine adds orphan/widow pagination and `keep_with_next` paragraph chaining across flows and pages. Full notes: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 - **Breaking.** `pdfcraft-pdf` `0.7.0`. Engineering standard hardening per `docs/pdfcraft-pdf-hardening-spec.md`. `Resources::add_image` returns `Result<ImageRef, Error>`. `ImageRef` and `ImageSpec` are no longer `Copy`. Global atomics and `Box<dyn Any>` downcasting eliminated. All production raw slice indexing eliminated with `#![deny(clippy::indexing_slicing)]` enforced. Full notes: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
 
 ## 2026-11-05

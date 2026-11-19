@@ -3,7 +3,7 @@
 //! # Shape
 //!
 //! - [`Error`] — one failure: [`Error::kind`] + optional [`Error::at`] ([`Location`])
-//! - [`Errors`] — one to 64 failures in discovery order (`first`, `as_slice`,
+//! - [`Errors`] — one to 64 failures in discovery order (`first`, `iter`, `len`, `is_empty`,
 //!   `iter`, `truncated`)
 //! - [`Result<T>`](crate::Result) — `Result<T, Errors>` for layout / `to_pdf`
 //!
@@ -927,63 +927,138 @@ const MAX_ERRORS: usize = 64;
 /// One or more failures from one document build, in discovery order.
 ///
 /// Never empty. At most 64 items are kept. [`truncated`](Self::truncated) reports
+/// One to 64 failures discovered during layout.
+///
+/// Guaranteed to contain at least one failure. [`Errors::first`] always returns
+/// that primary error. The list is capped at 64 items; [`Self::truncated`] signals
 /// that more were found. Equality compares each item by [`Error::kind`] and
 /// [`Error::at`] only.
 #[derive(Debug, Clone)]
 pub struct Errors {
-    items: Vec<Error>,
+    first: Error,
+    rest: Vec<Error>,
     truncated: bool,
 }
 
 impl PartialEq for Errors {
     fn eq(&self, other: &Self) -> bool {
-        self.items == other.items
+        self.first == other.first && self.rest == other.rest
     }
 }
 
 impl Errors {
     /// The first failure found.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` has no items. Construction keeps at least one failure.
-    #[expect(
-        clippy::expect_used,
-        reason = "Errors is constructed with at least one item"
-    )]
     #[must_use]
     pub fn first(&self) -> &Error {
-        self.items.first().expect("Errors keeps at least one item")
-    }
-
-    /// Kept failures, in discovery order.
-    #[must_use]
-    pub fn as_slice(&self) -> &[Error] {
-        &self.items
+        &self.first
     }
 
     /// Number of kept failures.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.items.len()
+        1 + self.rest.len()
     }
 
     /// Whether any failure was kept. Always false: construction keeps at
     /// least one failure.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        false
     }
 
-    /// Same as [`as_slice`](Self::as_slice)`.iter()`.
-    pub fn iter(&self) -> std::slice::Iter<'_, Error> {
-        self.items.iter()
+    /// Iterator over kept failures in discovery order.
+    #[must_use]
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &Error> {
+        ErrorsIter {
+            first: Some(&self.first),
+            rest: self.rest.iter(),
+        }
     }
 
     /// More failures were found than kept.
     #[must_use]
     pub fn truncated(&self) -> bool {
         self.truncated
+    }
+}
+
+/// Borrowed iterator over failures in an [`Errors`] list.
+#[derive(Debug, Clone)]
+pub struct ErrorsIter<'a> {
+    first: Option<&'a Error>,
+    rest: std::slice::Iter<'a, Error>,
+}
+
+impl<'a> Iterator for ErrorsIter<'a> {
+    type Item = &'a Error;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(first) = self.first.take() {
+            Some(first)
+        } else {
+            self.rest.next()
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl DoubleEndedIterator for ErrorsIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if let Some(item) = self.rest.next_back() {
+            Some(item)
+        } else {
+            self.first.take()
+        }
+    }
+}
+
+impl ExactSizeIterator for ErrorsIter<'_> {
+    fn len(&self) -> usize {
+        usize::from(self.first.is_some()) + self.rest.len()
+    }
+}
+
+/// Owned iterator over failures in an [`Errors`] list.
+#[derive(Debug)]
+pub struct ErrorsIntoIter {
+    first: Option<Error>,
+    rest: std::vec::IntoIter<Error>,
+}
+
+impl Iterator for ErrorsIntoIter {
+    type Item = Error;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(first) = self.first.take() {
+            Some(first)
+        } else {
+            self.rest.next()
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl DoubleEndedIterator for ErrorsIntoIter {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if let Some(item) = self.rest.next_back() {
+            Some(item)
+        } else {
+            self.first.take()
+        }
+    }
+}
+
+impl ExactSizeIterator for ErrorsIntoIter {
+    fn len(&self) -> usize {
+        usize::from(self.first.is_some()) + self.rest.len()
     }
 }
 
@@ -1000,12 +1075,13 @@ impl Errors {
     ///
     /// let errors = Errors::from_error(Error::new(ErrorKind::ContentOutsideSection));
     /// assert!(!errors.truncated());
-    /// assert_eq!(errors.as_slice().len(), 1);
+    /// assert_eq!(errors.len(), 1);
     /// ```
     #[must_use]
     pub fn from_error(error: Error) -> Self {
         Self {
-            items: vec![error],
+            first: error,
+            rest: Vec::new(),
             truncated: false,
         }
     }
@@ -1019,34 +1095,37 @@ impl From<Error> for Errors {
 
 impl<'a> IntoIterator for &'a Errors {
     type Item = &'a Error;
-    type IntoIter = std::slice::Iter<'a, Error>;
+    type IntoIter = ErrorsIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter()
+        ErrorsIter {
+            first: Some(&self.first),
+            rest: self.rest.iter(),
+        }
     }
 }
 
 impl IntoIterator for Errors {
     type Item = Error;
-    type IntoIter = std::vec::IntoIter<Error>;
+    type IntoIter = ErrorsIntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.items.into_iter()
+        ErrorsIntoIter {
+            first: Some(self.first),
+            rest: self.rest.into_iter(),
+        }
     }
 }
 
 impl fmt::Display for Errors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.items.len() == 1 && !self.truncated {
-            if let Some(first) = self.items.first() {
-                return write!(f, "{first}");
-            }
+        if self.rest.is_empty() && !self.truncated {
+            return write!(f, "{}", self.first);
         }
-        for (index, error) in self.items.iter().enumerate() {
-            if index > 0 {
-                writeln!(f)?;
-            }
-            write!(f, "{}. {error}", index + 1)?;
+        write!(f, "1. {}", self.first)?;
+        for (index, error) in self.rest.iter().enumerate() {
+            writeln!(f)?;
+            write!(f, "{}. {error}", index + 2)?;
         }
         if self.truncated {
             write!(f, "\nfurther errors omitted")?;
@@ -1057,9 +1136,10 @@ impl fmt::Display for Errors {
 
 impl StdError for Errors {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self.items.as_slice() {
-            [only] => StdError::source(only),
-            _ => None,
+        if self.rest.is_empty() {
+            StdError::source(&self.first)
+        } else {
+            None
         }
     }
 }
@@ -1206,9 +1286,16 @@ impl ErrorBag {
     }
 
     fn into_errors(self) -> Errors {
-        Errors {
-            truncated: self.seen > self.items.len() as u64,
-            items: self.items,
+        let truncated = self.seen > self.items.len() as u64;
+        let mut drain = self.items.into_iter();
+        if let Some(first) = drain.next() {
+            Errors {
+                first,
+                rest: drain.collect(),
+                truncated,
+            }
+        } else {
+            Errors::from_error(Error::new(ErrorKind::ContentOutsideSection))
         }
     }
 }
@@ -1217,7 +1304,8 @@ impl From<Errors> for ErrorBag {
     fn from(errors: Errors) -> Self {
         let mut bag = Self::default();
         let truncated = errors.truncated;
-        for error in errors.items {
+        bag.record(errors.first);
+        for error in errors.rest {
             bag.record(error);
         }
         if truncated && bag.seen <= bag.items.len() as u64 {
@@ -1257,7 +1345,7 @@ mod tests {
             Errors::from(Error::new(ErrorKind::ContentOutsideSection))
         );
         assert!(!single.truncated());
-        assert_eq!(single.as_slice().len(), 1);
+        assert_eq!(single.len(), 1);
         assert_eq!(single.iter().len(), 1);
     }
 
@@ -1358,11 +1446,11 @@ mod tests {
             bag.record(kind(n));
         }
         let errors = bag.finish(()).unwrap_err();
-        assert_eq!(errors.as_slice().len(), 64);
+        assert_eq!(errors.len(), 64);
         assert!(errors.truncated());
         assert_eq!(errors.first(), &kind(0));
-        assert_eq!(errors.as_slice()[63], kind(63));
-        assert!(errors.as_slice().iter().all(|error| error != &kind(64)));
+        assert_eq!(errors.iter().nth(63), Some(&kind(63)));
+        assert!(errors.iter().all(|error| error != &kind(64)));
     }
 
     #[test]
@@ -1371,7 +1459,7 @@ mod tests {
         bag.record(kind(1));
         bag.record(kind(2));
         let errors = bag.finish(()).unwrap_err();
-        assert_eq!(errors.len(), errors.as_slice().len());
+        assert_eq!(errors.len(), errors.iter().count());
         assert_eq!(errors.len(), 2);
         assert!(!errors.is_empty());
         let single = Errors::from(kind(3));
@@ -1388,7 +1476,10 @@ mod tests {
         second.record(kind(3));
         first.absorb(second);
         let errors = first.finish(()).unwrap_err();
-        assert_eq!(errors.as_slice(), &[kind(1), kind(2), kind(3)]);
+        assert_eq!(
+            errors.iter().cloned().collect::<Vec<_>>(),
+            vec![kind(1), kind(2), kind(3)]
+        );
         assert!(!errors.truncated());
     }
 
@@ -1401,7 +1492,7 @@ mod tests {
         let truncated = truncated_bag.finish(()).unwrap_err();
         assert!(truncated.truncated());
         let mut same = ErrorBag::default();
-        for error in truncated.as_slice() {
+        for error in truncated.iter() {
             same.record(error.clone());
         }
         let kept = same.finish(()).unwrap_err();
@@ -1413,7 +1504,10 @@ mod tests {
     fn from_error_is_one_item() {
         let error = Error::from(ErrorKind::EmptyLink);
         let errors = Errors::from(error.clone());
-        assert_eq!(errors.as_slice(), std::slice::from_ref(&error));
+        assert_eq!(
+            errors.iter().cloned().collect::<Vec<_>>(),
+            vec![error.clone()]
+        );
         assert!(!errors.truncated());
         assert_eq!(errors.to_string(), error.to_string());
     }
@@ -1437,9 +1531,12 @@ mod tests {
             bag.record(kind(n));
         }
         let errors = bag.fail(Error::from(ErrorKind::EmptyLink));
-        assert_eq!(errors.as_slice().len(), 64);
+        assert_eq!(errors.len(), 64);
         assert!(errors.truncated());
-        assert_eq!(errors.as_slice()[63], Error::from(ErrorKind::EmptyLink));
+        assert_eq!(
+            errors.iter().nth(63),
+            Some(&Error::from(ErrorKind::EmptyLink))
+        );
         assert_eq!(errors.first(), &kind(0));
     }
 
@@ -1459,8 +1556,8 @@ mod tests {
         });
         let errors = bag.finish(()).unwrap_err();
         assert_eq!(
-            errors.as_slice(),
-            &[
+            errors.iter().cloned().collect::<Vec<_>>(),
+            vec![
                 Error::from(ErrorKind::UnknownFont { id: 0 }),
                 Error::from(ErrorKind::UnknownFont { id: 1 }),
                 Error::from(ErrorKind::MissingGlyph {

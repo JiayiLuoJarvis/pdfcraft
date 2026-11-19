@@ -46,7 +46,7 @@ use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, CanvasMark, CanvasSpec,
     CanvasStyle, CellSpec, CellStyle, DocumentInfo, FontFace, FontFamily, FontRegistry, HLineStyle,
     LayerMark, LayerShape, Mark, PageText, PageWhen, ParagraphSpec, ParagraphStyle, Resources,
-    RunStyle, SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec,
+    RunStyle, SectionSpec, SectionStyle, Span, TableHeader, TableRow, TableRules, TableSpec,
     TableStyle,
 };
 use pdfcraft_pdf::{
@@ -333,10 +333,7 @@ fn golden_doc_table_spans() {
                 Track::Auto,
             ]),
             cell_padding: nn(4.0),
-            border: TableBorder {
-                width: nn(0.5),
-                color: Color::rgb(80, 80, 80),
-            },
+            rules: TableRules::Grid(Pen::new(Color::rgb(80, 80, 80), 0.5).unwrap()),
         },
     });
     let rendered = layout_spec(DocumentSpec {

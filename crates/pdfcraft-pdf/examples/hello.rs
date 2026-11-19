@@ -22,11 +22,11 @@ use pdfcraft_pdf::spec::{
     CellSpec, CellStyle, ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily,
     FontRegistry, HLineStyle, ImageSpec, ImageStyle, InsetStyle, ListItemSpec, ListKind, ListSpec,
     ListStyle, MarkerFormat, PageText, ParagraphSpec, ParagraphStyle, Resources, RunStyle,
-    SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow, TableSpec, TableStyle,
+    SectionSpec, SectionStyle, Span, TableHeader, TableRow, TableRules, TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, ImageFormat, Length, Margins, NonNegative, Numbering, PageSize,
-    Positive, Ratio, Result, Track,
+    Pen, Positive, Ratio, Result, Track,
 };
 
 const PIXEL: &[u8] = include_bytes!("../tests/fixtures/one-pixel.png");
@@ -531,10 +531,7 @@ fn table_block(logo: pdfcraft_pdf::spec::ImageRef) -> Result<Block<()>> {
                 Track::Fixed(pos(48.0)?),
             ]),
             cell_padding: nn(4.0)?,
-            border: TableBorder {
-                width: nn(0.5)?,
-                color: Color::rgb(30, 30, 30),
-            },
+            rules: TableRules::Grid(Pen::new(Color::rgb(30, 30, 30), 0.5)?),
         },
         header: Some(TableHeader {
             repeat: true,
@@ -611,10 +608,7 @@ fn closing_blocks() -> Result<Vec<Block<()>>> {
                         Block::Table(TableSpec {
                             style: TableStyle {
                                 cell_padding: nn(3.0)?,
-                                border: TableBorder {
-                                    width: nn(0.4)?,
-                                    color: Color::rgb(0, 0, 0),
-                                },
+                                rules: TableRules::Grid(Pen::new(Color::rgb(0, 0, 0), 0.4)?),
                                 ..TableStyle::default()
                             },
                             header: Some(TableHeader {

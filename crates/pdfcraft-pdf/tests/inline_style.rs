@@ -13,7 +13,7 @@
     reason = "integration test: a panic is the failure report"
 )]
 
-use pdfcraft_pdf::canvas::pt_near;
+use common::pt_near;
 use pdfcraft_pdf::spec::{
     Alignment, BlankSpec, BlankWidth, Block, CellSpec, FontFace, FontFamily, FontRegistry,
     HLineStyle, LineHeight, ParagraphSpec, ParagraphStyle, Resources, RunStyle, SectionSpec, Span,

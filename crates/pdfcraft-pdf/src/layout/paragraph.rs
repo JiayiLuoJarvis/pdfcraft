@@ -1,13 +1,15 @@
 //! Paragraph wrapping, per-line boxes, and fragment drawing.
 
-use crate::canvas::{self, LinkTarget};
+use std::num::NonZeroU8;
+
+use crate::canvas;
 #[cfg(test)]
 use crate::error::ErrorBag;
 use crate::error::{ErrorKind, Fallible as Result, GeometryKind};
 #[cfg(test)]
 use crate::fonts::FontStore;
 use crate::geom::{Color, Finite, Length, NonNegative, Positive};
-use crate::layout::frame::{Fragment, Frame, LayoutCtx, Split};
+use crate::layout::frame::{Fragment, Frame, LayoutCtx, LayoutLink, Split};
 use crate::layout::justify::{self, StretchPlan, StretchRequest};
 use crate::layout::line_run::{self, BlankStroke, LinePainter, LinePiece, MeasuredInline};
 use crate::layout::style::{GlyphStyle, Style, TextAlign};
@@ -19,7 +21,7 @@ use crate::text::measure::{LineExtent, LineMetrics};
 pub(crate) struct TextRun {
     pub(crate) text: String,
     pub(crate) style: GlyphStyle,
-    pub(crate) link: Option<LinkTarget>,
+    pub(crate) link: Option<LayoutLink>,
 }
 
 impl TextRun {
@@ -31,7 +33,7 @@ impl TextRun {
         }
     }
 
-    pub(crate) fn with_link(mut self, link: Option<LinkTarget>) -> Self {
+    pub(crate) fn with_link(mut self, link: Option<LayoutLink>) -> Self {
         self.link = link;
         self
     }
@@ -118,6 +120,42 @@ impl TextNode {
             .sum()
     }
 
+    pub(crate) fn keep_with_next(&self) -> bool {
+        self.style.keep_with_next
+    }
+
+    #[expect(dead_code, reason = "part of layout API for inspection")]
+    pub(crate) fn orphans(&self) -> NonZeroU8 {
+        self.style.orphans
+    }
+
+    #[expect(dead_code, reason = "part of layout API for inspection")]
+    pub(crate) fn widows(&self) -> NonZeroU8 {
+        self.style.widows
+    }
+
+    pub(crate) fn spacing_after(&self) -> Length<NonNegative> {
+        self.style.paragraph_spacing
+    }
+
+    pub(crate) fn total_height(
+        &self,
+        ctx: &mut LayoutCtx<'_>,
+        width: Length<Positive>,
+    ) -> Result<Length<NonNegative>> {
+        let laid = ParagraphNode::layout_runs(ctx, &self.items, &self.style, width)?;
+        Ok(laid.total_height())
+    }
+
+    pub(crate) fn opening_height(
+        &self,
+        ctx: &mut LayoutCtx<'_>,
+        width: Length<Positive>,
+    ) -> Result<Length<NonNegative>> {
+        let laid = ParagraphNode::layout_runs(ctx, &self.items, &self.style, width)?;
+        Ok(laid.opening_height())
+    }
+
     /// Every outcome hands back a laid-out `Paragraph`, so a page move never wraps twice.
     pub(crate) fn split(
         self,
@@ -133,6 +171,9 @@ impl TextNode {
 pub(crate) struct ParagraphNode {
     pub(crate) lines: Vec<LineBox>,
     pub(crate) spacing_after: Length<NonNegative>,
+    pub(crate) orphans: NonZeroU8,
+    pub(crate) widows: NonZeroU8,
+    pub(crate) keep_with_next: bool,
     width: Length<Positive>,
 }
 
@@ -242,8 +283,41 @@ impl ParagraphNode {
         Ok(Self {
             lines,
             spacing_after: style.paragraph_spacing,
+            orphans: style.orphans,
+            widows: style.widows,
+            keep_with_next: style.keep_with_next,
             width,
         })
+    }
+
+    pub(crate) fn keep_with_next(&self) -> bool {
+        self.keep_with_next
+    }
+
+    #[expect(dead_code, reason = "part of layout API for inspection")]
+    pub(crate) fn orphans(&self) -> NonZeroU8 {
+        self.orphans
+    }
+
+    #[expect(dead_code, reason = "part of layout API for inspection")]
+    pub(crate) fn widows(&self) -> NonZeroU8 {
+        self.widows
+    }
+
+    pub(crate) fn total_height(&self) -> Length<NonNegative> {
+        self.lines
+            .iter()
+            .map(|line| Length::<NonNegative>::from(line.height))
+            .sum()
+    }
+
+    pub(crate) fn opening_height(&self) -> Length<NonNegative> {
+        let count = self.lines.len().min(self.orphans.get() as usize);
+        self.lines
+            .iter()
+            .take(count)
+            .map(|line| Length::<NonNegative>::from(line.height))
+            .sum()
     }
 
     pub(crate) fn text_bytes(&self) -> usize {
@@ -288,30 +362,58 @@ impl ParagraphNode {
             return Ok(Split::MoveToNextPage(self));
         }
 
+        let total = self.lines.len();
         let tops = line_tops(&self.lines);
-        let max_lines = tops
+        let n_fit = tops
             .get(1..)
             .unwrap_or(&[])
             .iter()
             .take_while(|&&bottom| bottom <= avail.height.as_pt())
             .count();
-        if max_lines == 0 {
+        if n_fit == 0 {
             return Ok(Split::MoveToNextPage(self));
         }
 
-        if max_lines >= self.lines.len() {
+        if n_fit >= total {
+            let height = Length::from_trusted_pt(tops.last().copied().unwrap_or(0.0));
+            let fragment = fragment_from_lines(&self.lines, self.spacing_after)?;
+            return Ok(Split::Fit { height, fragment });
+        }
+
+        let is_empty_page = avail.height == avail.full_height.into();
+        let mut n = decide_split(
+            total,
+            n_fit,
+            self.orphans.get() as usize,
+            self.widows.get() as usize,
+        );
+        if n == 0 && is_empty_page {
+            // First abandon widows:
+            n = decide_split(total, n_fit, self.orphans.get() as usize, 0);
+            if n == 0 {
+                // Then abandon orphans:
+                n = n_fit;
+            }
+        }
+        if n == 0 {
+            return Ok(Split::MoveToNextPage(self));
+        }
+        if n >= total {
             let height = Length::from_trusted_pt(tops.last().copied().unwrap_or(0.0));
             let fragment = fragment_from_lines(&self.lines, self.spacing_after)?;
             return Ok(Split::Fit { height, fragment });
         }
 
         let mut lines = self.lines;
-        let tail_lines = lines.split_off(max_lines);
-        let height = Length::from_trusted_pt(tops.get(max_lines).copied().unwrap_or(0.0));
+        let tail_lines = lines.split_off(n);
+        let height = Length::from_trusted_pt(tops.get(n).copied().unwrap_or(0.0));
         let head = fragment_from_lines(&lines, NonNegative::ZERO)?;
         let tail = ParagraphNode {
             lines: tail_lines,
             spacing_after: self.spacing_after,
+            orphans: self.orphans,
+            widows: self.widows,
+            keep_with_next: self.keep_with_next,
             width: self.width,
         };
         Ok(Split::Partial {
@@ -320,6 +422,21 @@ impl ParagraphNode {
             tail,
         })
     }
+}
+
+fn decide_split(total: usize, n_fit: usize, orphans: usize, widows: usize) -> usize {
+    if total < orphans + widows {
+        return 0;
+    }
+    let mut n = n_fit;
+    let rest = total.saturating_sub(n);
+    if rest > 0 && rest < widows {
+        n = total.saturating_sub(widows);
+    }
+    if n < orphans {
+        return 0;
+    }
+    n
 }
 
 /// Top of each line and, last, the total height. A run of equal heights is

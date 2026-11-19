@@ -19,12 +19,12 @@ use pdfcraft_pdf::spec::{
     Alignment, BandFn, BandInset, BandSlot, BandSpec, BandStyle, Block, CellSpec, CellStyle,
     ColumnSpec, ColumnStyle, ColumnsSpec, ColumnsStyle, FontFace, FontFamily, FontRegistry,
     HLineStyle, ImageRef, ImageSpec, ImageStyle, PageText, ParagraphSpec, ParagraphStyle,
-    Resources, RunStyle, SectionSpec, SectionStyle, Span, TableBorder, TableHeader, TableRow,
+    Resources, RunStyle, SectionSpec, SectionStyle, Span, TableHeader, TableRow, TableRules,
     TableSpec, TableStyle,
 };
 use pdfcraft_pdf::{
     layout_spec, to_pdf, Color, DocumentSpec, ImageFormat, Length, Limits, Margins, NonNegative,
-    PageSize, Positive, Ratio, Result, Track,
+    PageSize, Pen, Positive, Ratio, Result, Track,
 };
 
 const NAVY: Color = Color::rgb(0x19, 0x2d, 0x74);
@@ -325,10 +325,7 @@ fn service_table() -> Result<Vec<Block<()>>> {
                     Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
                 ]),
                 cell_padding: nn(8.0)?,
-                border: TableBorder {
-                    width: nn(0.66)?,
-                    color: GRAY,
-                },
+                rules: TableRules::Grid(Pen::new(GRAY, 0.66)?),
             },
             header: Some(TableHeader {
                 repeat: true,
@@ -402,10 +399,7 @@ fn payment(diamond: &ImageRef) -> Result<Block<()>> {
                 Track::Ratio(Ratio::new(1.0).map_err(pdfcraft_pdf::Errors::from)?),
             ]),
             cell_padding: nn(4.0)?,
-            border: TableBorder {
-                width: nn(0.66)?,
-                color: GRAY,
-            },
+            rules: TableRules::Grid(Pen::new(GRAY, 0.66)?),
         },
         header: Some(TableHeader {
             repeat: true,

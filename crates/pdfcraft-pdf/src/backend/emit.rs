@@ -24,7 +24,7 @@ use krilla::{Data, Document, SerializeSettings};
 
 use crate::backend::convert;
 use crate::backend::krilla_canvas::{Mark, PagePlan, QueuedLink, Serialization};
-use crate::canvas::{DocumentInfo, LinkTarget, OutlineItem};
+use crate::canvas::{DocumentInfo, LinkDest, OutlineItem};
 use crate::error::{Error, ErrorKind, Fallible as Result};
 use crate::geom::Paint;
 
@@ -46,10 +46,20 @@ pub(super) fn render(
     }
 
     document.finish().map_err(|error| {
-        Error::from(ErrorKind::Backend {
-            message: "cannot serialize the PDF".to_owned(),
-        })
-        .with_source(error)
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "KrillaError is non-exhaustive; backend error catches all remaining cases"
+        )]
+        match &error {
+            krilla::error::KrillaError::Image(_, _, message) => Error::from(ErrorKind::Image {
+                message: message.clone(),
+            })
+            .with_source(error),
+            _ => Error::from(ErrorKind::Backend {
+                message: "cannot serialize the PDF".to_owned(),
+            })
+            .with_source(error),
+        }
     })
 }
 
@@ -296,17 +306,12 @@ fn to_annotation(link: &QueuedLink) -> Result<LinkAnnotation> {
     }))?;
     Ok(LinkAnnotation::new(
         rect,
-        match &link.target {
-            LinkTarget::Uri(uri) => Target::Action(LinkAction::new(uri.clone()).into()),
-            LinkTarget::Xyz(xyz) => Target::Destination(Destination::Xyz(XyzDestination::new(
+        match &link.dest {
+            LinkDest::Uri(uri) => Target::Action(LinkAction::new(uri.clone()).into()),
+            LinkDest::Page(xyz) => Target::Destination(Destination::Xyz(XyzDestination::new(
                 xyz.page_index(),
                 convert::to_krilla_point(xyz.point()),
             ))),
-            LinkTarget::Anchor(_) => {
-                return Err(Error::from(ErrorKind::Backend {
-                    message: "unresolved anchor link reached emit".to_owned(),
-                }));
-            }
         },
     ))
 }
@@ -316,7 +321,7 @@ mod tests {
     use super::*;
     use crate::backend::KrillaCanvas;
     use crate::canvas::ImageRegistry;
-    use crate::canvas::{Canvas, GlyphPlacement, GlyphRun, ImageId, LinkTarget};
+    use crate::canvas::{Canvas, GlyphPlacement, GlyphRun, ImageId, LinkDest};
     use crate::fonts::{fixture_bytes, FontId, FontSource, FontStore};
     use crate::geom::{Color, Paint, Path, Point, Positive, Rect, Size, Stroke, A4, LETTER};
     use crate::text::measure::measure_text;
@@ -341,7 +346,7 @@ mod tests {
         canvas.stroke_path(&probe_path(), &black(), &thin())?;
         canvas.annotate_link(
             Rect::try_pt(10.0, 30.0, 80.0, 44.0)?,
-            LinkTarget::uri("https://example.test/a")?,
+            LinkDest::uri("https://example.test/a")?,
         )?;
         canvas.finish_page()?;
         Ok(())

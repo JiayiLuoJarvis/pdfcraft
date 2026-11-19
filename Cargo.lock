@@ -758,8 +758,10 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-pdf"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
+ "gif",
+ "image-webp",
  "krilla",
  "png",
  "skrifa 0.48.0",

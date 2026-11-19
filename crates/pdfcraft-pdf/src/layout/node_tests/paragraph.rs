@@ -1,16 +1,22 @@
-use crate::canvas::{pt_near, CanvasCommand, LinkTarget, RecordingCanvas};
+use std::num::NonZeroU8;
+
+use crate::canvas::{pt_near, CanvasCommand, RecordingCanvas};
 use crate::fonts::{fixture_bytes, EmOffset, FontId, FontSource, FontStore};
 use crate::geom::{Finite, NonNegative, PathVerb, Point, Positive};
 use crate::layout::decorate::Decorations;
-use crate::layout::flow::FlowNode;
-use crate::layout::frame::{draw_fragment, Fragment, FragmentCommand, Frame, LayoutCtx, Split};
-use crate::layout::paragraph::{BlankWidth, InlineBlank, InlineItem, TextNode, TextRun};
+use crate::layout::flow::{FlowNode, SpacerNode};
+use crate::layout::frame::{
+    draw_fragment, Fragment, FragmentCommand, Frame, LayoutCtx, LayoutLink, Split,
+};
+use crate::layout::paragraph::{
+    BlankWidth, InlineBlank, InlineItem, ParagraphNode, TextNode, TextRun,
+};
 use crate::layout::style::{Decoration, GlyphStyle, Style, TextAlign};
 use crate::layout::test_util::{fonts_and_style, page, render};
 use crate::text::measure::{FaceExtent, LineMetrics};
 
-fn uri(text: &str) -> LinkTarget {
-    LinkTarget::uri(text).unwrap()
+fn uri(text: &str) -> LayoutLink {
+    LayoutLink::uri(text)
 }
 
 fn text_item(text: &str, style: &Style, font: FontId, link: Option<&str>) -> InlineItem {
@@ -64,12 +70,12 @@ fn hits(fragment: &Fragment) -> Vec<Hit> {
         .commands
         .iter()
         .filter_map(|command| match command {
-            FragmentCommand::Link { rect, target, .. } => Some(Hit {
+            FragmentCommand::Link { rect, link, .. } => Some(Hit {
                 x: rect.origin().x().as_pt(),
                 y: rect.origin().y().as_pt(),
                 width: rect.size().width().as_pt(),
                 height: rect.size().height().as_pt(),
-                target: target.uri_str().unwrap_or("").to_owned(),
+                target: link.uri_str().unwrap_or("").to_owned(),
             }),
             FragmentCommand::Glyphs(_)
             | FragmentCommand::Fill { .. }
@@ -524,10 +530,10 @@ fn offset_and_paint_move_the_link_rect() {
         .commands()
         .iter()
         .filter_map(|command| match command {
-            CanvasCommand::AnnotateLink { rect, target } => Some((
+            CanvasCommand::AnnotateLink { rect, dest } => Some((
                 rect.origin().x().as_pt(),
                 rect.origin().y().as_pt(),
-                target.uri_str().unwrap_or("").to_owned(),
+                dest.uri_str().unwrap_or("").to_owned(),
             )),
             CanvasCommand::SetDocumentInfo(_)
             | CanvasCommand::StartPage(_)
@@ -934,4 +940,204 @@ fn justify_with_tracking_stretches_after_tracking_width() {
     assert!(mj.len() >= 2);
     // Start twin already includes tracking in line width; justify adds on top.
     assert!(mj[0].2 > ms[0].2 + 0.5);
+}
+
+#[test]
+fn orphans_and_widows_r10_tests() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5";
+    let node = ParagraphNode::layout(&mut fonts, text, &style, 200.0).unwrap();
+    assert_eq!(node.lines.len(), 5);
+    let lh = node.lines[0].height.as_pt();
+    let full_h = Positive::pt(lh * 10.0).unwrap();
+
+    // 1. Default: 5-line paragraph with 1 line space at page bottom pushes whole paragraph to next page.
+    {
+        let frame = Frame {
+            width: Positive::pt(200.0).unwrap(),
+            height: NonNegative::pt(lh * 1.5).unwrap(),
+            full_height: full_h,
+        };
+        let split = node.clone().split(frame).unwrap();
+        assert!(matches!(split, Split::MoveToNextPage(_)));
+    }
+
+    // 2. 5-line paragraph with 4 lines space: puts 3 lines on current page, 2 on next page.
+    {
+        let frame = Frame {
+            width: Positive::pt(200.0).unwrap(),
+            height: NonNegative::pt(lh * 4.5).unwrap(),
+            full_height: full_h,
+        };
+        let split = node.split(frame).unwrap();
+        match split {
+            Split::Partial { head, tail, .. } => {
+                assert_eq!(tail.lines.len(), 2);
+                assert!((head.height.as_pt() - lh * 3.0).abs() < 1.0);
+            }
+            Split::Fit { .. } | Split::MoveToNextPage(_) => {
+                panic!("expected Partial, got {split:?}")
+            }
+        }
+    }
+
+    // 3. orphans = 1, widows = 1: behaves identically to old split.
+    {
+        let mut old_style = style.clone();
+        old_style.orphans = NonZeroU8::new(1).unwrap();
+        old_style.widows = NonZeroU8::new(1).unwrap();
+        let node_old = ParagraphNode::layout(&mut fonts, text, &old_style, 200.0).unwrap();
+        let frame = Frame {
+            width: Positive::pt(200.0).unwrap(),
+            height: NonNegative::pt(lh * 4.5).unwrap(),
+            full_height: full_h,
+        };
+        let split = node_old.split(frame).unwrap();
+        match split {
+            Split::Partial { head, tail, .. } => {
+                assert_eq!(tail.lines.len(), 1);
+                assert!((head.height.as_pt() - lh * 4.0).abs() < 1.0);
+            }
+            Split::Fit { .. } | Split::MoveToNextPage(_) => {
+                panic!("expected Partial with 4 lines in head, got {split:?}")
+            }
+        }
+    }
+}
+
+#[test]
+fn keep_with_next_title_r10_tests() {
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = crate::layout::test_util::metrics(&fonts, &style);
+    let lh = m.line_height.as_pt();
+
+    // 4. Title paragraph keep_with_next = true: following paragraph cannot fit first 2 lines -> title pushed to next page.
+    let page_h = 200.0;
+    let space_left = lh * 2.0;
+    let spacer_h = page_h - space_left;
+
+    let mut title_style = style.clone();
+    title_style.keep_with_next = true;
+    let title_node = TextNode::new("Title", GlyphStyle::plain(&title_style), title_style);
+
+    let body_text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5";
+    let body_node = TextNode::new(body_text, GlyphStyle::plain(&style), style);
+
+    let spacer = FlowNode::Spacer(SpacerNode {
+        height: NonNegative::pt(spacer_h).unwrap(),
+    });
+    let root = FlowNode::Stack(vec![
+        spacer,
+        FlowNode::Text(title_node),
+        FlowNode::Text(body_node),
+    ]);
+
+    let (result, rec) = render(root, &mut fonts, page(200.0, page_h), &Decorations::none());
+    result.unwrap();
+    assert_eq!(rec.pages().len(), 2);
+    let runs0 = crate::layout::test_util::runs(&rec.pages()[0]);
+    let runs1 = crate::layout::test_util::runs(&rec.pages()[1]);
+    assert!(runs0.is_empty(), "Page 1 must not contain Title");
+    assert!(!runs1.is_empty(), "Page 2 must contain Title and body");
+    assert_eq!(runs1[0].0, "Title");
+}
+
+#[test]
+fn keep_with_next_chaining_r10_tests() {
+    use crate::layout::column_width::Ratio;
+    use crate::layout::table::{Cell, Rules, TableNode, TableSpec};
+
+    let Some((mut fonts, style)) = fonts_and_style() else {
+        return;
+    };
+    let m = crate::layout::test_util::metrics(&fonts, &style);
+    let lh = m.line_height.as_pt();
+
+    // 5. 3 keep_with_next paragraphs chaining into table: chain and table header+first row stay on same page.
+    {
+        let page_h = 300.0;
+        let space_left = lh * 4.0;
+        let spacer_h = page_h - space_left;
+
+        let mut kwn_style = style.clone();
+        kwn_style.keep_with_next = true;
+
+        let p1 = TextNode::new("Title 1", GlyphStyle::plain(&kwn_style), kwn_style.clone());
+        let p2 = TextNode::new("Title 2", GlyphStyle::plain(&kwn_style), kwn_style.clone());
+        let p3 = TextNode::new("Title 3", GlyphStyle::plain(&kwn_style), kwn_style.clone());
+
+        let mut spec = TableSpec::new(vec![crate::layout::column_width::ColumnWidth::Ratio(
+            Ratio::new(1.0).unwrap(),
+        )]);
+        spec.rules = Rules::None;
+        spec.header = vec![vec![Cell::new(vec![FlowNode::Text(TextNode::new(
+            "TH",
+            GlyphStyle::plain(&style),
+            style.clone(),
+        ))])
+        .unwrap()]];
+        spec.body = vec![
+            vec![Cell::new(vec![FlowNode::Text(TextNode::new(
+                "TR1",
+                GlyphStyle::plain(&style),
+                style.clone(),
+            ))])
+            .unwrap()],
+            vec![Cell::new(vec![FlowNode::Text(TextNode::new(
+                "TR2",
+                GlyphStyle::plain(&style),
+                style.clone(),
+            ))])
+            .unwrap()],
+        ];
+        let table = TableNode::new(spec).unwrap();
+
+        let spacer = FlowNode::Spacer(SpacerNode {
+            height: NonNegative::pt(spacer_h).unwrap(),
+        });
+        let root = FlowNode::Stack(vec![
+            spacer,
+            FlowNode::Text(p1),
+            FlowNode::Text(p2),
+            FlowNode::Text(p3),
+            FlowNode::Table(table),
+        ]);
+
+        let (result, rec) = render(root, &mut fonts, page(200.0, page_h), &Decorations::none());
+        result.unwrap();
+        assert_eq!(rec.pages().len(), 2);
+        let runs0 = crate::layout::test_util::runs(&rec.pages()[0]);
+        let runs1 = crate::layout::test_util::runs(&rec.pages()[1]);
+        assert!(runs0.is_empty(), "Page 1 must not contain the chain");
+        let texts1: Vec<&str> = runs1.iter().map(|r| r.0.as_str()).collect();
+        assert!(texts1.contains(&"Title 1"));
+        assert!(texts1.contains(&"Title 2"));
+        assert!(texts1.contains(&"Title 3"));
+        assert!(texts1.contains(&"TH"));
+        assert!(texts1.contains(&"TR1"));
+    }
+
+    // 6. Chain taller than entire page: lays out normally, no error, no infinite loop.
+    {
+        let page_h = 100.0;
+        let mut kwn_style = style;
+        kwn_style.keep_with_next = true;
+
+        let mut nodes = Vec::new();
+        for i in 0..10 {
+            nodes.push(FlowNode::Text(TextNode::new(
+                format!("Heading {i}"),
+                GlyphStyle::plain(&kwn_style),
+                kwn_style.clone(),
+            )));
+        }
+        let root = FlowNode::Stack(nodes);
+        let (result, rec) = render(root, &mut fonts, page(200.0, page_h), &Decorations::none());
+        result.unwrap();
+        assert!(rec.pages().len() >= 2);
+    }
 }

@@ -20,11 +20,11 @@ its own README, usage guide, and rustdoc.
 | [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md) | Per-crate changelog |
 
 ```bash
-cargo test -p pdfcraft-pdf --features test-utils
+cargo test -p pdfcraft-pdf
 cargo run -p pdfcraft-pdf --example hello
 ```
 
-**Status:** `0.7.0`. The API can break before `1.0`.
+**Status:** `0.8.0`. The API can break before `1.0`.
 
 ## pdfcraft-forms
 

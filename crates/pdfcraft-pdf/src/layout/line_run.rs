@@ -2,11 +2,11 @@
 
 use std::ops::Range;
 
-use crate::canvas::{GlyphPlacement, GlyphRun, LinkTarget};
+use crate::canvas::{GlyphPlacement, GlyphRun};
 use crate::error::{self, Error, ErrorKind, Fallible as Result, FontFault};
 use crate::fonts::FontId;
 use crate::geom::{Color, Finite, Length, NonNegative, Paint, Path, Point, Positive, Rect, Stroke};
-use crate::layout::frame::{FragmentCommand, LayoutCtx};
+use crate::layout::frame::{FragmentCommand, FragmentLink, LayoutCtx, LayoutLink};
 use crate::layout::style::{Decoration, GlyphStyle, TextAlign};
 use crate::text::break_class::BreakClass;
 use crate::text::cluster::{self, ClusteredText, TaggedClusteredText};
@@ -18,7 +18,7 @@ use crate::text::measure::{self, FaceExtent, LineMetrics};
 pub(crate) struct MeasuredInline {
     pub(crate) text: TaggedClusteredText<GlyphStyle>,
     glyphs: Vec<InlineGlyph>,
-    pub(crate) link: Option<LinkTarget>,
+    pub(crate) link: Option<LayoutLink>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,7 +34,7 @@ struct InlineGlyph {
 pub(crate) fn measure_inline<'a>(
     ctx: &mut LayoutCtx<'_>,
     runs: impl IntoIterator<Item = (GlyphStyle, &'a str)>,
-    link: Option<LinkTarget>,
+    link: Option<LayoutLink>,
 ) -> Result<MeasuredInline> {
     let text = cluster::cluster_tagged(runs);
     let styles = cluster_styles(&text);
@@ -123,12 +123,11 @@ impl MeasuredInline {
         let cluster = self.glyphs.get(glyphs).unwrap_or(&[]);
         let body: f32 = cluster.iter().map(|glyph| glyph.advance_norm * size).sum();
         let gap = match cluster.iter().rev().find(|glyph| !glyph.omit) {
-            Some(receiver) => {
-                let advance = receiver.advance_norm * size;
+            Some(_receiver) => {
                 let tracking = style.tracking.as_pt();
-                if advance + tracking < 0.0 {
+                if body + tracking < 0.0 {
                     return Err(Error::from(ErrorKind::NegativeTracking {
-                        advance,
+                        advance: body,
                         tracking,
                     }));
                 }
@@ -151,7 +150,7 @@ pub(crate) enum LinePiece {
     Link {
         x0: f32,
         x1: f32,
-        target: LinkTarget,
+        target: LayoutLink,
     },
 }
 
@@ -496,7 +495,7 @@ pub(crate) fn append_commands(
                 if width > 0.0 {
                     commands.push(FragmentCommand::Link {
                         rect: Rect::try_pt(dx + x0, dy, width, link_height)?,
-                        target: target.clone(),
+                        link: FragmentLink::Unresolved(target.clone()),
                         at: error::Location::default(),
                     });
                 }
@@ -585,5 +584,44 @@ pub(crate) fn align_x(
         TextAlign::Start | TextAlign::Justify => Finite::ZERO,
         TextAlign::Center => Length::from_trusted_pt((frame_width - line_width).as_pt() / 2.0),
         TextAlign::End => frame_width - line_width,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fonts::FontId;
+    use crate::geom::Color;
+
+    #[test]
+    fn negative_tracking_checks_entire_cluster() {
+        let style = GlyphStyle {
+            font: FontId(0),
+            font_size: Length::from_trusted_pt(12.0),
+            tracking: Length::from_trusted_pt(-4.0),
+            color: Color::rgb(0, 0, 0),
+            underline: None,
+            strikethrough: None,
+        };
+        let text = cluster::cluster_tagged([(style, "a")]);
+        let measured = MeasuredInline {
+            text,
+            glyphs: vec![InlineGlyph {
+                style,
+                glyph_id: 1,
+                advance_norm: 0.25, // 0.25 * 12.0 = 3.0 pt
+                byte_range: 0..1,
+                omit: false,
+            }],
+            link: None,
+        };
+        let err = measured.ink_width(0..1).unwrap_err();
+        assert_eq!(
+            err.kind,
+            ErrorKind::NegativeTracking {
+                advance: 3.0,
+                tracking: -4.0,
+            }
+        );
     }
 }

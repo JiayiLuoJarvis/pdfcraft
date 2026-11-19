@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::error::{Error, ErrorKind, Fallible as Result, GeometryKind, Location, Region};
 use crate::geom::{Length, Margins, NonNegative, Point, Positive, Size};
 use crate::layout::decorate::{self, Decorations, PageBands, SectionSpan};
-use crate::layout::flow::{AnchorNode, FlowNode, LandingScope, PendingLandings};
+use crate::layout::flow::{self, AnchorNode, FlowNode, LandingScope, PendingLandings};
 use crate::layout::frame::{self, Flowable, Frame, LayoutCtx, PlacedFragment, Split};
 use crate::limits::LimitKind;
 #[cfg(test)]
@@ -263,6 +263,10 @@ fn opened_root(root: FlowNode) -> VecDeque<BodyWork> {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived internal pagination queue; boxing would allocate per node"
+)]
 enum BodyWork {
     Node(FlowNode),
     Close(LandingScope),
@@ -294,6 +298,67 @@ fn open_anchor(anchor: AnchorNode, state: &mut PlanState<'_>) {
     }
 }
 
+fn should_push_chain_in_page(
+    first: &FlowNode,
+    nodes: &mut VecDeque<BodyWork>,
+    ctx: &mut LayoutCtx<'_>,
+    avail: Frame,
+    is_empty_page: bool,
+) -> Result<bool> {
+    if is_empty_page {
+        return Ok(false);
+    }
+    let mut chain_end = 0;
+    while let Some(work) = nodes.get(chain_end) {
+        match work {
+            BodyWork::Close(_) => chain_end += 1,
+            BodyWork::Node(n) if n.keep_with_next() => chain_end += 1,
+            BodyWork::Node(_) => break,
+        }
+    }
+    let mut target_idx = chain_end;
+    while let Some(BodyWork::Close(_)) = nodes.get(target_idx) {
+        target_idx += 1;
+    }
+    if target_idx >= nodes.len() {
+        return Ok(false);
+    }
+    if let Some(BodyWork::Node(FlowNode::PageBreak)) = nodes.get(target_idx) {
+        return Ok(false);
+    }
+
+    let mut needed = first.paragraph_total_height_with_spacing(ctx, avail.width)?;
+    for work in nodes.iter().take(chain_end) {
+        if let BodyWork::Node(n) = work {
+            needed += n.paragraph_total_height_with_spacing(ctx, avail.width)?;
+        }
+    }
+    let Some(target_work) = nodes.get_mut(target_idx) else {
+        return Ok(false);
+    };
+    if let BodyWork::Node(target) = target_work {
+        needed += target.opening_height(ctx, avail)?;
+    }
+    Ok(needed > avail.height)
+}
+
+fn commit_and_requeue_node(
+    state: &mut PlanState<'_>,
+    frame: &BodyFrame,
+    tail: FlowNode,
+) -> Result<()> {
+    commit_page(
+        state.pages,
+        state.current,
+        frame.first_page,
+        frame.max_pages,
+    )?;
+    state.nodes.push_front(BodyWork::Node(tail));
+    state.y = NonNegative::ZERO;
+    state.cursor = PageCursor::Fresh;
+    Ok(())
+}
+
 #[expect(
     clippy::expect_used,
     reason = "ensure_content_page opened the page before either split arm reads it"
@@ -308,12 +373,18 @@ fn place_body_node(
         !matches!(&node, FlowNode::Anchor(_)),
         "top-level anchors are opened before body placement"
     );
-    ensure_content_page(state.current, frame.config);
+    let is_empty_page = state.y == NonNegative::ZERO;
     let avail = Frame {
         width: frame.width,
         height: (frame.height - state.y).clamp_non_negative(),
         full_height: frame.height,
     };
+    if node.keep_with_next()
+        && should_push_chain_in_page(&node, state.nodes, ctx, avail, is_empty_page)?
+    {
+        return commit_and_requeue_node(state, frame, node);
+    }
+    ensure_content_page(state.current, frame.config);
     let split = ctx.located(
         &Location::page_index(frame.first_page + state.pages.len()).with_region(Region::Body),
         |ctx| node.split(ctx, avail),
@@ -324,42 +395,48 @@ fn place_body_node(
             mut fragment,
         } => {
             state.landing.land(&mut fragment);
-            let page = state.current.as_mut().expect("content page open");
-            let origin = Point::try_pt(
-                frame.origin.x().as_pt(),
-                frame.origin.y().as_pt() + state.y.as_pt(),
-            )?;
-            let spacing = fragment.spacing_after;
-            page.placed.push(PlacedFragment { origin, fragment });
-            state.y += height;
-            if spacing > NonNegative::ZERO {
-                let remain = (frame.height - state.y).clamp_non_negative();
-                if remain >= spacing {
-                    state.y += spacing;
+            if flow::fragment_is_effective(&fragment) {
+                let page = state.current.as_mut().expect("content page open");
+                let origin = Point::try_pt(
+                    frame.origin.x().as_pt(),
+                    frame.origin.y().as_pt() + state.y.as_pt(),
+                )?;
+                let spacing = fragment.spacing_after;
+                page.placed.push(PlacedFragment { origin, fragment });
+                state.y += height;
+                if spacing > NonNegative::ZERO {
+                    let remain = (frame.height - state.y).clamp_non_negative();
+                    if remain >= spacing {
+                        state.y += spacing;
+                    }
                 }
+                state.cursor = PageCursor::HasBody;
+            } else {
+                debug_assert!(
+                    fragment.anchors.is_empty(),
+                    "ineffective fragment must have no anchors"
+                );
             }
-            state.cursor = PageCursor::HasBody;
         }
         Split::Partial { mut head, tail, .. } => {
             state.landing.land(&mut head);
-            let page = state.current.as_mut().expect("content page open");
-            let origin = Point::try_pt(
-                frame.origin.x().as_pt(),
-                frame.origin.y().as_pt() + state.y.as_pt(),
-            )?;
-            page.placed.push(PlacedFragment {
-                origin,
-                fragment: head,
-            });
-            commit_page(
-                state.pages,
-                state.current,
-                frame.first_page,
-                frame.max_pages,
-            )?;
-            state.nodes.push_front(BodyWork::Node(tail));
-            state.y = NonNegative::ZERO;
-            state.cursor = PageCursor::Fresh;
+            if flow::fragment_is_effective(&head) {
+                let page = state.current.as_mut().expect("content page open");
+                let origin = Point::try_pt(
+                    frame.origin.x().as_pt(),
+                    frame.origin.y().as_pt() + state.y.as_pt(),
+                )?;
+                page.placed.push(PlacedFragment {
+                    origin,
+                    fragment: head,
+                });
+            } else {
+                debug_assert!(
+                    head.anchors.is_empty(),
+                    "ineffective fragment must have no anchors"
+                );
+            }
+            commit_and_requeue_node(state, frame, tail)?;
         }
         Split::MoveToNextPage(tail) => {
             if state.y == NonNegative::ZERO {
@@ -369,15 +446,7 @@ fn place_body_node(
                 .in_region(Region::Body)
                 .on_page_index(frame.first_page + state.pages.len()));
             }
-            commit_page(
-                state.pages,
-                state.current,
-                frame.first_page,
-                frame.max_pages,
-            )?;
-            state.nodes.push_front(BodyWork::Node(tail));
-            state.y = NonNegative::ZERO;
-            state.cursor = PageCursor::Fresh;
+            commit_and_requeue_node(state, frame, tail)?;
         }
     }
     Ok(())
@@ -401,7 +470,7 @@ fn apply_page_break(
     max_pages: u32,
 ) -> Result<PageCursor> {
     Ok(match cursor {
-        PageCursor::Fresh => PageCursor::Fresh,
+        PageCursor::Fresh => PageCursor::PendingBlank,
         PageCursor::HasBody => {
             commit_page(pages, current, first_page, max_pages)?;
             PageCursor::PendingBlank
@@ -478,6 +547,17 @@ fn finalize_eof(
         }
         PageCursor::HasBody => commit_page(pages, current, first_page, max_pages),
         PageCursor::PendingBlank => {
+            if pages.is_empty() {
+                push_page(
+                    pages,
+                    PagePlan {
+                        size: config.page_size,
+                        placed: Vec::new(),
+                    },
+                    first_page,
+                    max_pages,
+                )?;
+            }
             current.take();
             Ok(())
         }

@@ -23,7 +23,7 @@ pub(crate) enum WidthPart {
 }
 
 /// Drawn width of each part. A cluster's `gap` counts only when the next part is
-/// also a cluster, so a blank, a hard break, or the line end drops it.
+/// also a visible cluster, so a blank, a hard break, zero-width space, or the line end drops it.
 pub(crate) fn draw_widths(parts: &[WidthPart]) -> impl Iterator<Item = Length<NonNegative>> + '_ {
     parts
         .iter()
@@ -31,10 +31,12 @@ pub(crate) fn draw_widths(parts: &[WidthPart]) -> impl Iterator<Item = Length<No
         .map(move |(index, part)| match *part {
             WidthPart::Blank(width) => width,
             WidthPart::Ink(ink) => match parts.get(index + 1) {
-                Some(WidthPart::Ink(_)) => {
+                Some(WidthPart::Ink(next))
+                    if next.body.as_pt() > 0.0 || next.gap.as_pt() != 0.0 =>
+                {
                     Length::from_trusted_pt((ink.body.as_pt() + ink.gap.as_pt()).max(0.0))
                 }
-                Some(WidthPart::Blank(_)) | None => ink.body,
+                _ => ink.body,
             },
         })
 }
@@ -316,13 +318,11 @@ fn pack_lines<T: Copy>(
 
         match current_atom {
             Atom::Hard { .. } => {
-                let width = closed_width(settled, tail);
                 records.push(emit_line(
                     groups,
                     &atoms,
                     line_start,
                     i,
-                    width,
                     EmitFlags {
                         ended_by_hard_break: true,
                         has_fill: line_has_fill,
@@ -372,13 +372,11 @@ fn pack_lines<T: Copy>(
                 }
                 match nearest_break(&atoms, line_start, i) {
                     Some(split) => {
-                        let committed = line_width(atoms.get(line_start..split).unwrap_or(&[]));
                         records.push(emit_line(
                             groups,
                             &atoms,
                             line_start,
                             split,
-                            committed,
                             EmitFlags {
                                 ended_by_hard_break: false,
                                 has_fill: line_has_fill,
@@ -407,14 +405,7 @@ fn pack_lines<T: Copy>(
         has_fill: line_has_fill,
     };
     if line_start < atoms.len() {
-        records.push(emit_line(
-            groups,
-            &atoms,
-            line_start,
-            atoms.len(),
-            closed_width(settled, tail),
-            soft,
-        ));
+        records.push(emit_line(groups, &atoms, line_start, atoms.len(), soft));
     } else {
         // Trailing empty after Hard is not itself hard-ended.
         records.push(emit_line(
@@ -422,7 +413,6 @@ fn pack_lines<T: Copy>(
             &atoms,
             line_start,
             line_start,
-            NonNegative::ZERO,
             EmitFlags {
                 ended_by_hard_break: false,
                 has_fill: false,
@@ -559,10 +549,22 @@ fn emit_line<T: Copy>(
     atoms: &[Atom<T>],
     start: usize,
     end: usize,
-    width: Length<NonNegative>,
     flags: EmitFlags,
 ) -> SpanLine<T> {
-    if start >= end {
+    let mut visible_end = end;
+    while visible_end > start {
+        if let Some(Atom::Ink {
+            pair: PairClass::Sp,
+            ..
+        }) = atoms.get(visible_end.saturating_sub(1))
+        {
+            visible_end = visible_end.saturating_sub(1);
+        } else {
+            break;
+        }
+    }
+
+    if start >= visible_end {
         return SpanLine {
             segs: Vec::new(),
             width: NonNegative::ZERO,
@@ -572,9 +574,11 @@ fn emit_line<T: Copy>(
         };
     }
 
+    let line_width = line_width(atoms.get(start..visible_end).unwrap_or(&[]));
+
     let mut segs = Vec::new();
     let mut index = start;
-    while index < end {
+    while index < visible_end {
         let Some(atom) = atoms.get(index) else {
             break;
         };
@@ -604,7 +608,7 @@ fn emit_line<T: Copy>(
                 let start_cursor = text_group.cluster(*cluster).start_cursor();
                 let mut last = *cluster;
                 index += 1;
-                while index < end {
+                while index < visible_end {
                     match atoms.get(index) {
                         Some(Atom::Ink {
                             group: next_group,
@@ -627,7 +631,7 @@ fn emit_line<T: Copy>(
     }
     SpanLine {
         segs,
-        width,
+        width: line_width,
         empty_at: None,
         ended_by_hard_break: flags.ended_by_hard_break,
         has_fill: flags.has_fill,
