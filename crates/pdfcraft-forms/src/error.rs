@@ -102,6 +102,12 @@ impl StdError for Error {
     }
 }
 
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Self {
+        Self::new(kind)
+    }
+}
+
 /// Why [`ErrorKind::InvalidArgument`] rejected the call.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -139,7 +145,7 @@ pub enum FlattenReason {
     ReadPage,
     /// A page `Annots` array could not be written back.
     UpdateAnnotations,
-    /// `QuireForms` through `QuireForms64` are already used on the page.
+    /// `PdfCraftForms` through `PdfCraftForms64` are already used on the page.
     FontNameTaken,
     /// `Document::save_to` failed.
     Write,
@@ -295,5 +301,12 @@ mod tests {
         let source = StdError::source(&err).unwrap().to_string();
         assert!(source.contains("unique-source-token"));
         assert!(!shown.contains("unique-source-token"));
+    }
+
+    #[test]
+    fn from_error_kind_matches_new() {
+        let err: Error = ErrorKind::NotAPdf.into();
+        assert_eq!(err.kind(), ErrorKind::NotAPdf);
+        assert_eq!(err.field(), None);
     }
 }

@@ -9,6 +9,15 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed internal font descriptors, CMap names, and resource keys from `QuireForms` to `PdfCraftForms`.
+- Implemented `From<ErrorKind> for Error` per repository engineering standard rule ERR-5.
+- Replaced bare `expect` with safe `fmt::Write` matching in font CMap generation.
+- Added leading newline delimiter when appending to page content streams to prevent operator fusion.
+- Reject duplicate `head` table records during SFNT font parsing.
+- Updated MIT license copyright attribution to `pdfcraft contributors`.
+
 ### Fixed
 
 - Dereference indirect `/Subtype` annotation objects during form flattening so widget annotations are cleanly stripped.

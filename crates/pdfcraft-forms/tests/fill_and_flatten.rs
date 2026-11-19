@@ -687,7 +687,7 @@ fn drops_prev_xrefstm_and_trailer_keys_that_point_at_orphans() {
     let out = lopdf::Document::load_mem(&pdf).unwrap();
     assert!(out.trailer.get(b"Prev").is_err());
     assert!(out.trailer.get(b"XRefStm").is_err());
-    assert!(out.trailer.get(b"QuireOrphan").is_err());
+    assert!(out.trailer.get(b"PdfCraftOrphan").is_err());
     assert!(out.trailer.get(b"Root").is_ok());
     assert!(out.get_object(orphan).is_err());
 }
@@ -793,7 +793,7 @@ fn trailer_orphan_pdf() -> (Vec<u8>, lopdf::ObjectId) {
     doc.trailer
         .set("Root", lopdf::Object::Reference(catalog_id));
     doc.trailer
-        .set("QuireOrphan", lopdf::Object::Reference(orphan));
+        .set("PdfCraftOrphan", lopdf::Object::Reference(orphan));
     let mut bytes = Vec::new();
     doc.save_to(&mut bytes).unwrap();
     let start = startxref_offset(&bytes);

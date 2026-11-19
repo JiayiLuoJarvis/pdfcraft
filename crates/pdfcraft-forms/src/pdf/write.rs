@@ -217,9 +217,9 @@ impl PdfDoc {
 fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
     for n in 0..64 {
         let candidate = if n == 0 {
-            "QuireForms".to_owned()
+            "PdfCraftForms".to_owned()
         } else {
-            format!("QuireForms{}", n + 1)
+            format!("PdfCraftForms{}", n + 1)
         };
         if !fonts.has(candidate.as_bytes()) {
             return Ok(candidate);

@@ -247,6 +247,9 @@ fn head_span(bytes: &[u8]) -> Result<(usize, usize, usize)> {
             return Err(error::font_unusable(FontReason::Head));
         }
         if &bytes[at..at + 4] == b"head" {
+            if head_off.is_some() {
+                return Err(error::font_unusable(FontReason::Head));
+            }
             head_off = Some(usize::try_from(u32be(&bytes[at + 8..at + 12])).unwrap_or(usize::MAX));
             head_len = usize::try_from(u32be(&bytes[at + 12..at + 16])).unwrap_or(0);
             record = at;

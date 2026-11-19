@@ -217,7 +217,7 @@ pub(crate) fn paint(
 }
 
 fn page_bytes(stamps: &[&Stamp], strokes: &[&Stroke], font_name: Option<&str>) -> Result<Vec<u8>> {
-    let mut content = Content { buf: Vec::new() };
+    let mut content = Content { buf: b"\n".to_vec() };
     for stamp in stamps {
         match &stamp.mark {
             Mark::Check => content.check(stamp.rect)?,

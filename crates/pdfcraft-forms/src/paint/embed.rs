@@ -32,7 +32,7 @@ pub(crate) fn embed(prepared: &PaintFont<'_>, doc: &mut PdfDoc) -> Result<Object
     let mut font = Dictionary::new();
     font.set("Type", name("Font"));
     font.set("Subtype", name("Type0"));
-    font.set("BaseFont", name("QuireForms"));
+    font.set("BaseFont", name("PdfCraftForms"));
     font.set("Encoding", name("Identity-H"));
     font.set(
         "DescendantFonts",
@@ -47,7 +47,7 @@ fn descriptor(file_id: ObjectId, upem: f32, ascent: f32, descent: f32) -> Result
     let descent = em1000(descent, upem)?;
     let mut dict = Dictionary::new();
     dict.set("Type", name("FontDescriptor"));
-    dict.set("FontName", name("QuireForms"));
+    dict.set("FontName", name("PdfCraftForms"));
     dict.set("Flags", 32_i64);
     dict.set(
         "FontBBox",
@@ -84,7 +84,7 @@ fn cid_font(
     let mut dict = Dictionary::new();
     dict.set("Type", name("Font"));
     dict.set("Subtype", name("CIDFontType2"));
-    dict.set("BaseFont", name("QuireForms"));
+    dict.set("BaseFont", name("PdfCraftForms"));
     dict.set("CIDSystemInfo", system);
     dict.set("FontDescriptor", Object::Reference(descriptor));
     dict.set("CIDToGIDMap", name("Identity"));
@@ -95,7 +95,7 @@ fn cid_font(
 
 fn to_unicode(used: &BTreeMap<u16, (char, f32)>) -> String {
     let mut body = String::from(
-        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /QuireForms def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
+        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /PdfCraftForms def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
     );
     let entries: Vec<_> = used
         .iter()
@@ -125,11 +125,10 @@ fn utf16_hex(scalar: char) -> String {
 }
 
 fn write_cmap(body: &mut String, args: std::fmt::Arguments<'_>) {
-    #[expect(
-        clippy::expect_used,
-        reason = "fmt::Write for String returns Ok after push_str"
-    )]
-    std::fmt::Write::write_fmt(body, args).expect("writing into a String cannot fail");
+    use std::fmt::Write as _;
+    match body.write_fmt(args) {
+        Ok(()) | Err(_) => {}
+    }
 }
 
 fn name(value: &str) -> Object {
