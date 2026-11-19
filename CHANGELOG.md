@@ -15,6 +15,10 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## 2026-11-19
 
+### Changed
+
+- `pdfcraft-pdf` `0.8.1`. Internal architecture cleanup for ARC-9 / ARC-10 / TRK-13: single image-dimension admit path, two-phase break-class classification with shared Latin blocks, cluster `ScanState`, table `Rules` geometry methods, and paragraph `FallbackStage` split policy. No public API break. Full notes: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).
+
 ### Breaking
 
 - **Breaking.** `pdfcraft-pdf` `0.8.0`. Replaced `TableBorder` with `TableRules` (`Grid`, `ThreeLine`, `None`) on `TableStyle.rules`. Added `orphans`, `widows`, and `keep_with_next` to `ParagraphStyle`. Layout engine adds orphan/widow pagination and `keep_with_next` paragraph chaining across flows and pages. Full notes: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHANGELOG.md).

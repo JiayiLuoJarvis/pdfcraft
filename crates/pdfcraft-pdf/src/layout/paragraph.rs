@@ -381,20 +381,14 @@ impl ParagraphNode {
         }
 
         let is_empty_page = avail.height == avail.full_height.into();
-        let mut n = decide_split(
-            total,
-            n_fit,
-            self.orphans.get() as usize,
-            self.widows.get() as usize,
-        );
-        if n == 0 && is_empty_page {
-            // First abandon widows:
-            n = decide_split(total, n_fit, self.orphans.get() as usize, 0);
-            if n == 0 {
-                // Then abandon orphans:
-                n = n_fit;
-            }
-        }
+        let orphans = self.orphans.get() as usize;
+        let widows = self.widows.get() as usize;
+        let n = FallbackStage::sequence(is_empty_page)
+            .iter()
+            .copied()
+            .map(|stage| try_split_at_stage(total, n_fit, orphans, widows, stage))
+            .find(|&count| count != 0)
+            .unwrap_or(0);
         if n == 0 {
             return Ok(Split::MoveToNextPage(self));
         }
@@ -421,6 +415,37 @@ impl ParagraphNode {
             head,
             tail,
         })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FallbackStage {
+    Strict,
+    RelaxWidows,
+    ForceFit,
+}
+
+impl FallbackStage {
+    fn sequence(empty_page: bool) -> &'static [Self] {
+        if empty_page {
+            &[Self::Strict, Self::RelaxWidows, Self::ForceFit]
+        } else {
+            &[Self::Strict]
+        }
+    }
+}
+
+fn try_split_at_stage(
+    total: usize,
+    n_fit: usize,
+    orphans: usize,
+    widows: usize,
+    stage: FallbackStage,
+) -> usize {
+    match stage {
+        FallbackStage::Strict => decide_split(total, n_fit, orphans, widows),
+        FallbackStage::RelaxWidows => decide_split(total, n_fit, orphans, 0),
+        FallbackStage::ForceFit => n_fit,
     }
 }
 

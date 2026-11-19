@@ -68,12 +68,8 @@ impl ClusteredText {
                 reason = "Unicode grapheme clusters contain at least one scalar"
             )]
             let first = grapheme.chars().next().expect("grapheme non-empty");
-            let is_zwsp = first == '\u{200B}';
-            let class = if is_zwsp {
-                BreakClass::Pair(break_class::PairClass::Sp)
-            } else {
-                break_class::classify(first, prev_class)
-            };
+            let static_class = break_class::classify_scalar(first);
+            let class = break_class::resolve_pair(prev_class, static_class);
             prev_class = match class {
                 BreakClass::Pair(pair) => Some(pair),
                 BreakClass::Hard => None,
@@ -83,8 +79,11 @@ impl ClusteredText {
                 glyph,
                 glyph_byte,
             };
-            let is_hard = matches!(class, BreakClass::Hard);
-            if !is_hard && !is_zwsp {
+            let omit_from_glyphs = matches!(
+                static_class,
+                break_class::StaticClass::Hard | break_class::StaticClass::Zwsp
+            );
+            if !omit_from_glyphs {
                 glyph_text.push_str(grapheme);
                 glyph += grapheme.chars().count();
                 glyph_byte += grapheme.len();
@@ -231,6 +230,13 @@ impl<'a> Cluster<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ScanState {
+    EmptyOrBreak,
+    AfterChar(char),
+    AfterVs,
+}
+
 fn normalize_runs<T: Copy, S: AsRef<str>>(
     runs: impl IntoIterator<Item = (T, S)>,
 ) -> (String, Vec<T>) {
@@ -247,44 +253,47 @@ fn normalize_runs<T: Copy, S: AsRef<str>>(
         })
         .peekable();
 
-    let mut prev_char: Option<char> = None;
+    let mut state = ScanState::EmptyOrBreak;
     while let Some((scalar, tag, is_span_start)) = scalars.next() {
         if is_span_start {
-            prev_char = None;
+            state = ScanState::EmptyOrBreak;
         }
-        match scalar {
-            '\u{FEFF}' | '\u{200C}' | '\u{200D}' => {
-                prev_char = None;
-            }
-            '\r' => {
+        state = match (state, scalar) {
+            (_, '\u{FEFF}' | '\u{200C}' | '\u{200D}') => ScanState::EmptyOrBreak,
+            (_, '\r') => {
                 if matches!(scalars.peek(), Some(('\n', _, _))) {
                     scalars.next();
                 }
                 text.push('\n');
                 tags.push(tag);
-                prev_char = Some('\n');
+                ScanState::AfterChar('\n')
             }
-            '\u{2028}' | '\u{2029}' => {
+            (_, '\u{2028}' | '\u{2029}') => {
                 text.push('\n');
                 tags.push(tag);
-                prev_char = Some('\n');
+                ScanState::AfterChar('\n')
             }
-            vs if is_variation_selector(vs) => {
-                let isolated = prev_char.is_none()
-                    || matches!(prev_char, Some('\n' | ' ' | '\u{3000}' | '\u{200B}'))
-                    || prev_char.is_some_and(is_variation_selector);
-                if !isolated {
-                    text.push(vs);
-                    tags.push(tag);
-                    prev_char = Some(vs);
-                }
+            (state @ ScanState::AfterChar('\n' | ' ' | '\u{3000}' | '\u{200B}'), vs)
+                if is_variation_selector(vs) =>
+            {
+                state
             }
-            other => {
+            (ScanState::AfterChar(_), vs) if is_variation_selector(vs) => {
+                text.push(vs);
+                tags.push(tag);
+                ScanState::AfterVs
+            }
+            (state @ (ScanState::EmptyOrBreak | ScanState::AfterVs), vs)
+                if is_variation_selector(vs) =>
+            {
+                state
+            }
+            (_, other) => {
                 text.push(other);
                 tags.push(tag);
-                prev_char = Some(other);
+                ScanState::AfterChar(other)
             }
-        }
+        };
     }
     (text, tags)
 }
@@ -370,6 +379,10 @@ mod tests {
         // Isolated VS after space stripped
         let text_space = ClusteredText::new(" \u{FE00}A");
         assert_eq!(text_space.normalized_text(), " A");
+
+        // Isolated VS after ZWSP stripped
+        let text_zwsp = ClusteredText::new("A\u{200B}\u{FE00}B");
+        assert_eq!(text_zwsp.normalized_text(), "A\u{200B}B");
 
         // Isolated VS at span start stripped
         let tagged = cluster_tagged([(0, "A"), (1, "\u{FE00}B")]);

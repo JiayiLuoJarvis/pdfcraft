@@ -28,6 +28,78 @@ pub(crate) enum Rules {
     None,
 }
 
+impl Rules {
+    /// Half the grid stroke, or zero. Cell geometry is shifted by this so strokes sit on the outer edge.
+    pub(crate) fn border_inset(&self) -> Length<NonNegative> {
+        match self {
+            Self::Grid(pen) => Length::from_trusted_pt(pen.width().as_pt() / 2.0),
+            Self::ThreeLine { .. } | Self::None => NonNegative::ZERO,
+        }
+    }
+
+    /// Column width after subtracting the grid stroke. `None` when the stroke eats the frame.
+    pub(crate) fn inner_content_width(
+        &self,
+        avail_width: Length<Positive>,
+    ) -> Option<Length<Positive>> {
+        match self {
+            Self::Grid(pen) => {
+                let border = pen.width().as_pt();
+                if border > 0.0 {
+                    let rem = avail_width.as_pt() - border;
+                    (rem > 0.0).then(|| Length::from_trusted_pt(rem))
+                } else {
+                    Some(avail_width)
+                }
+            }
+            Self::ThreeLine { .. } | Self::None => Some(avail_width),
+        }
+    }
+
+    /// Height of the header, first body group, and this rule's outer strokes.
+    pub(crate) fn opening_clearance(
+        &self,
+        header_h: Length<NonNegative>,
+        first_row_h: Length<NonNegative>,
+        has_header: bool,
+    ) -> Length<NonNegative> {
+        self.row_group_required_height(first_row_h, header_h, has_header)
+    }
+
+    /// Height a row group needs on a page, including a repeated header when `with_header`.
+    pub(crate) fn row_group_required_height(
+        &self,
+        group_h: Length<NonNegative>,
+        header_h: Length<NonNegative>,
+        with_header: bool,
+    ) -> Length<NonNegative> {
+        match (self, with_header) {
+            (Self::Grid(pen), true) => group_h + header_h + pen.width(),
+            (Self::Grid(pen), false) => group_h + pen.width(),
+            (
+                Self::ThreeLine {
+                    top,
+                    header,
+                    bottom,
+                },
+                true,
+            ) => group_h + top.width() + bottom.width() + header_h + header.width(),
+            (Self::ThreeLine { top, bottom, .. }, false) => group_h + top.width() + bottom.width(),
+            (Self::None, true) => group_h + header_h,
+            (Self::None, false) => group_h,
+        }
+    }
+
+    /// Height of the header band and its strokes, with no body row.
+    pub(crate) fn header_clearance(
+        &self,
+        header_h: Length<NonNegative>,
+        has_header: bool,
+    ) -> Length<NonNegative> {
+        self.row_group_required_height(NonNegative::ZERO, header_h, has_header)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TableSpec<N> {
     pub(crate) widths: Vec<ColumnWidth>,
@@ -280,37 +352,8 @@ impl MeasuredTable {
     pub(crate) fn opening_height(&self) -> Length<NonNegative> {
         let first = self.body.front().map_or(NonNegative::ZERO, |b| b.height);
         let header_h = self.header.as_ref().map_or(NonNegative::ZERO, |h| h.height);
-        let has_header = self.header.is_some();
-        match self.rules {
-            Rules::Grid(pen) => {
-                if has_header {
-                    header_h + first + pen.width()
-                } else {
-                    first + pen.width()
-                }
-            }
-            Rules::ThreeLine {
-                top,
-                header,
-                bottom,
-            } => {
-                let w_top = top.width();
-                let w_bot = bottom.width();
-                let w_hdr = header.width();
-                if has_header {
-                    w_top + header_h + w_hdr + first + w_bot
-                } else {
-                    w_top + first + w_bot
-                }
-            }
-            Rules::None => {
-                if has_header {
-                    header_h + first
-                } else {
-                    first
-                }
-            }
-        }
+        self.rules
+            .opening_clearance(header_h, first, self.header.is_some())
     }
 }
 
@@ -433,41 +476,10 @@ fn validate_table_groups_fit(
     full_height: Length<Positive>,
 ) -> Result<()> {
     let header_h = header.map_or(NonNegative::ZERO, |hdr| hdr.height);
+    let has_header = header.is_some();
     for (index, block) in body_groups.iter().enumerate() {
         let with_header = index == 0 || repeat_header;
-        let need = match rules {
-            Rules::Grid(pen) => {
-                block.height
-                    + if with_header {
-                        header_h
-                    } else {
-                        NonNegative::ZERO
-                    }
-                    + pen.width()
-            }
-            Rules::ThreeLine {
-                top,
-                header: header_pen,
-                bottom,
-            } => {
-                block.height
-                    + top.width()
-                    + bottom.width()
-                    + if with_header {
-                        header_h + header_pen.width()
-                    } else {
-                        NonNegative::ZERO
-                    }
-            }
-            Rules::None => {
-                block.height
-                    + if with_header {
-                        header_h
-                    } else {
-                        NonNegative::ZERO
-                    }
-            }
-        };
+        let need = rules.row_group_required_height(block.height, header_h, with_header);
         if need.as_pt() > full_height.as_pt() {
             return Err(ErrorKind::UnsplittableTallerThanFrame {
                 height: need.as_pt(),
@@ -476,24 +488,7 @@ fn validate_table_groups_fit(
             .into());
         }
     }
-    let header_need = match rules {
-        Rules::Grid(pen) => header_h + pen.width(),
-        Rules::ThreeLine {
-            top,
-            header: header_pen,
-            bottom,
-        } => {
-            if header.is_some() {
-                Length::<NonNegative>::from(top.width())
-                    + header_h
-                    + header_pen.width()
-                    + bottom.width()
-            } else {
-                Length::<NonNegative>::from(top.width()) + bottom.width()
-            }
-        }
-        Rules::None => header_h,
-    };
+    let header_need = rules.header_clearance(header_h, has_header);
     if header_need.as_pt() > full_height.as_pt() {
         return Err(ErrorKind::UnsplittableTallerThanFrame {
             height: header_need.as_pt(),
@@ -509,31 +504,13 @@ fn measure<N: Flowable>(
     ctx: &mut LayoutCtx<'_>,
     avail: Frame,
 ) -> Result<MeasuredTable> {
-    let (avail_w, inset, half_w) = match grid.rules {
-        Rules::Grid(pen) => {
-            let border = pen.width().as_pt();
-            let avail_w = if border > 0.0 {
-                let rem = avail.width.as_pt() - border;
-                if rem <= 0.0 {
-                    return Err(Error::from(ErrorKind::ColumnWidths {
-                        reason: ColumnWidthsReason::ContentWidth,
-                    }));
-                }
-                Length::<Positive>::from_trusted_pt(rem)
-            } else {
-                avail.width
-            };
-            let inset = border / 2.0 + grid.padding.as_pt();
-            let half_w = border / 2.0;
-            (avail_w, inset, half_w)
-        }
-        Rules::ThreeLine { .. } | Rules::None => {
-            let avail_w = avail.width;
-            let inset = grid.padding.as_pt();
-            let half_w = 0.0;
-            (avail_w, inset, half_w)
-        }
+    let Some(avail_w) = grid.rules.inner_content_width(avail.width) else {
+        return Err(Error::from(ErrorKind::ColumnWidths {
+            reason: ColumnWidthsReason::ContentWidth,
+        }));
     };
+    let half_w = grid.rules.border_inset().as_pt();
+    let inset = half_w + grid.padding.as_pt();
     let widths = column_width::resolve_column_widths(&grid.widths, avail_w)?;
     let xs = column_edges(&widths);
 
@@ -881,14 +858,22 @@ fn split_measured_three_line_or_none<N>(
         .body
         .front()
         .map_or(NonNegative::ZERO, |block| block.height);
+    let header_h = table
+        .header
+        .as_ref()
+        .map_or(NonNegative::ZERO, |header| header.height);
+    if table
+        .rules
+        .opening_clearance(header_h, first, has_header)
+        .as_pt()
+        > avail.height.as_pt()
+    {
+        return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
+            table,
+        ))));
+    }
     if has_header {
         if let Some(header) = &table.header {
-            let needed = w_top + header.height.as_pt() + w_hdr + first.as_pt() + w_bot;
-            if needed > avail.height.as_pt() {
-                return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
-                    table,
-                ))));
-            }
             let offset = header.with_offset(Finite::ZERO, Finite::pt(y)?)?;
             commands.extend(offset.commands);
             anchors.extend(offset.anchors);
@@ -896,13 +881,6 @@ fn split_measured_three_line_or_none<N>(
             baseline_chosen = true;
             y += header.height.as_pt() + w_hdr;
             placed_header = true;
-        }
-    } else {
-        let needed = w_top + first.as_pt() + w_bot;
-        if needed > avail.height.as_pt() {
-            return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
-                table,
-            ))));
         }
     }
 
@@ -988,7 +966,7 @@ fn split_measured_grid<N>(
                 .body
                 .front()
                 .map_or(NonNegative::ZERO, |block| block.height);
-            let needed = header.height + first + border_width;
+            let needed = table.rules.opening_clearance(header.height, first, true);
             if needed.as_pt() > avail.height.as_pt() {
                 return Ok(Split::MoveToNextPage(TableNode(TableState::Measured(
                     table,
@@ -1027,7 +1005,7 @@ fn split_measured_grid<N>(
         ))));
     }
 
-    let half_w = border_width.as_pt() / 2.0;
+    let half_w = table.rules.border_inset().as_pt();
     let rows_total_height = y.as_pt();
 
     let mut groups_info = Vec::new();

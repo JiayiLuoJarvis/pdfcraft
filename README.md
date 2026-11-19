@@ -24,7 +24,7 @@ cargo test -p pdfcraft-pdf
 cargo run -p pdfcraft-pdf --example hello
 ```
 
-**Status:** `0.8.0`. The API can break before `1.0`.
+**Status:** `0.8.1`. The API can break before `1.0`.
 
 ## pdfcraft-forms
 

@@ -1,30 +1,7 @@
 //! Caller-side split of a string into Latin-class and other [`Span`]s.
 
-use std::ops::RangeInclusive;
-
 use super::{RunStyle, Span};
-
-/// Blocks where an alphabetic scalar is Latin class.
-/// ASCII U+0020..=U+007E is Latin regardless of `is_alphabetic`.
-const LATIN_LETTER_BLOCKS: [RangeInclusive<char>; 7] = [
-    '\u{00C0}'..='\u{00FF}',
-    '\u{0100}'..='\u{017F}',
-    '\u{0180}'..='\u{024F}',
-    '\u{1E00}'..='\u{1EFF}',
-    '\u{2C60}'..='\u{2C7F}',
-    '\u{A720}'..='\u{A7FF}',
-    '\u{AB30}'..='\u{AB6F}',
-];
-
-fn is_latin(first: char) -> bool {
-    if ('\u{0020}'..='\u{007E}').contains(&first) {
-        return true;
-    }
-    first.is_alphabetic()
-        && LATIN_LETTER_BLOCKS
-            .iter()
-            .any(|block| block.contains(&first))
-}
+use crate::text::break_class::is_latin_char;
 
 impl<K: Clone + PartialEq> Span<K> {
     /// Splits `text` into [`Span::Text`] spans.
@@ -49,7 +26,7 @@ impl<K: Clone + PartialEq> Span<K> {
         let text = text.as_ref();
         let mut runs = Vec::new();
         for (_, cluster) in text.grapheme_indices(true) {
-            let key = if cluster.chars().next().is_some_and(is_latin) {
+            let key = if cluster.chars().next().is_some_and(is_latin_char) {
                 &latin
             } else {
                 &cjk

@@ -67,29 +67,7 @@ impl ImageRegistry for ImageTable {
         }
         let image = decode(bytes, format)?;
         let (width, height) = image.size();
-        if width == 0 || height == 0 {
-            return Err(Error::from(ErrorKind::Image {
-                message: "has an empty side".to_owned(),
-            }));
-        }
-        let max_edge = self.limits.max_image_edge();
-        let edge = width.max(height);
-        if edge > max_edge {
-            return Err(Error::from(ErrorKind::LimitExceeded {
-                kind: LimitKind::ImageEdge,
-                value: u64::from(edge),
-                max: u64::from(max_edge),
-            }));
-        }
-        let pixels = u64::from(width).saturating_mul(u64::from(height));
-        let max_pixels = self.limits.max_image_pixels();
-        if pixels > max_pixels {
-            return Err(Error::from(ErrorKind::LimitExceeded {
-                kind: LimitKind::ImagePixels,
-                value: pixels,
-                max: max_pixels,
-            }));
-        }
+        self.limits.validate_image_dimensions(width, height)?;
         let id = u32::try_from(self.rasters.len()).map_err(|_| {
             Error::from(ErrorKind::Image {
                 message: "table is full".to_owned(),
@@ -118,29 +96,7 @@ fn validate_png_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
         let info = reader.info();
         (info.width, info.height)
     };
-    if width == 0 || height == 0 {
-        return Err(Error::from(ErrorKind::Image {
-            message: "has an empty side".to_owned(),
-        }));
-    }
-    let max_edge = limits.max_image_edge();
-    let edge = width.max(height);
-    if edge > max_edge {
-        return Err(Error::from(ErrorKind::LimitExceeded {
-            kind: LimitKind::ImageEdge,
-            value: u64::from(edge),
-            max: u64::from(max_edge),
-        }));
-    }
-    let pixels = u64::from(width).saturating_mul(u64::from(height));
-    let max_pixels = limits.max_image_pixels();
-    if pixels > max_pixels {
-        return Err(Error::from(ErrorKind::LimitExceeded {
-            kind: LimitKind::ImagePixels,
-            value: pixels,
-            max: max_pixels,
-        }));
-    }
+    limits.validate_image_dimensions(width, height)?;
     let size = reader.output_buffer_size().ok_or_else(|| {
         Error::from(ErrorKind::Image {
             message: "Png decode failed: image is too large".to_owned(),
@@ -167,11 +123,7 @@ fn validate_gif_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
         .map_err(|error| gif_error(&error))?;
     let screen_width = reader.width();
     let screen_height = reader.height();
-    if screen_width == 0 || screen_height == 0 {
-        return Err(Error::from(ErrorKind::Image {
-            message: "has an empty side".to_owned(),
-        }));
-    }
+    limits.validate_image_dimensions(u32::from(screen_width), u32::from(screen_height))?;
     let frame = reader
         .next_frame_info()
         .map_err(|error| gif_error(&error))?
@@ -180,24 +132,7 @@ fn validate_gif_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
                 message: "Gif decode failed: no frames".to_owned(),
             })
         })?;
-    let max_edge = limits.max_image_edge();
-    let edge = frame.width.max(frame.height);
-    if u32::from(edge) > max_edge {
-        return Err(Error::from(ErrorKind::LimitExceeded {
-            kind: LimitKind::ImageEdge,
-            value: u64::from(edge),
-            max: u64::from(max_edge),
-        }));
-    }
-    let pixels = u64::from(frame.width).saturating_mul(u64::from(frame.height));
-    let max_pixels = limits.max_image_pixels();
-    if pixels > max_pixels {
-        return Err(Error::from(ErrorKind::LimitExceeded {
-            kind: LimitKind::ImagePixels,
-            value: pixels,
-            max: max_pixels,
-        }));
-    }
+    limits.validate_image_dimensions(u32::from(frame.width), u32::from(frame.height))?;
     if frame.left != 0
         || frame.top != 0
         || frame.width != screen_width
@@ -224,29 +159,7 @@ fn validate_webp_pixels(bytes: &[u8], limits: &Limits) -> Result<()> {
     let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes))
         .map_err(|error| webp_error(&error))?;
     let (width, height) = decoder.dimensions();
-    if width == 0 || height == 0 {
-        return Err(Error::from(ErrorKind::Image {
-            message: "has an empty side".to_owned(),
-        }));
-    }
-    let max_edge = limits.max_image_edge();
-    let edge = width.max(height);
-    if edge > max_edge {
-        return Err(Error::from(ErrorKind::LimitExceeded {
-            kind: LimitKind::ImageEdge,
-            value: u64::from(edge),
-            max: u64::from(max_edge),
-        }));
-    }
-    let pixels = u64::from(width).saturating_mul(u64::from(height));
-    let max_pixels = limits.max_image_pixels();
-    if pixels > max_pixels {
-        return Err(Error::from(ErrorKind::LimitExceeded {
-            kind: LimitKind::ImagePixels,
-            value: pixels,
-            max: max_pixels,
-        }));
-    }
+    limits.validate_image_dimensions(width, height)?;
     let size = decoder.output_buffer_size().ok_or_else(|| {
         Error::from(ErrorKind::Image {
             message: "Webp decode failed: image is too large".to_owned(),

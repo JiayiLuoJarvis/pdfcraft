@@ -7,6 +7,15 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 while remaining `0.x`. See the [workspace changelog](../../CHANGELOG.md) for
 cross-crate history.
 
+## [0.8.1] - 2026-11-19
+
+### Changed
+
+- Image dimension checks (empty side, max edge, max pixels) admit once through `Limits::validate_image_dimensions`; PNG/GIF/WebP probes no longer duplicate the three-way guard chain (ARC-10).
+- Line-break classification is two-phase: stateless `classify_scalar` then `resolve_pair` lookbehind (ARC-9). Latin letter blocks are shared with `Span::split_latin`, so extended Latin letters classify as `Al` for pair-table breaking.
+- Cluster normalization uses an explicit `ScanState` machine; ZWSP is classified in the break-class pipeline instead of an external special case.
+- Table `Rules` owns border inset, opening clearance, and row-group height math; paragraph orphan/widow fallback walks `FallbackStage` instead of overwriting the split index in place (TRK-13).
+
 ## [0.8.0] - 2026-11-19
 
 ### Breaking

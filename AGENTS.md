@@ -14,7 +14,7 @@
 
 提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 与 §14 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。公共面是 `Form::open`、`Fill::new` 与 `Fill::to_pdf`，含对齐、按字段字号、`FieldRule`、`AbsoluteLine`、TTC 拆面与 TrueType `glyf` 子集。OTF 仍未做。不要把填表写进 `pdfcraft-pdf`。§11 确认 `pdfcraft-post`：对已有 PDF 字节做 `SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`Pipeline`。Watermark 与输入限额延后。不要把加密、合并、后处理写 Info 写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走）不要提前做进公共 API。页眉页脚可以是 `BandFn`，并可放文字、图片和形状，见提案书 §2.10。§2.12 已确认 `LayerMark { when, child: Mark::Rotated { .. } }` 可包 path / Text / Image（`LayerShape<K>`，斜向水印）。流内 canvas 已保留为 `Block::Canvas`（§2.14、§12.7）。具名 images 字典仍不做。
 
-仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 是 `0.8.0`，`pdfcraft-forms` 是 `0.3.0`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.1`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
+仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 是 `0.8.1`，`pdfcraft-forms` 是 `0.3.0`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.1`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
 
 ## 现阶段姿态（无生产包袱）
 
@@ -23,6 +23,7 @@
 - **主题内不将就。** 已确认要改的设计/API/错误面，优先选长期正确的形状；不要因为「改动小」「兼容旧写法」「少动测试」而留下已知歪的公共面或内部结构。
 - **「最小 diff」指克制范围，不是降低标准。** 一 PR 一件事、不顺手改无关模块、不把未确认功能塞进当前 PR——这些仍成立。但在该主题 internally，允许为夯实基础做必要的较大重构。
 - **公开 API 与错误诊断** 按开源 / 批跑生产预期设计；0.x 可以 breaking，宁可现在拆干净，不要把「以后再补上下文」当默认答案。
+- **拒绝 if 瀑布与补丁式堆砌。** 严禁为了满足新特例或修复缺陷，在既有函数中平铺追加有隐式时序依赖的 `if ... return` 守卫分支（if-patching，见工程规范 TRK-13）。词法分类与断行决策必须遵循两阶段解耦（静态分类 + 状态转移，ARC-9）；外部数据尺寸校验必须收敛在边界单一入口（ARC-10）；复杂多分支决策必须使用穷尽性 `match`、状态机或领域策略对象。
 
 ## 这是什么库
 
@@ -151,3 +152,4 @@ lib         → spec, backend, canvas, fonts, error, geom, limits
 - 为「像大厂」堆流程：不建 viewer 视觉回归农场；不放宽成 `^` 依赖。
 - 把 forms / orgchart / post 做成 `pdfcraft-pdf` 的 feature，或让 `pdfcraft-forms` ↔ `pdfcraft-pdf`、`pdfcraft-post` ↔ 任一兄弟 crate 互相依赖。
 - 修改 hcsw 工程（含 `/mnt/data/dev/hcsw-pdfcraft`）里的任何文件。
+- 在分类器/解析器中倒灌上下文状态破坏两阶段解耦（ARC-9）；用平铺 `if` 瀑布打补丁替代领域建模（TRK-13）；在底层格式解码器中重复复制多重边界防御校验（ARC-10）。

@@ -153,6 +153,8 @@ cargo deny check advisories licenses bans sources
 | ARC-6 | 不用 `Box<dyn Any>` 加 downcast 绕过类型设计。 | MS M-DI-HIERARCHY | 评审（现存一处，见 §16） |
 | ARC-7 | 库代码不打印，不引入日志框架。 | MS M-LOG-NOT-PRINT（日志部分 N/A） | `lint:clippy::print_stdout`、`lint:clippy::print_stderr` |
 | ARC-8 | 不异步，不起线程，不并行开页或画页。 | AGENTS；G（chrome 条 N/A） | 评审 |
+| ARC-9 | 词法分类与动态决策严格两阶段解耦。字符标量分类器（如 `classify_scalar`）必须是无状态纯函数（`char -> StaticClass`），禁止将上下文（前驱状态、后继猜测）倒灌入基础分类器；上下文转移、两两配对裁决（如避头尾禁则、撇号保护）只能在后续状态机或转移矩阵中完成。 | 本仓库（方案 B） | 评审 |
+| ARC-10 | 外部数据边界防御单一职责。外部数据（图片、字体字节、spec）的尺寸与几何校验（宽高非零、边长上限、像素上限）收敛在系统边界的专用验证器中（如 `Limits::validate_image_dimensions`），禁止在底层格式解码器与业务注册函数中多次散落相同的多重 `if` 边界防御。 | API#c-validate；MS M-STRONG-TYPES-GUARD | 评审（ARC-3 引申） |
 
 ## 7. 确定性与批量生产（DET）
 
@@ -236,6 +238,7 @@ cargo deny check advisories licenses bans sources
 | TRK-10 | 为了躲 lint 改写形式而不改语义（如把 `\|_\|` 改成 `\|_e\|`） | 修正语义，或登记 `#[expect]` | — | 评审 |
 | TRK-11 | `mem::forget`、函数指针转整数、`verbose` 文件读取 | 按 RAII 与 std 便捷 API 写 | — | `lint:clippy::mem_forget`、`lint:clippy::fn_to_numeric_cast_any`、`lint:clippy::verbose_file_reads` |
 | TRK-12 | 冗余 `clone`、对 `&mut` 不必要的要求 | 借用或移动 | `forms/fill.rs:293`、`pdf/backend/krilla_canvas.rs:214` | `lint:clippy::redundant_clone`、`lint:clippy::needless_pass_by_ref_mut`（nursery） |
+| TRK-13 | 瀑布式顺序耦合的 `if ... return` 补丁链（if-patching） | 模式匹配（`match (a, b)`）、策略枚举（Strategy Pattern）或领域状态机 | —（原 `pdf/text/break_class.rs` 分类器已按 ARC-9 拆成 `classify_scalar` / `resolve_pair`） | 评审（ARC-9） |
 
 ## 14. Python 音译识别
 

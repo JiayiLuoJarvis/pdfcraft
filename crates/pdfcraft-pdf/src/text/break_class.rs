@@ -1,5 +1,7 @@
 //! Break-class table for CJK-aware line breaking (not full UAX #14).
 
+use std::ops::RangeInclusive;
+
 /// Cluster-head class. `Hard` is BK and never enters the pair matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BreakClass {
@@ -7,6 +9,21 @@ pub(crate) enum BreakClass {
     Hard,
     /// Participates in the 6×6 pair table.
     Pair(PairClass),
+}
+
+/// Context-free class of one scalar. Pairing happens in [`resolve_pair`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum StaticClass {
+    Hard,
+    Space,
+    Zwsp,
+    Op,
+    Cl,
+    QuoteRight,
+    AsciiPunct,
+    Id,
+    Al,
+    Other,
 }
 
 /// Row/column of the pair table. Discriminant equals the matrix index.
@@ -48,41 +65,69 @@ const CL: &[char] = &[
     '\u{FF5D}', '\u{FF0E}', '\u{201D}', '\u{00B7}', '\u{30FB}', '\u{FF5E}',
 ];
 
+/// Blocks where an alphabetic scalar is Latin class.
+/// ASCII U+0020..=U+007E is Latin regardless of `is_alphabetic`.
+pub(crate) const LATIN_LETTER_BLOCKS: [RangeInclusive<char>; 7] = [
+    '\u{00C0}'..='\u{00FF}',
+    '\u{0100}'..='\u{017F}',
+    '\u{0180}'..='\u{024F}',
+    '\u{1E00}'..='\u{1EFF}',
+    '\u{2C60}'..='\u{2C7F}',
+    '\u{A720}'..='\u{A7FF}',
+    '\u{AB30}'..='\u{AB6F}',
+];
+
+/// Returns `true` if `c` belongs to the Latin class defined in §12.2 of the specification.
+pub(crate) fn is_latin_char(c: char) -> bool {
+    if ('\u{0020}'..='\u{007E}').contains(&c) {
+        return true;
+    }
+    c.is_alphabetic() && LATIN_LETTER_BLOCKS.iter().any(|block| block.contains(&c))
+}
+
+/// Maps a scalar to [`StaticClass`] with no lookbehind.
+pub(crate) fn classify_scalar(scalar: char) -> StaticClass {
+    match scalar {
+        '\n' => StaticClass::Hard,
+        ' ' => StaticClass::Space,
+        '\u{200B}' => StaticClass::Zwsp,
+        '\u{2019}' => StaticClass::QuoteRight,
+        ',' | '.' | ';' | ':' | '!' | '?' | '%' => StaticClass::AsciiPunct,
+        c if OP.contains(&c) => StaticClass::Op,
+        c if CL.contains(&c) => StaticClass::Cl,
+        c if is_id(u32::from(c)) => StaticClass::Id,
+        c if is_al(c) => StaticClass::Al,
+        _ => StaticClass::Other,
+    }
+}
+
+/// Applies lookbehind rules to a [`StaticClass`].
+pub(crate) fn resolve_pair(prev: Option<PairClass>, curr: StaticClass) -> BreakClass {
+    // Same PairClass outcomes stay on separate arms so each lookbehind rule stays
+    // named; merging would bury apostrophe and kinzoku exceptions in a catch-all.
+    #[expect(
+        clippy::match_same_arms,
+        reason = "lookbehind rules map to the same PairClass on purpose"
+    )]
+    match (prev, curr) {
+        (_, StaticClass::Hard) => BreakClass::Hard,
+        (_, StaticClass::Space | StaticClass::Zwsp) => BreakClass::Pair(PairClass::Sp),
+        (Some(PairClass::Al), StaticClass::QuoteRight) => BreakClass::Pair(PairClass::Other),
+        (_, StaticClass::QuoteRight) => BreakClass::Pair(PairClass::Cl),
+        (Some(PairClass::Id), StaticClass::AsciiPunct) => BreakClass::Pair(PairClass::Cl),
+        (_, StaticClass::AsciiPunct) => BreakClass::Pair(PairClass::Other),
+        (_, StaticClass::Op) => BreakClass::Pair(PairClass::Op),
+        (_, StaticClass::Cl) => BreakClass::Pair(PairClass::Cl),
+        (_, StaticClass::Id) => BreakClass::Pair(PairClass::Id),
+        (_, StaticClass::Al) => BreakClass::Pair(PairClass::Al),
+        (_, StaticClass::Other) => BreakClass::Pair(PairClass::Other),
+    }
+}
+
 /// Classify a cluster by its first scalar and the previous cluster's pair class.
-pub(crate) fn classify(scalar: char, prev_class: Option<PairClass>) -> BreakClass {
-    if scalar == '\n' {
-        return BreakClass::Hard;
-    }
-    if scalar == ' ' {
-        return BreakClass::Pair(PairClass::Sp);
-    }
-    if scalar == '\u{2019}' {
-        let pair = if prev_class == Some(PairClass::Al) {
-            PairClass::Other
-        } else {
-            PairClass::Cl
-        };
-        return BreakClass::Pair(pair);
-    }
-    if prev_class == Some(PairClass::Id)
-        && matches!(scalar, ',' | '.' | ';' | ':' | '!' | '?' | '%')
-    {
-        return BreakClass::Pair(PairClass::Cl);
-    }
-    if OP.contains(&scalar) {
-        return BreakClass::Pair(PairClass::Op);
-    }
-    if CL.contains(&scalar) {
-        return BreakClass::Pair(PairClass::Cl);
-    }
-    let cp = u32::from(scalar);
-    if is_id(cp) {
-        return BreakClass::Pair(PairClass::Id);
-    }
-    if is_al(cp) {
-        return BreakClass::Pair(PairClass::Al);
-    }
-    BreakClass::Pair(PairClass::Other)
+#[cfg(test)]
+fn classify(scalar: char, prev_class: Option<PairClass>) -> BreakClass {
+    resolve_pair(prev_class, classify_scalar(scalar))
 }
 
 fn is_id(cp: u32) -> bool {
@@ -111,16 +156,8 @@ pub(crate) fn is_justify_cluster(scalar: char) -> bool {
     matches!(cp, 0x3400..=0x4DBF | 0x4E00..=0x9FFF) || is_fullwidth_op_or_cl(scalar)
 }
 
-fn is_al(cp: u32) -> bool {
-    matches!(
-        cp,
-        0x0030..=0x0039
-            | 0x0041..=0x005A
-            | 0x0061..=0x007A
-            | 0x00C0..=0x00D6
-            | 0x00D8..=0x00F6
-            | 0x00F8..=0x00FF
-    )
+fn is_al(c: char) -> bool {
+    c.is_ascii_digit() || (c.is_alphabetic() && is_latin_char(c))
 }
 
 /// Pair-table lookup. `Hard` cannot be passed.
@@ -140,6 +177,7 @@ mod tests {
     fn classifies_design_edges() {
         assert_eq!(classify('\n', None), BreakClass::Hard);
         assert_eq!(classify(' ', None), BreakClass::Pair(PairClass::Sp));
+        assert_eq!(classify('\u{200B}', None), BreakClass::Pair(PairClass::Sp));
         assert_eq!(classify('\u{3000}', None), BreakClass::Pair(PairClass::Id));
         assert_eq!(classify('A', None), BreakClass::Pair(PairClass::Al));
         assert_eq!(classify('好', None), BreakClass::Pair(PairClass::Id));
@@ -265,5 +303,16 @@ mod tests {
                 BreakClass::Pair(PairClass::Cl)
             );
         }
+    }
+
+    #[test]
+    fn latin_extended_classified_as_al() {
+        assert_eq!(classify('Ł', None), BreakClass::Pair(PairClass::Al));
+        assert_eq!(classify('ć', None), BreakClass::Pair(PairClass::Al));
+        assert_eq!(classify('\u{0180}', None), BreakClass::Pair(PairClass::Al));
+        assert_eq!(classify('0', None), BreakClass::Pair(PairClass::Al));
+        assert_eq!(classify('9', None), BreakClass::Pair(PairClass::Al));
+        assert_eq!(classify('×', None), BreakClass::Pair(PairClass::Other));
+        assert_eq!(classify('÷', None), BreakClass::Pair(PairClass::Other));
     }
 }

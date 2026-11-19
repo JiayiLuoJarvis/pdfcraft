@@ -8,6 +8,9 @@
 //! [`ErrorKind::LimitExceeded`] with a [`LimitKind`]. [`LimitKind`] is defined
 //! in [`crate::error`] and re-exported here.
 
+#[cfg(any(feature = "backend-krilla", test))]
+use std::num::NonZeroU32;
+
 use crate::error::{Error, ErrorKind};
 
 #[doc(inline)]
@@ -22,6 +25,68 @@ const DEFAULT_BLOCKS: u32 = 100_000;
 const DEFAULT_TABLE_CELLS: u32 = 50_000;
 const DEFAULT_PARAGRAPH_BYTES: usize = 1_000_000;
 const DEFAULT_NESTING_DEPTH: u32 = 16;
+
+/// Validated non-zero dimensions of an image in pixels.
+///
+/// Empty sides are unrepresentable. Construct only via [`ImageDimensions::try_new`].
+/// Only the krilla backend registers rasters; keep the admit path out of the
+/// no-backend lib target so `--no-default-features` stays free of dead code.
+#[cfg(any(feature = "backend-krilla", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ImageDimensions {
+    width: NonZeroU32,
+    height: NonZeroU32,
+}
+
+#[cfg(any(feature = "backend-krilla", test))]
+impl ImageDimensions {
+    /// Parses raw width/height at the boundary, rejecting empty sides.
+    pub(crate) fn try_new(width: u32, height: u32) -> Result<Self, Error> {
+        let (Some(width), Some(height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) else {
+            return Err(Error::from(ErrorKind::Image {
+                message: "has an empty side".to_owned(),
+            }));
+        };
+        Ok(Self { width, height })
+    }
+
+    #[must_use]
+    pub(crate) fn edge(self) -> u32 {
+        self.width.get().max(self.height.get())
+    }
+
+    #[must_use]
+    pub(crate) fn pixels(self) -> u64 {
+        u64::from(self.width.get()).saturating_mul(u64::from(self.height.get()))
+    }
+}
+
+/// Cap fault for a non-empty [`ImageDimensions`] against a [`Limits`] budget.
+#[cfg(any(feature = "backend-krilla", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImageDimFault {
+    Edge { value: u32, max: u32 },
+    Pixels { value: u64, max: u64 },
+}
+
+#[cfg(any(feature = "backend-krilla", test))]
+impl ImageDimFault {
+    fn against(dims: ImageDimensions, max_edge: u32, max_pixels: u64) -> Option<Self> {
+        let edge = dims.edge();
+        let pixels = dims.pixels();
+        match (edge > max_edge, pixels > max_pixels) {
+            (true, _) => Some(Self::Edge {
+                value: edge,
+                max: max_edge,
+            }),
+            (false, true) => Some(Self::Pixels {
+                value: pixels,
+                max: max_pixels,
+            }),
+            (false, false) => None,
+        }
+    }
+}
 
 /// Resource and document-size caps.
 ///
@@ -117,6 +182,32 @@ impl Limits {
     #[must_use]
     pub const fn max_nesting_depth(&self) -> u32 {
         self.nesting_depth
+    }
+
+    /// Admits raw probe or decoded dimensions at the Limits boundary.
+    ///
+    /// Empty sides are rejected by [`ImageDimensions::try_new`]. Edge and pixel
+    /// caps are checked once here so format decoders never repeat them.
+    #[cfg(any(feature = "backend-krilla", test))]
+    pub(crate) fn validate_image_dimensions(&self, width: u32, height: u32) -> Result<(), Error> {
+        let dims = ImageDimensions::try_new(width, height)?;
+        match ImageDimFault::against(dims, self.max_image_edge(), self.max_image_pixels()) {
+            None => Ok(()),
+            Some(ImageDimFault::Edge { value, max }) => {
+                Err(Error::from(ErrorKind::LimitExceeded {
+                    kind: LimitKind::ImageEdge,
+                    value: u64::from(value),
+                    max: u64::from(max),
+                }))
+            }
+            Some(ImageDimFault::Pixels { value, max }) => {
+                Err(Error::from(ErrorKind::LimitExceeded {
+                    kind: LimitKind::ImagePixels,
+                    value,
+                    max,
+                }))
+            }
+        }
     }
 
     /// Sets the font-bytes cap.
@@ -348,6 +439,42 @@ mod tests {
             |limits, value| limits.set_max_nesting_depth(u32::try_from(value).unwrap()),
             |limits| u64::from(limits.max_nesting_depth()),
         );
+    }
+
+    #[test]
+    fn validate_image_dimensions_checks_empty_edge_and_pixels() {
+        let limits = Limits::default();
+        let err_zero_w = limits.validate_image_dimensions(0, 100).unwrap_err();
+        assert_eq!(err_zero_w.to_string(), "image: has an empty side");
+
+        let err_zero_h = limits.validate_image_dimensions(100, 0).unwrap_err();
+        assert_eq!(err_zero_h.to_string(), "image: has an empty side");
+
+        let err_edge = limits.validate_image_dimensions(8193, 10).unwrap_err();
+        assert!(matches!(
+            err_edge.kind,
+            ErrorKind::LimitExceeded {
+                kind: LimitKind::ImageEdge,
+                value: 8193,
+                max: 8192,
+            }
+        ));
+
+        let mut small_pixel_limits = Limits::default();
+        small_pixel_limits.set_max_image_pixels(100).unwrap();
+        let err_pixels = small_pixel_limits
+            .validate_image_dimensions(20, 20)
+            .unwrap_err();
+        assert!(matches!(
+            err_pixels.kind,
+            ErrorKind::LimitExceeded {
+                kind: LimitKind::ImagePixels,
+                value: 400,
+                max: 100,
+            }
+        ));
+
+        assert!(limits.validate_image_dimensions(100, 100).is_ok());
     }
 
     #[test]

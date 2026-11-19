@@ -22,7 +22,7 @@ the only band link.
 | API | [docs.rs/pdfcraft-pdf](https://docs.rs/pdfcraft-pdf) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.8.0`. The API can break before `1.0` |
+| Status | `0.8.1`. The API can break before `1.0` |
 
 Filling existing AcroForms is [`pdfcraft-forms`](https://docs.rs/pdfcraft-forms).
 Equity charts are [`pdfcraft-orgchart`](https://docs.rs/pdfcraft-orgchart). Both
@@ -34,7 +34,7 @@ are separate crates with their own guides.
 
 ```toml
 [dependencies]
-pdfcraft-pdf = "0.8.0"
+pdfcraft-pdf = "0.8.1"
 ```
 
 Default features enable the krilla backend (`to_pdf`).

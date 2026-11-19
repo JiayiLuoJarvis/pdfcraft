@@ -145,6 +145,7 @@ spec layout/paragraph
 spec layout/style
 spec layout/table
 spec limits
+spec text
 text error
 text fonts
 text geom
