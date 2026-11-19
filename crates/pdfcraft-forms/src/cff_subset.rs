@@ -87,7 +87,7 @@ fn build_subset_glyphs(
         }
         kept.insert(gid);
     }
-    let num_out = usize::from(*kept.iter().next_back().unwrap()) + 1;
+    let num_out = usize::from(*kept.iter().next_back().ok_or_else(head_error)?) + 1;
     let mut fd_used = BTreeSet::new();
     let mut charstrings = Vec::with_capacity(num_out);
     for gid in 0..num_out {
@@ -472,6 +472,7 @@ fn desubroutinize(
     let mut stack = Vec::new();
     let mut hint_count = 0_u16;
     let mut hint_mask_bytes = 0_u16;
+    let mut calls = 0_usize;
     desubroutinize_inner(
         charstring,
         global_subrs,
@@ -480,6 +481,7 @@ fn desubroutinize(
         &mut stack,
         &mut hint_count,
         &mut hint_mask_bytes,
+        &mut calls,
         0,
     )?;
     if out.last() != Some(&ENDCHAR) {
@@ -496,9 +498,10 @@ fn desubroutinize_inner(
     stack: &mut Vec<i32>,
     hint_count: &mut u16,
     hint_mask_bytes: &mut u16,
+    calls: &mut usize,
     depth: u8,
 ) -> Result<CharEnd> {
-    if depth > 64 {
+    if depth > 10 || *calls > 1000 {
         return Err(head_error());
     }
     let g_bias = subr_bias(global_subrs.len());
@@ -525,6 +528,7 @@ fn desubroutinize_inner(
         }
         match b0 {
             CALLSUBR => {
+                *calls += 1;
                 let biased = stack.pop().ok_or_else(head_error)?;
                 pop_last_number_encoding(out)?;
                 let index = unbiased(biased, l_bias)?;
@@ -538,6 +542,7 @@ fn desubroutinize_inner(
                         stack,
                         hint_count,
                         hint_mask_bytes,
+                        calls,
                         depth + 1,
                     )?,
                     CharEnd::EndChar
@@ -546,6 +551,7 @@ fn desubroutinize_inner(
                 }
             }
             CALLGSUBR => {
+                *calls += 1;
                 let biased = stack.pop().ok_or_else(head_error)?;
                 pop_last_number_encoding(out)?;
                 let index = unbiased(biased, g_bias)?;
@@ -559,6 +565,7 @@ fn desubroutinize_inner(
                         stack,
                         hint_count,
                         hint_mask_bytes,
+                        calls,
                         depth + 1,
                     )?,
                     CharEnd::EndChar
@@ -699,15 +706,18 @@ fn read_index(data: &[u8], offset: usize) -> Result<(usize, Vec<&[u8]>)> {
     if offsets.first().copied() != Some(1) {
         return Err(head_error());
     }
-    let last = *offsets.last().unwrap();
-    let end = data_at.checked_add(last - 1).ok_or_else(head_error)?;
+    let last = offsets.last().copied().ok_or_else(head_error)?;
+    let last_minus_one = last.checked_sub(1).ok_or_else(head_error)?;
+    let end = data_at.checked_add(last_minus_one).ok_or_else(head_error)?;
     if end > data.len() {
         return Err(head_error());
     }
     let mut objects = Vec::with_capacity(count);
     for window in offsets.windows(2) {
-        let start = data_at + window[0] - 1;
-        let stop = data_at + window[1] - 1;
+        let off0 = window[0].checked_sub(1).ok_or_else(head_error)?;
+        let off1 = window[1].checked_sub(1).ok_or_else(head_error)?;
+        let start = data_at.checked_add(off0).ok_or_else(head_error)?;
+        let stop = data_at.checked_add(off1).ok_or_else(head_error)?;
         if stop < start || stop > data.len() {
             return Err(head_error());
         }
@@ -827,7 +837,7 @@ fn write_fd_select(
     out.push(3);
     let mut ranges = Vec::new();
     let mut start = 0_u16;
-    let mut current = fds[0];
+    let mut current = *fds.first().ok_or_else(head_error)?;
     for (gid, &fd) in fds.iter().enumerate().skip(1) {
         if fd != current {
             ranges.push((start, current));

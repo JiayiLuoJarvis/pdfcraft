@@ -201,6 +201,19 @@ struct Token {
     space_before: bool,
 }
 
+fn is_cjk(ch: char) -> bool {
+    matches!(
+        u32::from(ch),
+        0x3040..=0x30FF
+            | 0x3100..=0x312F
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xAC00..=0xD7AF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2FA1F
+    )
+}
+
 fn tokenize(face: &Face<'_>, para: &str) -> std::result::Result<Vec<Token>, FitError> {
     let mut tokens = Vec::new();
     let mut chars = para.chars().peekable();
@@ -210,7 +223,7 @@ fn tokenize(face: &Face<'_>, para: &str) -> std::result::Result<Vec<Token>, FitE
             space_before = true;
             continue;
         }
-        if u32::from(ch) > 0x7F {
+        if is_cjk(ch) {
             let glyph = map_scalar(face, ch)?;
             tokens.push(Token {
                 units: glyph.units,
@@ -222,7 +235,7 @@ fn tokenize(face: &Face<'_>, para: &str) -> std::result::Result<Vec<Token>, FitE
         }
         let mut glyphs = vec![map_scalar(face, ch)?];
         while let Some(next) = chars.peek().copied() {
-            if next.is_whitespace() || u32::from(next) > 0x7F {
+            if next.is_whitespace() || is_cjk(next) {
                 break;
             }
             chars.next();
@@ -695,5 +708,18 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::MissingGlyph);
         assert_eq!(err.field(), Some("employee_name"));
         assert_eq!(err.scalar(), Some(' '));
+    }
+
+    #[test]
+    fn cjk_predicate_classifies_ideographs_and_latin() {
+        assert!(super::is_cjk('中'));
+        assert!(super::is_cjk('文'));
+        assert!(super::is_cjk('あ'));
+        assert!(super::is_cjk('ア'));
+        assert!(super::is_cjk('한'));
+        assert!(!super::is_cjk('A'));
+        assert!(!super::is_cjk('é'));
+        assert!(!super::is_cjk('ü'));
+        assert!(!super::is_cjk('ñ'));
     }
 }

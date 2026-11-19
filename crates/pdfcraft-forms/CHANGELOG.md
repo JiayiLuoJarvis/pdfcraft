@@ -23,6 +23,9 @@ cross-crate history.
 - Dereference indirect `/Subtype` annotation objects during form flattening so widget annotations are cleanly stripped.
 - Validate all widgets sharing a field name across all pages to ensure signature and unsupported widgets are rejected even when another widget of the same name is text.
 - Strip trailing `\r` from lines before empty paragraph checks to preserve blank lines in CRLF formatted text.
+- Upgraded text layout tokenization with Unicode CJK classification so Western words with accented letters remain intact and do not break mid-word.
+- Guarded `PdfRect::new` against non-finite floating point numbers to prevent `NaN` coordinates from propagating into layout calculations.
+- Fixed arithmetic underflows and bound subroutine call recursion in CFF font subsetting.
 
 ## [0.3.0] - 2026-11-05
 

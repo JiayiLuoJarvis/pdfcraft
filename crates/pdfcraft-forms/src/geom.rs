@@ -25,9 +25,24 @@ impl PdfRect {
 }
 
 fn ordered(a: f32, b: f32) -> (f32, f32) {
-    if a <= b {
+    if !a.is_finite() || !b.is_finite() {
+        (0.0, 0.0)
+    } else if a <= b {
         (a, b)
     } else {
         (b, a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PdfRect;
+
+    #[test]
+    fn nan_coordinate_clamps_to_zero() {
+        let rect = PdfRect::new(f32::NAN, 10.0, 100.0, 50.0);
+        assert_eq!(rect.x0.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(rect.x1.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(rect.width().to_bits(), 0.0_f32.to_bits());
     }
 }
