@@ -9,23 +9,56 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-23
+
+### Added
+
+- `FlattenReason::GraphicsStateNameTaken` when `PdfCraftOpaque` through
+  `PdfCraftOpaque64` are already used on the page.
+
 ### Changed
 
-- Renamed internal font descriptors, CMap names, and resource keys from `QuireForms` to `PdfCraftForms`.
-- Implemented `From<ErrorKind> for Error` per repository engineering standard rule ERR-5.
-- Replaced bare `expect` with safe `fmt::Write` matching in font CMap generation.
-- Added leading newline delimiter when appending to page content streams to prevent operator fusion.
+- Dependency `lopdf` is now `=0.47.0`. `Form::open` returns `NotAPdf` when a
+  single stream decompresses over 256 MiB.
+- Filled page bytes differ from `0.3.0` (new `q` stream, ExtGState, and reset
+  operators). The same `Fill` still yields identical bytes on two `to_pdf`
+  calls.
+- Renamed internal font descriptors, CMap names, and resource keys from
+  `QuireForms` to `PdfCraftForms`.
+- Implemented `From<ErrorKind> for Error` per repository engineering standard
+  rule ERR-5.
+- Replaced bare `expect` with safe `fmt::Write` matching in font CMap
+  generation.
+- Added a leading newline delimiter when appending to page content streams to
+  prevent operator fusion.
 - Reject duplicate `head` table records during SFNT font parsing.
 - Updated MIT license copyright attribution to `pdfcraft contributors`.
 
 ### Fixed
 
-- Dereference indirect `/Subtype` annotation objects during form flattening so widget annotations are cleanly stripped.
-- Validate all widgets sharing a field name across all pages to ensure signature and unsupported widgets are rejected even when another widget of the same name is text.
-- Strip trailing `\r` from lines before empty paragraph checks to preserve blank lines in CRLF formatted text.
-- Upgraded text layout tokenization with Unicode CJK classification so Western words with accented letters remain intact and do not break mid-word.
-- Guarded `PdfRect::new` against non-finite floating point numbers to prevent `NaN` coordinates from propagating into layout calculations.
-- Fixed arithmetic underflows and bound subroutine call recursion in CFF font subsetting.
+- Drawn text, checks, field rules, and absolute lines no longer inherit the
+  page content's ending graphics state. Transparency of zero, invisible text
+  rendering mode, white strokes, character spacing, dashes, or a leftover CTM
+  used to hide, recolor, widen, or displace the overlay. Original content is
+  wrapped in `q`/`Q`, the overlay sets an opaque `/PdfCraftOpaque` ExtGState,
+  and each mark resets the text and stroke state it depends on.
+- `/Contents` that is an indirect array is written as a legal array
+  `[q, original…, overlay]`.
+- `/Rect` is read from the annotation dictionary itself. It is not inherited
+  from `/Parent`. A widget without its own `/Rect` is skipped.
+- Dereference indirect `/Subtype` annotation objects during form flattening so
+  widget annotations are cleanly stripped.
+- Validate all widgets sharing a field name across all pages so signature and
+  unsupported widgets are rejected even when another widget of the same name
+  is text.
+- Strip trailing `\r` from lines before empty paragraph checks to preserve
+  blank lines in CRLF formatted text.
+- Upgraded text layout tokenization with Unicode CJK classification so Western
+  words with accented letters remain intact and do not break mid-word.
+- Guarded `PdfRect::new` against non-finite floating point numbers to prevent
+  `NaN` coordinates from propagating into layout calculations.
+- Fixed arithmetic underflows and bound subroutine call recursion in CFF font
+  subsetting.
 
 ## [0.3.0] - 2026-11-05
 

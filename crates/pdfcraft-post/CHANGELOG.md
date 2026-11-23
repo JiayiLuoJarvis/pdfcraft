@@ -9,6 +9,14 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-23
+
+### Changed
+
+- Dependency `lopdf` is now `=0.47.0`. A single stream that decompresses over
+  256 MiB returns `NotAPdf`. Encrypt-dict key order may change with lopdf;
+  content is unchanged.
+
 ## [0.3.1] - 2026-11-05
 
 No public API change. Success-path PDF bytes are unchanged.

@@ -147,6 +147,8 @@ pub enum FlattenReason {
     UpdateAnnotations,
     /// `PdfCraftForms` through `PdfCraftForms64` are already used on the page.
     FontNameTaken,
+    /// `PdfCraftOpaque` through `PdfCraftOpaque64` are already used on the page.
+    GraphicsStateNameTaken,
     /// `Document::save_to` failed.
     Write,
     /// A PDF object nests deeper than this crate will walk.
@@ -225,6 +227,9 @@ impl fmt::Display for ErrorKind {
                     write!(f, "could not update page annotations")
                 }
                 FlattenReason::FontNameTaken => write!(f, "page font resource name is taken"),
+                FlattenReason::GraphicsStateNameTaken => {
+                    write!(f, "page graphics state resource name is taken")
+                }
                 FlattenReason::Write => write!(f, "could not write PDF"),
                 FlattenReason::NestingTooDeep { depth } => {
                     write!(f, "PDF object nesting reached depth {depth}")

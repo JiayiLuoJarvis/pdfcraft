@@ -190,6 +190,8 @@ records.push((tag, checksum, bytes[off..off + len].to_vec()));
 
 ## 4. W3：页面内容流隔离图形状态（F2）
 
+已由 [`pdfcraft-forms-overlay-state-spec.md`](pdfcraft-forms-overlay-state-spec.md) P2 取代。
+
 ### 4.1 问题
 
 `paint` 直接 `add_page_contents` 追加新流。原内容流结尾若留有未 `Q` 的 `cm`、颜色、线宽、裁剪，新内容会继承它们。复现中原流以 `2 0 0 2 0 0 cm` 开头且不恢复，填入文字落到 MediaBox 之外。
@@ -354,7 +356,7 @@ records.push((tag, checksum, bytes[off..off + len].to_vec()));
 | 场景 | 0.3.0 实测 | 期望 | 落在 |
 | --- | --- | --- | --- |
 | 约 1 MiB `ttcf`，512 条表记录都指向整文件，`Font::from_collection(_, 0)` | 返回 `FontNotConfigured(Head)`，峰值 RSS 1,063,424 KB | 失败且峰值新增分配 < 4 × 输入 | W1 |
-| 原内容流 `2 0 0 2 0 0 cm` 不恢复，填 Text 控件 | 填入文字不在页面上；去掉 `cm` 的对照组文字在 (101, 188) | 文字落在控件 `/Rect` 内 | W3 |
+| 原内容流 `2 0 0 2 0 0 cm` 不恢复，填 Text 控件 | 填入文字不在页面上；去掉 `cm` 的对照组文字在 (101, 188) | 文字落在控件 `/Rect` 内 | overlay-state P2 |
 | 未知字段名 + NaN 线段 | `UnknownField` | `InvalidArgument(NonFinite)` | W4 |
 | 输出字体字典 | 无 `/Length1`；`/FontBBox [0 -236 1000 928]`；`/Flags 32`；`/BaseFont` 无前缀 | 见 W5 | W5 |
 

@@ -7,6 +7,7 @@ mod write;
 use lopdf::Document;
 
 pub(crate) use snapshot::WidgetSnap;
+pub(crate) use write::{opaque_extgstate, OverlayIds, OverlayNames};
 
 pub(crate) struct PdfDoc(pub(super) Document);
 

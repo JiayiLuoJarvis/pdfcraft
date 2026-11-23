@@ -16,7 +16,7 @@ entry. An empty request still strips the form. Reading uses
 | API | [docs.rs/pdfcraft-forms](https://docs.rs/pdfcraft-forms) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.3.0`. The API can break before `1.0` |
+| Status | `0.3.1`. The API can break before `1.0` |
 
 ---
 
@@ -24,7 +24,7 @@ entry. An empty request still strips the form. Reading uses
 
 ```toml
 [dependencies]
-pdfcraft-forms = "0.3.0"
+pdfcraft-forms = "0.3.1"
 ```
 
 ---

@@ -13,6 +13,18 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+## 2026-11-23
+
+### Changed
+
+- `pdfcraft-forms` `0.3.1`. Overlay drawing isolates the page graphics state
+  (`q`/`Q`, `/PdfCraftOpaque`), bumps `lopdf` to `=0.47.0`, and reads `/Rect`
+  from the annotation only. Details in
+  [`crates/pdfcraft-forms/CHANGELOG.md`](crates/pdfcraft-forms/CHANGELOG.md).
+- `pdfcraft-post` `0.3.2`. Bumps `lopdf` to `=0.47.0` (256 MiB per-stream
+  decompress cap). Details in
+  [`crates/pdfcraft-post/CHANGELOG.md`](crates/pdfcraft-post/CHANGELOG.md).
+
 ## 2026-11-19
 
 ### Changed

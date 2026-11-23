@@ -7,8 +7,11 @@ use crate::error::{Error, ErrorKind, FlattenReason, Result};
 use crate::geom::PdfRect;
 use crate::layout::LaidText;
 use crate::layout::PAD_X;
-use crate::pdf::PdfDoc;
+use crate::pdf::{opaque_extgstate, OverlayIds, OverlayNames, PdfDoc};
 use crate::request::HAlign;
+use lopdf::Dictionary;
+use lopdf::Object;
+use lopdf::Stream;
 
 use super::PaintFont;
 
@@ -21,6 +24,10 @@ const CHECK_JOINT_DY: f32 = 0.28;
 const CHECK_RIGHT_DY: f32 = 0.32;
 const CHECK_STROKE_RATIO: f32 = 0.14;
 const CHECK_STROKE_MIN: f32 = 0.8;
+const RESTORE_PAGE_STATE: &str = "Q\n";
+const TEXT_STATE_RESET: &str = "0 Tr\n0 Tc\n0 Tw\n100 Tz\n0 Ts\n";
+const SOLID_DASH: &str = "[] 0 d\n";
+const BUTT_MITER: &str = "0 J\n0 j\n";
 
 pub(crate) enum Mark {
     Text {
@@ -80,6 +87,8 @@ impl Content {
         let right_y = mid_y + mark * CHECK_RIGHT_DY;
         let stroke = (mark * CHECK_STROKE_RATIO).max(CHECK_STROKE_MIN);
         self.clip(rect)?;
+        self.push("0 0 0 RG\n");
+        self.push(SOLID_DASH);
         self.push(&format!(
             "{} w\n1 J\n1 j\n{} {} m\n{} {} l\n{} {} l\nS\nQ\n",
             pdf_num(stroke)?,
@@ -101,7 +110,9 @@ impl Content {
         font_name: &str,
     ) -> Result<()> {
         self.clip(rect)?;
-        self.push("0 0 0 rg\nBT\n");
+        self.push("0 0 0 rg\n");
+        self.push(TEXT_STATE_RESET);
+        self.push("BT\n");
         for (baseline, width, glyphs) in laid.lines() {
             if glyphs.is_empty() {
                 continue;
@@ -128,8 +139,11 @@ impl Content {
 
     fn line_below(&mut self, rect: PdfRect, offset: f32) -> Result<()> {
         let y = rect.y0 - offset;
+        self.push("q\n0 0 0 RG\n1 w\n");
+        self.push(BUTT_MITER);
+        self.push(SOLID_DASH);
         self.push(&format!(
-            "q\n0 0 0 RG\n1 w\n{} {} m\n{} {} l\nS\nQ\n",
+            "{} {} m\n{} {} l\nS\nQ\n",
             pdf_num(rect.x0)?,
             pdf_num(y)?,
             pdf_num(rect.x1)?,
@@ -140,11 +154,16 @@ impl Content {
 
     fn stroke(&mut self, stroke: &Stroke) -> Result<()> {
         self.push(&format!(
-            "q\n{} {} {} RG\n{} w\n{} {} m\n{} {} l\nS\nQ\n",
+            "q\n{} {} {} RG\n{} w\n",
             pdf_num(stroke.red)?,
             pdf_num(stroke.green)?,
             pdf_num(stroke.blue)?,
             pdf_num(stroke.width)?,
+        ));
+        self.push(BUTT_MITER);
+        self.push(SOLID_DASH);
+        self.push(&format!(
+            "{} {} m\n{} {} l\nS\nQ\n",
             pdf_num(stroke.x1)?,
             pdf_num(stroke.y1)?,
             pdf_num(stroke.x2)?,
@@ -187,44 +206,61 @@ pub(crate) fn paint(
     let mut pages_to_paint = BTreeSet::new();
     pages_to_paint.extend(by_page.keys().copied());
     pages_to_paint.extend(strokes_by_page.keys().copied());
-    for index in pages_to_paint {
-        let page_stamps = by_page.get(&index).map_or(&[][..], Vec::as_slice);
-        let page_strokes = strokes_by_page.get(&index).map_or(&[][..], Vec::as_slice);
-        let page_id = pages
-            .get(index)
-            .copied()
-            .ok_or_else(|| Error::new(ErrorKind::FlattenFailed(FlattenReason::ReadPage)))?;
-        let needs_font = page_stamps.iter().any(|stamp| {
-            matches!(
-                &stamp.mark,
-                Mark::Text { laid, .. }
-                    if laid.lines().any(|(_, _, glyphs)| !glyphs.is_empty())
-            )
-        });
-        let font_name = if needs_font {
-            let font_id = font_id
+    if !pages_to_paint.is_empty() {
+        let opaque = doc.add_object(Object::Dictionary(opaque_extgstate()));
+        let save = doc.add_object(Object::Stream(Stream::new(
+            Dictionary::new(),
+            b"q\n".to_vec(),
+        )));
+        for index in pages_to_paint {
+            let page_stamps = by_page.get(&index).map_or(&[][..], Vec::as_slice);
+            let page_strokes = strokes_by_page.get(&index).map_or(&[][..], Vec::as_slice);
+            let page_id = pages
+                .get(index)
+                .copied()
                 .ok_or_else(|| Error::new(ErrorKind::FlattenFailed(FlattenReason::ReadPage)))?;
-            Some(doc.attach_font(page_id, font_id)?)
-        } else {
-            None
-        };
-        let content = page_bytes(page_stamps, page_strokes, font_name.as_deref())?;
-        doc.add_page_contents(page_id, content)?;
+            let needs_font = page_stamps.iter().any(|stamp| {
+                matches!(
+                    &stamp.mark,
+                    Mark::Text { laid, .. }
+                        if laid.lines().any(|(_, _, glyphs)| !glyphs.is_empty())
+                )
+            });
+            let page_font =
+                if needs_font {
+                    Some(font_id.ok_or_else(|| {
+                        Error::new(ErrorKind::FlattenFailed(FlattenReason::ReadPage))
+                    })?)
+                } else {
+                    None
+                };
+            let names = doc.attach_overlay_resources(
+                page_id,
+                &OverlayIds {
+                    font: page_font,
+                    opaque,
+                },
+            )?;
+            let content = page_bytes(page_stamps, page_strokes, &names)?;
+            doc.append_isolated(page_id, save, content)?;
+        }
     }
     doc.strip_form()?;
     doc.prune()?;
     Ok(())
 }
 
-fn page_bytes(stamps: &[&Stamp], strokes: &[&Stroke], font_name: Option<&str>) -> Result<Vec<u8>> {
+fn page_bytes(stamps: &[&Stamp], strokes: &[&Stroke], names: &OverlayNames) -> Result<Vec<u8>> {
     let mut content = Content {
         buf: b"\n".to_vec(),
     };
+    content.push(RESTORE_PAGE_STATE);
+    content.push(&format!("/{} gs\n", names.opaque));
     for stamp in stamps {
         match &stamp.mark {
             Mark::Check => content.check(stamp.rect)?,
             Mark::Text { laid, h_align } => {
-                if let Some(font_name) = font_name {
+                if let Some(font_name) = names.font.as_deref() {
                     content.text(stamp.rect, laid, *h_align, font_name)?;
                 }
             }
@@ -262,8 +298,32 @@ fn pdf_num(value: f32) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::pdf_num;
+    use super::{
+        page_bytes, pdf_num, Mark, Stamp, Stroke, BUTT_MITER, SOLID_DASH, TEXT_STATE_RESET,
+    };
     use crate::error::{ErrorKind, FlattenReason};
+    use crate::geom::PdfRect;
+    use crate::layout::LaidText;
+    use crate::pdf::OverlayNames;
+    use crate::request::HAlign;
+
+    fn opaque_names(font: Option<&str>) -> OverlayNames {
+        OverlayNames {
+            font: font.map(str::to_owned),
+            opaque: "PdfCraftOpaque".to_owned(),
+        }
+    }
+
+    fn rect() -> PdfRect {
+        PdfRect::new(0.0, 0.0, 10.0, 10.0)
+    }
+
+    fn before_stroke(block: &str) -> &str {
+        let at = block
+            .find("\nS\n")
+            .unwrap_or_else(|| panic!("no stroke in {block}"));
+        &block[..at]
+    }
 
     #[test]
     fn pdf_num_rejects_nan_and_formats_finite_values() {
@@ -274,5 +334,85 @@ mod tests {
         );
         assert_eq!(pdf_num(1.5).unwrap(), "1.5");
         assert_eq!(pdf_num(-0.0).unwrap(), "0");
+    }
+
+    #[test]
+    fn page_bytes_restores_and_sets_opaque_first() {
+        let stamp = Stamp {
+            page_index: 0,
+            rect: rect(),
+            mark: Mark::Check,
+        };
+        let bytes = page_bytes(&[&stamp], &[], &opaque_names(None)).unwrap();
+        assert!(
+            bytes.starts_with(b"\nQ\n/PdfCraftOpaque gs\n"),
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+    }
+
+    #[test]
+    fn text_resets_text_state_before_bt() {
+        let stamp = Stamp {
+            page_index: 0,
+            rect: rect(),
+            mark: Mark::Text {
+                laid: LaidText::stub_line(12.0),
+                h_align: HAlign::Left,
+            },
+        };
+        let text = String::from_utf8(page_bytes(&[&stamp], &[], &opaque_names(Some("F"))).unwrap())
+            .unwrap();
+        let q = text.find("q\n").expect("q");
+        let reset = text.find(TEXT_STATE_RESET).expect("text state reset");
+        let bt = text.find("BT\n").expect("BT");
+        assert!(q < reset, "{text}");
+        assert!(reset < bt, "{text}");
+    }
+
+    #[test]
+    fn check_sets_black_stroke_and_solid_dash() {
+        let stamp = Stamp {
+            page_index: 0,
+            rect: rect(),
+            mark: Mark::Check,
+        };
+        let text =
+            String::from_utf8(page_bytes(&[&stamp], &[], &opaque_names(None)).unwrap()).unwrap();
+        let check = match text.split_once("/PdfCraftOpaque gs\n") {
+            Some((_, rest)) => rest,
+            None => &text,
+        };
+        let before = before_stroke(check);
+        assert!(before.contains("0 0 0 RG"), "{text}");
+        assert!(before.contains("[] 0 d"), "{text}");
+    }
+
+    #[test]
+    fn rules_and_strokes_set_cap_join_and_dash() {
+        let rule = Stamp {
+            page_index: 0,
+            rect: rect(),
+            mark: Mark::LineBelow { offset: 2.0 },
+        };
+        let stroke = Stroke {
+            page_index: 0,
+            x1: 0.0,
+            y1: 0.0,
+            x2: 10.0,
+            y2: 0.0,
+            width: 1.0,
+            red: 1.0,
+            green: 0.0,
+            blue: 0.0,
+        };
+        let text =
+            String::from_utf8(page_bytes(&[&rule], &[&stroke], &opaque_names(None)).unwrap())
+                .unwrap();
+        for block in text.split("q\n").skip(1) {
+            let before = before_stroke(block);
+            assert!(before.contains(BUTT_MITER.trim_end()), "{text}");
+            assert!(before.contains(SOLID_DASH.trim_end()), "{text}");
+        }
     }
 }

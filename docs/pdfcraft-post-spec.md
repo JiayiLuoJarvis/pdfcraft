@@ -59,7 +59,7 @@
 - 入参与出参均为 PDF **字节**（`&[u8]` → `Vec<u8>`），不接受路径、不访问网络。
 - 各处理器提供 `apply`（或等价关联函数）。`Pipeline` 按顺序调用。
 - 不向公共 API 重导出 `lopdf` 类型。
-- 依赖：workspace `lopdf =0.45.0`，`default-features = false`。不引入 `krilla`（本栈无水印）。
+- 依赖：workspace `lopdf =0.47.0`，`default-features = false`。不引入 `krilla`（本栈无水印）。
 
 ### 3.2 `SetMetadata`
 
@@ -159,7 +159,7 @@ pdfcraft-post  ──X──→  pdfcraft-orgchart
 （反向同样禁止）
 ```
 
-- 钉 `lopdf =0.45.0`（与 forms 相同，根 `[workspace.dependencies]`）。
+- 钉 `lopdf =0.47.0`（与 forms 相同，根 `[workspace.dependencies]`）。
 - `forbid(unsafe_code)`；edition / MSRV 跟 workspace。
 - 门禁扩展：`clippy` / `test` / `doc` 含 `-p pdfcraft-post`。
 - **硬规则：** 任何实现或 PR **不得修改** hcsw 工程。
@@ -205,7 +205,7 @@ Encrypt 与 lopdf AES-256 互通已有一次性原型（2026-10-14）：pikepdf 
 - [x] v1 含 SetMetadata、Encrypt、StampAndEncrypt、merge_pdfs、Pipeline。
 - [x] v1 不含 Watermark、输入限额、HTTP、finalize 编排。
 - [x] Creator/Producer 在 SetMetadata 可写；与 DocumentSpec.info 差异写明。
-- [x] 与三 crate 无依赖边；用 lopdf 0.45.0。
+- [x] 与三 crate 无依赖边；用 lopdf 0.47.0。
 - [x] 错误为 Error + ErrorKind。
 - [x] `0.1.0` 可发布。
 - [x] 文档写明禁止改动 hcsw；实现只在本仓库。

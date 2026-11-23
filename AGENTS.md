@@ -14,7 +14,7 @@
 
 提案书 §1 到 §9 主线已确认（见提案书文末总表）。§10 与 §14 确认 `pdfcraft-forms` 读取已有 AcroForm 并 flatten。公共面是 `Form::open`、`Fill::new` 与 `Fill::to_pdf`，含对齐、按字段字号、`FieldRule`、`AbsoluteLine`、TTC 拆面与 TrueType `glyf` 子集。OTF 仍未做。不要把填表写进 `pdfcraft-pdf`。§11 确认 `pdfcraft-post`：对已有 PDF 字节做 `SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`Pipeline`。Watermark 与输入限额延后。不要把加密、合并、后处理写 Info 写进 `pdfcraft-pdf`。`pdfcraft-pdf` 的实现按层推进。预置边距枚举等小项可后补。搁置项（章跟流走）不要提前做进公共 API。页眉页脚可以是 `BandFn`，并可放文字、图片和形状，见提案书 §2.10。§2.12 已确认 `LayerMark { when, child: Mark::Rotated { .. } }` 可包 path / Text / Image（`LayerShape<K>`，斜向水印）。流内 canvas 已保留为 `Block::Canvas`（§2.14、§12.7）。具名 images 字典仍不做。
 
-仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 是 `0.8.1`，`pdfcraft-forms` 是 `0.3.0`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.1`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
+仍须遵守：未确认功能不「顺便」做。`pdfcraft-pdf` 是 `0.8.1`，`pdfcraft-forms` 是 `0.3.1`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.2`。都可以发布。版本号不必四包相同。实现只在本仓库；禁止修改 hcsw 工程中的任何文件（只读对照允许）。
 
 ## 现阶段姿态（无生产包袱）
 
@@ -32,7 +32,7 @@
 已钉死（见提案书「你已经定过的」）：
 
 - 不做 FOP / XSL-FO；股权架构图不做。
-- 底座 krilla。`pdfcraft-pdf` 不改用 pdf-writer、lopdf、printpdf。`pdfcraft-forms` 与 `pdfcraft-post` 用自有的 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）；forms 另用 `skrifa =0.48.0`，见提案书 §10 与 §11。二者都不依赖 `pdfcraft-pdf`。
+- 底座 krilla。`pdfcraft-pdf` 不改用 pdf-writer、lopdf、printpdf。`pdfcraft-forms` 与 `pdfcraft-post` 用自有的 `lopdf =0.47.0`（`default-features = false`，无 `nom_parser`）；forms 另用 `skrifa =0.48.0`，见提案书 §10 与 §11。二者都不依赖 `pdfcraft-pdf`。
 - 行宽用 **skrifa** 量，不靠 krilla 文字绘制反推。
 - 直依 `skrifa =0.48.0` 与 `krilla =0.8.2` 传递的 `skrifa ^0.42.0` 是两份库。2026-10-14 的解析结果是 `0.42.1`。当天 crates.io 上 krilla 最新仍是 0.8.2，升 krilla 消不掉这两份。上游 `main` 钉 `skrifa 0.44.0`，尚未发布，也不是 0.48.0。不要 fork krilla，不要改成 git 依赖。`emit` 的 `check_upem` 拒绝 units per em 不一致，夹具字形的 `TJ` 调整量锁住两边的 hmtx。
 - 上层只依赖自有画布；`krilla` 类型关在适配器里，公共 API 不重导出 krilla。
@@ -121,7 +121,7 @@ lib         → spec, backend, canvas, fonts, error, geom, limits
 
 ### 字形管线与依赖（产品约束）
 
-- 依赖钉版规则见工程规范 DEP-2 / DEP-3。字体与 PDF 栈的直依：`krilla =0.8.2`（`default-features = false`，`pdfcraft-pdf` 再开 `raster-images`）、`skrifa =0.48.0`（workspace 关闭 default；`pdfcraft-pdf` 与 `pdfcraft-forms` 打开 `std` 和 `autohint_shaping`，`pdfcraft-orgchart` 只打开 `std`）、`read-fonts =0.45.0`（`default-features = false`，`pdfcraft-orgchart` 再开 `std`）、`lopdf =0.45.0`（`default-features = false`）、`png =0.18.1`、`gif =0.14.2`、`image-webp =0.2.4`；post 的 `thumbnail` feature 另用 `hayro =0.8.0`、`image =0.25.10`。
+- 依赖钉版规则见工程规范 DEP-2 / DEP-3。字体与 PDF 栈的直依：`krilla =0.8.2`（`default-features = false`，`pdfcraft-pdf` 再开 `raster-images`）、`skrifa =0.48.0`（workspace 关闭 default；`pdfcraft-pdf` 与 `pdfcraft-forms` 打开 `std` 和 `autohint_shaping`，`pdfcraft-orgchart` 只打开 `std`）、`read-fonts =0.45.0`（`default-features = false`，`pdfcraft-orgchart` 再开 `std`）、`lopdf =0.47.0`（`default-features = false`）、`png =0.18.1`、`gif =0.14.2`、`image-webp =0.2.4`；post 的 `thumbnail` feature 另用 `hayro =0.8.0`、`image =0.25.10`。
 - 不启用 krilla 的 `simple-text` / `rayon`；禁止 `Surface::draw_text`。
 - 测量与绘制同一条字形管线：charmap → advance → 断行 → 同一批 glyph id 再画。
 - 缺字策略以提案书 §4 为准（设计稿默认「缺字即错」；未确认前不要实现回退字体）。

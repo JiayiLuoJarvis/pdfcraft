@@ -47,6 +47,7 @@ fn open_error(err: lopdf::Error) -> Error {
         | lopdf::Error::Xref(_)
         | lopdf::Error::IndirectObject { .. }
         | lopdf::Error::ObjectIdMismatch
+        | lopdf::Error::ObjectIdOverflow
         | lopdf::Error::Syntax(_)
         | lopdf::Error::ToUnicodeCMap(_)
         | lopdf::Error::TryFromInt(_)

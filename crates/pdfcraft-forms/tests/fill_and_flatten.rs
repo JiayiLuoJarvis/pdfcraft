@@ -501,7 +501,7 @@ fn draws_a_line_below_without_filling_the_field() {
     let pdf = draw(&fixture("basic_form.pdf"), request, None).unwrap();
     let text = page_stream(&pdf);
     assert!(
-        text.contains("0 0 0 RG\n1 w\n100 707 m\n300 707 l\nS\n"),
+        text.contains("0 0 0 RG\n1 w\n0 J\n0 j\n[] 0 d\n100 707 m\n300 707 l\nS\n"),
         "{text}"
     );
 }
@@ -523,7 +523,7 @@ fn draws_a_value_and_a_rule_for_the_same_name() {
     assert!(pdftotext(&pdf).contains("Ada"));
     let text = page_stream(&pdf);
     assert!(
-        text.contains("0 0 0 RG\n1 w\n100 707 m\n300 707 l\nS\n"),
+        text.contains("0 0 0 RG\n1 w\n0 J\n0 j\n[] 0 d\n100 707 m\n300 707 l\nS\n"),
         "{text}"
     );
 }
@@ -678,10 +678,10 @@ fn drops_prev_xrefstm_and_trailer_keys_that_point_at_orphans() {
     assert!(input_text.contains("/Prev "), "{input_text}");
     assert!(input_text.contains("/XRefStm "), "{input_text}");
     let before = lopdf::Document::load_mem(&input).unwrap();
-    // lopdf 0.45 deletes `/Prev` while resolving the xref chain, including a
-    // non-integer value. `/XRefStm` stays when that loop does not run.
+    // lopdf 0.47 deletes `/Prev` and `/XRefStm` while resolving the xref chain,
+    // including a non-integer `/Prev` value.
     assert!(before.trailer.get(b"Prev").is_err());
-    assert!(before.trailer.get(b"XRefStm").is_ok());
+    assert!(before.trailer.get(b"XRefStm").is_err());
     assert!(before.get_object(orphan).is_ok());
     let pdf = draw(&input, FillRequest::default(), None).unwrap();
     let out = lopdf::Document::load_mem(&pdf).unwrap();
@@ -802,8 +802,8 @@ fn trailer_orphan_pdf() -> (Vec<u8>, lopdf::ObjectId) {
         .position(|window| window == b"<<")
         .unwrap();
     let at = start + dict + 2;
-    // A string `/Prev` is not an xref offset. lopdf 0.45 still deletes that key
-    // on load and leaves `/XRefStm`. `prune` has to drop `XRefStm`.
+    // A string `/Prev` is not an xref offset. lopdf 0.47 deletes `/Prev` and
+    // `/XRefStm` on load. `prune` still drops both keys.
     let extra = format!("/Prev (0) /XRefStm {start}");
     let mut with_offsets = Vec::with_capacity(bytes.len() + extra.len());
     with_offsets.extend_from_slice(&bytes[..at]);
@@ -864,8 +864,9 @@ fn font_file2_lengths(pdf: &[u8]) -> Vec<usize> {
 }
 
 const AGREE_MARK: &[&str] = &[
-    "q", "100", "662", "30", "30", "re", "W", "n", "2.94", "w", "1", "J", "1", "j", "108.28",
-    "677.42", "m", "113.95", "671.12", "l", "122.14", "683.72", "l", "S", "Q",
+    "q", "100", "662", "30", "30", "re", "W", "n", "0", "0", "0", "RG", "[]", "0", "d", "2.94",
+    "w", "1", "J", "1", "j", "108.28", "677.42", "m", "113.95", "671.12", "l", "122.14", "683.72",
+    "l", "S", "Q",
 ];
 
 fn has_agree_mark(doc: &lopdf::Document) -> bool {

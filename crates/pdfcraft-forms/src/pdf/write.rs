@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use lopdf::{Dictionary, Object, ObjectId};
+use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 use crate::error::{Error, ErrorKind, FlattenReason, Result};
 
@@ -12,6 +12,29 @@ use super::PdfDoc;
 const MAX_PARENT: usize = 32;
 /// How deep arrays, dictionaries, and stream dictionaries may nest inside one object.
 const MAX_INLINE_DEPTH: usize = 64;
+
+pub(crate) struct OverlayIds {
+    pub(crate) font: Option<ObjectId>,
+    pub(crate) opaque: ObjectId,
+}
+
+pub(crate) struct OverlayNames {
+    pub(crate) font: Option<String>,
+    pub(crate) opaque: String,
+}
+
+pub(crate) fn opaque_extgstate() -> Dictionary {
+    let mut dict = Dictionary::new();
+    dict.set("Type", "ExtGState");
+    dict.set("CA", 1);
+    dict.set("ca", 1);
+    dict.set("BM", "Normal");
+    dict.set("SMask", "None");
+    dict.set("AIS", false);
+    dict.set("OP", false);
+    dict.set("op", false);
+    dict
+}
 
 impl PdfDoc {
     pub(crate) fn save(mut self) -> Result<Vec<u8>> {
@@ -30,14 +53,112 @@ impl PdfDoc {
         self.0.page_iter().collect()
     }
 
-    pub(crate) fn add_page_contents(&mut self, page: ObjectId, bytes: Vec<u8>) -> Result<()> {
-        self.0.add_page_contents(page, bytes).map_err(|err| {
-            Error::new(ErrorKind::FlattenFailed(FlattenReason::AppendContent)).with_source(err)
-        })
+    /// Overlay `overlay` on `page` so the original content's graphics state does not leak.
+    pub(crate) fn append_isolated(
+        &mut self,
+        page: ObjectId,
+        save: ObjectId,
+        overlay: Vec<u8>,
+    ) -> Result<()> {
+        let original = self.original_content_refs(page)?;
+        let overlay_id = self.add_object(Object::Stream(Stream::new(Dictionary::new(), overlay)));
+        let mut contents = Vec::with_capacity(original.len() + 2);
+        contents.push(Object::Reference(save));
+        contents.extend(original);
+        contents.push(Object::Reference(overlay_id));
+        let page = self
+            .0
+            .get_object_mut(page)
+            .and_then(Object::as_dict_mut)
+            .map_err(|err| {
+                Error::new(ErrorKind::FlattenFailed(FlattenReason::AppendContent)).with_source(err)
+            })?;
+        page.set("Contents", Object::Array(contents));
+        Ok(())
     }
-    pub(crate) fn attach_font(&mut self, page_id: ObjectId, font_id: ObjectId) -> Result<String> {
-        let mut resources = self.copied_resources(page_id)?;
-        let mut fonts = match resources.get(b"Font").ok().cloned() {
+
+    pub(crate) fn attach_overlay_resources(
+        &mut self,
+        page: ObjectId,
+        ids: &OverlayIds,
+    ) -> Result<OverlayNames> {
+        let mut resources = self.copied_resources(page)?;
+        let mut states = self.copied_resource_dict(&resources, b"ExtGState");
+        let opaque = fresh_name(
+            &states,
+            "PdfCraftOpaque",
+            FlattenReason::GraphicsStateNameTaken,
+        )?;
+        states.set(opaque.as_str(), Object::Reference(ids.opaque));
+        resources.set("ExtGState", Object::Dictionary(states));
+        let font = match ids.font {
+            Some(font_id) => {
+                let mut fonts = self.copied_resource_dict(&resources, b"Font");
+                let name = fresh_name(&fonts, "PdfCraftForms", FlattenReason::FontNameTaken)?;
+                fonts.set(name.as_str(), Object::Reference(font_id));
+                resources.set("Font", Object::Dictionary(fonts));
+                Some(name)
+            }
+            None => None,
+        };
+        let resources_id = self.add_object(Object::Dictionary(resources));
+        let page = self
+            .0
+            .get_object_mut(page)
+            .and_then(Object::as_dict_mut)
+            .map_err(|err| {
+                Error::new(ErrorKind::FlattenFailed(FlattenReason::UpdateResources))
+                    .with_source(err)
+            })?;
+        page.set("Resources", Object::Reference(resources_id));
+        Ok(OverlayNames { font, opaque })
+    }
+
+    fn original_content_refs(&self, page: ObjectId) -> Result<Vec<Object>> {
+        let dict = self.0.get_dictionary(page).map_err(|err| {
+            Error::new(ErrorKind::FlattenFailed(FlattenReason::ReadPage)).with_source(err)
+        })?;
+        match dict.get(b"Contents").ok().cloned() {
+            None => Ok(Vec::new()),
+            Some(contents) => self.classify_contents(contents),
+        }
+    }
+
+    fn classify_contents(&self, contents: Object) -> Result<Vec<Object>> {
+        match contents {
+            Object::Null => Ok(Vec::new()),
+            Object::Reference(id) => match self.lookup(Object::Reference(id)) {
+                Lookup::Missing | Lookup::Found(Object::Null) => Ok(Vec::new()),
+                Lookup::Found(Object::Stream(_)) => Ok(vec![Object::Reference(id)]),
+                Lookup::Found(Object::Array(items)) => Ok(items),
+                Lookup::Found(
+                    Object::Boolean(_)
+                    | Object::Integer(_)
+                    | Object::Real(_)
+                    | Object::Name(_)
+                    | Object::String(_, _)
+                    | Object::Dictionary(_)
+                    | Object::Reference(_),
+                ) => Err(Error::new(ErrorKind::FlattenFailed(
+                    FlattenReason::AppendContent,
+                ))),
+            },
+            Object::Array(items) => Ok(items),
+            Object::Boolean(_)
+            | Object::Integer(_)
+            | Object::Real(_)
+            | Object::Name(_)
+            | Object::String(_, _)
+            | Object::Dictionary(_)
+            | Object::Stream(_) => Err(Error::new(ErrorKind::FlattenFailed(
+                FlattenReason::AppendContent,
+            ))),
+        }
+    }
+
+    fn copied_resource_dict(&self, resources: &Dictionary, key: &[u8]) -> Dictionary {
+        match resources.get(key).ok().cloned() {
+            None => Dictionary::new(),
             Some(obj) => match self.lookup(obj) {
                 Lookup::Found(Object::Dictionary(dict)) => dict,
                 Lookup::Found(
@@ -53,22 +174,7 @@ impl PdfDoc {
                 )
                 | Lookup::Missing => Dictionary::new(),
             },
-            None => Dictionary::new(),
-        };
-        let resource_name = fresh_font_name(&fonts)?;
-        fonts.set(resource_name.as_str(), Object::Reference(font_id));
-        resources.set("Font", Object::Dictionary(fonts));
-        let resources_id = self.add_object(Object::Dictionary(resources));
-        let page = self
-            .0
-            .get_object_mut(page_id)
-            .and_then(Object::as_dict_mut)
-            .map_err(|err| {
-                Error::new(ErrorKind::FlattenFailed(FlattenReason::UpdateResources))
-                    .with_source(err)
-            })?;
-        page.set("Resources", Object::Reference(resources_id));
-        Ok(resource_name)
+        }
     }
 
     pub(crate) fn strip_form(&mut self) -> Result<()> {
@@ -108,7 +214,7 @@ impl PdfDoc {
 
     /// Roots are `Root` and `Info`. `save_to` writes the rest of the trailer as-is, apart from `Size`.
     ///
-    /// lopdf 0.45 already drops `/Prev` while reading. This still removes `/Prev`
+    /// lopdf 0.47 drops `/Prev` and `/XRefStm` while reading. This still removes `/Prev`
     /// and `/XRefStm` so a trailer that kept them is not written back.
     pub(crate) fn prune(&mut self) -> Result<()> {
         let reachable = self.reachable()?;
@@ -214,20 +320,18 @@ impl PdfDoc {
     }
 }
 
-fn fresh_font_name(fonts: &Dictionary) -> Result<String> {
+fn fresh_name(dict: &Dictionary, base: &str, taken: FlattenReason) -> Result<String> {
     for n in 0..64 {
         let candidate = if n == 0 {
-            "PdfCraftForms".to_owned()
+            base.to_owned()
         } else {
-            format!("PdfCraftForms{}", n + 1)
+            format!("{}{}", base, n + 1)
         };
-        if !fonts.has(candidate.as_bytes()) {
+        if !dict.has(candidate.as_bytes()) {
             return Ok(candidate);
         }
     }
-    Err(Error::new(ErrorKind::FlattenFailed(
-        FlattenReason::FontNameTaken,
-    )))
+    Err(Error::new(ErrorKind::FlattenFailed(taken)))
 }
 
 fn collect_refs(obj: &Object, out: &mut Vec<ObjectId>) -> Result<()> {

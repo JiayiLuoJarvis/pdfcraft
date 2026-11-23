@@ -34,9 +34,13 @@ impl WidgetSnap {
         let name = doc
             .inherited(&dict, b"T")
             .and_then(|obj| lopdf::decode_text_string(&obj).ok())?;
-        let rect = doc
-            .inherited(&dict, b"Rect")
-            .and_then(|obj| parse_rect(&obj))?;
+        let rect = dict
+            .get(b"Rect")
+            .ok()
+            .and_then(|obj| match doc.lookup(obj.clone()) {
+                Lookup::Found(found) => parse_rect(&found),
+                Lookup::Missing => None,
+            })?;
         let ft = doc
             .inherited(&dict, b"FT")
             .and_then(|obj| super::read::name_str(&obj).map(str::to_owned));

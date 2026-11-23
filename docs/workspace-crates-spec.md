@@ -39,10 +39,10 @@ pdfcraft/                           # workspace 根（无业务 package）
 
 | Crate | 职责 | 现状 |
 | --- | --- | --- |
-| `pdfcraft-pdf` | `DocumentSpec` → 排版 → Canvas → krilla 出 PDF | 主线实现。版本 `0.6.0`。不加密、不合并第三方 PDF、不提供后处理改 `/Info` |
-| `pdfcraft-forms` | 读第三方 PDF 字节，填写已有 AcroForm，写出已 flatten 的 PDF | 提案书 §10 与 §14 已确认。`Form::open` 列出 widget，`Fill::new` 编译请求，`Fill::to_pdf` 写出。文本、勾选和选项在成功时一律 flatten。`FillStyle`、`FieldStyle`、`FieldRule` 和 `AbsoluteLine` 已实现。单面用 `Font::new`，集合用 `Font::from_collection`。调用方提供带 `glyf` 的字体时可以填写中文。夹具里的中文字体不入库，相关测例要设置 `PDFCRAFT_FORMS_FONT`。OTF 未做。TrueType `glyf` 子集已实现并保留原 glyph id。版本 `0.3.0`。拒绝加密输入；不写加密 |
+| `pdfcraft-pdf` | `DocumentSpec` → 排版 → Canvas → krilla 出 PDF | 主线实现。版本 `0.8.1`。不加密、不合并第三方 PDF、不提供后处理改 `/Info` |
+| `pdfcraft-forms` | 读第三方 PDF 字节，填写已有 AcroForm，写出已 flatten 的 PDF | 提案书 §10 与 §14 已确认。`Form::open` 列出 widget，`Fill::new` 编译请求，`Fill::to_pdf` 写出。文本、勾选和选项在成功时一律 flatten。`FillStyle`、`FieldStyle`、`FieldRule` 和 `AbsoluteLine` 已实现。单面用 `Font::new`，集合用 `Font::from_collection`。调用方提供带 `glyf` 的字体时可以填写中文。夹具里的中文字体不入库，相关测例要设置 `PDFCRAFT_FORMS_FONT`。OTF 未做。TrueType `glyf` 子集已实现并保留原 glyph id。版本 `0.3.1`。拒绝加密输入；不写加密 |
 | `pdfcraft-orgchart` | 股权与对外投资图。`Font` + skrifa `0.48.0` 测量，krilla `0.8.2` 绘制 | 已实现 `Chart::new`、`to_pdf`、`title`。行为合同是 [`pdfcraft-orgchart-spec.md`](pdfcraft-orgchart-spec.md)。版本 `0.3.1`。不依赖 `pdfcraft-pdf` |
-| `pdfcraft-post` | 已有 PDF 字节 → 后处理。`SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`split_pdfs`、`first_page_jpeg`、`Pipeline`。输出是一份或多份 PDF，或缩略图 JPEG | 提案书 §11 已确认。API 已落地。Watermark 与输入限额延后。HTTP / finalize 编排不做。版本 `0.3.1`，可发布 |
+| `pdfcraft-post` | 已有 PDF 字节 → 后处理。`SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`split_pdfs`、`first_page_jpeg`、`Pipeline`。输出是一份或多份 PDF，或缩略图 JPEG | 提案书 §11 已确认。API 已落地。Watermark 与输入限额延后。HTTP / finalize 编排不做。版本 `0.3.2`，可发布 |
 
 ## 依赖硬规则
 
@@ -60,8 +60,8 @@ pdfcraft-forms     ──X──→  pdfcraft-post
 pdfcraft-orgchart  ──X──→  pdfcraft-post
 ```
 
-- `pdfcraft-forms` 使用 `lopdf =0.45.0`（`default-features = false`，无 `nom_parser`）与 `skrifa =0.48.0`。直依版本在根 `[workspace.dependencies]`。`pdfcraft-forms` 不依赖 `krilla`。`pdfcraft-forms` 不依赖 `pdfcraft-pdf`。禁止为填表把第二套 PDF 栈引进 `pdfcraft-pdf`。
-- `pdfcraft-post` 使用同一份 workspace `lopdf =0.45.0`（`default-features = false`）。不依赖 `krilla`（本栈无水印）。不依赖 `pdfcraft-pdf` / `pdfcraft-forms` / `pdfcraft-orgchart`。禁止把加密、合并、后处理写 Info 做进 `pdfcraft-pdf` 的 feature。
+- `pdfcraft-forms` 使用 `lopdf =0.47.0`（`default-features = false`，无 `nom_parser`）与 `skrifa =0.48.0`。直依版本在根 `[workspace.dependencies]`。`pdfcraft-forms` 不依赖 `krilla`。`pdfcraft-forms` 不依赖 `pdfcraft-pdf`。禁止为填表把第二套 PDF 栈引进 `pdfcraft-pdf`。
+- `pdfcraft-post` 使用同一份 workspace `lopdf =0.47.0`（`default-features = false`）。不依赖 `krilla`（本栈无水印）。不依赖 `pdfcraft-pdf` / `pdfcraft-forms` / `pdfcraft-orgchart`。禁止把加密、合并、后处理写 Info 做进 `pdfcraft-pdf` 的 feature。
 - `pdfcraft-pdf` 内部模块 DAG 不变，见 [`module-dependency.md`](module-dependency.md)。不为「无环」再拆 `pdfcraft-pdf`。
 - 共享类型默认不抽包；重复到不可忍受再考虑极薄 `pdfcraft-geom` 类 crate。
 
@@ -74,7 +74,7 @@ pdfcraft-orgchart  ──X──→  pdfcraft-post
 
 ## 版本与发布
 
-- `pdfcraft-pdf` 是 `0.6.0`，`pdfcraft-forms` 是 `0.3.0`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.1`。都可以发布。
+- `pdfcraft-pdf` 是 `0.8.1`，`pdfcraft-forms` 是 `0.3.1`，`pdfcraft-orgchart` 是 `0.3.1`，`pdfcraft-post` 是 `0.3.2`。都可以发布。
 - 版本号可同号可不同；不强制 workspace 统一 version。
 - crates.io 发布名保持各 crate 的 `name` 字段；口头仓库名仍可称 pdfcraft。
 
@@ -114,6 +114,6 @@ CI 对 `pdfcraft-pdf` 保留原有 feature 矩阵。`pdfcraft-forms`、`pdfcraft
 | --- | --- |
 | 根 `[workspace]` + `crates/*` | 已落地 |
 | `pdfcraft-pdf` 迁入 `crates/pdfcraft-pdf` | 已落地 |
-| `pdfcraft-forms` 产品 API 与依赖 | 已确认，见提案书 §10 与 §14。依赖为 `lopdf =0.45.0`（`default-features = false`）与 `skrifa =0.48.0`。不引入 `krilla`。与 `pdfcraft-pdf` 无依赖边。能力与上表「现状」相同。OTF 未做。`glyf` 子集已实现 |
+| `pdfcraft-forms` 产品 API 与依赖 | 已确认，见提案书 §10 与 §14。依赖为 `lopdf =0.47.0`（`default-features = false`）与 `skrifa =0.48.0`。不引入 `krilla`。与 `pdfcraft-pdf` 无依赖边。能力与上表「现状」相同。OTF 未做。`glyf` 子集已实现 |
 | `pdfcraft-orgchart` 协议、测量、`Chart::new` / `to_pdf` | 已落地。行为见 `pdfcraft-orgchart-spec.md` |
 | `pdfcraft-post` 产品范围与实现 | 已确认，见提案书 §11。crate 已落地 |

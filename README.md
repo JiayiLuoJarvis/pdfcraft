@@ -43,7 +43,7 @@ cargo run -p pdfcraft-forms --example fill_basic
 Needs `PDFCRAFT_FORMS_FONT` for text-fill examples and CJK tests. OTF is not
 implemented. Text embed uses a `glyf` subset that keeps the original glyph ids.
 
-**Status:** `0.3.0`. The API can break before `1.0`.
+**Status:** `0.3.1`. The API can break before `1.0`.
 
 ## pdfcraft-orgchart
 
@@ -80,7 +80,7 @@ cargo run -p pdfcraft-post --example encrypt -- in.pdf out.pdf owner-secret
 Processors: `SetMetadata`, `Encrypt`, `StampAndEncrypt`, `merge_pdfs`, `split_pdfs`, `first_page_jpeg`, `Pipeline`.
 No Watermark or input limits in this stack.
 
-**Status:** `0.3.1`. The API can break before `1.0`.
+**Status:** `0.3.2`. The API can break before `1.0`.
 
 ## Contributing
 

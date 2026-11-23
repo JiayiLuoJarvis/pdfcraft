@@ -122,6 +122,24 @@ impl LaidText {
             .map(|line| (line.baseline, line.width, line.glyphs.as_slice()))
     }
 
+    #[cfg(test)]
+    pub(crate) fn stub_line(size: f32) -> Self {
+        Self {
+            size,
+            lines: vec![PlacedLine {
+                glyphs: vec![GlyphUse {
+                    id: 1,
+                    scalar: 'A',
+                    units: 500.0,
+                    y_min: 0.0,
+                    y_max: 700.0,
+                }],
+                baseline: size,
+                width: size,
+            }],
+        }
+    }
+
     /// 展平所有行。只给 `record` 折叠 `used`。不要拿它画 `Tm`。
     pub(crate) fn glyphs(&self) -> impl Iterator<Item = GlyphUse> + '_ {
         self.lines

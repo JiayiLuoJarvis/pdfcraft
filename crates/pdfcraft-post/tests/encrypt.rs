@@ -90,13 +90,16 @@ fn v5_stdcf_declares_length_32() {
     // Top-level `/Length 256` (bits) mirrors qpdf output; strict readers
     // key off the entry even though it is deprecated for V5. Scope the
     // search to the `/Encrypt` object so stream `/Length` entries elsewhere
-    // cannot false-positive.
+    // cannot false-positive. lopdf 0.47 writes `/EncryptMetadata` before some
+    // other keys, so the first `/Encrypt` substring is not the dict start.
+    let (enc_n, enc_g) = encrypt_object_id(&out).expect("trailer or xref /Encrypt N G R");
+    let enc_header = format!("{enc_n} {enc_g} obj");
     let enc_start = out
-        .windows(8)
-        .position(|bytes| bytes == b"/Encrypt")
-        .expect("Encrypt present");
+        .windows(enc_header.len())
+        .position(|bytes| bytes == enc_header.as_bytes())
+        .expect("Encrypt object");
     let enc_end = out[enc_start..]
-        .windows(7)
+        .windows(6)
         .position(|bytes| bytes == b"endobj")
         .map_or(out.len(), |offset| enc_start + offset);
     let enc_dict = &out[enc_start..enc_end];
@@ -215,4 +218,54 @@ fn truncated_bytes_are_not_a_pdf() {
         .apply(&pdf[..cut])
         .expect_err("truncated");
     assert_eq!(err.kind, ErrorKind::NotAPdf);
+}
+
+/// Trailer or xref-stream `/Encrypt N G R`, skipping `/EncryptMetadata`.
+fn encrypt_object_id(pdf: &[u8]) -> Option<(u32, u16)> {
+    let needle = b"/Encrypt";
+    let mut pos = 0;
+    while let Some(rel) = pdf[pos..]
+        .windows(needle.len())
+        .position(|window| window == needle)
+    {
+        let after = pos + rel + needle.len();
+        if pdf
+            .get(after..)
+            .is_some_and(|rest| rest.starts_with(b"Metadata"))
+        {
+            pos = after;
+            continue;
+        }
+        let rest = skip_pdf_ws(pdf.get(after..)?);
+        let (n, rest) = parse_pdf_u32(rest)?;
+        let rest = skip_pdf_ws(rest);
+        let (g, rest) = parse_pdf_u32(rest)?;
+        let rest = skip_pdf_ws(rest);
+        if rest.first() == Some(&b'R') {
+            let g = u16::try_from(g).ok()?;
+            return Some((n, g));
+        }
+        pos = after;
+    }
+    None
+}
+
+fn skip_pdf_ws(bytes: &[u8]) -> &[u8] {
+    let n = bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_whitespace())
+        .count();
+    &bytes[n..]
+}
+
+fn parse_pdf_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
+    let n = bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if n == 0 {
+        return None;
+    }
+    let value = std::str::from_utf8(&bytes[..n]).ok()?.parse().ok()?;
+    Some((value, &bytes[n..]))
 }

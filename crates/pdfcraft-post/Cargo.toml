@@ -1,6 +1,6 @@
 [package]
 name = "pdfcraft-post"
-version = "0.3.1"
+version = "0.3.2"
 edition.workspace = true
 rust-version.workspace = true
 description = "Post-process existing PDF bytes: metadata, encrypt, merge, split, thumbnails, and pipelines"

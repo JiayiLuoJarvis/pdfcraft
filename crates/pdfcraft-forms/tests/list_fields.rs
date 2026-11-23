@@ -92,6 +92,12 @@ fn inherits_name_and_type_from_parent() {
 }
 
 #[test]
+fn widget_without_own_rect_is_skipped_even_if_parent_has_rect() {
+    let fields = open_fields(&parent_rect_without_widget_rect_pdf());
+    assert!(fields.is_empty(), "{fields:?}");
+}
+
+#[test]
 fn keeps_a_real_widget_when_an_annotation_reference_is_dangling() {
     let fields = open_fields(&dangling_annot_pdf());
     assert_eq!(fields.len(), 1);
@@ -171,6 +177,24 @@ fn parent_field_pdf() -> Vec<u8> {
     let mut bytes = Vec::new();
     doc.save_to(&mut bytes).unwrap();
     bytes
+}
+
+fn parent_rect_without_widget_rect_pdf() -> Vec<u8> {
+    let mut doc = lopdf::Document::with_version("1.4");
+    let field_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("T", lopdf::Object::string_literal("employee_name")),
+        ("FT", lopdf::Object::Name(b"Tx".to_vec())),
+        ("Rect", rect(10, 10, 80, 30)),
+    ]));
+    let widget_id = doc.add_object(lopdf::Dictionary::from_iter([
+        ("Type", lopdf::Object::Name(b"Annot".to_vec())),
+        ("Subtype", lopdf::Object::Name(b"Widget".to_vec())),
+        ("Parent", lopdf::Object::Reference(field_id)),
+    ]));
+    finish_page(
+        &mut doc,
+        lopdf::Object::Array(vec![lopdf::Object::Reference(widget_id)]),
+    )
 }
 
 fn dangling_annot_pdf() -> Vec<u8> {
