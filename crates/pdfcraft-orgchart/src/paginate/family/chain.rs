@@ -28,7 +28,7 @@ impl<O: PageOracle> Context<'_, O> {
                 return None;
             }
             let edge_id = outgoing[0];
-            let edge = &self.edge_by_id[&edge_id];
+            let edge = self.family_edge(edge_id);
             edge_ids.push(edge_id);
             node_ids.push(edge.child_id);
             remaining.remove(&edge_id);

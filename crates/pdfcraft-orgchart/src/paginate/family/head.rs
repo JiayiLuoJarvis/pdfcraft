@@ -101,9 +101,9 @@ impl<O: PageOracle> Context<'_, O> {
     ) -> Result<Vec<MeasuredCut>, Error> {
         let mut eviction = children.to_vec();
         eviction.sort_by(|left, right| {
-            kinds[left]
+            super::map_get(kinds, left, "direct child has a kind")
                 .eviction_rank()
-                .cmp(&kinds[right].eviction_rank())
+                .cmp(&super::map_get(kinds, right, "direct child has a kind").eviction_rank())
                 .then(self.rank(*right).cmp(&self.rank(*left)))
                 .then(left.cmp(right))
         });
@@ -152,7 +152,7 @@ impl<O: PageOracle> Context<'_, O> {
         }
         let moved_set: BTreeSet<NodeId> = moved.iter().copied().collect();
         for edge_id in self.direct_edges(task.subject_id, &task.edge_ids) {
-            if moved_set.contains(&self.edge_by_id[&edge_id].child_id) {
+            if moved_set.contains(&self.family_edge(edge_id).child_id) {
                 edge_ids.insert(edge_id);
             }
         }
@@ -280,7 +280,9 @@ impl<O: PageOracle> Context<'_, O> {
             let cone = self.reachable_edges(*child_id, &task.edge_ids);
             if cone.is_empty() {
                 placed.push(PlacedChild::Leaf);
-            } else if kinds[child_id] == ChildKind::LargeFamily {
+            } else if *super::map_get(kinds, child_id, "retained child has a kind")
+                == ChildKind::LargeFamily
+            {
                 placed.push(PlacedChild::Stub(*child_id));
             } else {
                 placed.push(PlacedChild::Inlined {

@@ -57,7 +57,7 @@ pub(crate) fn collect_layer_groups(
     let mut parents_by_rank = BTreeMap::new();
     for (&layer_rank, ids) in by_rank {
         let mut layer_ids = ids.clone();
-        layer_ids.sort_by_key(|id| order_index[id]);
+        layer_ids.sort_by_key(|id| *super::map_get(order_index, id, "layer node is in node_order"));
         let groups = sibling_groups(&layer_ids, edges, ranks, order_index, subject_rank);
         let parents = groups
             .iter()
@@ -82,8 +82,8 @@ pub(crate) fn group_band_rows(
     }
     let safe_cols = cols.max(1);
     let mut ordered = group_ids.to_vec();
-    ordered.sort_by_key(|id| order_index[id]);
-    let group_rank = ranks[&group_ids[0]];
+    ordered.sort_by_key(|id| *super::map_get(order_index, id, "group node is in node_order"));
+    let group_rank = *super::map_get(ranks, &group_ids[0], "group node has a hop rank");
     let Some(subject_rank) = subject_rank else {
         return balanced_rows(&ordered, safe_cols);
     };
@@ -131,7 +131,7 @@ fn is_outer(
     subject_rank: i32,
     page: &HashSet<NodeId>,
 ) -> bool {
-    let my_rank = ranks[&node_id];
+    let my_rank = *super::map_get(ranks, &node_id, "page node has a hop rank");
     if my_rank < subject_rank {
         return edges.iter().any(|edge| {
             edge.to_id == node_id
@@ -156,7 +156,7 @@ fn layout_parent(
     order_index: &HashMap<NodeId, usize>,
     subject_rank: Option<i32>,
 ) -> NodeId {
-    let my_rank = ranks[&node_id];
+    let my_rank = *super::map_get(ranks, &node_id, "page node has a hop rank");
     let order_of = |id: &NodeId| order_index.get(id).copied().unwrap_or(MISSING_ORDER);
     if let Some(subject_rank) = subject_rank {
         if my_rank < subject_rank {
@@ -170,11 +170,16 @@ fn layout_parent(
                 .collect();
             if !downs.is_empty() {
                 downs.sort_by(|left, right| {
-                    (ranks[left], order_of(left), *left).cmp(&(
-                        ranks[right],
-                        order_of(right),
-                        *right,
-                    ))
+                    (
+                        *super::map_get(ranks, left, "down-neighbor has a hop rank"),
+                        order_of(left),
+                        *left,
+                    )
+                        .cmp(&(
+                            *super::map_get(ranks, right, "down-neighbor has a hop rank"),
+                            order_of(right),
+                            *right,
+                        ))
                 });
                 return downs[0];
             }
@@ -189,11 +194,24 @@ fn layout_parent(
                 .collect();
             if !ups.is_empty() {
                 ups.sort_by(|left, right| {
-                    (std::cmp::Reverse(ranks[left]), order_of(left), *left).cmp(&(
-                        std::cmp::Reverse(ranks[right]),
-                        order_of(right),
-                        *right,
-                    ))
+                    (
+                        std::cmp::Reverse(*super::map_get(
+                            ranks,
+                            left,
+                            "up-neighbor has a hop rank",
+                        )),
+                        order_of(left),
+                        *left,
+                    )
+                        .cmp(&(
+                            std::cmp::Reverse(*super::map_get(
+                                ranks,
+                                right,
+                                "up-neighbor has a hop rank",
+                            )),
+                            order_of(right),
+                            *right,
+                        ))
                 });
                 return ups[0];
             }
@@ -211,11 +229,16 @@ fn layout_parent(
         return node_id;
     }
     ups.sort_by(|left, right| {
-        (std::cmp::Reverse(ranks[left]), order_of(left), *left).cmp(&(
-            std::cmp::Reverse(ranks[right]),
-            order_of(right),
-            *right,
-        ))
+        (
+            std::cmp::Reverse(*super::map_get(ranks, left, "up-neighbor has a hop rank")),
+            order_of(left),
+            *left,
+        )
+            .cmp(&(
+                std::cmp::Reverse(*super::map_get(ranks, right, "up-neighbor has a hop rank")),
+                order_of(right),
+                *right,
+            ))
     });
     ups[0]
 }

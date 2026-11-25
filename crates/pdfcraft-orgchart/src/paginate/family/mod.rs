@@ -7,6 +7,7 @@ mod score;
 mod solve;
 
 use std::collections::{BTreeSet, HashMap};
+use std::hash::Hash;
 
 use crate::error::{Error, ErrorCode};
 use crate::graph::NodeId;
@@ -219,7 +220,7 @@ struct Context<'a, O: PageOracle> {
     max_expansions: usize,
     expansions: usize,
     budget_exhausted: bool,
-    edge_by_id: HashMap<usize, FamilyEdge>,
+    edge_by_id: Vec<Option<FamilyEdge>>,
     outgoing: HashMap<NodeId, Vec<usize>>,
     order_index: HashMap<NodeId, usize>,
     layout_cache: HashMap<PageDraft, LayoutEvaluation>,
@@ -249,10 +250,13 @@ pub(crate) fn search_family_pages(
 impl<'a, O: PageOracle> Context<'a, O> {
     fn new(graph: &'a FamilyGraph, oracle: &'a mut O, max_expansions: usize) -> Self {
         let mut outgoing: HashMap<NodeId, Vec<usize>> = HashMap::new();
-        let mut edge_by_id = HashMap::new();
+        let max_id = graph.edges.iter().map(|edge| edge.id).max().unwrap_or(0);
+        let mut edge_by_id = vec![None; max_id.saturating_add(1)];
         for edge in &graph.edges {
             outgoing.entry(edge.parent_id).or_default().push(edge.id);
-            edge_by_id.insert(edge.id, edge.clone());
+            if let Some(slot) = edge_by_id.get_mut(edge.id) {
+                *slot = Some(edge.clone());
+            }
         }
         let order_index = graph
             .node_order
@@ -338,7 +342,7 @@ impl<'a, O: PageOracle> Context<'a, O> {
         if let Some(edges) = self.outgoing.get(&parent_id) {
             for edge_id in edges {
                 if allowed.contains(edge_id) {
-                    children.push(self.edge_by_id[edge_id].child_id);
+                    children.push(self.family_edge(*edge_id).child_id);
                 }
             }
         }
@@ -375,7 +379,7 @@ impl<'a, O: PageOracle> Context<'a, O> {
                         continue;
                     }
                     found.insert(*edge_id);
-                    stack.push(self.edge_by_id[edge_id].child_id);
+                    stack.push(self.family_edge(*edge_id).child_id);
                 }
             }
         }
@@ -385,9 +389,31 @@ impl<'a, O: PageOracle> Context<'a, O> {
     fn nodes_below(&self, edge_ids: &BTreeSet<usize>) -> BTreeSet<NodeId> {
         edge_ids
             .iter()
-            .map(|edge_id| self.edge_by_id[edge_id].child_id)
+            .map(|edge_id| self.family_edge(*edge_id).child_id)
             .collect()
     }
+
+    fn family_edge(&self, edge_id: usize) -> &FamilyEdge {
+        #[expect(
+            clippy::expect_used,
+            reason = "edge_id comes from this family graph's outgoing or task edge set"
+        )]
+        self.edge_by_id
+            .get(edge_id)
+            .and_then(Option::as_ref)
+            .expect("family graph contains this edge")
+    }
+}
+
+pub(super) fn map_get<'a, K, V>(map: &'a HashMap<K, V>, key: &K, fact: &'static str) -> &'a V
+where
+    K: Eq + Hash,
+{
+    #[expect(
+        clippy::expect_used,
+        reason = "call site names the proven fact that this key is in the map"
+    )]
+    map.get(key).expect(fact)
 }
 
 fn make_draft(

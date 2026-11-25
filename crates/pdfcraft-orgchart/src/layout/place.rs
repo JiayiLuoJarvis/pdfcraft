@@ -161,7 +161,7 @@ pub(crate) fn resolve_row_schedules(
         let Some(width) = child_family_width_by_parent.get(&node_id) else {
             return ChildFamilyFit::Absent;
         };
-        let box_width = box_width_mm(node_id, box_by_id, spacing.node_width_mm);
+        let box_width = box_width_mm(node_id, box_by_id);
         if *width <= box_width + FIT_EPSILON_MM {
             ChildFamilyFit::Shallow
         } else {
@@ -244,7 +244,7 @@ fn row_span_mm(
     }
     let mut total = 0.0;
     for (index, node_id) in row_ids.iter().enumerate() {
-        total += box_width_mm(*node_id, box_by_id, spacing.node_width_mm);
+        total += box_width_mm(*node_id, box_by_id);
         if index + 1 < row_ids.len() {
             total += sibling_gap_mm(schedule.gaps[index], spacing);
         }
@@ -259,10 +259,8 @@ fn sibling_gap_mm(gap: SiblingGap, spacing: Spacing) -> f64 {
     }
 }
 
-fn box_width_mm(node_id: NodeId, box_by_id: &HashMap<NodeId, NodeBox>, node_width_mm: f64) -> f64 {
-    box_by_id
-        .get(&node_id)
-        .map_or(node_width_mm, |box_| box_.width_mm)
+fn box_width_mm(node_id: NodeId, box_by_id: &HashMap<NodeId, NodeBox>) -> f64 {
+    super::map_get(box_by_id, &node_id, "placed node has a measured box").width_mm
 }
 
 fn node_ids_in_plan(plan: &LayerPlan) -> HashSet<NodeId> {
@@ -276,10 +274,9 @@ fn parent_center_mm(
     parent_id: NodeId,
     xs: &HashMap<NodeId, f64>,
     box_by_id: &HashMap<NodeId, NodeBox>,
-    node_width_mm: f64,
 ) -> f64 {
-    let width = box_width_mm(parent_id, box_by_id, node_width_mm);
-    xs[&parent_id] + width / 2.0
+    let width = box_width_mm(parent_id, box_by_id);
+    *super::map_get(xs, &parent_id, "parent already has an x") + width / 2.0
 }
 
 fn parents_ready(plan: &LayerPlan, xs: &HashMap<NodeId, f64>) -> bool {
@@ -345,7 +342,7 @@ fn place_plan_xs(
         return Ok(());
     }
     if let Some(geometry) = geometry {
-        place_slotted_plan_xs(plan, geometry, xs, content_width, box_by_id, spacing);
+        place_slotted_plan_xs(plan, geometry, xs, content_width, box_by_id);
         return Ok(());
     }
     if try_align_single_group(plan, xs, box_by_id, spacing)? {
@@ -363,7 +360,7 @@ fn place_plan_fallback(
     spacing: Spacing,
 ) -> Result<(), Error> {
     if let Some(geometry) = geometry {
-        place_slotted_plan_xs(plan, geometry, xs, content_width, box_by_id, spacing);
+        place_slotted_plan_xs(plan, geometry, xs, content_width, box_by_id);
         Ok(())
     } else {
         place_plan_layer_centered(plan, xs, content_width, box_by_id, spacing)
@@ -384,7 +381,7 @@ fn try_align_single_group(
     if !xs.contains_key(parent_id) || plan_ids.contains(parent_id) {
         return Ok(false);
     }
-    let parent_center = parent_center_mm(*parent_id, xs, box_by_id, spacing.node_width_mm);
+    let parent_center = parent_center_mm(*parent_id, xs, box_by_id);
     for (row_ids, schedule) in plan.bands_per_group[0].iter().zip(&plan.row_schedules[0]) {
         let width = row_span_mm(row_ids, box_by_id, schedule, spacing)?;
         write_row_xs(
@@ -416,7 +413,7 @@ fn write_row_xs(
     let mut x = start_x;
     for (index, node_id) in row_ids.iter().enumerate() {
         xs.insert(*node_id, x);
-        x += box_width_mm(*node_id, box_by_id, spacing.node_width_mm);
+        x += box_width_mm(*node_id, box_by_id);
         if index + 1 < row_ids.len() {
             x += sibling_gap_mm(schedule.gaps[index], spacing);
         }
@@ -469,7 +466,7 @@ fn slotted_row(
     let mut slots = Vec::new();
     let mut cursor = 0.0;
     for (index, node_id) in row_ids.iter().enumerate() {
-        let box_width = box_width_mm(*node_id, box_by_id, spacing.node_width_mm);
+        let box_width = box_width_mm(*node_id, box_by_id);
         let slot_width = child_family_width_by_parent
             .get(node_id)
             .map_or(box_width, |child| child.max(box_width));
@@ -495,21 +492,20 @@ fn place_slotted_plan_xs(
     xs: &mut HashMap<NodeId, f64>,
     content_width: f64,
     box_by_id: &HashMap<NodeId, NodeBox>,
-    spacing: Spacing,
 ) {
     let mut anchor = content_width / 2.0;
     if plan.bands_per_group.len() == 1 && plan.group_parents.len() == 1 {
         let parent_id = &plan.group_parents[0];
         let plan_ids = node_ids_in_plan(plan);
         if xs.contains_key(parent_id) && !plan_ids.contains(parent_id) {
-            anchor = parent_center_mm(*parent_id, xs, box_by_id, spacing.node_width_mm);
+            anchor = parent_center_mm(*parent_id, xs, box_by_id);
         }
     }
     for (group_rows, slotted_rows) in plan.bands_per_group.iter().zip(&geometry.rows_per_group) {
         for (row_ids, slotted) in group_rows.iter().zip(slotted_rows) {
             let row_start = anchor - slotted.width_mm / 2.0;
             for (node_id, slot) in row_ids.iter().zip(&slotted.slots) {
-                let box_width = box_width_mm(*node_id, box_by_id, spacing.node_width_mm);
+                let box_width = box_width_mm(*node_id, box_by_id);
                 xs.insert(
                     *node_id,
                     row_start + slot.offset_x_mm + (slot.slot_width_mm - box_width) / 2.0,
@@ -593,27 +589,24 @@ fn place_family_xs(
         && !parent_xs_overlap(
             &ready
                 .iter()
-                .map(|index| xs[&plan.group_parents[*index]])
+                .map(|index| {
+                    *super::map_get(
+                        xs,
+                        &plan.group_parents[*index],
+                        "aligned parent already has an x",
+                    )
+                })
                 .collect::<Vec<_>>(),
             &ready
                 .iter()
-                .map(|index| {
-                    box_width_mm(plan.group_parents[*index], box_by_id, spacing.node_width_mm)
-                })
+                .map(|index| box_width_mm(plan.group_parents[*index], box_by_id))
                 .collect::<Vec<_>>(),
         );
     if align {
         let mut order: Vec<usize> = (0..ready.len()).collect();
         let centers: Vec<f64> = ready
             .iter()
-            .map(|index| {
-                parent_center_mm(
-                    plan.group_parents[*index],
-                    xs,
-                    box_by_id,
-                    spacing.node_width_mm,
-                )
-            })
+            .map(|index| parent_center_mm(plan.group_parents[*index], xs, box_by_id))
             .collect();
         order.sort_by(|&left, &right| centers[left].total_cmp(&centers[right]));
         let ordered_centers: Vec<f64> = order.iter().map(|index| centers[*index]).collect();
@@ -690,15 +683,19 @@ fn assign_ys(
                     }
                     let row_height = row_ids
                         .iter()
-                        .map(|id| box_by_id[id].height_mm)
+                        .map(|id| {
+                            super::map_get(box_by_id, id, "placed node has a measured box")
+                                .height_mm
+                        })
                         .fold(0.0, f64::max);
                     for node_id in row_ids {
-                        let box_ = &box_by_id[node_id];
+                        let box_ =
+                            super::map_get(box_by_id, node_id, "placed node has a measured box");
                         laid_out.insert(
                             *node_id,
                             PlacedNode {
                                 id: *node_id,
-                                x: xs[node_id],
+                                x: *super::map_get(xs, node_id, "placed node already has an x"),
                                 y: y_col,
                                 width: box_.width_mm,
                                 height: box_.height_mm,
@@ -723,15 +720,19 @@ fn assign_ys(
                     }
                     let row_height = row_ids
                         .iter()
-                        .map(|id| box_by_id[id].height_mm)
+                        .map(|id| {
+                            super::map_get(box_by_id, id, "placed node has a measured box")
+                                .height_mm
+                        })
                         .fold(0.0, f64::max);
                     for node_id in row_ids {
-                        let box_ = &box_by_id[node_id];
+                        let box_ =
+                            super::map_get(box_by_id, node_id, "placed node has a measured box");
                         laid_out.insert(
                             *node_id,
                             PlacedNode {
                                 id: *node_id,
-                                x: xs[node_id],
+                                x: *super::map_get(xs, node_id, "placed node already has an x"),
                                 y,
                                 width: box_.width_mm,
                                 height: box_.height_mm,

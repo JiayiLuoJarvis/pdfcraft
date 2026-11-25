@@ -119,8 +119,17 @@ pub(crate) fn route_edges(
         multi_in_bottom_row_y: HashMap::new(),
     };
     for edge in page_edges {
-        let (Some(src), Some(dst)) = (nodes.get(&edge.from_id), nodes.get(&edge.to_id)) else {
-            continue;
+        let Some(src) = nodes.get(&edge.from_id) else {
+            return Err(Error::new(
+                ErrorCode::LayoutFailed,
+                format!("edge source {} is not placed", edge.from_id),
+            ));
+        };
+        let Some(dst) = nodes.get(&edge.to_id) else {
+            return Err(Error::new(
+                ErrorCode::LayoutFailed,
+                format!("edge target {} is not placed", edge.to_id),
+            ));
         };
         let src_bottom = PointMm {
             x: src.x + src.width / 2.0,
@@ -130,24 +139,8 @@ pub(crate) fn route_edges(
             x: dst.x + dst.width / 2.0,
             y: dst.y,
         };
-        let siblings_in: Vec<NodeId> = by_target
-            .get(&edge.to_id)
-            .map(|ids| {
-                ids.iter()
-                    .copied()
-                    .filter(|id| nodes.contains_key(id))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let siblings_out: Vec<NodeId> = by_source
-            .get(&edge.from_id)
-            .map(|ids| {
-                ids.iter()
-                    .copied()
-                    .filter(|id| nodes.contains_key(id))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let siblings_in: Vec<NodeId> = by_target.get(&edge.to_id).cloned().unwrap_or_default();
+        let siblings_out: Vec<NodeId> = by_source.get(&edge.from_id).cloned().unwrap_or_default();
         let multi_in = siblings_in.len() > 1;
         let multi_out = siblings_out.len() > 1 && !multi_in;
         if multi_in {
@@ -256,7 +249,10 @@ fn route_multi_in(
     nodes: &HashMap<NodeId, PlacedNode>,
     caches: &mut RouteCaches,
 ) -> Result<LaidOutEdge, Error> {
-    let sources: Vec<&PlacedNode> = siblings_in.iter().map(|id| &nodes[id]).collect();
+    let sources: Vec<&PlacedNode> = siblings_in
+        .iter()
+        .map(|id| super::map_get(nodes, id, "multi-in sibling is placed"))
+        .collect();
     let max_src_bottom = sources
         .iter()
         .map(|node| node.y + node.height)
@@ -310,8 +306,17 @@ fn route_multi_in(
                 .map(|node| node.y)
                 .fold(f64::NEG_INFINITY, f64::max)
         });
-    let row_bottoms = caches.multi_in_row_bottom[&edge.to_id].clone();
-    let bottom_row_y = caches.multi_in_bottom_row_y[&edge.to_id];
+    let row_bottoms = super::map_get(
+        &caches.multi_in_row_bottom,
+        &edge.to_id,
+        "multi-in row bottoms were cached for this target",
+    )
+    .clone();
+    let bottom_row_y = *super::map_get(
+        &caches.multi_in_bottom_row_y,
+        &edge.to_id,
+        "multi-in bottom row was cached for this target",
+    );
     let multi_row = row_bottoms.len() > 1;
     let column_stack = sources
         .iter()
@@ -335,14 +340,26 @@ fn route_multi_in(
                 };
                 group_spine_x(&sources, top_y, bus_y, trunk_x, &node_list, &exclude)
             });
-        spine_x = Some(caches.multi_in_spine_x[&edge.to_id]);
+        spine_x = Some(*super::map_get(
+            &caches.multi_in_spine_x,
+            &edge.to_id,
+            "multi-in spine x was cached for this target",
+        ));
     }
     let path_to_bus = if column_stack {
-        let shared_spine = caches.multi_in_spine_x[&edge.to_id];
+        let shared_spine = *super::map_get(
+            &caches.multi_in_spine_x,
+            &edge.to_id,
+            "column-stack spine x was cached for this target",
+        );
         route_side_to_spine(src, shared_spine, bus_y, trunk_x)
     } else {
         let use_spine = multi_row && src.y < bottom_row_y - 0.01;
-        let row_bottom = row_bottoms[&FiniteMm::or_zero(src.y)];
+        let row_bottom = *super::map_get(
+            &row_bottoms,
+            &FiniteMm::or_zero(src.y),
+            "source row has a cached bottom",
+        );
         route_down_to_bus(&DownBus {
             src,
             src_bottom,
@@ -376,7 +393,10 @@ fn route_multi_out(
     nodes: &HashMap<NodeId, PlacedNode>,
     caches: &mut RouteCaches,
 ) -> Result<LaidOutEdge, Error> {
-    let children: Vec<&PlacedNode> = siblings_out.iter().map(|id| &nodes[id]).collect();
+    let children: Vec<&PlacedNode> = siblings_out
+        .iter()
+        .map(|id| super::map_get(nodes, id, "multi-out sibling is placed"))
+        .collect();
     let min_dst_top = children
         .iter()
         .map(|node| node.y)
@@ -746,5 +766,21 @@ fn side_channel_x(
         left
     } else {
         right
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::route_edges;
+    use crate::error::ErrorCode;
+    use crate::graph::NodeId;
+    use crate::page::EdgeRef;
+    use std::collections::HashMap;
+
+    #[test]
+    fn missing_endpoint_is_layout_failed() {
+        let edges = [EdgeRef::new(NodeId::from_index(0), NodeId::from_index(1))];
+        let error = route_edges(&edges, &HashMap::new()).expect_err("missing");
+        assert_eq!(error.code(), ErrorCode::LayoutFailed);
     }
 }

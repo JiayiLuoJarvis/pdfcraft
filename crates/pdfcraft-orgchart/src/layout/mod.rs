@@ -7,6 +7,7 @@ mod route;
 
 use crate::graph::NodeId;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
 
 use groups::{collect_layer_groups, group_band_rows, use_family_columns};
 use place::{
@@ -44,7 +45,8 @@ pub(crate) struct LayoutInput<'a> {
     pub(crate) boxes: &'a [NodeBox],
     /// Parent and child links among those nodes.
     pub(crate) edges: &'a [EdgeRef],
-    /// Rank order. Ids absent from `boxes` are ignored.
+    /// Rank order. Ids absent from `boxes` are ignored. A non-empty order that
+    /// omits a box is [`crate::ErrorCode::LayoutFailed`].
     pub(crate) node_order: &'a [NodeId],
     /// Column budget for the subject's direct row.
     pub(crate) cols: usize,
@@ -209,7 +211,11 @@ fn structure_plans(
     let mut by_rank: BTreeMap<i32, Vec<NodeId>> = BTreeMap::new();
     for node_id in &prepared.ordered_ids {
         by_rank
-            .entry(prepared.ranks[node_id])
+            .entry(*map_get(
+                &prepared.ranks,
+                node_id,
+                "ordered node has a hop rank",
+            ))
             .or_default()
             .push(*node_id);
     }
@@ -336,4 +342,15 @@ fn fixup_shallow_gaps(
         }
     }
     Ok(())
+}
+
+pub(super) fn map_get<'a, K, V>(map: &'a HashMap<K, V>, key: &K, fact: &'static str) -> &'a V
+where
+    K: Eq + Hash,
+{
+    #[expect(
+        clippy::expect_used,
+        reason = "call site names the proven fact that this key is in the map"
+    )]
+    map.get(key).expect(fact)
 }

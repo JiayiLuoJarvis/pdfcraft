@@ -68,7 +68,7 @@ fn fold_parent(
             holders.contains(&from) && !graph.origin(from).stands_in_for(parent)
         })
         .collect();
-    let mut ratios = HashMap::with_capacity(children.len());
+    let mut ratios = vec![None; graph.nodes.len()];
     for &edge in &children {
         let from = graph.edge_from(edge);
         let ratio = resolve_display_ratio(graph, from)?.ok_or_else(|| {
@@ -81,7 +81,14 @@ fn fold_parent(
             )
             .with_optional_subject(graph.node_subject(from))
         })?;
-        ratios.insert(from, ratio);
+        #[expect(
+            clippy::expect_used,
+            reason = "from is an arena NodeId and ratios is sized to the arena"
+        )]
+        let slot = ratios
+            .get_mut(from.index())
+            .expect("holder NodeId is inside the arena");
+        *slot = Some(ratio);
     }
     if children.len() <= top_n {
         return Ok(None);
@@ -90,14 +97,14 @@ fn fold_parent(
     ranked.sort_by(|&left, &right| {
         let left_from = graph.edge_from(left);
         let right_from = graph.edge_from(right);
-        ratios[&right_from]
-            .total_cmp(&ratios[&left_from])
+        ratio_of(&ratios, right_from)
+            .total_cmp(&ratio_of(&ratios, left_from))
             .then(left_from.cmp(&right_from))
     });
     let dropped = ranked.split_off(top_n);
     let dropped_ratios: Vec<f64> = dropped
         .iter()
-        .map(|&edge| ratios[&graph.edge_from(edge)])
+        .map(|&edge| ratio_of(&ratios, graph.edge_from(edge)))
         .collect();
     let total = exact_sum(&dropped_ratios);
     if !total.is_finite() || !(RATIO_MIN..=RATIO_MAX).contains(&total) {
@@ -128,6 +135,18 @@ fn fold_parent(
         dropped,
         total,
     }))
+}
+
+fn ratio_of(ratios: &[Option<f64>], id: NodeId) -> f64 {
+    #[expect(
+        clippy::expect_used,
+        reason = "fold_parent stores a display ratio for every ranked holder"
+    )]
+    ratios
+        .get(id.index())
+        .copied()
+        .flatten()
+        .expect("holder has a stored display ratio")
 }
 
 /// Finite sum matching `CPython` `math.fsum`, including the half-even correction.

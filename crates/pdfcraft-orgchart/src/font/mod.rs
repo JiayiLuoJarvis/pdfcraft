@@ -164,7 +164,19 @@ impl FontMetrics {
                 );
             }
         }
-        Ok(text.chars().map(|ch| self.glyphs[&ch]).collect())
+        Ok(text
+            .chars()
+            .map(|ch| {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "glyph_run inserts every character before this collect"
+                )]
+                *self
+                    .glyphs
+                    .get(&ch)
+                    .expect("glyph cache contains this character")
+            })
+            .collect())
     }
 
     /// Sum of advances at `size_pt`, in mm.

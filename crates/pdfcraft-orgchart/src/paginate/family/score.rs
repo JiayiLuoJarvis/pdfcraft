@@ -8,7 +8,7 @@ use super::{
     AttachmentTask, Context, LayoutEvaluation, OverflowScore, PageDraft, PageOracle, PlanScore,
     SearchPage, SearchPlan, SPARSE_UTILIZATION, UTILIZATION_BUCKET,
 };
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 
 impl PartialEq for PlanScore {
     fn eq(&self, other: &Self) -> bool {
@@ -97,7 +97,10 @@ impl<O: PageOracle> Context<'_, O> {
         for source in &plan.pages {
             for cut in &source.attachment_cuts {
                 let Some(attachment) = first_by_task.get(&cut.task) else {
-                    continue;
+                    return Err(Error::new(
+                        ErrorCode::LayoutFailed,
+                        "attachment cut has no page in the plan",
+                    ));
                 };
                 let mut node_ids = source.draft.node_ids.clone();
                 node_ids.extend(attachment.draft.node_ids.iter().copied());

@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 /// Why a chart request or a draw was rejected.
 ///
-/// [`ErrorCode::as_str`] is the stable value. It matches Python `EquityErrorCode.value`.
+/// [`ErrorCode::as_str`] is the stable protocol code string. Callers match
+/// [`ErrorCode`] exhaustively. The strings do not change within `0.x` without
+/// a breaking bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorCode {
     /// The request breaks a protocol rule, including a `top_n` fold rule.
@@ -28,7 +30,7 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
-    /// Stable code string, matching Python `EquityErrorCode.value`.
+    /// Stable protocol code string. Callers persist or compare this value.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -167,7 +169,7 @@ mod tests {
     use super::ErrorCode;
 
     #[test]
-    fn code_strings_match_python_equity_error_code() {
+    fn code_strings_are_stable_protocol_values() {
         assert_eq!(ErrorCode::InvalidProtocol.as_str(), "INVALID_PROTOCOL");
         assert_eq!(ErrorCode::CycleDetected.as_str(), "CYCLE_DETECTED");
         assert_eq!(ErrorCode::SubjectNotFound.as_str(), "SUBJECT_NOT_FOUND");

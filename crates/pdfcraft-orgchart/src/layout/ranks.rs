@@ -21,14 +21,29 @@ pub(crate) fn prepare(
     node_order: &[NodeId],
 ) -> Result<Option<Prepared>, Error> {
     let box_ids: HashSet<NodeId> = boxes.iter().map(|box_| box_.id).collect();
-    let mut ordered: Vec<NodeId> = node_order
-        .iter()
-        .copied()
-        .filter(|id| box_ids.contains(id))
-        .collect();
-    if ordered.is_empty() {
-        ordered = boxes.iter().map(|box_| box_.id).collect();
-    }
+    let ordered = if node_order.is_empty() {
+        boxes.iter().map(|box_| box_.id).collect()
+    } else {
+        let mut seen = HashSet::new();
+        let mut ordered = Vec::new();
+        for id in node_order {
+            if !box_ids.contains(id) {
+                continue;
+            }
+            if seen.insert(*id) {
+                ordered.push(*id);
+            }
+        }
+        for box_ in boxes {
+            if !seen.contains(&box_.id) {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!("box {} is not listed in node_order", box_.id),
+                ));
+            }
+        }
+        ordered
+    };
     if ordered.is_empty() {
         return Ok(None);
     }
@@ -52,7 +67,8 @@ pub(crate) fn prepare(
         .enumerate()
         .map(|(index, id)| (id, index))
         .collect();
-    let subject_rank = subject_id.map(|id| ranks[&id]);
+    let subject_rank =
+        subject_id.map(|id| *super::map_get(&ranks, &id, "page subject is in the hop rank map"));
     Ok(Some(Prepared {
         ordered_ids: ordered,
         page_edges,
@@ -83,7 +99,13 @@ fn assign_hop_ranks(
     Ok(ordered_ids
         .iter()
         .copied()
-        .map(|id| (id, remap[&hops[&id]]))
+        .map(|id| {
+            let hop = *super::map_get(&hops, &id, "ordered node has a hop");
+            (
+                id,
+                *super::map_get(&remap, &hop, "hop value has a remapped rank"),
+            )
+        })
         .collect())
 }
 
@@ -101,52 +123,78 @@ fn compute_hops(
     }
     if let Some(subject_id) = subject_id {
         if id_set.contains(&subject_id) {
-            let mut pending: HashMap<NodeId, Option<i32>> =
-                ordered_ids.iter().copied().map(|id| (id, None)).collect();
-            pending.insert(subject_id, Some(0));
-            let mut queue = VecDeque::from([subject_id]);
-            while let Some(node_id) = queue.pop_front() {
-                let base = pending[&node_id].ok_or_else(|| {
-                    Error::new(
-                        ErrorCode::LayoutFailed,
-                        format!("hop rank missing for {node_id}"),
-                    )
-                })?;
-                if let Some(preds) = incoming.get(&node_id) {
-                    for pred in preds {
-                        if !id_set.contains(pred) {
-                            continue;
-                        }
-                        let cand = base - 1;
-                        let current = pending[pred];
-                        if current.is_none_or(|value| cand < value) {
-                            pending.insert(*pred, Some(cand));
-                            queue.push_back(*pred);
-                        }
-                    }
-                }
-                if let Some(succs) = outgoing.get(&node_id) {
-                    for succ in succs {
-                        if !id_set.contains(succ) {
-                            continue;
-                        }
-                        let cand = base + 1;
-                        let current = pending[succ];
-                        if current.is_none_or(|value| cand > value) {
-                            pending.insert(*succ, Some(cand));
-                            queue.push_back(*succ);
-                        }
-                    }
-                }
-            }
-            // A node the subject walk never reaches keeps hop 0.
-            return Ok(ordered_ids
-                .iter()
-                .copied()
-                .map(|id| (id, pending[&id].unwrap_or(0)))
-                .collect());
+            return hops_from_subject(ordered_ids, &id_set, &incoming, &outgoing, subject_id);
         }
     }
+    Ok(hops_by_indegree(ordered_ids, edges, &id_set, &outgoing))
+}
+
+fn hops_from_subject(
+    ordered_ids: &[NodeId],
+    id_set: &HashSet<NodeId>,
+    incoming: &HashMap<NodeId, Vec<NodeId>>,
+    outgoing: &HashMap<NodeId, Vec<NodeId>>,
+    subject_id: NodeId,
+) -> Result<HashMap<NodeId, i32>, Error> {
+    let mut pending: HashMap<NodeId, Option<i32>> =
+        ordered_ids.iter().copied().map(|id| (id, None)).collect();
+    pending.insert(subject_id, Some(0));
+    let mut queue = VecDeque::from([subject_id]);
+    while let Some(node_id) = queue.pop_front() {
+        let base = super::map_get(&pending, &node_id, "queued node is in the hop map").ok_or_else(
+            || {
+                Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!("hop rank missing for {node_id}"),
+                )
+            },
+        )?;
+        if let Some(preds) = incoming.get(&node_id) {
+            for pred in preds {
+                if !id_set.contains(pred) {
+                    continue;
+                }
+                let cand = base - 1;
+                let current = *super::map_get(&pending, pred, "predecessor is in the hop map");
+                if current.is_none_or(|value| cand < value) {
+                    pending.insert(*pred, Some(cand));
+                    queue.push_back(*pred);
+                }
+            }
+        }
+        if let Some(succs) = outgoing.get(&node_id) {
+            for succ in succs {
+                if !id_set.contains(succ) {
+                    continue;
+                }
+                let cand = base + 1;
+                let current = *super::map_get(&pending, succ, "successor is in the hop map");
+                if current.is_none_or(|value| cand > value) {
+                    pending.insert(*succ, Some(cand));
+                    queue.push_back(*succ);
+                }
+            }
+        }
+    }
+    // A node the subject walk never reaches keeps hop 0.
+    Ok(ordered_ids
+        .iter()
+        .copied()
+        .map(|id| {
+            (
+                id,
+                super::map_get(&pending, &id, "ordered node is in the hop map").unwrap_or(0),
+            )
+        })
+        .collect())
+}
+
+fn hops_by_indegree(
+    ordered_ids: &[NodeId],
+    edges: &[EdgeRef],
+    id_set: &HashSet<NodeId>,
+    outgoing: &HashMap<NodeId, Vec<NodeId>>,
+) -> HashMap<NodeId, i32> {
     let mut hop: HashMap<NodeId, i32> = ordered_ids.iter().copied().map(|id| (id, 0)).collect();
     let mut indegree: HashMap<NodeId, i32> =
         ordered_ids.iter().copied().map(|id| (id, 0)).collect();
@@ -160,7 +208,7 @@ fn compute_hops(
     let mut queue: VecDeque<NodeId> = ordered_ids
         .iter()
         .copied()
-        .filter(|id| indegree[id] == 0)
+        .filter(|id| *super::map_get(&indegree, id, "ordered node has an indegree") == 0)
         .collect();
     let mut seen = HashSet::new();
     while let Some(node_id) = queue.pop_front() {
@@ -172,8 +220,8 @@ fn compute_hops(
                 if !id_set.contains(next) {
                     continue;
                 }
-                let hop_next = hop[&node_id] + 1;
-                if hop_next > hop[next] {
+                let hop_next = *super::map_get(&hop, &node_id, "queued node has a hop") + 1;
+                if hop_next > *super::map_get(&hop, next, "successor has a hop") {
                     hop.insert(*next, hop_next);
                 }
                 let Some(degree) = indegree.get_mut(next) else {
@@ -186,9 +234,81 @@ fn compute_hops(
             }
         }
     }
-    Ok(ordered_ids
+    ordered_ids
         .iter()
         .copied()
-        .map(|id| (id, hop[&id]))
-        .collect())
+        .map(|id| (id, *super::map_get(&hop, &id, "ordered node has a hop")))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare;
+    use crate::error::ErrorCode;
+    use crate::graph::{NodeId, NodeOrigin};
+    use crate::page::NodeBox;
+
+    fn box_of(index: usize, subject: bool) -> NodeBox {
+        NodeBox {
+            id: NodeId::from_index(index),
+            origin: NodeOrigin::Caller {
+                index,
+                id: format!("n{index}"),
+                stands_in_for: None,
+            },
+            width_mm: 38.0,
+            height_mm: 10.0,
+            lines: Vec::new(),
+            is_subject: subject,
+            is_company: false,
+        }
+    }
+
+    #[test]
+    fn extra_node_order_ids_are_ignored() {
+        let boxes = [box_of(0, true)];
+        let prepared = prepare(&boxes, &[], &[NodeId::from_index(0), NodeId::from_index(9)])
+            .expect("ok")
+            .expect("some");
+        assert_eq!(prepared.ordered_ids, vec![NodeId::from_index(0)]);
+    }
+
+    #[test]
+    fn box_missing_from_node_order_is_layout_failed() {
+        let boxes = [box_of(0, true), box_of(1, false)];
+        match prepare(&boxes, &[], &[NodeId::from_index(0)]) {
+            Err(error) => assert_eq!(error.code(), ErrorCode::LayoutFailed),
+            Ok(_) => panic!("expected LAYOUT_FAILED"),
+        }
+    }
+
+    #[test]
+    fn node_order_is_deduped() {
+        let boxes = [box_of(0, true), box_of(1, false)];
+        let prepared = prepare(
+            &boxes,
+            &[],
+            &[
+                NodeId::from_index(0),
+                NodeId::from_index(1),
+                NodeId::from_index(0),
+            ],
+        )
+        .expect("ok")
+        .expect("some");
+        assert_eq!(
+            prepared.ordered_ids,
+            vec![NodeId::from_index(0), NodeId::from_index(1)]
+        );
+    }
+
+    #[test]
+    fn empty_node_order_uses_all_boxes() {
+        let boxes = [box_of(0, true), box_of(1, false)];
+        let prepared = prepare(&boxes, &[], &[]).expect("ok").expect("some");
+        assert_eq!(
+            prepared.ordered_ids,
+            vec![NodeId::from_index(0), NodeId::from_index(1)]
+        );
+    }
 }
