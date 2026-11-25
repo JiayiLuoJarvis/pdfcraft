@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-14 |
-| 状态 | 工作项 G 已落地。本文的前半是 `pdfcraft-pdf` 的目标图，`pdfcraft-orgchart` 的模块图见末节。`pdfcraft-pdf` 的完整边表在 [`scripts/pdfcraft-pdf-module-edges.txt`](../scripts/pdfcraft-pdf-module-edges.txt)，CI 用它核对源码 |
+| 状态 | 工作项 G 已落地。本文的前半是 `pdfcraft-pdf` 的目标图，`pdfcraft-orgchart` 的模块图见末节。`pdfcraft-pdf` 的完整边表在 [`scripts/pdfcraft-pdf-module-edges.txt`](../scripts/pdfcraft-pdf-module-edges.txt)，`pdfcraft-orgchart` 的边表在 [`scripts/pdfcraft-orgchart-module-edges.txt`](../scripts/pdfcraft-orgchart-module-edges.txt)，CI 用它们核对源码 |
 | 相关 | [`AGENTS.md`](../AGENTS.md)；[`enterprise-readiness-spec.md`](enterprise-readiness-spec.md) 5.5 与 5.6 |
 
 ## 硬规则
@@ -18,6 +18,7 @@
 
 ```bash
 python3 scripts/check_pdfcraft_pdf_modules.py
+python3 scripts/check_pdfcraft_orgchart_modules.py
 ```
 
 退出码 0 时，脚本打印边数，并打印两条自检。退出码 1 时，它列出树里多出来的边、边文件里树没有的边，或一条环。
@@ -125,7 +126,7 @@ layout/paginate      → canvas, error, geom, limits, layout/decorate, layout/fl
 | `fonts` / `canvas` → `limits` | 按树写入。`layout/flow`、`layout/paginate`、`spec`、`backend` 同样使用 `limits` |
 | `decorate` 测试 | 整段移到 `layout/decorate_tests.rs`，由 `layout/mod.rs` 的 `#[cfg(test)]` 挂上。测试经 `test_util` 调用 `paginate_root`。生产 `decorate` 没有这条边 |
 | `list` 与 `paragraph`、`table` 与 `columns` | 抽到 `layout/line_run` 与 `layout/column_width`。生产图里没有这两对兄弟边 |
-| 环检查 | `scripts/check_pdfcraft_pdf_modules.py` 读边文件，扫生产 `use` 与 `crate::` 路径。`.github/workflows/ci.yml` 在装 Rust 之前跑它 |
+| 环检查 | `scripts/check_pdfcraft_pdf_modules.py` 与 `scripts/check_pdfcraft_orgchart_modules.py` 读各自的边文件，扫生产 `use` 与 `crate::` 路径。`.github/workflows/ci.yml` 在装 Rust 之前跑它们 |
 | 旧结案语 | 删去「全部拆环工作项已落地，生产代码里没有反向边」 |
 
 `backend` 在这张图里是一个节点。`backend/emit.rs` 使用 `krilla_canvas` 里的页计划类型，`krilla_canvas.rs` 调用 `emit::render`。两份文件同属 `backend`，检查器不把它们拆开。拆成两个节点不在工作项 G 的边表里。
@@ -140,7 +141,7 @@ layout/paginate      → canvas, error, geom, limits, layout/decorate, layout/fl
 
 ## pdfcraft-orgchart
 
-日期 2026-11-04。来源：[`pdfcraft-orgchart-reshape-spec.md`](pdfcraft-orgchart-reshape-spec.md) §8.1，PR 1 搬运之后的 `crates/pdfcraft-orgchart/src`。本节还没有边文件和检查脚本，边由 `rg 'crate::'` 人工核对。
+日期 2026-11-25。来源：[`pdfcraft-orgchart-reshape-spec.md`](pdfcraft-orgchart-reshape-spec.md) §8.1。生产边表在 [`scripts/pdfcraft-orgchart-module-edges.txt`](../scripts/pdfcraft-orgchart-module-edges.txt)，由 [`scripts/check_pdfcraft_orgchart_modules.py`](../scripts/check_pdfcraft_orgchart_modules.py) 核对。
 
 `graph`、`font`、`content`、`page`、`paginate`、`render` 各是一个节点，节点内部的文件互相引用，不记成边。`layout` 的文件没有搬，它也是一个节点。目录模块一律写成 `<name>/mod.rs`（根 `Cargo.toml` 的 `clippy::self_named_module_files` 是 deny）。
 

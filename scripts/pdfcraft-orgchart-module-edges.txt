@@ -1,0 +1,56 @@
+# Production module edges for crates/pdfcraft-orgchart/src.
+# One `from to` pair per line. `scripts/check_pdfcraft_orgchart_modules.py` fails
+# when the tree disagrees with this file, or when this graph has a cycle.
+#
+# Nodes: src/<name>.rs, and one node each for graph, font, content, page,
+# layout, paginate, and render. cfg(test) modules and cfg(test) items are not
+# edges. lib.rs is the `lib` node.
+
+chart captions
+chart content
+chart error
+chart font
+chart graph
+chart page
+chart paginate
+chart render
+chart request
+chart units
+content error
+content graph
+content request
+font error
+font units
+graph captions
+graph error
+graph request
+layout error
+layout graph
+layout page
+layout units
+lib chart
+lib error
+lib font
+lib request
+page captions
+page content
+page error
+page font
+page graph
+page request
+page units
+paginate captions
+paginate content
+paginate error
+paginate font
+paginate graph
+paginate layout
+paginate page
+paginate request
+paginate units
+render captions
+render error
+render font
+render graph
+render page
+render units

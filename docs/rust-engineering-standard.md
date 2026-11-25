@@ -48,6 +48,7 @@
 ```bash
 export RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings"
 python3 scripts/check_pdfcraft_pdf_modules.py
+python3 scripts/check_pdfcraft_orgchart_modules.py
 python3 scripts/check_readme_identity.py
 cargo fmt --all -- --check
 cargo clippy -p pdfcraft-forms -p pdfcraft-orgchart -p pdfcraft-post --all-targets -- -D warnings
@@ -146,7 +147,7 @@ cargo deny check advisories licenses bans sources
 | 号 | 规则 | 出处 | 执行 |
 | --- | --- | --- | --- |
 | ARC-1 | 四包边界锁定，互不依赖，见 workspace-crates-spec。不把 forms / orgchart / post 做成 `pdfcraft-pdf` 的 feature。 | workspace-crates-spec | Cargo（crate 环编译失败）；`deny`；评审 |
-| ARC-2 | 模块依赖是 DAG，同一 crate 内的模块之间也不许有环。 | [`module-dependency.md`](module-dependency.md) | `script:check_pdfcraft_pdf_modules.py`（只覆盖 pdf），其余三包靠评审（缺口，见 §16） |
+| ARC-2 | 模块依赖是 DAG，同一 crate 内的模块之间也不许有环。 | [`module-dependency.md`](module-dependency.md) | `script:check_pdfcraft_pdf_modules.py`；`script:check_pdfcraft_orgchart_modules.py`。forms 与 post 靠评审（缺口，见 §16） |
 | ARC-3 | 在系统边界把外部数据一次解析成内部类型（调用方传入的 spec、字体字节、已有 PDF）。内部函数信任类型，不重复校验。 | API#c-validate；MS M-STRONG-TYPES-GUARD | 评审 |
 | ARC-4 | `krilla` 只出现在 `pdfcraft-pdf` 的 `backend/` 和 `pdfcraft-orgchart` 里。`lopdf` 只出现在 forms 与 post。 | AGENTS；workspace-crates-spec | `script:check_pdfcraft_pdf_modules.py`；评审 |
 | ARC-5 | 不用可变 `static`、全局缓存、`OnceLock` 单例。状态显式传递。 | MS M-AVOID-STATICS | 评审 |
@@ -324,7 +325,7 @@ cargo deny check advisories licenses bans sources
 
 规范已立、执行缺口待补：
 
-- ARC-2 的模块 DAG 脚本只覆盖 pdf。
+- ARC-2 的模块 DAG 脚本覆盖 pdf 与 orgchart。forms 与 post 仍靠评审。
 - `ci:feature-matrix` 只跑 pdf。post 的 `thumbnail` feature 不在 CI 的 clippy 与 test 里（本地实测 `--all-features` clippy 与 doc 为绿）。
 - ERR-2 的编译期断言只有 pdf 的 `spec` 有。
 - ARC-6 现存 `backend/mod.rs:29` 一处。
