@@ -31,7 +31,8 @@ use ratio_labels::{place_ratio_labels, RatioMetrics};
 /// # Errors
 ///
 /// Returns [`ErrorCode::FontError`] when krilla rejects the face, and glyph errors.
-/// A placed node with no measured box is [`ErrorCode::LayoutFailed`].
+/// A placed node with no measured box, a missing cue or link, or a path
+/// that krilla rejects is [`ErrorCode::LayoutFailed`].
 pub(crate) fn render(pages: &[PageSpec], font: &mut FontMetrics) -> Result<Vec<u8>, Error> {
     let mut document = Document::new_with(SerializeSettings {
         enable_tagging: false,
@@ -70,7 +71,7 @@ fn draw_page(
                 .iter()
                 .map(|point| (point.x + origin_x, point.y + origin_y))
                 .collect();
-            stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, edge.draw_arrow);
+            stroke_poly(&mut surface, &points, EDGE_WIDTH_PT, edge.draw_arrow)?;
         }
         let box_by_id: HashMap<NodeId, &NodeBox> =
             page.boxes.iter().map(|box_| (box_.id, box_)).collect();
@@ -89,50 +90,65 @@ fn draw_page(
         surface.finish();
     }
     for cue in &page.cont_cues {
-        if let Some(slot) = page
+        let slot = page
             .layout
             .slots
             .iter()
             .find(|slot| slot.anchor_id == cue.anchor_id && slot.side == cue.side)
-        {
-            if let Some(rect) = rect_pt(
-                slot.x + origin_x,
-                slot.y + origin_y,
-                slot.width,
-                slot.height,
-            ) {
-                let dest = XyzDestination::new(
-                    cue.target_page.saturating_sub(1),
-                    Point::from_xy(0.0, 0.0),
-                );
-                pdf_page.add_annotation(
-                    LinkAnnotation::new(rect, Target::Destination(dest.into())).into(),
-                );
-            }
-        }
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!(
+                        "continuation cue has no matching slot: node #{}",
+                        cue.anchor_id
+                    ),
+                )
+            })?;
+        let rect = rect_pt(
+            slot.x + origin_x,
+            slot.y + origin_y,
+            slot.width,
+            slot.height,
+        )
+        .ok_or_else(|| {
+            Error::new(
+                ErrorCode::LayoutFailed,
+                format!("link annotation rect was rejected: node #{}", cue.anchor_id),
+            )
+        })?;
+        let dest = XyzDestination::new(cue.target_page.saturating_sub(1), Point::from_xy(0.0, 0.0));
+        pdf_page.add_annotation(LinkAnnotation::new(rect, Target::Destination(dest.into())).into());
     }
     for link in &page.node_page_links {
-        if let Some(node) = page
+        let node = page
             .layout
             .nodes
             .iter()
             .find(|node| node.id == link.node_id)
-        {
-            if let Some(rect) = rect_pt(
-                node.x + origin_x,
-                node.y + origin_y,
-                node.width,
-                node.height,
-            ) {
-                let dest = XyzDestination::new(
-                    link.target_page.saturating_sub(1),
-                    Point::from_xy(0.0, 0.0),
-                );
-                pdf_page.add_annotation(
-                    LinkAnnotation::new(rect, Target::Destination(dest.into())).into(),
-                );
-            }
-        }
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!(
+                        "node page link names a node that is not on this page: node #{}",
+                        link.node_id
+                    ),
+                )
+            })?;
+        let rect = rect_pt(
+            node.x + origin_x,
+            node.y + origin_y,
+            node.width,
+            node.height,
+        )
+        .ok_or_else(|| {
+            Error::new(
+                ErrorCode::LayoutFailed,
+                format!("link annotation rect was rejected: node #{}", link.node_id),
+            )
+        })?;
+        let dest =
+            XyzDestination::new(link.target_page.saturating_sub(1), Point::from_xy(0.0, 0.0));
+        pdf_page.add_annotation(LinkAnnotation::new(rect, Target::Destination(dest.into())).into());
     }
     pdf_page.finish();
     Ok(())

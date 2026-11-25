@@ -10,7 +10,7 @@ use krilla::surface::Surface;
 use krilla::text::{Font, GlyphId, KrillaGlyph};
 
 use super::{RoundBox, TextLine};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::font::{FontMetrics, GlyphUse};
 use crate::units::{
     mm_to_pt, ARROW_SIZE_PT, CONT_CUE_CORNER_MM, CONT_CUE_DASH_OFF_PT, CONT_CUE_DASH_ON_PT,
@@ -129,22 +129,26 @@ pub(super) fn fill_round(
     h: f64,
     color: rgb::Color,
     radius_mm: f64,
-) {
-    let Some(path) = round_path(x, y, w, h, radius_mm) else {
-        return;
-    };
+) -> Result<(), Error> {
+    let path = path_or_layout_failed(round_path(x, y, w, h, radius_mm))?;
     surface.set_fill(Some(solid(color)));
     surface.set_stroke(None);
     surface.draw_path(&path);
+    Ok(())
 }
 
-pub(super) fn stroke_cue_box(surface: &mut Surface<'_>, x: f64, y: f64, w: f64, h: f64) {
-    let Some(path) = round_path(x, y, w, h, CONT_CUE_CORNER_MM) else {
-        return;
-    };
+pub(super) fn stroke_cue_box(
+    surface: &mut Surface<'_>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), Error> {
+    let path = path_or_layout_failed(round_path(x, y, w, h, CONT_CUE_CORNER_MM))?;
     surface.set_fill(None);
     surface.set_stroke(Some(ink_stroke(pt_f32(CONT_CUE_LINE_WIDTH_PT), true)));
     surface.draw_path(&path);
+    Ok(())
 }
 
 pub(super) fn stroke_round(
@@ -153,14 +157,13 @@ pub(super) fn stroke_round(
     width_pt: f32,
     dashed: bool,
     radius_mm: f64,
-) {
+) -> Result<(), Error> {
     let RoundBox { x, y, w, h } = *box_;
-    let Some(path) = round_path(x, y, w, h, radius_mm) else {
-        return;
-    };
+    let path = path_or_layout_failed(round_path(x, y, w, h, radius_mm))?;
     surface.set_fill(None);
     surface.set_stroke(Some(ink_stroke(width_pt, dashed)));
     surface.draw_path(&path);
+    Ok(())
 }
 
 pub(super) fn stroke_poly(
@@ -168,9 +171,12 @@ pub(super) fn stroke_poly(
     points: &[(f64, f64)],
     width_pt: f64,
     draw_arrow: bool,
-) {
+) -> Result<(), Error> {
     if points.len() < 2 {
-        return;
+        return Err(Error::new(
+            ErrorCode::LayoutFailed,
+            "edge polyline needs at least two points",
+        ));
     }
     let mut path = PathBuilder::new();
     let (x0, y0) = points[0];
@@ -178,26 +184,28 @@ pub(super) fn stroke_poly(
     for (x, y) in points.iter().skip(1) {
         path.line_to(pt(*x), pt(*y));
     }
-    let Some(path) = path.finish() else {
-        return;
-    };
+    let path = path_or_layout_failed(path.finish())?;
     surface.set_fill(None);
     surface.set_stroke(Some(edge_stroke(pt_f32(width_pt))));
     surface.draw_path(&path);
     if draw_arrow {
-        arrow(surface, points);
+        arrow(surface, points)?;
     }
+    Ok(())
 }
 
-fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {
+fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) -> Result<(), Error> {
     let Some((end, prev)) = points.last().zip(points.iter().rev().nth(1)) else {
-        return;
+        return Err(Error::new(
+            ErrorCode::LayoutFailed,
+            "edge polyline needs at least two points",
+        ));
     };
     let dx = mm_to_pt(end.0 - prev.0);
     let dy = mm_to_pt(end.1 - prev.1);
     let len = (dx * dx + dy * dy).sqrt();
     if len < 0.01 {
-        return;
+        return Ok(());
     }
     let ux = dx / len;
     let uy = dy / len;
@@ -215,12 +223,17 @@ fn arrow(surface: &mut Surface<'_>, points: &[(f64, f64)]) {
     path.line_to(base_x + px, base_y + py);
     path.line_to(base_x - px, base_y - py);
     path.close();
-    let Some(path) = path.finish() else {
-        return;
-    };
+    let path = path_or_layout_failed(path.finish())?;
     surface.set_fill(Some(solid(edge_color())));
     surface.set_stroke(None);
     surface.draw_path(&path);
+    Ok(())
+}
+
+pub(super) fn path_or_layout_failed(
+    path: Option<krilla::geom::Path>,
+) -> Result<krilla::geom::Path, Error> {
+    path.ok_or_else(|| Error::new(ErrorCode::LayoutFailed, "path construction failed"))
 }
 
 pub(super) fn round_path(
@@ -322,7 +335,8 @@ pub(super) fn rect_pt(x: f64, y: f64, w: f64, h: f64) -> Option<Rect> {
 
 #[cfg(test)]
 mod tests {
-    use super::centered_x;
+    use super::{centered_x, path_or_layout_failed};
+    use crate::error::ErrorCode;
     use crate::render::near;
 
     #[test]
@@ -330,5 +344,14 @@ mod tests {
         let x = centered_x(10.0, 40.0, 10.0);
         near(x, 25.0);
         assert!((x - 12.0).abs() > 1.0);
+    }
+
+    #[test]
+    fn a_missing_path_is_layout_failed() {
+        let Err(error) = path_or_layout_failed(None) else {
+            panic!("missing path succeeded");
+        };
+        assert_eq!(error.code(), ErrorCode::LayoutFailed);
+        assert!(error.message().contains("path construction failed"));
     }
 }

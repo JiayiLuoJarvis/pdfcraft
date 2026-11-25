@@ -9,6 +9,12 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Fixed
+
+- Drawing now returns `LAYOUT_FAILED` when a continuation cue, leader, or
+  page link is missing from the placed layout, or when a path cannot be
+  built. Valid charts are unchanged.
+
 ## [0.3.1] - 2026-11-04
 
 No public API change. Only page headers of one-page charts change.

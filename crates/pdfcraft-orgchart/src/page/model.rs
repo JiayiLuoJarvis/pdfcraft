@@ -317,6 +317,178 @@ impl PageSpec {
                 ));
             }
         }
+        let node_ids: Vec<NodeId> = self.layout.nodes.iter().map(|node| node.id).collect();
+        for slot in &self.layout.slots {
+            if !node_ids.contains(&slot.anchor_id) {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!(
+                        "cue slot anchors a node that is not on this page: node #{}",
+                        slot.anchor_id
+                    ),
+                ));
+            }
+        }
+        for link in &self.node_page_links {
+            if !node_ids.contains(&link.node_id) {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!(
+                        "node page link names a node that is not on this page: node #{}",
+                        link.node_id
+                    ),
+                ));
+            }
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ContCue, CueSlot, LayoutResult, NodePageLink, PageSpec, PlacedNode};
+    use crate::captions::CueSide;
+    use crate::error::ErrorCode;
+    use crate::graph::{NodeId, NodeOrigin};
+    use crate::page::NodeBox;
+    use crate::units::PageGeometry;
+
+    fn id(index: usize) -> NodeId {
+        NodeId::from_index(index)
+    }
+
+    fn placed(index: usize) -> PlacedNode {
+        PlacedNode {
+            id: id(index),
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        }
+    }
+
+    fn caller_box(index: usize) -> NodeBox {
+        NodeBox {
+            id: id(index),
+            origin: NodeOrigin::Caller {
+                index,
+                id: format!("n{index}"),
+                stands_in_for: None,
+            },
+            width_mm: 10.0,
+            height_mm: 10.0,
+            lines: Vec::new(),
+            is_subject: false,
+            is_company: false,
+        }
+    }
+
+    fn overflow_box(index: usize) -> NodeBox {
+        NodeBox {
+            id: id(index),
+            origin: NodeOrigin::Overflow {
+                subject: id(0),
+                first_moved: id(index),
+                moved_count: 1,
+            },
+            width_mm: 10.0,
+            height_mm: 10.0,
+            lines: Vec::new(),
+            is_subject: false,
+            is_company: false,
+        }
+    }
+
+    fn spec(
+        nodes: Vec<PlacedNode>,
+        slots: Vec<CueSlot>,
+        boxes: Vec<NodeBox>,
+        cues: Vec<ContCue>,
+        links: Vec<NodePageLink>,
+    ) -> PageSpec {
+        PageSpec {
+            main_title: String::new(),
+            sub_title: String::new(),
+            boxes,
+            layout: LayoutResult::from_parts(nodes, Vec::new(), slots).expect("layout"),
+            geometry: PageGeometry::default(),
+            cont_cues: cues,
+            node_page_links: links,
+            ratio_facts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn check_accepts_a_slot_and_link_whose_nodes_are_placed() {
+        let page = spec(
+            vec![placed(0), placed(1)],
+            vec![CueSlot {
+                anchor_id: id(0),
+                side: CueSide::Shareholder,
+                x: 20.0,
+                y: 0.0,
+                width: 18.0,
+                height: 10.0,
+                needs_leader: true,
+            }],
+            vec![caller_box(0), overflow_box(1)],
+            vec![ContCue {
+                target_page: 2,
+                direct_count: 1,
+                side: CueSide::Shareholder,
+                anchor_id: id(0),
+            }],
+            vec![NodePageLink {
+                node_id: id(1),
+                target_page: 2,
+            }],
+        );
+        page.check().expect("valid page");
+    }
+
+    #[test]
+    fn check_rejects_a_slot_whose_anchor_is_not_placed() {
+        let page = spec(
+            vec![placed(0)],
+            vec![CueSlot {
+                anchor_id: id(1),
+                side: CueSide::Shareholder,
+                x: 20.0,
+                y: 0.0,
+                width: 18.0,
+                height: 10.0,
+                needs_leader: false,
+            }],
+            vec![caller_box(0)],
+            vec![ContCue {
+                target_page: 2,
+                direct_count: 1,
+                side: CueSide::Shareholder,
+                anchor_id: id(1),
+            }],
+            Vec::new(),
+        );
+        let error = page.check().expect_err("missing slot anchor");
+        assert_eq!(error.code(), ErrorCode::LayoutFailed);
+        assert!(error.message().contains("cue slot"));
+        assert!(error.message().contains("node #1"));
+    }
+
+    #[test]
+    fn check_rejects_a_link_whose_node_is_not_placed() {
+        let page = spec(
+            vec![placed(0)],
+            Vec::new(),
+            vec![caller_box(0), overflow_box(1)],
+            Vec::new(),
+            vec![NodePageLink {
+                node_id: id(1),
+                target_page: 2,
+            }],
+        );
+        let error = page.check().expect_err("missing link node");
+        assert_eq!(error.code(), ErrorCode::LayoutFailed);
+        assert!(error.message().contains("node page link"));
+        assert!(error.message().contains("node #1"));
     }
 }

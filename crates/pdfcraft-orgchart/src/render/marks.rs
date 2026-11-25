@@ -7,12 +7,12 @@ use krilla::surface::Surface;
 use krilla::text::Font;
 
 use super::paint::{
-    center_text, edge_color, fill_round, gray_byte, paint_stroke, pt, pt_f32, round_path, solid,
-    stroke_cue_box, stroke_round,
+    center_text, edge_color, fill_round, gray_byte, paint_stroke, path_or_layout_failed, pt,
+    pt_f32, round_path, solid, stroke_cue_box, stroke_round,
 };
 use super::{RoundBox, TextLine};
 use crate::captions::cont_cue_lines;
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::font::FontMetrics;
 use crate::page::{CueSlot, NodeBox, PageSpec, PlacedNode, PointMm};
 use crate::units::{
@@ -36,25 +36,38 @@ pub(super) fn draw_cues(
             .iter()
             .find(|slot| slot.anchor_id == cue.anchor_id && slot.side == cue.side)
         else {
-            continue;
+            return Err(Error::new(
+                ErrorCode::LayoutFailed,
+                format!(
+                    "continuation cue has no matching slot: node #{}",
+                    cue.anchor_id
+                ),
+            ));
         };
         let x = slot.x + origin_x;
         let y = slot.y + origin_y;
-        stroke_cue_box(surface, x, y, slot.width, slot.height);
+        stroke_cue_box(surface, x, y, slot.width, slot.height)?;
         if slot.needs_leader {
-            if let Some(anchor) = page
+            let Some(anchor) = page
                 .layout
                 .nodes
                 .iter()
                 .find(|node| node.id == slot.anchor_id)
-            {
-                let (from, to) = leader_segment(slot, anchor);
-                stroke_leader(
-                    surface,
-                    (from.x + origin_x, from.y + origin_y),
-                    (to.x + origin_x, to.y + origin_y),
-                );
-            }
+            else {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!(
+                        "leader has no matching anchor node: node #{}",
+                        slot.anchor_id
+                    ),
+                ));
+            };
+            let (from, to) = leader_segment(slot, anchor);
+            stroke_leader(
+                surface,
+                (from.x + origin_x, from.y + origin_y),
+                (to.x + origin_x, to.y + origin_y),
+            )?;
         }
         let (first, second) = cont_cue_lines(cue.target_page, cue.side);
         let text_y = y + CONT_CUE_PAD_MM;
@@ -109,7 +122,7 @@ pub(super) fn draw_node(
         node.height_mm,
         rgb::Color::new(byte, byte, byte),
         NODE_CORNER_RADIUS_MM,
-    );
+    )?;
     let width = if node.is_subject {
         SUBJECT_BORDER_PT
     } else {
@@ -126,20 +139,23 @@ pub(super) fn draw_node(
         pt_f32(width),
         dashed,
         NODE_CORNER_RADIUS_MM,
-    );
+    )?;
     let pad_y = if node.is_subject {
         SUBJECT_PADDING_Y_MM
     } else {
         PADDING_Y_MM
     };
-    if let Some(path) = round_path(x, y0, node.width_mm, node.height_mm, NODE_CORNER_RADIUS_MM) {
-        surface.push_clip_path(&path, &FillRule::NonZero);
-        let drawn = paint_node_lines(surface, node, x, y0 + pad_y, font, face);
-        surface.pop();
-        drawn
-    } else {
-        paint_node_lines(surface, node, x, y0 + pad_y, font, face)
-    }
+    let path = path_or_layout_failed(round_path(
+        x,
+        y0,
+        node.width_mm,
+        node.height_mm,
+        NODE_CORNER_RADIUS_MM,
+    ))?;
+    surface.push_clip_path(&path, &FillRule::NonZero);
+    let drawn = paint_node_lines(surface, node, x, y0 + pad_y, font, face);
+    surface.pop();
+    drawn
 }
 
 fn paint_node_lines(
@@ -234,13 +250,11 @@ fn leader_arrow_length_pt() -> f64 {
     ARROW_SIZE_PT * LEADER_ARROW_LENGTH_FACTOR
 }
 
-fn stroke_leader(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)) {
+fn stroke_leader(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)) -> Result<(), Error> {
     let mut path = PathBuilder::new();
     path.move_to(pt(from.0), pt(from.1));
     path.line_to(pt(to.0), pt(to.1));
-    let Some(path) = path.finish() else {
-        return;
-    };
+    let path = path_or_layout_failed(path.finish())?;
     surface.set_fill(None);
     surface.set_stroke(Some(paint_stroke(
         pt_f32(CONT_CUE_LINE_WIDTH_PT),
@@ -248,15 +262,19 @@ fn stroke_leader(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)) {
         edge_color(),
     )));
     surface.draw_path(&path);
-    fill_leader_arrow(surface, from, to);
+    fill_leader_arrow(surface, from, to)
 }
 
-fn fill_leader_arrow(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)) {
+fn fill_leader_arrow(
+    surface: &mut Surface<'_>,
+    from: (f64, f64),
+    to: (f64, f64),
+) -> Result<(), Error> {
     let dx = mm_to_pt(to.0 - from.0);
     let dy = mm_to_pt(to.1 - from.1);
     let len = (dx * dx + dy * dy).sqrt();
     if len < 0.01 {
-        return;
+        return Ok(());
     }
     let ux = dx / len;
     let uy = dy / len;
@@ -275,12 +293,11 @@ fn fill_leader_arrow(surface: &mut Surface<'_>, from: (f64, f64), to: (f64, f64)
     path.line_to(base_x + px, base_y + py);
     path.line_to(base_x - px, base_y - py);
     path.close();
-    let Some(path) = path.finish() else {
-        return;
-    };
+    let path = path_or_layout_failed(path.finish())?;
     surface.set_fill(Some(solid(edge_color())));
     surface.set_stroke(None);
     surface.draw_path(&path);
+    Ok(())
 }
 
 #[cfg(test)]
