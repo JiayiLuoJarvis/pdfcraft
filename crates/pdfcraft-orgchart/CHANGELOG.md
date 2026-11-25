@@ -15,8 +15,9 @@ cross-crate history.
   page link is missing from the placed layout, or when a path cannot be
   built. Valid charts are unchanged.
 - Layout now returns `LAYOUT_FAILED` when an edge endpoint is not placed,
-  a page box is missing from a non-empty `node_order`, or an attachment
-  cut has no page. Valid charts are unchanged.
+  a page box is missing from a non-empty `node_order`, an attachment cut
+  has no page, or a numbered continuation line lacks its cue slot. Valid
+  charts are unchanged.
 - Page boxes are collected in `NodeId` order, so overflow line fills and
   glyph ensuring no longer follow `HashMap` iteration.
 
