@@ -9,6 +9,10 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-25
+
+No public API change. Valid charts keep the same observable layout and copy.
+
 ### Fixed
 
 - Drawing now returns `LAYOUT_FAILED` when a continuation cue, leader, or

@@ -13,6 +13,15 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+## 2026-11-25
+
+### Fixed
+
+- `pdfcraft-orgchart` `0.3.2`. Render and layout gaps that used to skip
+  silently now return `LAYOUT_FAILED`, and page boxes are collected in
+  `NodeId` order. No public API change. Details in
+  [`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md).
+
 ## 2026-11-23
 
 ### Changed
