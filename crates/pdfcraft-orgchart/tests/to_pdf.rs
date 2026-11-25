@@ -1,18 +1,13 @@
 //! `Chart::to_pdf` writes a PDF whose text includes the role header.
 
-#![expect(
-    clippy::expect_used,
-    reason = "integration test: a panic is the failure report"
-)]
-
 use std::process::Command;
 
 use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
 
+mod common;
+
 fn hc_font() -> Option<Font> {
-    let path = std::env::var_os("PDFCRAFT_ORGCHART_FONT")
-        .or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
-    Some(Font::new(std::fs::read(path).expect("read orgchart font")).expect("font"))
+    common::env_font()
 }
 
 fn draw(request: ChartRequest, font: &Font) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
@@ -35,7 +30,7 @@ fn a_small_chart_starts_with_pdf_and_names_the_role() {
     };
     let pdf = match draw(request, &font) {
         Ok(pdf) => pdf,
-        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => return,
+        Err(error) if common::skip_missing_glyph(&error) => return,
         Err(error) => panic!("pdf: {error}"),
     };
     assert!(pdf.starts_with(b"%PDF"));
@@ -68,7 +63,7 @@ fn a_vertical_stub_prints_forty_percent() {
     };
     let pdf = match draw(request, &font) {
         Ok(pdf) => pdf,
-        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => return,
+        Err(error) if common::skip_missing_glyph(&error) => return,
         Err(error) => panic!("pdf: {error}"),
     };
     let mut path = std::env::temp_dir();
@@ -132,7 +127,7 @@ fn the_same_multipage_request_twice_yields_identical_bytes() {
     };
     let first = match chart.to_pdf(&font) {
         Ok(pdf) => pdf,
-        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => return,
+        Err(error) if common::skip_missing_glyph(&error) => return,
         Err(error) => panic!("pdf: {error}"),
     };
     let second = chart.to_pdf(&font).expect("second pdf");

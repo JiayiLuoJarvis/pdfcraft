@@ -13,20 +13,16 @@ use std::process::Command;
 
 use std::num::NonZeroUsize;
 
-use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node, NodeType};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Node, NodeType};
 
-fn hc_font() -> Option<Font> {
-    let path = std::env::var_os("PDFCRAFT_ORGCHART_FONT")
-        .or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
-    Some(Font::new(std::fs::read(path).expect("read orgchart font")).expect("font"))
-}
+mod common;
 
 fn pdf_of(request: &ChartRequest) -> Option<Vec<u8>> {
-    let font = hc_font()?;
+    let font = common::env_font()?;
     let chart = Chart::new(request.clone()).expect("chart");
     match chart.to_pdf(&font) {
         Ok(pdf) => Some(pdf),
-        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => None,
+        Err(error) if common::skip_missing_glyph(&error) => None,
         Err(error) => panic!("pdf: {error}"),
     }
 }

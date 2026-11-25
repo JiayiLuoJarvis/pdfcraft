@@ -5,12 +5,16 @@ use std::collections::BTreeSet;
 use super::test_support::{
     caller, chain, fake_pages, id_sets, node_id, plain_box, set_of, FakeEngine, FakeMeasurer,
 };
+use crate::captions::{other_investments_name, other_shareholders_name};
 use crate::content::build_display;
 use crate::font::{FallbackMeasurer, FontMetrics};
-use crate::graph::NodeId;
-use crate::page::{build_node_boxes, promote_to_page_subject, InboxNode, NodeBox, PageSpec};
+use crate::graph::{NodeId, NodeOrigin};
+use crate::page::{
+    build_node_boxes, overflow_box, promote_to_page_subject, InboxNode, NodeBox, PageSpec,
+};
 use crate::paginate::{paginate_request as paginate, paginate_request_with as paginate_with};
 use crate::units::PageGeometry;
+use crate::Chart;
 use crate::{ChartRequest, Edge, ErrorCode, Node};
 
 #[test]
@@ -71,7 +75,7 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
         .enumerate()
         .map(|(index, node)| plain_box(index, &node.id, &node.name, node.id == request.subject_id))
         .collect();
-    let Some(bytes) = hc_font() else {
+    let Some(bytes) = crate::test_font::env_font() else {
         return;
     };
     let mut font = FontMetrics::from_font(&bytes);
@@ -83,7 +87,7 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
         &mut font,
     ) {
         Ok(pages) => pages,
-        Err(error) if error.code() == ErrorCode::MissingGlyph => return,
+        Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
         Err(error) => panic!("pages: {error}"),
     };
     let root = node_id(&request, "root");
@@ -102,7 +106,7 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
     let mut again = FontMetrics::from_font(&bytes);
     let expected = match promote_to_page_subject(&source, 38.0, &mut again) {
         Ok(lines) => lines,
-        Err(error) if error.code() == ErrorCode::MissingGlyph => return,
+        Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
         Err(error) => panic!("promote: {error}"),
     };
     assert_eq!(promoted.lines, expected.lines);
@@ -111,8 +115,137 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
     assert_ne!(promoted.lines.len(), fallback.lines.len());
 }
 
-fn hc_font() -> Option<crate::Font> {
-    crate::test_font::env_font()
+fn split_production_request() -> ChartRequest {
+    let mut nodes = vec![Node::new("root", "主体公司")];
+    let mut edges = Vec::new();
+    let mut held = "root".to_owned();
+    for index in 0..16 {
+        let id = format!("a{index}");
+        nodes.push(Node {
+            legal_person: Some("法人".to_owned()),
+            ..Node::new(&id, format!("{}上层{index}", "甲".repeat(12)))
+        });
+        edges.push(Edge::new(&id, &held));
+        held = id;
+    }
+    for index in 0..12 {
+        let id = format!("v{index}");
+        nodes.push(Node::new(&id, format!("{}对外{index}", "乙".repeat(8))));
+        edges.push(Edge::new("root", &id));
+    }
+    ChartRequest::new("root", nodes, edges)
+}
+
+fn unpromoted_boxes(request: &ChartRequest, font: &crate::Font) -> Vec<NodeBox> {
+    let mut graph = crate::graph::prepare_graph(request).expect("graph");
+    crate::graph::recheck(&mut graph).expect("recheck");
+    let shown = crate::content::display_of(&graph);
+    let geometry = PageGeometry::portrait(graph.style.margin_mm);
+    let mut metrics = FontMetrics::from_font(font);
+    let inboxes: Vec<InboxNode<'_>> = graph
+        .nodes
+        .iter()
+        .zip(shown.nodes())
+        .map(|(node, content)| InboxNode {
+            id: node.id,
+            origin: node.origin.clone(),
+            lines: &content.lines,
+            is_company: crate::content::company_fill_rec(node),
+        })
+        .collect();
+    build_node_boxes(
+        &inboxes,
+        &mut metrics,
+        graph.style.node_width_mm,
+        graph.subject,
+        geometry.printable_height_mm(),
+    )
+    .expect("boxes")
+}
+
+fn overflow_caption(origin: &NodeOrigin, lines: &[crate::page::WrappedLine]) -> Option<String> {
+    let NodeOrigin::Overflow { moved_count, .. } = origin else {
+        return None;
+    };
+    let joined: String = lines.iter().map(|line| line.text.as_str()).collect();
+    if joined.contains("投资") {
+        Some(other_investments_name(*moved_count))
+    } else {
+        Some(other_shareholders_name(*moved_count))
+    }
+}
+
+#[test]
+fn to_pdf_wraps_promoted_and_overflow_boxes_like_the_helpers() {
+    let Some(font) = crate::test_font::env_font() else {
+        return;
+    };
+    let request = split_production_request();
+    let chart = Chart::new(request.clone()).expect("chart");
+    let pdf = match chart.to_pdf(&font) {
+        Ok(pdf) => pdf,
+        Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
+        Err(error) => panic!("pdf: {error}"),
+    };
+    assert!(pdf.starts_with(b"%PDF"), "production to_pdf writes a PDF");
+    let pages = match chart.pages(&font) {
+        Ok(pages) => pages,
+        Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
+        Err(error) => panic!("pages: {error}"),
+    };
+    let subject = chart.subject_id();
+    let node_width = request.style.node_width_mm;
+    let sources = unpromoted_boxes(&request, &font);
+    let mut saw_promoted = false;
+    let mut saw_overflow = false;
+    for page in &pages {
+        for box_ in &page.boxes {
+            if box_.is_subject && box_.id != subject {
+                let source = sources
+                    .iter()
+                    .find(|source| source.id == box_.id)
+                    .expect("promoted source");
+                let mut metrics = FontMetrics::from_font(&font);
+                let expected = match promote_to_page_subject(source, node_width, &mut metrics) {
+                    Ok(expected) => expected,
+                    Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
+                    Err(error) => panic!("promote: {error}"),
+                };
+                assert_eq!(box_.lines, expected.lines, "promoted wrap {}", box_.id);
+                saw_promoted = true;
+            }
+            if let Some(name) = overflow_caption(&box_.origin, &box_.lines) {
+                let mut metrics = FontMetrics::from_font(&font);
+                let expected = match overflow_box(
+                    box_.id,
+                    box_.origin.clone(),
+                    &name,
+                    &mut metrics,
+                    node_width,
+                ) {
+                    Ok(expected) => expected,
+                    Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
+                    Err(error) => panic!("overflow: {error}"),
+                };
+                assert!(
+                    box_.lines.len() >= 2 && expected.lines.len() >= 2,
+                    "overflow reserved line"
+                );
+                assert_eq!(
+                    &box_.lines[..box_.lines.len() - 1],
+                    &expected.lines[..expected.lines.len() - 1],
+                    "overflow wrap {}",
+                    box_.id
+                );
+                saw_overflow = true;
+            }
+        }
+    }
+    assert!(
+        saw_promoted || saw_overflow,
+        "fixture must promote an annex subject or create overflow; pages={}",
+        pages.len()
+    );
 }
 
 #[test]

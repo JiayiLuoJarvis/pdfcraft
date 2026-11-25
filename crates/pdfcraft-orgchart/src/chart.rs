@@ -71,6 +71,18 @@ impl Chart {
         draw(self.graph.clone(), font)
     }
 
+    /// Same pagination [`Chart::to_pdf`] uses, before krilla writes bytes.
+    #[cfg(test)]
+    pub(crate) fn pages(&self, font: &Font) -> Result<Vec<crate::page::PageSpec>, Error> {
+        Ok(paginate_chart(self.graph.clone(), font)?.0)
+    }
+
+    /// Arena id of the compiled subject. Test helpers compare annex promotion against it.
+    #[cfg(test)]
+    pub(crate) fn subject_id(&self) -> graph::NodeId {
+        self.graph.subject
+    }
+
     /// `{subject name}股权架构图`. The name is copied as stored.
     #[must_use]
     pub fn title(&self) -> String {
@@ -84,32 +96,33 @@ impl Chart {
     }
 }
 
-fn draw(graph: graph::Graph, font: &Font) -> Result<Vec<u8>, Error> {
+fn paginate_chart(
+    graph: graph::Graph,
+    font: &Font,
+) -> Result<(Vec<crate::page::PageSpec>, FontMetrics), Error> {
     let shown = content::display_of(&graph);
     let margin = graph.style.margin_mm;
     let node_width = graph.style.node_width_mm;
     let geometry = crate::units::PageGeometry::portrait(margin);
     let mut metrics = FontMetrics::from_font(font);
-    let boxes = {
-        let inboxes: Vec<InboxNode<'_>> = graph
-            .nodes
-            .iter()
-            .zip(shown.nodes())
-            .map(|(node, content)| InboxNode {
-                id: node.id,
-                origin: node.origin.clone(),
-                lines: &content.lines,
-                is_company: content::company_fill_rec(node),
-            })
-            .collect();
-        build_node_boxes(
-            &inboxes,
-            &mut metrics,
-            node_width,
-            graph.subject,
-            geometry.printable_height_mm(),
-        )?
-    };
+    let inboxes: Vec<InboxNode<'_>> = graph
+        .nodes
+        .iter()
+        .zip(shown.nodes())
+        .map(|(node, content)| InboxNode {
+            id: node.id,
+            origin: node.origin.clone(),
+            lines: &content.lines,
+            is_company: content::company_fill_rec(node),
+        })
+        .collect();
+    let boxes = build_node_boxes(
+        &inboxes,
+        &mut metrics,
+        node_width,
+        graph.subject,
+        geometry.printable_height_mm(),
+    )?;
     let pages = paginate::paginate(graph, &boxes, geometry, &mut metrics)?;
     for page in &pages {
         Measurer::ensure_glyphs(&mut metrics, &page.main_title)?;
@@ -122,6 +135,11 @@ fn draw(graph: graph::Graph, font: &Font) -> Result<Vec<u8>, Error> {
     for index in 1..=count {
         Measurer::ensure_glyphs(&mut metrics, &captions::footer(index, count))?;
     }
+    Ok((pages, metrics))
+}
+
+fn draw(graph: graph::Graph, font: &Font) -> Result<Vec<u8>, Error> {
+    let (pages, mut metrics) = paginate_chart(graph, font)?;
     render::render(&pages, &mut metrics)
 }
 

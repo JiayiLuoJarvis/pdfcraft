@@ -1,16 +1,11 @@
 //! Node strokes are black. Edge strokes and edge-arrow fills are byte 51.
 
-#![expect(
-    clippy::expect_used,
-    reason = "integration test: a panic is the failure report"
-)]
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Node};
 
-use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
+mod common;
 
-fn hc_font() -> Option<Font> {
-    let path = std::env::var_os("PDFCRAFT_ORGCHART_FONT")
-        .or_else(|| std::env::var_os("PDFCRAFT_CJK_FONT"))?;
-    Some(Font::new(std::fs::read(path).expect("read orgchart font")).expect("font"))
+fn hc_font() -> Option<pdfcraft_orgchart::Font> {
+    common::env_font()
 }
 
 fn byte_channel(component: f64) -> u8 {
@@ -91,7 +86,7 @@ fn node_strokes_are_black_and_edge_strokes_are_byte_51() {
     };
     let pdf = match Chart::new(request).and_then(|chart| chart.to_pdf(&font)) {
         Ok(pdf) => pdf,
-        Err(error) if error.code() == pdfcraft_orgchart::ErrorCode::MissingGlyph => return,
+        Err(error) if common::skip_missing_glyph(&error) => return,
         Err(error) => panic!("pdf: {error}"),
     };
     let doc = lopdf::Document::load_mem(&pdf).expect("pdf");
