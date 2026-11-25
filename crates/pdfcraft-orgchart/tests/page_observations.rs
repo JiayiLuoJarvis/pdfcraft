@@ -205,11 +205,11 @@ fn one_portrait_page_has_a4_mediabox_role_text_and_no_links() {
     assert!((height - 297.0 * 72.0 / 25.4).abs() < 0.5, "{height}");
     assert_eq!(annotation_count(&doc, pages[0]), 0);
     let body = text_of(&pdf, "pdfcraft-orgchart-one-page.pdf");
-    assert!(body.contains("股权架构图"), "{body}");
-    assert!(body.contains("主体公司"), "{body}");
-    assert!(body.contains("第 1 / 1 頁"), "{body}");
-    assert!(!body.contains("详见"), "{body}");
-    assert!(!body.contains("附件"), "{body}");
+    assert!(common::pdftotext_has(&body, "股权架构图"), "{body}");
+    assert!(common::pdftotext_has(&body, "主体公司"), "{body}");
+    assert!(common::pdftotext_has(&body, "第 1 / 1 頁"), "{body}");
+    assert!(!common::pdftotext_has(&body, "详见"), "{body}");
+    assert!(!common::pdftotext_has(&body, "附件"), "{body}");
 }
 
 #[test]

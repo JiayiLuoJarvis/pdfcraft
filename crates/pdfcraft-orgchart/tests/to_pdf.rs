@@ -16,14 +16,14 @@ fn draw(request: ChartRequest, font: &Font) -> Result<Vec<u8>, pdfcraft_orgchart
 
 #[test]
 fn a_small_chart_starts_with_pdf_and_names_the_role() {
+    // Equity-only cone so the page title is `股权架构图` (structure-spec §11).
     let request = ChartRequest::new(
         "root",
         vec![
             Node::new("holder", "甲股东"),
             Node::new("root", "主体公司"),
-            Node::new("invest", "乙投资"),
         ],
-        vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
+        vec![Edge::new("holder", "root")],
     );
     let Some(font) = hc_font() else {
         return;
@@ -45,8 +45,8 @@ fn a_small_chart_starts_with_pdf_and_names_the_role() {
         .expect("pdftotext is required");
     assert!(text.status.success(), "pdftotext failed");
     let body = String::from_utf8_lossy(&text.stdout);
-    assert!(body.contains("股权架构图"), "{body}");
-    assert!(body.contains("主体公司"), "{body}");
+    assert!(common::pdftotext_has(&body, "股权架构图"), "{body}");
+    assert!(common::pdftotext_has(&body, "主体公司"), "{body}");
 }
 
 #[test]
