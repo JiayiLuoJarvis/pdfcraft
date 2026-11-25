@@ -29,7 +29,7 @@ jobs:
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
           toolchain: "1.98"
           components: rustfmt, clippy
@@ -61,7 +61,7 @@ jobs:
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
           toolchain: "1.98"
 
@@ -103,7 +103,7 @@ jobs:
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
           toolchain: "1.98"
           components: rustfmt, clippy
@@ -214,7 +214,7 @@ jobs:
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
           toolchain: "1.98"
 
@@ -237,7 +237,7 @@ jobs:
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
       - name: Install Rust (nightly)
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
           toolchain: nightly
 
@@ -283,7 +283,7 @@ jobs:
       # v1 of dtolnay/rust-toolchain points at this commit as of 2026-10-09.
       # Later moves of that tag do not change this pin.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
           toolchain: "1.98"
 
