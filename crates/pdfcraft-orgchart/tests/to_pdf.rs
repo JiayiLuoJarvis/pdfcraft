@@ -10,6 +10,12 @@ fn hc_font() -> Option<Font> {
     common::env_font()
 }
 
+/// `pdftotext -layout` often drops ASCII spaces between CJK runs.
+fn pdftotext_has(body: &str, needle: &str) -> bool {
+    let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    compact(body).contains(&compact(needle))
+}
+
 fn draw(request: ChartRequest, font: &Font) -> Result<Vec<u8>, pdfcraft_orgchart::Error> {
     Chart::new(request)?.to_pdf(font)
 }
@@ -45,8 +51,8 @@ fn a_small_chart_starts_with_pdf_and_names_the_role() {
         .expect("pdftotext is required");
     assert!(text.status.success(), "pdftotext failed");
     let body = String::from_utf8_lossy(&text.stdout);
-    assert!(common::pdftotext_has(&body, "股权架构图"), "{body}");
-    assert!(common::pdftotext_has(&body, "主体公司"), "{body}");
+    assert!(pdftotext_has(&body, "股权架构图"), "{body}");
+    assert!(pdftotext_has(&body, "主体公司"), "{body}");
 }
 
 #[test]

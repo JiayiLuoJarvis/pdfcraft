@@ -41,6 +41,12 @@ fn text_of(pdf: &[u8], name: &str) -> String {
     String::from_utf8_lossy(&text.stdout).into_owned()
 }
 
+/// `pdftotext -layout` often drops ASCII spaces between CJK runs.
+fn pdftotext_has(body: &str, needle: &str) -> bool {
+    let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    compact(body).contains(&compact(needle))
+}
+
 fn real(object: &lopdf::Object) -> f64 {
     match object {
         lopdf::Object::Integer(value) => f64::from(i32::try_from(*value).unwrap_or(i32::MAX)),
@@ -205,11 +211,11 @@ fn one_portrait_page_has_a4_mediabox_role_text_and_no_links() {
     assert!((height - 297.0 * 72.0 / 25.4).abs() < 0.5, "{height}");
     assert_eq!(annotation_count(&doc, pages[0]), 0);
     let body = text_of(&pdf, "pdfcraft-orgchart-one-page.pdf");
-    assert!(common::pdftotext_has(&body, "股权架构图"), "{body}");
-    assert!(common::pdftotext_has(&body, "主体公司"), "{body}");
-    assert!(common::pdftotext_has(&body, "第 1 / 1 頁"), "{body}");
-    assert!(!common::pdftotext_has(&body, "详见"), "{body}");
-    assert!(!common::pdftotext_has(&body, "附件"), "{body}");
+    assert!(pdftotext_has(&body, "股权架构图"), "{body}");
+    assert!(pdftotext_has(&body, "主体公司"), "{body}");
+    assert!(pdftotext_has(&body, "第 1 / 1 頁"), "{body}");
+    assert!(!pdftotext_has(&body, "详见"), "{body}");
+    assert!(!pdftotext_has(&body, "附件"), "{body}");
 }
 
 #[test]
