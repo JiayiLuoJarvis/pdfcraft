@@ -12,7 +12,11 @@ fn hc_font() -> Option<Font> {
 
 /// `pdftotext -layout` often drops ASCII spaces between CJK runs.
 fn pdftotext_has(body: &str, needle: &str) -> bool {
-    let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    let compact = |text: &str| {
+        text.chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>()
+    };
     compact(body).contains(&compact(needle))
 }
 
@@ -25,10 +29,7 @@ fn a_small_chart_starts_with_pdf_and_names_the_role() {
     // Equity-only cone so the page title is `股权架构图` (structure-spec §11).
     let request = ChartRequest::new(
         "root",
-        vec![
-            Node::new("holder", "甲股东"),
-            Node::new("root", "主体公司"),
-        ],
+        vec![Node::new("holder", "甲股东"), Node::new("root", "主体公司")],
         vec![Edge::new("holder", "root")],
     );
     let Some(font) = hc_font() else {

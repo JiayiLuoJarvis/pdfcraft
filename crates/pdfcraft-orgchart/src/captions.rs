@@ -70,20 +70,14 @@ pub(crate) fn whole_chart_subtitle(subject_name: &str, has_investments: bool) ->
 }
 
 /// Shareholder-side subtitle.
-///
-/// The page index is accepted so overview and continuation pages share one call
-/// shape. The subtitle does not change with that index.
 #[must_use]
-pub(crate) fn shareholder_overview(subject_name: &str, _index: usize) -> String {
+pub(crate) fn shareholder_overview(subject_name: &str) -> String {
     whole_chart_subtitle(subject_name, false)
 }
 
 /// Investment-side subtitle.
-///
-/// The page index is accepted so overview and continuation pages share one call
-/// shape. The subtitle does not change with that index.
 #[must_use]
-pub(crate) fn investment_overview(subject_name: &str, _index: usize) -> String {
+pub(crate) fn investment_overview(subject_name: &str) -> String {
     format!("{subject_name} → 对外投资")
 }
 
@@ -97,7 +91,7 @@ pub(crate) fn shareholder_page_titles(subject_name: &str, index: usize) -> (Stri
     } else {
         continuation_title(index, subject_name)
     };
-    (main, shareholder_overview(subject_name, index))
+    (main, shareholder_overview(subject_name))
 }
 
 /// Main title and subtitle for an investment overview or continuation page.
@@ -110,7 +104,7 @@ pub(crate) fn investment_page_titles(subject_name: &str, index: usize) -> (Strin
     } else {
         continuation_title(index, subject_name)
     };
-    (main, investment_overview(subject_name, index))
+    (main, investment_overview(subject_name))
 }
 
 /// Shareholder cut subtitle. Omits the percent when `ratio` is `None`.

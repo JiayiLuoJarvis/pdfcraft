@@ -44,14 +44,7 @@ pub(crate) fn validate(request: &ChartRequest) -> Result<Graph, Error> {
         .with_subject(ErrorSubject::Field("subject_id")));
     };
     let edges = check_edges(request, &by_protocol_id)?;
-    let mut graph = Graph::from_records(
-        nodes,
-        edges,
-        subject,
-        request.subject_id.clone(),
-        request.style,
-        request.max_nodes,
-    );
+    let mut graph = Graph::from_records(nodes, edges, subject, request.style, request.max_nodes);
     check_structure(&mut graph)?;
     Ok(graph)
 }
@@ -361,8 +354,8 @@ fn detect_cycle(graph: &Graph) -> Result<(), Error> {
                 }
                 match state[target] {
                     Visit::Visiting => {
-                        let from_id = NodeId::from_index(node);
-                        let to_id = NodeId::from_index(target);
+                        let from_id = graph.nodes[node].id;
+                        let to_id = graph.nodes[target].id;
                         return Err(Error::new(
                             ErrorCode::CycleDetected,
                             format!("cycle at {}->{}", graph.label(from_id), graph.label(to_id)),
@@ -436,18 +429,20 @@ fn require_dual_cone(graph: &Graph) -> Result<(), Error> {
         labels.sort_unstable();
         let subject = orphans
             .iter()
-            .filter_map(|id| graph.node_subject(*id))
-            .min_by_key(|subject| match subject {
-                ErrorSubject::Node { index, .. } => *index,
-                ErrorSubject::Edge { .. } | ErrorSubject::Field(_) | ErrorSubject::Character(_) => {
-                    usize::MAX
-                }
-            });
+            .filter_map(|id| match graph.node_subject(*id) {
+                Some(ErrorSubject::Node { index, id }) => Some((index, id)),
+                Some(
+                    ErrorSubject::Edge { .. } | ErrorSubject::Field(_) | ErrorSubject::Character(_),
+                )
+                | None => None,
+            })
+            .min_by_key(|(index, _)| *index)
+            .map(|(index, id)| ErrorSubject::Node { index, id });
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
             format!(
                 "nodes not connected to subject={}: {}",
-                graph.subject_protocol_id,
+                graph.label(graph.subject),
                 labels.join(",")
             ),
         )
@@ -479,7 +474,7 @@ fn require_dual_cone(graph: &Graph) -> Result<(), Error> {
 
 fn reject_ambiguous_ratios(graph: &mut Graph) -> Result<(), Error> {
     for index in 0..graph.nodes.len() {
-        let id = NodeId::from_index(index);
+        let id = graph.nodes[index].id;
         if graph.nodes[index].ratio.is_some() || id == graph.subject {
             continue;
         }
@@ -547,7 +542,6 @@ mod subject_tests {
             nodes,
             edges,
             NodeId::from_index(0),
-            "root".to_owned(),
             ChartStyle::default(),
             100,
         )

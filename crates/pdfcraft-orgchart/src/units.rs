@@ -2,6 +2,7 @@
 
 pub(crate) const PAGE_WIDTH_MM: f64 = 210.0;
 pub(crate) const PAGE_HEIGHT_MM: f64 = 297.0;
+#[cfg(test)]
 pub(crate) const NODE_WIDTH_MM: f64 = 38.0;
 pub(crate) const SUBJECT_WIDTH_FACTOR: f64 = 2.55;
 pub(crate) const SUBJECT_PADDING_Y_MM: f64 = 3.5;

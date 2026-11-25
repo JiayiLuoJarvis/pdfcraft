@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::graph::NodeId;
 use crate::page::EdgeRef;
 
-const MISSING_ORDER: usize = usize::MAX;
-
 type RankGroups = BTreeMap<i32, Vec<Vec<NodeId>>>;
 type RankParents = BTreeMap<i32, Vec<NodeId>>;
+type OrderKey = (bool, Option<usize>);
+type SiblingBucketKey = (OrderKey, NodeId);
 
 pub(crate) fn use_family_columns(
     subject_rank: Option<i32>,
@@ -16,6 +16,11 @@ pub(crate) fn use_family_columns(
     group_count: usize,
 ) -> bool {
     subject_rank.is_some_and(|rank| layer_rank != rank && group_count >= 2)
+}
+
+fn order_key(order_index: &HashMap<NodeId, usize>, id: NodeId) -> OrderKey {
+    let index = order_index.get(&id).copied();
+    (index.is_none(), index)
 }
 
 pub(crate) fn sibling_groups(
@@ -28,19 +33,16 @@ pub(crate) fn sibling_groups(
     if layer_ids.is_empty() {
         return Vec::new();
     }
-    let mut buckets: BTreeMap<(usize, NodeId), Vec<NodeId>> = BTreeMap::new();
+    let mut buckets: BTreeMap<SiblingBucketKey, Vec<NodeId>> = BTreeMap::new();
     for node_id in layer_ids {
         let parent = layout_parent(*node_id, edges, ranks, order_index, subject_rank);
-        let key = (
-            order_index.get(&parent).copied().unwrap_or(MISSING_ORDER),
-            parent,
-        );
+        let key = (order_key(order_index, parent), parent);
         buckets.entry(key).or_default().push(*node_id);
     }
     buckets
         .into_values()
         .map(|mut group| {
-            group.sort_by_key(|id| order_index.get(id).copied().unwrap_or(MISSING_ORDER));
+            group.sort_by_key(|id| order_key(order_index, *id));
             group
         })
         .collect()
@@ -113,14 +115,14 @@ fn partition_outer_leaf(
         .copied()
         .filter(|id| is_outer(*id, edges, ranks, subject_rank, &page))
         .collect();
-    outer.sort_by_key(|id| order_index.get(id).copied().unwrap_or(MISSING_ORDER));
+    outer.sort_by_key(|id| order_key(order_index, *id));
     let outer_set: HashSet<NodeId> = outer.iter().copied().collect();
     let mut leaf: Vec<NodeId> = group_ids
         .iter()
         .copied()
         .filter(|id| !outer_set.contains(id))
         .collect();
-    leaf.sort_by_key(|id| order_index.get(id).copied().unwrap_or(MISSING_ORDER));
+    leaf.sort_by_key(|id| order_key(order_index, *id));
     (outer, leaf)
 }
 
@@ -157,7 +159,7 @@ fn layout_parent(
     subject_rank: Option<i32>,
 ) -> NodeId {
     let my_rank = *super::map_get(ranks, &node_id, "page node has a hop rank");
-    let order_of = |id: &NodeId| order_index.get(id).copied().unwrap_or(MISSING_ORDER);
+    let order_of = |id: &NodeId| order_key(order_index, *id);
     if let Some(subject_rank) = subject_rank {
         if my_rank < subject_rank {
             let mut downs: Vec<NodeId> = edges

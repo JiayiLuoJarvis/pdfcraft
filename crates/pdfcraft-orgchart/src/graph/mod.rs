@@ -5,7 +5,7 @@ mod check;
 mod fold;
 mod ratio;
 
-pub(crate) use arena::{Graph, NodeId, NodeOrigin, NodeRec};
+pub(crate) use arena::{EdgeId, Graph, NodeId, NodeOrigin, NodeRec};
 #[cfg(test)]
 pub(crate) use check::validate;
 pub(crate) use check::{investment_ids, recheck, shareholder_ids};

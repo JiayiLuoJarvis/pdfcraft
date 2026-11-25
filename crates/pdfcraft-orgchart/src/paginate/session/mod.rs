@@ -4,8 +4,6 @@ mod assemble;
 mod fit;
 mod titles;
 
-use assemble::investment_id_refs;
-
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::cues::{direct_count, finalize_pages, PendingCue, PendingLink, UnnumberedPage};
@@ -19,12 +17,12 @@ use crate::captions::{
 use crate::content::{self, RatioFact};
 use crate::error::{Error, ErrorCode};
 use crate::font::Measurer;
-use crate::graph::{Graph, NodeId};
+use crate::graph::{EdgeId, Graph, NodeId};
 use crate::layout::{LayoutEngine, WrappedEngine};
 use crate::page::{EdgeRef, LayoutResult, NodeBox, PageSpec};
 #[cfg(test)]
 use crate::request::ChartRequest;
-use crate::units::{within, GeometryKey, PageGeometry, NODE_WIDTH_MM};
+use crate::units::{within, GeometryKey, PageGeometry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Side {
@@ -185,10 +183,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
                 whole_chart_subtitle(&subject_name, has_investments),
             ),
         };
-        let node_width = boxes
-            .values()
-            .find(|box_| !box_.is_subject)
-            .map_or(NODE_WIDTH_MM, |box_| box_.width_mm);
+        let node_width = graph.style.node_width_mm;
         let node_order: Vec<NodeId> = graph.nodes.iter().map(|node| node.id).collect();
         let order_index = node_order
             .iter()
@@ -256,8 +251,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
             });
         }
         if shareholder_nonempty && offset < pages.len() {
-            let refs = investment_id_refs(&investment.direct_ids, &pages[offset].boxes);
-            let count = direct_count(&pages[offset].boxes, &refs).max(1);
+            let count = direct_count(&pages[offset].boxes, &investment.direct_ids).max(1);
             cues.push(PendingCue {
                 source_index: 0,
                 target_index: offset,
@@ -468,7 +462,10 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
 
     fn sorted(&self, ids: Vec<NodeId>) -> Vec<NodeId> {
         let mut owned = ids;
-        owned.sort_by_key(|id| self.order_index.get(id).copied().unwrap_or(usize::MAX));
+        owned.sort_by_key(|id| {
+            let index = self.order_index.get(id).copied();
+            (index.is_none(), index)
+        });
         owned.dedup();
         owned
     }
@@ -511,12 +508,12 @@ fn has_fork(edges: &[EdgeRef]) -> bool {
     false
 }
 
-fn task_key(task: &AttachmentTask) -> (NodeId, BTreeSet<usize>, TaskKind) {
+fn task_key(task: &AttachmentTask) -> (NodeId, BTreeSet<EdgeId>, TaskKind) {
     (task.subject_id, task.edge_ids.clone(), task.kind)
 }
 
 fn task_index(
-    first_by_task: &HashMap<(NodeId, BTreeSet<usize>, TaskKind), usize>,
+    first_by_task: &HashMap<(NodeId, BTreeSet<EdgeId>, TaskKind), usize>,
     task: &AttachmentTask,
     source_index: usize,
 ) -> Result<usize, Error> {

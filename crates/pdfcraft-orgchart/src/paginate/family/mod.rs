@@ -6,11 +6,12 @@ mod inline;
 mod score;
 mod solve;
 
+use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap};
 use std::hash::Hash;
 
 use crate::error::{Error, ErrorCode};
-use crate::graph::NodeId;
+use crate::graph::{EdgeId, NodeId};
 use crate::units::PageGeometry;
 
 const MAX_SEARCH_EXPANSIONS: usize = 8192;
@@ -44,7 +45,7 @@ impl ChildKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct FamilyEdge {
-    pub(crate) id: usize,
+    pub(crate) id: EdgeId,
     pub(crate) parent_id: NodeId,
     pub(crate) child_id: NodeId,
 }
@@ -70,7 +71,7 @@ pub(crate) struct LayoutEvaluation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AttachmentTask {
     pub(crate) subject_id: NodeId,
-    pub(crate) edge_ids: BTreeSet<usize>,
+    pub(crate) edge_ids: BTreeSet<EdgeId>,
     pub(crate) kind: TaskKind,
 }
 
@@ -165,7 +166,7 @@ enum PlacedChild {
     Leaf,
     Inlined {
         child_id: NodeId,
-        edge_ids: BTreeSet<usize>,
+        edge_ids: BTreeSet<EdgeId>,
         node_ids: BTreeSet<NodeId>,
     },
 }
@@ -174,7 +175,7 @@ enum PlacedChild {
 struct HeadPlan {
     base_node_ids: BTreeSet<NodeId>,
     placed: Vec<PlacedChild>,
-    units: Vec<(NodeId, BTreeSet<usize>, BTreeSet<NodeId>)>,
+    units: Vec<(NodeId, BTreeSet<EdgeId>, BTreeSet<NodeId>)>,
     overflow: Option<OverflowCut>,
     direct_layout: Option<LayoutEvaluation>,
     direct_degraded: bool,
@@ -197,7 +198,7 @@ struct OverflowScore {
     degraded_pages: usize,
     sparse_flag: usize,
     sparse_util: f64,
-    front_retention: Vec<i32>,
+    front_retention: Vec<Reverse<usize>>,
     utilization_spread: f64,
     input_order: Vec<usize>,
 }
@@ -221,7 +222,7 @@ struct Context<'a, O: PageOracle> {
     expansions: usize,
     budget_exhausted: bool,
     edge_by_id: Vec<Option<FamilyEdge>>,
-    outgoing: HashMap<NodeId, Vec<usize>>,
+    outgoing: HashMap<NodeId, Vec<EdgeId>>,
     order_index: HashMap<NodeId, usize>,
     layout_cache: HashMap<PageDraft, LayoutEvaluation>,
     direct_cache: HashMap<PageDraft, DirectFit>,
@@ -249,12 +250,17 @@ pub(crate) fn search_family_pages(
 
 impl<'a, O: PageOracle> Context<'a, O> {
     fn new(graph: &'a FamilyGraph, oracle: &'a mut O, max_expansions: usize) -> Self {
-        let mut outgoing: HashMap<NodeId, Vec<usize>> = HashMap::new();
-        let max_id = graph.edges.iter().map(|edge| edge.id).max().unwrap_or(0);
+        let mut outgoing: HashMap<NodeId, Vec<EdgeId>> = HashMap::new();
+        let max_id = graph
+            .edges
+            .iter()
+            .map(|edge| edge.id.index())
+            .max()
+            .unwrap_or(0);
         let mut edge_by_id = vec![None; max_id.saturating_add(1)];
         for edge in &graph.edges {
             outgoing.entry(edge.parent_id).or_default().push(edge.id);
-            if let Some(slot) = edge_by_id.get_mut(edge.id) {
+            if let Some(slot) = edge_by_id.get_mut(edge.id.index()) {
                 *slot = Some(edge.clone());
             }
         }
@@ -337,7 +343,7 @@ impl<'a, O: PageOracle> Context<'a, O> {
         ids
     }
 
-    fn direct_children(&self, parent_id: NodeId, allowed: &BTreeSet<usize>) -> Vec<NodeId> {
+    fn direct_children(&self, parent_id: NodeId, allowed: &BTreeSet<EdgeId>) -> Vec<NodeId> {
         let mut children = Vec::new();
         if let Some(edges) = self.outgoing.get(&parent_id) {
             for edge_id in edges {
@@ -355,7 +361,7 @@ impl<'a, O: PageOracle> Context<'a, O> {
         children
     }
 
-    fn direct_edges(&self, parent_id: NodeId, allowed: &BTreeSet<usize>) -> BTreeSet<usize> {
+    fn direct_edges(&self, parent_id: NodeId, allowed: &BTreeSet<EdgeId>) -> BTreeSet<EdgeId> {
         self.outgoing
             .get(&parent_id)
             .into_iter()
@@ -365,7 +371,7 @@ impl<'a, O: PageOracle> Context<'a, O> {
             .collect()
     }
 
-    fn reachable_edges(&self, subject_id: NodeId, allowed: &BTreeSet<usize>) -> BTreeSet<usize> {
+    fn reachable_edges(&self, subject_id: NodeId, allowed: &BTreeSet<EdgeId>) -> BTreeSet<EdgeId> {
         let mut found = BTreeSet::new();
         let mut stack = vec![subject_id];
         let mut seen = BTreeSet::new();
@@ -386,20 +392,20 @@ impl<'a, O: PageOracle> Context<'a, O> {
         found
     }
 
-    fn nodes_below(&self, edge_ids: &BTreeSet<usize>) -> BTreeSet<NodeId> {
+    fn nodes_below(&self, edge_ids: &BTreeSet<EdgeId>) -> BTreeSet<NodeId> {
         edge_ids
             .iter()
             .map(|edge_id| self.family_edge(*edge_id).child_id)
             .collect()
     }
 
-    fn family_edge(&self, edge_id: usize) -> &FamilyEdge {
+    fn family_edge(&self, edge_id: EdgeId) -> &FamilyEdge {
         #[expect(
             clippy::expect_used,
             reason = "edge_id comes from this family graph's outgoing or task edge set"
         )]
         self.edge_by_id
-            .get(edge_id)
+            .get(edge_id.index())
             .and_then(Option::as_ref)
             .expect("family graph contains this edge")
     }

@@ -260,7 +260,7 @@ impl<O: PageOracle> Context<'_, O> {
             sparse_util,
             front_retention: run
                 .iter()
-                .map(|page| -i32::try_from(page.retained_count).unwrap_or(i32::MAX))
+                .map(|page| std::cmp::Reverse(page.retained_count))
                 .collect(),
             utilization_spread: spread,
             input_order,

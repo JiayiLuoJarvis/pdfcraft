@@ -16,6 +16,12 @@ use crate::request::{ChartStyle, NodeType};
 pub(crate) struct NodeId(usize);
 
 impl NodeId {
+    #[cfg(not(test))]
+    pub(super) fn from_index(index: usize) -> Self {
+        Self(index)
+    }
+
+    #[cfg(test)]
     pub(crate) fn from_index(index: usize) -> Self {
         Self(index)
     }
@@ -36,6 +42,12 @@ impl fmt::Display for NodeId {
 pub(crate) struct EdgeId(usize);
 
 impl EdgeId {
+    #[cfg(not(test))]
+    pub(super) fn from_index(index: usize) -> Self {
+        Self(index)
+    }
+
+    #[cfg(test)]
     pub(crate) fn from_index(index: usize) -> Self {
         Self(index)
     }
@@ -147,7 +159,6 @@ pub(crate) struct Graph {
     pub(super) incoming: Vec<Vec<EdgeId>>,
     pub(super) out_nodes: Vec<Vec<NodeId>>,
     pub(crate) subject: NodeId,
-    pub(crate) subject_protocol_id: String,
     pub(crate) style: ChartStyle,
     pub(crate) max_nodes: usize,
     /// Reachability answers for layout-parent selection. Same lifetime as the graph.
@@ -162,7 +173,6 @@ impl Graph {
         nodes: Vec<NodeRec>,
         edges: Vec<EdgeRec>,
         subject: NodeId,
-        subject_protocol_id: String,
         style: ChartStyle,
         max_nodes: usize,
     ) -> Self {
@@ -182,7 +192,6 @@ impl Graph {
             incoming,
             out_nodes,
             subject,
-            subject_protocol_id,
             style,
             max_nodes,
             reach_cache: HashMap::new(),

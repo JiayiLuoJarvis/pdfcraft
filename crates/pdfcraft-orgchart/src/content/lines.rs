@@ -284,7 +284,7 @@ pub(crate) fn facts_of(graph: &mut Graph) -> Result<Vec<RatioFact>, Error> {
     let mut facts = Vec::new();
     let count = graph.nodes.len();
     for index in 0..count {
-        let id = NodeId::from_index(index);
+        let id = graph.nodes[index].id;
         let role = role_of(id, graph.subject, &shareholders, &investments);
         if role == DisplayRole::Subject {
             continue;

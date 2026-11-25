@@ -7,16 +7,16 @@ use super::{
     TaskKind,
 };
 use crate::error::Error;
-use crate::graph::NodeId;
+use crate::graph::{EdgeId, NodeId};
 
 impl<O: PageOracle> Context<'_, O> {
-    pub(super) fn chain_path(&self, task: &AttachmentTask) -> Option<(Vec<NodeId>, Vec<usize>)> {
+    pub(super) fn chain_path(&self, task: &AttachmentTask) -> Option<(Vec<NodeId>, Vec<EdgeId>)> {
         let mut node_ids = vec![task.subject_id];
         let mut edge_ids = Vec::new();
         let mut remaining = task.edge_ids.clone();
         let mut current = task.subject_id;
         while !remaining.is_empty() {
-            let outgoing: Vec<usize> = self
+            let outgoing: Vec<EdgeId> = self
                 .outgoing
                 .get(&current)
                 .into_iter()
@@ -40,7 +40,7 @@ impl<O: PageOracle> Context<'_, O> {
     pub(super) fn solve_chain(
         &mut self,
         task: &AttachmentTask,
-        chain: &(Vec<NodeId>, Vec<usize>),
+        chain: &(Vec<NodeId>, Vec<EdgeId>),
         seen_nodes: &BTreeSet<NodeId>,
         baseline: SearchPlan,
     ) -> Result<SearchPlan, Error> {

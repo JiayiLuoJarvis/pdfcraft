@@ -420,7 +420,10 @@ fn require_numbered_line_fits(
             .iter()
             .find(|slot| slot.anchor_id == cue.anchor_id && slot.side == cue.side)
         else {
-            continue;
+            return Err(Error::new(
+                ErrorCode::LayoutFailed,
+                format!("continuation cue has no slot for node #{}", cue.anchor_id),
+            ));
         };
         let (first, second) = cont_cue_lines(cue.target_page, cue.side);
         let text = measurer

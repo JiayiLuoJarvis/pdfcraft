@@ -34,4 +34,3 @@ pub(crate) fn skip_missing_glyph(error: &Error) -> bool {
         false
     }
 }
-

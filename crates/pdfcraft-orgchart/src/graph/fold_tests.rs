@@ -507,3 +507,42 @@ fn prepare_does_not_apply_max_nodes_to_the_folded_request() {
         }
     }
 }
+
+#[test]
+fn diamond_stand_in_clears_when_parent_is_folded() {
+    let mut stand_in = company("p", "占位", Some(50.0));
+    stand_in.folded_holders_of = Some("q".to_owned());
+    let mut request = ChartRequest::new(
+        "root",
+        vec![
+            company("a", "甲", Some(60.0)),
+            company("c", "丙", Some(30.0)),
+            company("q", "乙", Some(10.0)),
+            stand_in,
+            company("root", "主体", None),
+        ],
+        vec![
+            holding("a", "root", 60.0),
+            holding("c", "root", 30.0),
+            holding("q", "root", 10.0),
+            holding("p", "q", 50.0),
+            holding("p", "a", 50.0),
+        ],
+    );
+    request.top_n = Some(top_n(2));
+    let mut folded = prepare_graph(&request).expect("fold");
+    recheck(&mut folded).expect("cleared stand-in stays valid");
+    assert!(folded.id_of("q").is_none(), "q is folded away");
+    let origin = &node_keyed(&folded, "p").origin;
+    match origin {
+        NodeOrigin::Caller {
+            stands_in_for, id, ..
+        } => {
+            assert_eq!(id, "p");
+            assert_eq!(stands_in_for, &None);
+        }
+        NodeOrigin::FoldedHolders { .. } | NodeOrigin::Overflow { .. } => {
+            panic!("p should remain a caller, got {origin:?}");
+        }
+    }
+}

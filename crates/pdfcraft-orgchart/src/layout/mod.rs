@@ -20,6 +20,7 @@ use route::route_edges;
 use crate::error::Error;
 use crate::page::{EdgeRef, LayoutResult, NodeBox};
 type FamilyBands = Vec<Vec<Vec<NodeId>>>;
+pub(super) type BoxById<'a> = HashMap<NodeId, &'a NodeBox>;
 
 use crate::units::{within, FAMILY_GAP_MM, LAYER_SPACING_MM, NODE_SPACING_MM, ROW_GAP_MM};
 
@@ -101,8 +102,7 @@ impl LayoutEngine for WrappedEngine {
         let Some(prepared) = prepare(boxes, edges, node_order)? else {
             return Ok(LayoutResult::empty());
         };
-        let box_by_id: HashMap<NodeId, NodeBox> =
-            boxes.iter().map(|box_| (box_.id, box_.clone())).collect();
+        let box_by_id = boxes_by_id(boxes);
         let mut child_widths = HashMap::new();
         let spacing = spacing_of(node_width_mm, row_gap_mm, printable_width_mm);
         let plans = build_plans(&prepared, cols, &box_by_id, &mut child_widths, spacing)?;
@@ -130,8 +130,7 @@ impl LayoutEngine for WrappedEngine {
                 max_nondirect_rows: 0,
             });
         };
-        let box_by_id: HashMap<NodeId, NodeBox> =
-            boxes.iter().map(|box_| (box_.id, box_.clone())).collect();
+        let box_by_id = boxes_by_id(boxes);
         let spacing = spacing_of(node_width_mm, ROW_GAP_MM, printable_width_mm);
         let plans = structure_plans(&prepared, cols, &box_by_id, spacing)?;
         let mut row_counts = Vec::new();
@@ -153,6 +152,10 @@ impl LayoutEngine for WrappedEngine {
             max_nondirect_rows: nondirect.iter().copied().max().unwrap_or(0),
         })
     }
+}
+
+fn boxes_by_id(boxes: &[NodeBox]) -> BoxById<'_> {
+    boxes.iter().map(|box_| (box_.id, box_)).collect()
 }
 
 fn spacing_of(node_width_mm: f64, row_gap_mm: f64, printable_width_mm: f64) -> Spacing {
@@ -186,7 +189,7 @@ fn is_subject_direct_group(
 fn build_plans(
     prepared: &ranks::Prepared,
     cols: usize,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     child_widths: &mut HashMap<NodeId, f64>,
     spacing: Spacing,
 ) -> Result<Vec<LayerPlan>, Error> {
@@ -204,7 +207,7 @@ fn build_plans(
 fn structure_plans(
     prepared: &ranks::Prepared,
     cols: usize,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<Vec<LayerPlan>, Error> {
     let safe_cols = cols.max(1);
@@ -275,7 +278,7 @@ fn family_bands_within_width(
     groups: &[Vec<NodeId>],
     prepared: &ranks::Prepared,
     safe_cols: usize,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(FamilyBands, f64), Error> {
     let mut best_bands = Vec::new();
@@ -304,7 +307,7 @@ fn fixup_shallow_gaps(
     plans: &mut [LayerPlan],
     child_widths: &mut HashMap<NodeId, f64>,
     subject_rank: Option<i32>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(), Error> {
     let mut order: Vec<usize> = (0..plans.len()).collect();

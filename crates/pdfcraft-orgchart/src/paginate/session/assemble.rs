@@ -109,7 +109,7 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
                 (from_node, to_node)
             };
             edges.push(FamilyEdge {
-                id: edge.id.index(),
+                id: edge.id,
                 parent_id,
                 child_id,
             });
@@ -136,11 +136,4 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
             person_ids,
         }
     }
-}
-
-pub(super) fn investment_id_refs(ids: &[NodeId], boxes: &[NodeBox]) -> Vec<NodeId> {
-    ids.iter()
-        .copied()
-        .filter(|id| boxes.iter().any(|box_| box_.id == *id))
-        .collect()
 }

@@ -13,8 +13,8 @@ use super::{RoundBox, TextLine};
 use crate::error::{Error, ErrorCode};
 use crate::font::{FontMetrics, GlyphUse};
 use crate::units::{
-    mm_to_pt, ARROW_SIZE_PT, CONT_CUE_CORNER_MM, CONT_CUE_DASH_OFF_PT, CONT_CUE_DASH_ON_PT,
-    CONT_CUE_LINE_WIDTH_PT, EDGE_GRAY, INK_BYTE,
+    mm_to_pt, pt_to_mm, ARROW_SIZE_PT, CONT_CUE_CORNER_MM, CONT_CUE_DASH_OFF_PT,
+    CONT_CUE_DASH_ON_PT, CONT_CUE_LINE_WIDTH_PT, EDGE_GRAY, INK_BYTE,
 };
 
 pub(super) fn pt(mm: f64) -> f32 {
@@ -68,9 +68,15 @@ pub(super) fn center_text(
     if text.is_empty() {
         return Ok(());
     }
-    let text_width = font.string_width_mm(text, size_pt)?;
+    let glyphs = font.glyph_run(text)?;
+    let units: f64 = glyphs
+        .iter()
+        .map(|glyph| f64::from(glyph.advance_units))
+        .sum();
+    let text_width = pt_to_mm(units / font.units_per_em() * size_pt);
     let x = centered_x(left_mm, width_mm, text_width);
-    draw_text(surface, text, font, face, size_pt, x, y_mm)
+    paint_run(surface, text, &glyphs, font, face, size_pt, (x, y_mm));
+    Ok(())
 }
 
 pub(super) fn draw_text(
@@ -86,19 +92,31 @@ pub(super) fn draw_text(
         return Ok(());
     }
     let glyphs = font.glyph_run(text)?;
-    let drawn = krilla_glyphs(&glyphs, text, font.units_per_em());
-    let baseline = y_mm + font.ascent_mm(size_pt);
+    paint_run(surface, text, &glyphs, font, face, size_pt, (x_mm, y_mm));
+    Ok(())
+}
+
+fn paint_run(
+    surface: &mut Surface<'_>,
+    text: &str,
+    glyphs: &[GlyphUse],
+    font: &FontMetrics,
+    face: &Font,
+    size_pt: f64,
+    origin_mm: (f64, f64),
+) {
+    let drawn = krilla_glyphs(glyphs, text, font.units_per_em());
+    let baseline = origin_mm.1 + font.ascent_mm(size_pt);
     surface.set_fill(Some(solid(rgb::Color::new(0, 0, 0))));
     surface.set_stroke(None);
     surface.draw_glyphs(
-        Point::from_xy(pt(x_mm), pt(baseline)),
+        Point::from_xy(pt(origin_mm.0), pt(baseline)),
         &drawn,
         face.clone(),
         text,
         pt_f32(size_pt),
         false,
     );
-    Ok(())
 }
 
 fn krilla_glyphs(glyphs: &[GlyphUse], text: &str, upem: f64) -> Vec<KrillaGlyph> {

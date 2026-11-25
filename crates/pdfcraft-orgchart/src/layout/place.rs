@@ -3,8 +3,9 @@
 use crate::graph::NodeId;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use super::BoxById;
 use crate::error::{Error, ErrorCode};
-use crate::page::{NodeBox, PlacedNode};
+use crate::page::PlacedNode;
 use crate::units::FIT_EPSILON_MM;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,11 +54,6 @@ pub(crate) struct Spacing {
 }
 
 struct ParentSlot {
-    #[expect(
-        dead_code,
-        reason = "slot keeps its parent id; layout reads offsets only"
-    )]
-    node_id: NodeId,
     offset_x_mm: f64,
     slot_width_mm: f64,
 }
@@ -80,7 +76,7 @@ enum ChildFamilyFit {
 
 pub(crate) fn place_layers(
     plans: &[LayerPlan],
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     child_family_width_by_parent: &HashMap<NodeId, f64>,
     spacing: Spacing,
 ) -> Result<HashMap<NodeId, PlacedNode>, Error> {
@@ -113,7 +109,7 @@ pub(crate) fn measured_layer_width_mm(
     bands_per_group: &[Vec<Vec<NodeId>>],
     schedules_per_group: &[Vec<RowGapSchedule>],
     family_columns: bool,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<f64, Error> {
     if family_columns {
@@ -137,7 +133,7 @@ pub(crate) fn measured_layer_width_mm(
 pub(crate) fn group_band_width_mm(
     band: &[Vec<NodeId>],
     schedules: &[RowGapSchedule],
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<f64, Error> {
     if band.is_empty() {
@@ -154,7 +150,7 @@ pub(crate) fn resolve_row_schedules(
     bands_per_group: &[Vec<Vec<NodeId>>],
     family_columns: bool,
     child_family_width_by_parent: &HashMap<NodeId, f64>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<Vec<Vec<RowGapSchedule>>, Error> {
     let fit_of = |node_id: NodeId| -> ChildFamilyFit {
@@ -232,7 +228,7 @@ pub(crate) fn dense_schedules(bands: &[Vec<Vec<NodeId>>]) -> Vec<Vec<RowGapSched
 
 fn row_span_mm(
     row_ids: &[NodeId],
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     schedule: &RowGapSchedule,
     spacing: Spacing,
 ) -> Result<f64, Error> {
@@ -259,7 +255,7 @@ fn sibling_gap_mm(gap: SiblingGap, spacing: Spacing) -> f64 {
     }
 }
 
-fn box_width_mm(node_id: NodeId, box_by_id: &HashMap<NodeId, NodeBox>) -> f64 {
+fn box_width_mm(node_id: NodeId, box_by_id: &BoxById<'_>) -> f64 {
     super::map_get(box_by_id, &node_id, "placed node has a measured box").width_mm
 }
 
@@ -270,11 +266,7 @@ fn node_ids_in_plan(plan: &LayerPlan) -> HashSet<NodeId> {
         .collect()
 }
 
-fn parent_center_mm(
-    parent_id: NodeId,
-    xs: &HashMap<NodeId, f64>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
-) -> f64 {
+fn parent_center_mm(parent_id: NodeId, xs: &HashMap<NodeId, f64>, box_by_id: &BoxById<'_>) -> f64 {
     let width = box_width_mm(parent_id, box_by_id);
     *super::map_get(xs, &parent_id, "parent already has an x") + width / 2.0
 }
@@ -290,7 +282,7 @@ fn assign_xs(
     plans: &[LayerPlan],
     slot_geometries: &[Option<PlanSlotGeometry>],
     content_width: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<HashMap<NodeId, f64>, Error> {
     let mut xs = HashMap::new();
@@ -329,26 +321,48 @@ fn assign_xs(
     Ok(xs)
 }
 
+enum XsStrategy<'a> {
+    Family,
+    Slotted(&'a PlanSlotGeometry),
+    AlignParent,
+    Centered,
+}
+
+fn xs_strategy<'a>(
+    plan: &LayerPlan,
+    geometry: Option<&'a PlanSlotGeometry>,
+    xs: &HashMap<NodeId, f64>,
+) -> XsStrategy<'a> {
+    if plan.family_columns {
+        XsStrategy::Family
+    } else if let Some(geometry) = geometry {
+        XsStrategy::Slotted(geometry)
+    } else if can_align_single_group(plan, xs) {
+        XsStrategy::AlignParent
+    } else {
+        XsStrategy::Centered
+    }
+}
+
 fn place_plan_xs(
     plan: &LayerPlan,
     geometry: Option<&PlanSlotGeometry>,
     xs: &mut HashMap<NodeId, f64>,
     content_width: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(), Error> {
-    if plan.family_columns {
-        place_family_xs(plan, xs, content_width, box_by_id, spacing)?;
-        return Ok(());
+    match xs_strategy(plan, geometry, xs) {
+        XsStrategy::Family => place_family_xs(plan, xs, content_width, box_by_id, spacing),
+        XsStrategy::Slotted(geometry) => {
+            place_slotted_plan_xs(plan, geometry, xs, content_width, box_by_id);
+            Ok(())
+        }
+        XsStrategy::AlignParent => place_aligned_single_group(plan, xs, box_by_id, spacing),
+        XsStrategy::Centered => {
+            place_plan_layer_centered(plan, xs, content_width, box_by_id, spacing)
+        }
     }
-    if let Some(geometry) = geometry {
-        place_slotted_plan_xs(plan, geometry, xs, content_width, box_by_id);
-        return Ok(());
-    }
-    if try_align_single_group(plan, xs, box_by_id, spacing)? {
-        return Ok(());
-    }
-    place_plan_layer_centered(plan, xs, content_width, box_by_id, spacing)
 }
 
 fn place_plan_fallback(
@@ -356,7 +370,7 @@ fn place_plan_fallback(
     geometry: Option<&PlanSlotGeometry>,
     xs: &mut HashMap<NodeId, f64>,
     content_width: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(), Error> {
     if let Some(geometry) = geometry {
@@ -367,21 +381,23 @@ fn place_plan_fallback(
     }
 }
 
-fn try_align_single_group(
-    plan: &LayerPlan,
-    xs: &mut HashMap<NodeId, f64>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
-    spacing: Spacing,
-) -> Result<bool, Error> {
+fn can_align_single_group(plan: &LayerPlan, xs: &HashMap<NodeId, f64>) -> bool {
     if plan.bands_per_group.len() != 1 || plan.group_parents.len() != 1 {
-        return Ok(false);
+        return false;
     }
     let parent_id = &plan.group_parents[0];
     let plan_ids = node_ids_in_plan(plan);
-    if !xs.contains_key(parent_id) || plan_ids.contains(parent_id) {
-        return Ok(false);
-    }
-    let parent_center = parent_center_mm(*parent_id, xs, box_by_id);
+    xs.contains_key(parent_id) && !plan_ids.contains(parent_id)
+}
+
+fn place_aligned_single_group(
+    plan: &LayerPlan,
+    xs: &mut HashMap<NodeId, f64>,
+    box_by_id: &BoxById<'_>,
+    spacing: Spacing,
+) -> Result<(), Error> {
+    let parent_id = plan.group_parents[0];
+    let parent_center = parent_center_mm(parent_id, xs, box_by_id);
     for (row_ids, schedule) in plan.bands_per_group[0].iter().zip(&plan.row_schedules[0]) {
         let width = row_span_mm(row_ids, box_by_id, schedule, spacing)?;
         write_row_xs(
@@ -393,7 +409,7 @@ fn try_align_single_group(
             spacing,
         )?;
     }
-    Ok(true)
+    Ok(())
 }
 
 fn write_row_xs(
@@ -401,7 +417,7 @@ fn write_row_xs(
     row_ids: &[NodeId],
     schedule: &RowGapSchedule,
     start_x: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(), Error> {
     if schedule.gaps.len() != row_ids.len().saturating_sub(1) {
@@ -424,7 +440,7 @@ fn write_row_xs(
 fn parent_slot_geometry(
     plan: &LayerPlan,
     child_family_width_by_parent: &HashMap<NodeId, f64>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Option<PlanSlotGeometry> {
     if plan.family_columns {
@@ -460,7 +476,7 @@ fn parent_slot_geometry(
 fn slotted_row(
     row_ids: &[NodeId],
     child_family_width_by_parent: &HashMap<NodeId, f64>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> SlottedRow {
     let mut slots = Vec::new();
@@ -471,7 +487,6 @@ fn slotted_row(
             .get(node_id)
             .map_or(box_width, |child| child.max(box_width));
         slots.push(ParentSlot {
-            node_id: *node_id,
             offset_x_mm: cursor,
             slot_width_mm: slot_width,
         });
@@ -491,7 +506,7 @@ fn place_slotted_plan_xs(
     geometry: &PlanSlotGeometry,
     xs: &mut HashMap<NodeId, f64>,
     content_width: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
 ) {
     let mut anchor = content_width / 2.0;
     if plan.bands_per_group.len() == 1 && plan.group_parents.len() == 1 {
@@ -519,7 +534,7 @@ fn place_plan_layer_centered(
     plan: &LayerPlan,
     xs: &mut HashMap<NodeId, f64>,
     content_width: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(), Error> {
     let layer_offset_x = (content_width - plan.layer_width_mm) / 2.0;
@@ -535,7 +550,7 @@ fn place_plan_layer_centered(
 
 fn family_widths(
     plan: &LayerPlan,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<Vec<f64>, Error> {
     plan.bands_per_group
@@ -573,7 +588,7 @@ fn place_family_xs(
     plan: &LayerPlan,
     xs: &mut HashMap<NodeId, f64>,
     content_width: f64,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(), Error> {
     let layer_offset_x = (content_width - plan.layer_width_mm) / 2.0;
@@ -664,7 +679,7 @@ fn place_family_xs(
 fn assign_ys(
     plans: &[LayerPlan],
     xs: &HashMap<NodeId, f64>,
-    box_by_id: &HashMap<NodeId, NodeBox>,
+    box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> HashMap<NodeId, PlacedNode> {
     let mut laid_out = HashMap::new();

@@ -291,7 +291,6 @@ fn folded_arena(graph: &Graph, holders: &HashSet<NodeId>, folds: &[Fold]) -> Res
         nodes,
         edges,
         remap(graph.subject)?,
-        graph.subject_protocol_id.clone(),
         graph.style,
         graph.max_nodes,
     ))
@@ -329,7 +328,12 @@ fn carried_nodes(
                 parent: remap(graph, &new_id, *parent)?,
                 count: *count,
             },
-            NodeOrigin::Overflow { .. } => continue,
+            NodeOrigin::Overflow { .. } => {
+                return Err(Error::new(
+                    ErrorCode::LayoutFailed,
+                    format!("fold kept overflow node {}", graph.label(node.id)),
+                ));
+            }
         };
         nodes.push(NodeRec {
             id: NodeId::from_index(nodes.len()),

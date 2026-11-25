@@ -43,7 +43,11 @@ fn text_of(pdf: &[u8], name: &str) -> String {
 
 /// `pdftotext -layout` often drops ASCII spaces between CJK runs.
 fn pdftotext_has(body: &str, needle: &str) -> bool {
-    let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    let compact = |text: &str| {
+        text.chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>()
+    };
     compact(body).contains(&compact(needle))
 }
 

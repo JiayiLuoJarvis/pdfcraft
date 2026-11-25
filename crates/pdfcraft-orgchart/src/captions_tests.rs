@@ -10,10 +10,8 @@ use crate::captions::{
 
 #[test]
 fn overview_subtitles_have_no_continuation_suffix() {
-    assert_eq!(shareholder_overview("主体", 1), "各股东/合伙人 → 主体");
-    assert_eq!(shareholder_overview("主体", 2), "各股东/合伙人 → 主体");
-    assert_eq!(investment_overview("主体", 1), "主体 → 对外投资");
-    assert_eq!(investment_overview("主体", 3), "主体 → 对外投资");
+    assert_eq!(shareholder_overview("主体"), "各股东/合伙人 → 主体");
+    assert_eq!(investment_overview("主体"), "主体 → 对外投资");
 }
 
 #[test]
@@ -91,10 +89,8 @@ fn cue_lines_and_other_and_footer() {
 
 #[test]
 fn overview_and_page_titles_follow_role_prefixes() {
-    assert_eq!(shareholder_overview("主体", 1), "各股东/合伙人 → 主体");
-    assert_eq!(shareholder_overview("主体", 2), "各股东/合伙人 → 主体");
-    assert_eq!(investment_overview("主体", 1), "主体 → 对外投资");
-    assert_eq!(investment_overview("主体", 3), "主体 → 对外投资");
+    assert_eq!(shareholder_overview("主体"), "各股东/合伙人 → 主体");
+    assert_eq!(investment_overview("主体"), "主体 → 对外投资");
     assert_eq!(
         shareholder_page_titles("主体", 1),
         (

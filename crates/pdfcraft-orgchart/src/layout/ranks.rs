@@ -91,11 +91,12 @@ fn assign_hop_ranks(
     let mut values: Vec<i32> = hops.values().copied().collect();
     values.sort_unstable();
     values.dedup();
-    let remap: HashMap<i32, i32> = values
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| (value, i32::try_from(index).unwrap_or(i32::MAX)))
-        .collect();
+    let mut remap = HashMap::new();
+    for (index, value) in values.into_iter().enumerate() {
+        let rank = i32::try_from(index)
+            .map_err(|_| Error::new(ErrorCode::LayoutFailed, "too many hop ranks"))?;
+        remap.insert(value, rank);
+    }
     Ok(ordered_ids
         .iter()
         .copied()
