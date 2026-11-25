@@ -36,6 +36,9 @@ pub(crate) fn skip_missing_glyph(error: &Error) -> bool {
 }
 
 /// `pdftotext -layout` often drops ASCII spaces between CJK runs. Compare without them.
+///
+/// Shared by several integration crates; some binaries do not call it.
+#[allow(dead_code, reason = "not every integration binary uses pdftotext checks")]
 #[must_use]
 pub(crate) fn pdftotext_has(body: &str, needle: &str) -> bool {
     let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
