@@ -14,6 +14,8 @@ cross-crate history.
 - Drawing now returns `LAYOUT_FAILED` when a continuation cue, leader, or
   page link is missing from the placed layout, or when a path cannot be
   built. Valid charts are unchanged.
+- Page boxes are collected in `NodeId` order, so overflow line fills and
+  glyph ensuring no longer follow `HashMap` iteration.
 
 ## [0.3.1] - 2026-11-04
 

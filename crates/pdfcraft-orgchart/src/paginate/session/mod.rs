@@ -24,7 +24,7 @@ use crate::layout::{LayoutEngine, WrappedEngine};
 use crate::page::{EdgeRef, LayoutResult, NodeBox, PageSpec};
 #[cfg(test)]
 use crate::request::ChartRequest;
-use crate::units::{within, PageGeometry, NODE_WIDTH_MM};
+use crate::units::{within, GeometryKey, PageGeometry, NODE_WIDTH_MM};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Side {
@@ -55,7 +55,7 @@ struct PageKey {
     overview_cue: bool,
 }
 
-type GeometryCache = HashMap<(PageKey, (u64, u64, u64, u64, u64)), PackedLayout>;
+type GeometryCache = HashMap<(PageKey, GeometryKey), PackedLayout>;
 
 #[derive(Clone)]
 struct PackedLayout {
@@ -425,7 +425,8 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
                 ),
             ));
         }
-        let boxes: Vec<NodeBox> = packed.boxes.values().cloned().collect();
+        let mut boxes: Vec<NodeBox> = packed.boxes.values().cloned().collect();
+        boxes.sort_by_key(|box_| box_.id);
         let ids: HashSet<NodeId> = packed.boxes.keys().copied().collect();
         let ratio_facts = self
             .ratio_facts

@@ -187,13 +187,14 @@ fn exact_sum(values: &[f64]) -> f64 {
 }
 
 fn nonzero(value: f64) -> bool {
-    value.to_bits() != 0.0_f64.to_bits() && value.to_bits() != (-0.0_f64).to_bits()
+    value != 0.0
 }
 
 fn same_float(left: f64, right: f64) -> bool {
-    left.to_bits() == right.to_bits()
-        || (left.to_bits() == 0.0_f64.to_bits() && right.to_bits() == (-0.0_f64).to_bits())
-        || (left.to_bits() == (-0.0_f64).to_bits() && right.to_bits() == 0.0_f64.to_bits())
+    #[expect(clippy::float_cmp, reason = "Shewchuk exact sum")]
+    {
+        left == right
+    }
 }
 
 fn folded_arena(graph: &Graph, holders: &HashSet<NodeId>, folds: &[Fold]) -> Result<Graph, Error> {

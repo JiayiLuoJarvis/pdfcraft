@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::{Error, ErrorCode};
 use crate::page::{EdgeRef, LaidOutEdge, PlacedNode, PointMm};
 use crate::units::{
-    BUS_ENDPOINT_CLEARANCE_MM, BUS_STAGGER_MM, BUS_Y_EPS_MM, NODE_SPACING_MM, ROW_GAP_MM,
+    FiniteMm, BUS_ENDPOINT_CLEARANCE_MM, BUS_STAGGER_MM, BUS_Y_EPS_MM, NODE_SPACING_MM, ROW_GAP_MM,
     SHAREHOLDER_STUB_MIN_MM,
 };
 
@@ -22,13 +22,24 @@ struct BusKey {
     endpoint_id: NodeId,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct BusSpan {
     key: BusKey,
     y_mm: f64,
     x0_mm: f64,
     x1_mm: f64,
 }
+
+impl PartialEq for BusSpan {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+            && FiniteMm::new(self.y_mm) == FiniteMm::new(other.y_mm)
+            && FiniteMm::new(self.x0_mm) == FiniteMm::new(other.x0_mm)
+            && FiniteMm::new(self.x1_mm) == FiniteMm::new(other.x1_mm)
+    }
+}
+
+impl Eq for BusSpan {}
 
 impl BusSpan {
     fn overlaps_x(&self, x0_mm: f64, x1_mm: f64) -> bool {
@@ -81,7 +92,7 @@ struct RouteCaches {
     drawn_trunk_from: HashSet<NodeId>,
     occupied: OccupiedBuses,
     multi_in_spine_x: HashMap<NodeId, f64>,
-    multi_in_row_bottom: HashMap<NodeId, HashMap<u64, f64>>,
+    multi_in_row_bottom: HashMap<NodeId, HashMap<FiniteMm, f64>>,
     multi_in_bottom_row_y: HashMap<NodeId, f64>,
 }
 
@@ -279,9 +290,9 @@ fn route_multi_in(
         .multi_in_row_bottom
         .entry(edge.to_id)
         .or_insert_with(|| {
-            let mut grouped: HashMap<u64, f64> = HashMap::new();
+            let mut grouped: HashMap<FiniteMm, f64> = HashMap::new();
             for source in &sources {
-                let key = source.y.to_bits();
+                let key = FiniteMm::or_zero(source.y);
                 let bottom = source.y + source.height;
                 grouped
                     .entry(key)
@@ -331,7 +342,7 @@ fn route_multi_in(
         route_side_to_spine(src, shared_spine, bus_y, trunk_x)
     } else {
         let use_spine = multi_row && src.y < bottom_row_y - 0.01;
-        let row_bottom = row_bottoms[&src.y.to_bits()];
+        let row_bottom = row_bottoms[&FiniteMm::or_zero(src.y)];
         route_down_to_bus(&DownBus {
             src,
             src_bottom,

@@ -91,6 +91,49 @@ pub(crate) fn node_height_limit_mm(printable_height_mm: f64) -> f64 {
     (printable_height_mm - LAYER_SPACING_MM) / 2.0
 }
 
+/// Finite millimetre quantity that can be a map key.
+///
+/// Construction rejects non-finite values. Equality and hash use the bit
+/// pattern, matching prior `f64::to_bits` keys without exposing them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct FiniteMm(u64);
+
+impl FiniteMm {
+    /// Canonical finite zero. Same bits as `0.0_f64`.
+    pub(crate) const ZERO: Self = Self(0);
+
+    /// `None` when `value` is NaN or infinite.
+    #[must_use]
+    pub(crate) fn new(value: f64) -> Option<Self> {
+        value.is_finite().then_some(Self(value.to_bits()))
+    }
+
+    /// Finite zero when `value` is not finite.
+    #[must_use]
+    pub(crate) fn or_zero(value: f64) -> Self {
+        Self::new(value).unwrap_or(Self::ZERO)
+    }
+}
+
+/// Portrait versus landscape of an A4-derived page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PageOrientation {
+    /// Width is at most height.
+    Portrait,
+    /// Width is greater than height.
+    Landscape,
+}
+
+/// Geometry cache identity: orientation plus margin. Header and footer come
+/// from the page constructors and are not part of the key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct GeometryKey {
+    /// Portrait or landscape of this page.
+    orientation: PageOrientation,
+    /// Page margin in millimetres.
+    margin: FiniteMm,
+}
+
 /// A4 page. Landscape swaps the page edges and keeps the margin and bands.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[expect(
@@ -156,16 +199,23 @@ impl PageGeometry {
         self.printable_height_mm() * ELASTIC_HEIGHT_RATIO
     }
 
-    /// Bit pattern of the page size. Equal geometries share a layout cache entry.
+    /// Portrait when width is at most height.
     #[must_use]
-    pub(crate) fn cache_key(self) -> (u64, u64, u64, u64, u64) {
-        (
-            self.page_width_mm.to_bits(),
-            self.page_height_mm.to_bits(),
-            self.margin_mm.to_bits(),
-            self.header_height_mm.to_bits(),
-            self.footer_height_mm.to_bits(),
-        )
+    pub(crate) fn orientation(self) -> PageOrientation {
+        if self.page_width_mm <= self.page_height_mm {
+            PageOrientation::Portrait
+        } else {
+            PageOrientation::Landscape
+        }
+    }
+
+    /// Orientation and margin. Equal keys share a layout cache entry.
+    #[must_use]
+    pub(crate) fn cache_key(self) -> GeometryKey {
+        GeometryKey {
+            orientation: self.orientation(),
+            margin: FiniteMm::or_zero(self.margin_mm),
+        }
     }
 
     /// How many ordinary boxes fit on one row.
@@ -202,7 +252,9 @@ impl Default for PageGeometry {
 
 #[cfg(test)]
 mod tests {
-    use super::{PageGeometry, NODE_SPACING_MM, NODE_WIDTH_MM};
+    use super::{
+        PageGeometry, PageOrientation, HEADER_HEIGHT_MM, MARGIN_MM, NODE_SPACING_MM, NODE_WIDTH_MM,
+    };
 
     #[test]
     fn default_portrait_fits_four_columns() {
@@ -233,5 +285,22 @@ mod tests {
     fn a_non_positive_pitch_is_one_column() {
         assert_eq!(PageGeometry::default().max_cols(-NODE_SPACING_MM), 1);
         assert_eq!(PageGeometry::default().max_cols(-NODE_SPACING_MM - 1.0), 1);
+    }
+
+    #[test]
+    fn cache_key_is_orientation_and_margin() {
+        let portrait = PageGeometry::portrait(MARGIN_MM);
+        assert_eq!(portrait.cache_key(), PageGeometry::default().cache_key());
+        assert_eq!(portrait.orientation(), PageOrientation::Portrait);
+        let landscape = portrait.landscape();
+        assert_eq!(landscape.orientation(), PageOrientation::Landscape);
+        assert_ne!(portrait.cache_key(), landscape.cache_key());
+        let wider_margin = PageGeometry::portrait(10.0);
+        assert_ne!(portrait.cache_key(), wider_margin.cache_key());
+        let different_header = PageGeometry {
+            header_height_mm: HEADER_HEIGHT_MM + 1.0,
+            ..portrait
+        };
+        assert_eq!(portrait.cache_key(), different_header.cache_key());
     }
 }
