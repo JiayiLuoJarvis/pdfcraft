@@ -106,6 +106,10 @@ Ranking for that parent skips the stand-in.
 | `node_width_mm` | 38 | `[20, 80]` (`MIN_NODE_WIDTH_MM`..=`MAX_NODE_WIDTH_MM`) |
 | `margin_mm` | 8 | `(0, 40]` (`MAX_MARGIN_MM`) |
 
+The page subject (including a promoted annex subject) is wider:
+`min(node_width_mm * 3.0, 120)` mm. That cap is independent of
+`MAX_NODE_WIDTH_MM`.
+
 `top_n` must be in `1..=max_nodes`. `top_n == max_nodes` is legal.
 `max_nodes` must be in `1..=ChartRequest::MAX_NODES`.
 

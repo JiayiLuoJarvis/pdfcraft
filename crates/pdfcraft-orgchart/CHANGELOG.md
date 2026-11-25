@@ -9,6 +9,12 @@ cross-crate history.
 
 ## [Unreleased]
 
+### Changed
+
+- Page-subject boxes (chart root and promoted annex subjects) are wider:
+  `min(node_width_mm * 3.0, 120)` mm. Previously `min(node_width_mm * 2.55, 80)`,
+  reusing `ChartStyle::MAX_NODE_WIDTH_MM`. Ordinary node width range is unchanged.
+
 ## [0.3.2] - 2026-11-25
 
 No public API change. Valid charts keep the same observable layout and copy.

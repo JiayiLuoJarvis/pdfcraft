@@ -13,6 +13,12 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
+### Changed
+
+- `pdfcraft-orgchart`: page-subject box width is now `min(node_width × 3.0, 120)` mm
+  (was capped at 80 via the ordinary-node max). Details in
+  [`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md).
+
 ## 2026-11-25
 
 ### Fixed

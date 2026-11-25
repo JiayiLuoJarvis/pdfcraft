@@ -376,7 +376,7 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 
 ### 9.2 节点框
 
-- 普通宽 = `style.node_width_mm`。缺省 `38` mm。主体宽 = `min(width * 2.55, 80)` mm。
+- 普通宽 = `style.node_width_mm`。缺省 `38` mm。主体宽 = `min(width * 3.0, 120)` mm。封顶独立于 `ChartStyle::MAX_NODE_WIDTH_MM`。
 - 内容宽 = 框宽 − `2 * PADDING_X_MM`。名称可折行。名称字号主体 `12` pt，普通 `10` pt。法人/详情 `9` pt。
 - 高度 = 上下 padding + 各折行行高，再与两行名称下限取 max。主体用 `SUBJECT_PADDING_Y_MM`。
 - `NODE_TOO_TALL` 比较对象是**肖像**可印高导出的 `node_height_limit_mm = (printable_h - LAYER_SPACING_MM) / 2`。升格附页主体时 Python 不再做该检查。
@@ -459,7 +459,8 @@ Python/reportlab 与 krilla 坐标约定可能不同。Rust 侧在适配层做�
 | `PAGE_WIDTH_MM` | 210 |
 | `PAGE_HEIGHT_MM` | 297 |
 | `NODE_WIDTH_MM` | 38 |
-| `SUBJECT_WIDTH_FACTOR` | 2.55 |
+| `SUBJECT_WIDTH_FACTOR` | 3.0 |
+| `SUBJECT_MAX_WIDTH_MM` | 120 |
 | `SUBJECT_PADDING_Y_MM` | 3.5 |
 | `SUBJECT_NAME_FONT_PT` | 12 |
 | `MARGIN_MM` | 8 |

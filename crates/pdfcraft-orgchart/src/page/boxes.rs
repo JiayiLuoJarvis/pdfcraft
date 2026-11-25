@@ -11,7 +11,8 @@ use crate::graph::{NodeId, NodeOrigin};
 use crate::units::{
     node_height_limit_mm, CONT_CUE_LINE_COUNT, CONT_CUE_LINE_GAP_MM, CONT_CUE_MIN_WIDTH_MM,
     CONT_CUE_PAD_MM, CONT_CUE_PAGE_DIGITS, CONT_CUE_TEXT_PT, DETAIL_FONT_PT, NAME_FONT_PT,
-    PADDING_X_MM, PADDING_Y_MM, SUBJECT_NAME_FONT_PT, SUBJECT_PADDING_Y_MM, SUBJECT_WIDTH_FACTOR,
+    PADDING_X_MM, PADDING_Y_MM, SUBJECT_MAX_WIDTH_MM, SUBJECT_NAME_FONT_PT, SUBJECT_PADDING_Y_MM,
+    SUBJECT_WIDTH_FACTOR,
 };
 
 /// Ordinary node width used when chart options leave the width unset.
@@ -19,6 +20,12 @@ use crate::units::{
 #[must_use]
 pub(crate) fn default_node_width_mm() -> f64 {
     crate::units::NODE_WIDTH_MM
+}
+
+/// Page-subject box width from the ordinary node width.
+#[must_use]
+pub(crate) fn subject_width_mm(node_width_mm: f64) -> f64 {
+    (node_width_mm * SUBJECT_WIDTH_FACTOR).min(SUBJECT_MAX_WIDTH_MM)
 }
 
 /// One wrapped row inside a node box.
@@ -88,8 +95,8 @@ fn line_size(kind: LineKind, is_subject: bool) -> f64 {
 
 /// Build one box per inbox node.
 ///
-/// The subject is wider, up to 80 mm. Height is compared with the portrait
-/// node-height limit of `printable_height_mm`.
+/// The subject is wider, up to `SUBJECT_MAX_WIDTH_MM` (120 mm). Height is
+/// compared with the portrait node-height limit of `printable_height_mm`.
 ///
 /// # Errors
 ///
@@ -106,8 +113,7 @@ pub(crate) fn build_node_boxes(
     for inbox in nodes {
         let is_subject = inbox.id == subject;
         let width_mm = if is_subject {
-            (node_width_mm * SUBJECT_WIDTH_FACTOR)
-                .min(crate::request::ChartStyle::MAX_NODE_WIDTH_MM)
+            subject_width_mm(node_width_mm)
         } else {
             node_width_mm
         };
@@ -207,8 +213,7 @@ pub(crate) fn promote_to_page_subject(
     node_width_mm: f64,
     measurer: &mut impl Measurer,
 ) -> Result<NodeBox, Error> {
-    let width_mm =
-        (node_width_mm * SUBJECT_WIDTH_FACTOR).min(crate::request::ChartStyle::MAX_NODE_WIDTH_MM);
+    let width_mm = subject_width_mm(node_width_mm);
     let max_content = width_mm - 2.0 * PADDING_X_MM;
     let segments = join_segments(&box_.lines);
     let mut lines = Vec::new();

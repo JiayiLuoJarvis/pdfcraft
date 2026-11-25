@@ -44,18 +44,20 @@ impl LayoutEngine for FakeEngine {
     fn layout(&self, input: &LayoutInput<'_>) -> Result<LayoutResult, Error> {
         let boxes = input.boxes;
         if self.limit >= 0 && count_i32(boxes.len()) <= self.limit {
+            // Stack vertically so page-subject chrome width does not decide fit.
+            // Box count versus `limit` remains the only fit knob.
             let mut nodes = Vec::new();
-            let mut x = 0.0;
+            let mut y = 0.0;
             for box_ in boxes {
                 let height = box_.height_mm.max(1.0);
                 nodes.push(PlacedNode {
                     id: box_.id,
-                    x,
-                    y: 0.0,
+                    x: 0.0,
+                    y,
                     width: box_.width_mm,
                     height,
                 });
-                x += box_.width_mm + 6.0;
+                y += height + 6.0;
             }
             return LayoutResult::from_parts(nodes, Vec::new(), Vec::new());
         }

@@ -149,7 +149,7 @@ fn subject_lines_keep_their_font_sizes() {
         ]
     );
     assert!((box_.height_mm - (2.0 * 3.5 + 5.0 * 3.0)).abs() < 0.0001);
-    assert!((box_.width_mm - 80.0).abs() < 0.0001);
+    assert!((box_.width_mm - 114.0).abs() < 0.0001);
     assert!(box_.is_subject);
 }
 
@@ -210,7 +210,7 @@ fn promote_keeps_detail_and_widens() {
     };
     let promoted = promote_to_page_subject(&ordinary, 38.0, &mut measurer).expect("promote");
     assert!(promoted.is_subject);
-    assert!((promoted.width_mm - 80.0).abs() < 0.0001);
+    assert!((promoted.width_mm - 114.0).abs() < 0.0001);
     assert_eq!(
         promoted
             .lines

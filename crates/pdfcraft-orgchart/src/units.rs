@@ -4,7 +4,9 @@ pub(crate) const PAGE_WIDTH_MM: f64 = 210.0;
 pub(crate) const PAGE_HEIGHT_MM: f64 = 297.0;
 #[cfg(test)]
 pub(crate) const NODE_WIDTH_MM: f64 = 38.0;
-pub(crate) const SUBJECT_WIDTH_FACTOR: f64 = 2.55;
+pub(crate) const SUBJECT_WIDTH_FACTOR: f64 = 3.0;
+/// Cap for page-subject boxes. Independent of [`crate::request::ChartStyle::MAX_NODE_WIDTH_MM`].
+pub(crate) const SUBJECT_MAX_WIDTH_MM: f64 = 120.0;
 pub(crate) const SUBJECT_PADDING_Y_MM: f64 = 3.5;
 pub(crate) const SUBJECT_NAME_FONT_PT: f64 = 12.0;
 pub(crate) const MARGIN_MM: f64 = 8.0;
