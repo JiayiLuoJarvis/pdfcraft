@@ -45,7 +45,6 @@ pub(crate) struct LayerPlan {
     reason = "mm-suffixed fields share the spacing unit"
 )]
 pub(crate) struct Spacing {
-    pub(crate) node_width_mm: f64,
     pub(crate) node_spacing_mm: f64,
     pub(crate) layer_spacing_mm: f64,
     pub(crate) row_gap_mm: f64,
@@ -93,7 +92,7 @@ pub(crate) fn place_layers(
                 .map_or(plan.layer_width_mm, |item| item.layer_width_mm)
         })
         .collect();
-    let mut content_width = spacing.node_width_mm;
+    let mut content_width = 0.0_f64;
     for width in effective_widths
         .iter()
         .copied()
@@ -137,7 +136,7 @@ pub(crate) fn group_band_width_mm(
     spacing: Spacing,
 ) -> Result<f64, Error> {
     if band.is_empty() {
-        return Ok(spacing.node_width_mm);
+        return Ok(0.0);
     }
     let mut width = 0.0_f64;
     for (row, schedule) in band.iter().zip(schedules) {

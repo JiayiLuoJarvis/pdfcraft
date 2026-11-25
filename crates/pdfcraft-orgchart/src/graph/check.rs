@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use super::arena::{EdgeId, EdgeRec, Graph, NodeId, NodeOrigin, NodeRec};
 use super::ratio::unique_layout_parent_edge;
 use crate::error::{Error, ErrorCode, ErrorSubject};
-use crate::request::{ChartRequest, ChartStyle, PaidIn, RATIO_MAX, RATIO_MIN};
+use crate::request::{ChartRequest, ChartStyle, NodeWidth, PaidIn, RATIO_MAX, RATIO_MIN};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Visit {
@@ -92,10 +92,7 @@ fn request_bounds(request: &ChartRequest) -> Result<(), Error> {
             .with_subject(ErrorSubject::Field("top_n")));
         }
     }
-    let ChartStyle {
-        margin_mm,
-        node_width_mm,
-    } = request.style;
+    let ChartStyle { margin_mm, width } = request.style;
     if !(margin_mm.is_finite() && margin_mm > 0.0 && margin_mm <= ChartStyle::MAX_MARGIN_MM) {
         return Err(Error::new(
             ErrorCode::InvalidProtocol,
@@ -106,20 +103,26 @@ fn request_bounds(request: &ChartRequest) -> Result<(), Error> {
         )
         .with_subject(ErrorSubject::Field("style.margin_mm")));
     }
-    let in_range = node_width_mm.is_finite()
-        && (ChartStyle::MIN_NODE_WIDTH_MM..=ChartStyle::MAX_NODE_WIDTH_MM).contains(&node_width_mm);
-    if !in_range {
-        return Err(Error::new(
-            ErrorCode::InvalidProtocol,
-            format!(
-                "node_width_mm={node_width_mm:?} must be in [{}, {}]",
-                ChartStyle::MIN_NODE_WIDTH_MM,
-                ChartStyle::MAX_NODE_WIDTH_MM
-            ),
-        )
-        .with_subject(ErrorSubject::Field("style.node_width_mm")));
+    match width {
+        NodeWidth::Adaptive => Ok(()),
+        NodeWidth::Fixed(node_width_mm) => {
+            let in_range = node_width_mm.is_finite()
+                && (NodeWidth::MIN_FIXED_MM..=NodeWidth::MAX_FIXED_MM).contains(&node_width_mm);
+            if in_range {
+                Ok(())
+            } else {
+                Err(Error::new(
+                    ErrorCode::InvalidProtocol,
+                    format!(
+                        "style.width={node_width_mm:?} must be in [{}, {}]",
+                        NodeWidth::MIN_FIXED_MM,
+                        NodeWidth::MAX_FIXED_MM
+                    ),
+                )
+                .with_subject(ErrorSubject::Field("style.width")))
+            }
+        }
     }
-    Ok(())
 }
 
 fn index_nodes(request: &ChartRequest) -> Result<(Vec<NodeRec>, HashMap<String, NodeId>), Error> {

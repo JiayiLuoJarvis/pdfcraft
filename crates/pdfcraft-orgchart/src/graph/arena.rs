@@ -163,8 +163,8 @@ pub(crate) struct Graph {
     pub(crate) max_nodes: usize,
     /// Reachability answers for layout-parent selection. Same lifetime as the graph.
     pub(super) reach_cache: HashMap<(NodeId, NodeId), bool>,
-    /// Overflow boxes already appended for `(subject, first_moved)`.
-    pub(super) overflow_ids: HashMap<(NodeId, NodeId), NodeId>,
+    /// Overflow boxes already appended for `(subject, first_moved, moved_count)`.
+    pub(super) overflow_ids: HashMap<(NodeId, NodeId, usize), NodeId>,
 }
 
 impl Graph {
@@ -303,7 +303,7 @@ impl Graph {
         Ok(Some((self.edge_from(edge), self.edge_to(edge))))
     }
 
-    /// Append an overflow node, or reuse the id for the same subject and first moved child.
+    /// Append an overflow node, or reuse the id for the same subject, first moved child, and count.
     pub(crate) fn ensure_overflow(
         &mut self,
         subject: NodeId,
@@ -311,7 +311,7 @@ impl Graph {
         moved_count: usize,
         name: String,
     ) -> NodeId {
-        if let Some(id) = self.overflow_ids.get(&(subject, first_moved)) {
+        if let Some(id) = self.overflow_ids.get(&(subject, first_moved, moved_count)) {
             return *id;
         }
         let id = NodeId::from_index(self.nodes.len());
@@ -334,7 +334,88 @@ impl Graph {
         self.outgoing.push(Vec::new());
         self.incoming.push(Vec::new());
         self.out_nodes.push(Vec::new());
-        self.overflow_ids.insert((subject, first_moved), id);
+        self.overflow_ids
+            .insert((subject, first_moved, moved_count), id);
         id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EdgeId, EdgeRec, Graph, NodeId, NodeOrigin, NodeRec};
+    use crate::request::{ChartStyle, NodeType};
+
+    fn caller(index: usize, id: &str, name: &str, node_type: Option<NodeType>) -> NodeRec {
+        NodeRec {
+            id: NodeId::from_index(index),
+            origin: NodeOrigin::Caller {
+                index,
+                id: id.to_owned(),
+                stands_in_for: None,
+            },
+            name: name.to_owned(),
+            legal_person: None,
+            ratio: None,
+            node_type,
+            paid_in_amount: None,
+            currency: None,
+            location: None,
+            approval_date: None,
+        }
+    }
+
+    fn edge(index: usize, from: usize, to: usize) -> EdgeRec {
+        EdgeRec {
+            id: EdgeId::from_index(index),
+            from: NodeId::from_index(from),
+            to: NodeId::from_index(to),
+            ratio: None,
+            caller_index: Some(index),
+        }
+    }
+
+    /// Two eviction sequences share `(subject, first_moved)` when the first
+    /// direct child is a Person and the second is a leaf company. A key that
+    /// omits `moved_count` reuses the first overflow box and its caption.
+    #[test]
+    fn person_then_leaf_company_cuts_do_not_share_an_overflow_box() {
+        let subject = NodeId::from_index(0);
+        let person = NodeId::from_index(1);
+        let leaf_company = NodeId::from_index(2);
+        let mut graph = Graph::from_records(
+            vec![
+                caller(0, "root", "主体", Some(NodeType::Company)),
+                caller(1, "p1", "甲", Some(NodeType::Person)),
+                caller(2, "c1", "乙公司", Some(NodeType::Company)),
+            ],
+            vec![edge(0, 0, 1), edge(1, 0, 2)],
+            subject,
+            ChartStyle::default(),
+            100,
+        );
+        assert_eq!(graph.outgoing_targets(subject), [person, leaf_company]);
+
+        let keep_company = graph.ensure_overflow(subject, person, 1, "其他投资(1家)".to_owned());
+        let evict_both = graph.ensure_overflow(subject, person, 2, "其他投资(2家)".to_owned());
+
+        assert_ne!(keep_company, evict_both);
+        assert_eq!(graph.node_name(keep_company), "其他投资(1家)");
+        assert_eq!(graph.node_name(evict_both), "其他投资(2家)");
+        assert_eq!(
+            graph.origin(keep_company),
+            &NodeOrigin::Overflow {
+                subject,
+                first_moved: person,
+                moved_count: 1,
+            }
+        );
+        assert_eq!(
+            graph.origin(evict_both),
+            &NodeOrigin::Overflow {
+                subject,
+                first_moved: person,
+                moved_count: 2,
+            }
+        );
     }
 }

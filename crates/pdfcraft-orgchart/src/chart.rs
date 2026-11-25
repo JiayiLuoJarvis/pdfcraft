@@ -102,7 +102,7 @@ fn paginate_chart(
 ) -> Result<(Vec<crate::page::PageSpec>, FontMetrics), Error> {
     let shown = content::display_of(&graph);
     let margin = graph.style.margin_mm;
-    let node_width = graph.style.node_width_mm;
+    let node_width = graph.style.width;
     let geometry = crate::units::PageGeometry::portrait(margin);
     let mut metrics = FontMetrics::from_font(font);
     let inboxes: Vec<InboxNode<'_>> = graph

@@ -52,7 +52,14 @@ fn pages_of(request: &ChartRequest) -> Vec<PageSpec> {
         .collect();
     let mut measurer = FakeMeasurer;
     let subject = node_id(request, &request.subject_id);
-    let boxes = build_node_boxes(&inbox, &mut measurer, 38.0, subject, 257.0).expect("boxes");
+    let boxes = build_node_boxes(
+        &inbox,
+        &mut measurer,
+        crate::request::NodeWidth::Fixed(38.0),
+        subject,
+        257.0,
+    )
+    .expect("boxes");
     paginate(request, &boxes, PageGeometry::default(), &mut measurer).expect("pages")
 }
 

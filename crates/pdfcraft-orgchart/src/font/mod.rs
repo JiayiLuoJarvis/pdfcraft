@@ -87,8 +87,13 @@ pub(crate) trait Measurer {
     /// A real font returns [`ErrorCode::MissingGlyph`] when `text` needs a glyph it lacks.
     fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, Error>;
 
-    /// Line slot height at `size_pt`, in mm.
-    fn line_height_mm(&mut self, size_pt: f64) -> f64;
+    /// Line slot height at `size_pt` with `gap_pt` added after the glyph, in mm.
+    fn line_height_with_gap_mm(&mut self, size_pt: f64, gap_pt: f64) -> f64;
+
+    /// Line slot height at `size_pt` with the default [`LINE_GAP_PT`] gap, in mm.
+    fn line_height_mm(&mut self, size_pt: f64) -> f64 {
+        self.line_height_with_gap_mm(size_pt, LINE_GAP_PT)
+    }
 
     /// Reject text that the font cannot draw.
     ///
@@ -219,10 +224,16 @@ impl FontMetrics {
         self.upem
     }
 
+    /// Ascender plus descender, scaled, plus `gap_pt`.
+    #[must_use]
+    pub(crate) fn line_height_with_gap_mm(&self, size_pt: f64, gap_pt: f64) -> f64 {
+        pt_to_mm((self.ascent + self.descent) / self.upem * size_pt + gap_pt)
+    }
+
     /// Ascender plus descender, scaled, plus a 2 pt gap.
     #[must_use]
     pub(crate) fn line_height_mm(&self, size_pt: f64) -> f64 {
-        pt_to_mm((self.ascent + self.descent) / self.upem * size_pt + LINE_GAP_PT)
+        self.line_height_with_gap_mm(size_pt, LINE_GAP_PT)
     }
 }
 
@@ -231,8 +242,8 @@ impl Measurer for FontMetrics {
         Self::string_width_mm(self, text, size_pt)
     }
 
-    fn line_height_mm(&mut self, size_pt: f64) -> f64 {
-        Self::line_height_mm(self, size_pt)
+    fn line_height_with_gap_mm(&mut self, size_pt: f64, gap_pt: f64) -> f64 {
+        Self::line_height_with_gap_mm(self, size_pt, gap_pt)
     }
 
     fn ensure_glyphs(&mut self, text: &str) -> Result<(), Error> {
@@ -318,6 +329,7 @@ fn missing_glyph(ch: char) -> Error {
 /// Wrap `text`. ASCII runs stay together until a space. Other characters break one by one.
 ///
 /// `allow_wrap == false` returns the whole string even when it is wider than `max_width_mm`.
+/// Output parts concatenate back to `text`.
 ///
 /// # Errors
 ///
@@ -333,31 +345,91 @@ pub(crate) fn wrap_text(
     if !allow_wrap || measurer.string_width_mm(text, size_pt)? <= max_width_mm {
         return Ok(vec![text.to_owned()]);
     }
+    let tokens = tokenize(text, measurer, size_pt, max_width_mm)?;
+    if tokens.is_empty() {
+        return Ok(vec![text.to_owned()]);
+    }
+    let mut widths = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        widths.push(measurer.string_width_mm(token, size_pt)?);
+    }
+    let parts = balance_tokens(&tokens, &widths, max_width_mm);
+    debug_assert_eq!(
+        parts.concat(),
+        text,
+        "wrap slices must rejoin to the source line"
+    );
+    Ok(parts)
+}
+
+/// Forbid a wrap after an opener, before closer/punct, or beside `·`. Adaptive-layout spec §4.2.
+const WRAP_FORBID_BREAK_PENALTY: f64 = 10_000.0;
+/// Last wrapped line with at most two non-whitespace characters. Adaptive-layout spec §4.2.
+const WRAP_ORPHAN_LINE_PENALTY: f64 = 2_000.0;
+/// Split inside a static institution suffix. Adaptive-layout spec §4.2.
+const WRAP_SUFFIX_SPLIT_PENALTY: f64 = 1_500.0;
+
+const INSTITUTION_SUFFIXES: &[&str] = &[
+    "股份有限公司",
+    "有限责任公司",
+    "有限公司",
+    "合伙企业",
+    "分公司",
+    "股东",
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharClass {
+    OpenBracket,
+    ClosePunct,
+    MiddleDot,
+    Whitespace,
+    Other,
+}
+
+fn classify_scalar(ch: char) -> CharClass {
+    match ch {
+        '(' | '（' => CharClass::OpenBracket,
+        ')' | '）' | '、' | '，' | '。' => CharClass::ClosePunct,
+        '·' => CharClass::MiddleDot,
+        ch if ch.is_whitespace() => CharClass::Whitespace,
+        _ => CharClass::Other,
+    }
+}
+
+fn boundary_penalty(prev: CharClass, next: CharClass) -> f64 {
+    match (prev, next) {
+        (CharClass::OpenBracket | CharClass::MiddleDot, _)
+        | (_, CharClass::ClosePunct | CharClass::MiddleDot) => WRAP_FORBID_BREAK_PENALTY,
+        (
+            CharClass::ClosePunct | CharClass::Whitespace | CharClass::Other,
+            CharClass::OpenBracket | CharClass::Whitespace | CharClass::Other,
+        ) => 0.0,
+    }
+}
+
+fn tokenize(
+    text: &str,
+    measurer: &mut impl Measurer,
+    size_pt: f64,
+    max_width_mm: f64,
+) -> Result<Vec<String>, Error> {
     let chars: Vec<char> = text.chars().collect();
-    let mut out = Vec::new();
-    let mut current = String::new();
+    let mut tokens = Vec::new();
     let mut index = 0;
     while index < chars.len() {
-        let (mut candidate, mut take) = next_chunk(&chars, index);
-        if measurer.string_width_mm(&candidate, size_pt)? > max_width_mm {
-            candidate = chars[index].to_string();
-            take = 1;
-        }
-        let combined = format!("{current}{candidate}");
-        if measurer.string_width_mm(&combined, size_pt)? <= max_width_mm {
-            current = combined;
-            index += take;
-        } else if !current.is_empty() {
-            out.push(std::mem::take(&mut current));
+        let (chunk, take) = next_chunk(&chars, index);
+        if chunk.is_ascii() && take > 1 && measurer.string_width_mm(&chunk, size_pt)? > max_width_mm
+        {
+            for ch in chunk.chars() {
+                tokens.push(ch.to_string());
+            }
         } else {
-            out.push(candidate);
-            index += take;
+            tokens.push(chunk);
         }
+        index += take;
     }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    Ok(out)
+    Ok(tokens)
 }
 
 fn next_chunk(chars: &[char], index: usize) -> (String, usize) {
@@ -377,6 +449,176 @@ fn next_chunk(chars: &[char], index: usize) -> (String, usize) {
     } else {
         (chars[index].to_string(), 1)
     }
+}
+
+fn balance_tokens(tokens: &[String], widths: &[f64], max_width_mm: f64) -> Vec<String> {
+    let count = tokens.len();
+    let mut prefix = vec![0.0; count + 1];
+    for (index, width) in widths.iter().enumerate() {
+        prefix[index + 1] = prefix[index] + width;
+    }
+    let line_width = |start: usize, end: usize| prefix[end] - prefix[start];
+    let fits = |start: usize, end: usize| {
+        end > start && (end == start + 1 || line_width(start, end) <= max_width_mm)
+    };
+    let line_count = min_line_count(count, fits);
+    if line_count <= 1 {
+        return vec![tokens.concat()];
+    }
+    let split_cost = split_penalties(tokens);
+    let target = prefix[count] / crate::units::n64(line_count);
+    let pred = wrap_predecessors(
+        count,
+        line_count,
+        target,
+        &split_cost,
+        tokens,
+        fits,
+        line_width,
+    );
+    reconstruct_lines(tokens, &pred, count, line_count)
+}
+
+fn min_line_count(count: usize, fits: impl Fn(usize, usize) -> bool) -> usize {
+    let mut start = 0;
+    let mut lines = 0;
+    while start < count {
+        let mut end = start + 1;
+        while end <= count && fits(start, end) {
+            end += 1;
+        }
+        start = (end - 1).max(start + 1);
+        lines += 1;
+    }
+    lines
+}
+
+fn split_penalties(tokens: &[String]) -> Vec<f64> {
+    let split_count = tokens.len().saturating_sub(1);
+    let mut cost = vec![0.0; split_count];
+    for (index, window) in tokens.windows(2).enumerate() {
+        let prev = window[0].chars().next_back().map(classify_scalar);
+        let next = window[1].chars().next().map(classify_scalar);
+        if let (Some(prev), Some(next)) = (prev, next) {
+            cost[index] = boundary_penalty(prev, next);
+        }
+    }
+    let mut suffix_split = vec![false; split_count];
+    for suffix in INSTITUTION_SUFFIXES {
+        mark_suffix_splits(tokens, suffix, &mut suffix_split);
+    }
+    for (index, marked) in suffix_split.iter().enumerate() {
+        if *marked {
+            cost[index] += WRAP_SUFFIX_SPLIT_PENALTY;
+        }
+    }
+    cost
+}
+
+fn mark_suffix_splits(tokens: &[String], suffix: &str, marked: &mut [bool]) {
+    if suffix.is_empty() || tokens.is_empty() {
+        return;
+    }
+    let mut concat = String::new();
+    let mut ends = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        concat.push_str(token);
+        ends.push(concat.len());
+    }
+    let mut from = 0;
+    while from < concat.len() {
+        let Some(rel) = concat[from..].find(suffix) else {
+            break;
+        };
+        let start = from + rel;
+        let end = start + suffix.len();
+        for (index, boundary) in ends.iter().take(marked.len()).enumerate() {
+            if start < *boundary && *boundary < end {
+                marked[index] = true;
+            }
+        }
+        from = start + suffix.chars().next().map_or(1, char::len_utf8);
+    }
+}
+
+const WRAP_INFEASIBLE: f64 = 1.0e30;
+
+fn wrap_predecessors(
+    count: usize,
+    line_count: usize,
+    target: f64,
+    split_cost: &[f64],
+    tokens: &[String],
+    fits: impl Fn(usize, usize) -> bool,
+    line_width: impl Fn(usize, usize) -> f64,
+) -> Vec<Vec<usize>> {
+    let mut cost = vec![vec![WRAP_INFEASIBLE; count + 1]; line_count + 1];
+    let mut pred = vec![vec![0usize; count + 1]; line_count + 1];
+    cost[0][0] = 0.0;
+    for lines in 1..=line_count {
+        for end in 1..=count {
+            for start in 0..end {
+                if !fits(start, end) {
+                    continue;
+                }
+                let mut line_cost = (line_width(start, end) - target).powi(2);
+                if start > 0 {
+                    line_cost += split_cost[start - 1];
+                }
+                if lines == line_count && end == count {
+                    line_cost += last_line_orphan_penalty(&tokens[start..end]);
+                }
+                let total = cost[lines - 1][start] + line_cost;
+                if total + 1e-9 < cost[lines][end] {
+                    cost[lines][end] = total;
+                    pred[lines][end] = start;
+                }
+            }
+        }
+    }
+    #[expect(
+        clippy::expect_used,
+        reason = "greedy min-line scan proved an N-line split exists"
+    )]
+    let _: () = (cost[line_count][count] < WRAP_INFEASIBLE)
+        .then_some(())
+        .expect("greedy min-line scan proved an N-line split exists");
+    pred
+}
+
+fn last_line_orphan_penalty(tokens: &[String]) -> f64 {
+    let letters = tokens
+        .iter()
+        .flat_map(|token| token.chars())
+        .filter(|ch| !ch.is_whitespace())
+        .count();
+    if letters <= 2 {
+        WRAP_ORPHAN_LINE_PENALTY
+    } else {
+        0.0
+    }
+}
+
+fn reconstruct_lines(
+    tokens: &[String],
+    pred: &[Vec<usize>],
+    count: usize,
+    line_count: usize,
+) -> Vec<String> {
+    let mut ends = Vec::with_capacity(line_count);
+    let mut end = count;
+    for lines in (1..=line_count).rev() {
+        ends.push(end);
+        end = pred[lines][end];
+    }
+    ends.reverse();
+    let mut start = 0;
+    let mut parts = Vec::with_capacity(line_count);
+    for stop in ends {
+        parts.push(tokens[start..stop].concat());
+        start = stop;
+    }
+    parts
 }
 
 #[cfg(test)]

@@ -142,3 +142,76 @@ fn hc_latin_glyph_run_is_stable_and_has_width() {
     let width = font.string_width_mm("A", 10.0).expect("width");
     assert!(width > 0.0);
 }
+
+fn wrap(text: &str, max_width_mm: f64) -> Vec<String> {
+    wrap_text(text, &mut FallbackMeasurer, 10.0, max_width_mm, true).expect("wrap")
+}
+
+#[test]
+fn wrap_parts_concatenate_to_the_source() {
+    let text = "甲乙丙丁戊己庚辛(股份有限公司)·股东";
+    let parts = wrap(text, 8.0);
+    assert_eq!(parts.concat(), text);
+    assert!(parts.len() > 1);
+}
+
+#[test]
+fn wrap_keeps_an_opener_with_the_following_token() {
+    let parts = wrap("甲(乙丙丁戊)", 4.0);
+    assert_eq!(parts.concat(), "甲(乙丙丁戊)");
+    assert!(parts.iter().all(|part| !part.ends_with('(')), "{parts:?}");
+    assert!(parts.iter().all(|part| !part.starts_with(')')), "{parts:?}");
+}
+
+#[test]
+fn wrap_does_not_split_beside_a_middle_dot() {
+    let text = "广州 · 深圳";
+    let parts = wrap(text, 10.0);
+    assert_eq!(parts.concat(), text);
+    for part in &parts {
+        assert!(!part.starts_with('·'), "{parts:?}");
+        assert!(!part.ends_with('·'), "{parts:?}");
+    }
+}
+
+#[test]
+fn wrap_keeps_an_institution_suffix_on_one_line() {
+    let parts = wrap("北京某某股份有限公司", 12.0);
+    assert_eq!(parts.concat(), "北京某某股份有限公司");
+    assert_eq!(parts, ["北京某某", "股份有限公司"]);
+}
+
+#[test]
+fn wrap_avoids_a_one_character_last_line() {
+    let parts = wrap("甲乙丙丁戊己庚", 6.0);
+    assert_eq!(parts.concat(), "甲乙丙丁戊己庚");
+    let last = parts.last().expect("line");
+    let letters = last.chars().filter(|ch| !ch.is_whitespace()).count();
+    assert!(letters > 2, "{parts:?}");
+}
+
+struct WideScalar;
+
+impl Measurer for WideScalar {
+    fn string_width_mm(&mut self, text: &str, _size_pt: f64) -> Result<f64, crate::Error> {
+        Ok(if text == "宽" {
+            20.0
+        } else {
+            crate::units::n64(text.chars().count()) * 2.0
+        })
+    }
+
+    fn line_height_with_gap_mm(&mut self, _size_pt: f64, gap_pt: f64) -> f64 {
+        5.0 - crate::units::pt_to_mm(crate::units::LINE_GAP_PT) + crate::units::pt_to_mm(gap_pt)
+    }
+
+    fn ensure_glyphs(&mut self, _text: &str) -> Result<(), crate::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn wrap_lets_a_single_token_exceed_the_line() {
+    let parts = wrap_text("宽", &mut WideScalar, 10.0, 6.0, true).expect("wrap");
+    assert_eq!(parts, ["宽"]);
+}

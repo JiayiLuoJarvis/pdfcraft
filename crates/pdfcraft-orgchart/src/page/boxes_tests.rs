@@ -1,14 +1,20 @@
 //! Box height, wrap, subject promotion, and cue slots.
 
 use super::{
-    build_node_boxes, cont_cue_height_mm, default_node_width_mm, overflow_box,
+    build_node_boxes, cont_cue_height_mm, default_node_width, layout_box_text, overflow_box,
     promote_to_page_subject, sized_cue_anchors, InboxNode, NodeBox, WrappedLine,
 };
 use crate::captions::CueSide;
 use crate::content::{company_fill, LineKind, LogicalLine};
 use crate::font::{wrap_text, Measurer};
 use crate::graph::{NodeId, NodeOrigin};
+use crate::request::NodeWidth;
+use crate::units::{pt_to_mm, LINE_GAP_PT};
 use crate::{ErrorCode, Node, NodeType};
+
+fn fixed(width: f64) -> NodeWidth {
+    NodeWidth::Fixed(width)
+}
 
 fn chars_f64(text: &str) -> f64 {
     f64::from(u32::try_from(text.chars().count()).unwrap_or(u32::MAX))
@@ -30,8 +36,8 @@ impl Measurer for FakeMeasurer {
         Ok(chars_f64(text) * self.char_w)
     }
 
-    fn line_height_mm(&mut self, _size_pt: f64) -> f64 {
-        self.line_h
+    fn line_height_with_gap_mm(&mut self, _size_pt: f64, gap_pt: f64) -> f64 {
+        self.line_h - pt_to_mm(LINE_GAP_PT) + pt_to_mm(gap_pt)
     }
 
     fn ensure_glyphs(&mut self, _text: &str) -> Result<(), crate::Error> {
@@ -52,8 +58,8 @@ impl Measurer for DigitMeasurer {
         })
     }
 
-    fn line_height_mm(&mut self, _size_pt: f64) -> f64 {
-        5.0
+    fn line_height_with_gap_mm(&mut self, _size_pt: f64, gap_pt: f64) -> f64 {
+        5.0 - pt_to_mm(LINE_GAP_PT) + pt_to_mm(gap_pt)
     }
 
     fn ensure_glyphs(&mut self, _text: &str) -> Result<(), crate::Error> {
@@ -106,7 +112,7 @@ fn detail_line_wraps_when_wider_than_the_box() {
     let boxes = build_node_boxes(
         &[inbox(0, "n1", &lines, &node)],
         &mut measurer,
-        10.0,
+        fixed(10.0),
         NodeId::from_index(99),
         257.0,
     )
@@ -131,7 +137,7 @@ fn subject_lines_keep_their_font_sizes() {
     let boxes = build_node_boxes(
         &[inbox(0, "n1", &lines, &node)],
         &mut measurer,
-        default_node_width_mm(),
+        default_node_width(),
         NodeId::from_index(0),
         257.0,
     )
@@ -148,7 +154,8 @@ fn subject_lines_keep_their_font_sizes() {
             (LineKind::Detail, 9.0),
         ]
     );
-    assert!((box_.height_mm - (2.0 * 3.5 + 5.0 * 3.0)).abs() < 0.0001);
+    let layout = layout_box_text(&box_.lines, &mut measurer);
+    assert!((box_.height_mm - (2.0 * 3.5 + layout.content_height_mm)).abs() < 0.0001);
     assert!((box_.width_mm - 114.0).abs() < 0.0001);
     assert!(box_.is_subject);
 }
@@ -172,7 +179,7 @@ fn subject_box_is_larger_than_an_ordinary_peer() {
             inbox(1, "s1", &holder_lines, &holder),
         ],
         &mut measurer,
-        default_node_width_mm(),
+        default_node_width(),
         NodeId::from_index(0),
         257.0,
     )
@@ -198,17 +205,19 @@ fn promote_keeps_detail_and_widens() {
                 kind: LineKind::Name,
                 text: "超频三".to_owned(),
                 font_size_pt: 10.0,
+                logical_line_index: 0,
             },
             WrappedLine {
                 kind: LineKind::Detail,
                 text: "实缴 100万".to_owned(),
                 font_size_pt: 9.0,
+                logical_line_index: 1,
             },
         ],
         is_subject: false,
         is_company: true,
     };
-    let promoted = promote_to_page_subject(&ordinary, 38.0, &mut measurer).expect("promote");
+    let promoted = promote_to_page_subject(&ordinary, fixed(38.0), &mut measurer).expect("promote");
     assert!(promoted.is_subject);
     assert!((promoted.width_mm - 114.0).abs() < 0.0001);
     assert_eq!(
@@ -227,7 +236,10 @@ fn promote_keeps_detail_and_widens() {
             .collect::<Vec<_>>(),
         vec![(LineKind::Name, 12.0), (LineKind::Detail, 9.0)]
     );
-    assert!((promoted.height_mm - (2.0 * 3.5 + 2.0 * 5.0)).abs() < 0.0001);
+    let layout = layout_box_text(&promoted.lines, &mut measurer);
+    let min_h = 2.0 * 3.5 + 2.0 * measurer.line_height_mm(12.0);
+    let expected = (2.0 * 3.5 + layout.content_height_mm).max(min_h);
+    assert!((promoted.height_mm - expected).abs() < 0.0001);
 }
 
 #[test]
@@ -247,12 +259,13 @@ fn promote_rejoins_a_wrapped_name() {
                 kind: LineKind::Name,
                 text: part.clone(),
                 font_size_pt: 10.0,
+                logical_line_index: 0,
             })
             .collect(),
         is_subject: false,
         is_company: true,
     };
-    let promoted = promote_to_page_subject(&ordinary, 38.0, &mut measurer).expect("promote");
+    let promoted = promote_to_page_subject(&ordinary, fixed(38.0), &mut measurer).expect("promote");
     assert!(promoted.lines.len() < parts.len());
     let joined: String = promoted.lines.iter().map(|row| row.text.as_str()).collect();
     assert_eq!(joined, long_name);
@@ -306,8 +319,14 @@ fn blank_legal_person_does_not_force_company_shade() {
             )
         })
         .collect();
-    let boxes =
-        build_node_boxes(&inbox, &mut measurer, 38.0, NodeId::from_index(0), 257.0).expect("boxes");
+    let boxes = build_node_boxes(
+        &inbox,
+        &mut measurer,
+        fixed(38.0),
+        NodeId::from_index(0),
+        257.0,
+    )
+    .expect("boxes");
     let shade = |id: &str| {
         boxes
             .iter()
@@ -336,7 +355,7 @@ fn a_wrapped_name_taller_than_the_portrait_limit_is_node_too_tall() {
     let error = build_node_boxes(
         &[inbox(0, "n1", &lines, &node)],
         &mut measurer,
-        10.0,
+        fixed(10.0),
         NodeId::from_index(0),
         printable_h,
     )
@@ -364,6 +383,7 @@ fn cue_slots_budget_three_widest_digits() {
                 kind: LineKind::Name,
                 text: "甲".to_owned(),
                 font_size_pt: 10.0,
+                logical_line_index: 0,
             }],
             is_subject: false,
             is_company: true,
@@ -377,6 +397,7 @@ fn cue_slots_budget_three_widest_digits() {
                 kind: LineKind::Name,
                 text: "主体".to_owned(),
                 font_size_pt: 12.0,
+                logical_line_index: 0,
             }],
             is_subject: true,
             is_company: true,
@@ -395,7 +416,7 @@ fn cue_slots_budget_three_widest_digits() {
     assert_eq!(sized[0].side, CueSide::Shareholder);
     assert_eq!(sized[1].side, CueSide::Investment);
     assert!((sized[0].width_mm - 36.0).abs() < 0.0001);
-    assert!((sized[1].width_mm - 40.0).abs() < 0.0001);
+    assert!((sized[1].width_mm - 38.0).abs() < 0.0001);
     assert!((sized[0].height_mm - 14.4).abs() < 0.0001);
     assert!((cont_cue_height_mm(&mut DigitMeasurer) - 14.4).abs() < 0.0001);
 }
@@ -449,7 +470,7 @@ fn overflow_box_reserves_a_blank_second_name_row() {
         },
         "其他股东(2家)",
         &mut measurer,
-        38.0,
+        fixed(38.0),
     )
     .expect("box");
     assert!(box_.lines.len() >= 2);
@@ -457,4 +478,159 @@ fn overflow_box_reserves_a_blank_second_name_row() {
     assert!((box_.lines.last().expect("slot").font_size_pt - 10.0).abs() < 0.0001);
     assert!(box_.is_company);
     assert!(!box_.is_subject);
+}
+
+struct SizeAwareMeasurer;
+
+impl Measurer for SizeAwareMeasurer {
+    fn string_width_mm(&mut self, text: &str, size_pt: f64) -> Result<f64, crate::Error> {
+        Ok(chars_f64(text) * size_pt / 5.0)
+    }
+
+    fn line_height_with_gap_mm(&mut self, _size_pt: f64, gap_pt: f64) -> f64 {
+        5.0 - pt_to_mm(LINE_GAP_PT) + pt_to_mm(gap_pt)
+    }
+
+    fn ensure_glyphs(&mut self, _text: &str) -> Result<(), crate::Error> {
+        Ok(())
+    }
+}
+
+fn ordinary_width(name: &str, width: NodeWidth) -> f64 {
+    let mut measurer = FakeMeasurer::new(2.0, 5.0);
+    let node = name_only("n", name);
+    let lines = [line(LineKind::Name, name)];
+    let boxes = build_node_boxes(
+        &[inbox(0, "n", &lines, &node)],
+        &mut measurer,
+        width,
+        NodeId::from_index(99),
+        257.0,
+    )
+    .expect("boxes");
+    boxes[0].width_mm
+}
+
+#[test]
+fn adaptive_snaps_to_thirty_two_forty_eight_and_sixty() {
+    assert!((ordinary_width(&"甲".repeat(14), NodeWidth::Adaptive) - 32.0).abs() < 0.0001);
+    assert!((ordinary_width(&"甲".repeat(15), NodeWidth::Adaptive) - 48.0).abs() < 0.0001);
+    assert!((ordinary_width(&"甲".repeat(23), NodeWidth::Adaptive) - 60.0).abs() < 0.0001);
+}
+
+#[test]
+fn fixed_width_does_not_snap_to_a_tier() {
+    assert!((ordinary_width("甲", fixed(38.0)) - 38.0).abs() < 0.0001);
+    assert!((ordinary_width(&"甲".repeat(23), fixed(38.0)) - 38.0).abs() < 0.0001);
+}
+
+#[test]
+fn adaptive_name_falls_back_to_nine_pt_when_that_cuts_lines() {
+    let name = "甲".repeat(57);
+    let node = name_only("n", &name);
+    let lines = [line(LineKind::Name, &name)];
+    let boxes = build_node_boxes(
+        &[inbox(0, "n", &lines, &node)],
+        &mut SizeAwareMeasurer,
+        NodeWidth::Adaptive,
+        NodeId::from_index(99),
+        257.0,
+    )
+    .expect("boxes");
+    assert!(boxes[0]
+        .lines
+        .iter()
+        .all(|row| (row.font_size_pt - 9.0).abs() < 0.0001));
+    let locked = build_node_boxes(
+        &[inbox(0, "n", &lines, &node)],
+        &mut SizeAwareMeasurer,
+        NodeWidth::Fixed(60.0),
+        NodeId::from_index(99),
+        257.0,
+    )
+    .expect("fixed");
+    assert!(locked[0]
+        .lines
+        .iter()
+        .all(|row| (row.font_size_pt - 10.0).abs() < 0.0001));
+}
+
+#[test]
+fn overflow_box_adaptive_budgets_three_digits_and_keeps_ten_pt() {
+    let box_ = overflow_box(
+        NodeId::from_index(9),
+        NodeOrigin::Overflow {
+            subject: NodeId::from_index(0),
+            first_moved: NodeId::from_index(1),
+            moved_count: 2,
+        },
+        "其他股东(2家)",
+        &mut DigitMeasurer,
+        NodeWidth::Adaptive,
+    )
+    .expect("box");
+    assert!((box_.width_mm - 48.0).abs() < 0.0001);
+    assert!(box_
+        .lines
+        .iter()
+        .all(|row| (row.font_size_pt - 10.0).abs() < 0.0001));
+}
+
+#[test]
+fn promote_keeps_separate_investment_detail_lines() {
+    let mut measurer = FakeMeasurer::new(2.0, 5.0);
+    let ordinary = NodeBox {
+        id: NodeId::from_index(1),
+        origin: caller(1, "c"),
+        width_mm: 38.0,
+        height_mm: 20.0,
+        lines: vec![
+            WrappedLine {
+                kind: LineKind::Name,
+                text: "子公司".to_owned(),
+                font_size_pt: 10.0,
+                logical_line_index: 0,
+            },
+            WrappedLine {
+                kind: LineKind::Detail,
+                text: "实缴 100万".to_owned(),
+                font_size_pt: 9.0,
+                logical_line_index: 1,
+            },
+            WrappedLine {
+                kind: LineKind::Detail,
+                text: "深圳 · 2024-06-01".to_owned(),
+                font_size_pt: 9.0,
+                logical_line_index: 2,
+            },
+        ],
+        is_subject: false,
+        is_company: true,
+    };
+    let promoted =
+        promote_to_page_subject(&ordinary, NodeWidth::Adaptive, &mut measurer).expect("promote");
+    let texts: Vec<&str> = promoted.lines.iter().map(|row| row.text.as_str()).collect();
+    assert_eq!(texts, ["子公司", "实缴 100万", "深圳 · 2024-06-01"]);
+}
+
+#[test]
+fn detail_follows_name_with_name_line_gap() {
+    let mut measurer = FakeMeasurer::new(2.0, 5.0);
+    let lines = [
+        WrappedLine {
+            kind: LineKind::Name,
+            text: "甲".to_owned(),
+            font_size_pt: 10.0,
+            logical_line_index: 0,
+        },
+        WrappedLine {
+            kind: LineKind::Detail,
+            text: "实缴 1".to_owned(),
+            font_size_pt: 9.0,
+            logical_line_index: 1,
+        },
+    ];
+    let layout = layout_box_text(&lines, &mut measurer);
+    let name_slot = measurer.line_height_with_gap_mm(10.0, LINE_GAP_PT);
+    assert!((layout.lines[1].y_mm - name_slot).abs() < 0.0001);
 }

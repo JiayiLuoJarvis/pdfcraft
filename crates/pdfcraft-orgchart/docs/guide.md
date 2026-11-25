@@ -62,7 +62,7 @@ the request first if you need to edit it and try again.
 | `subject_id` | Id of the company the chart is about |
 | `nodes` | Parties. Order is the tie-break order for a `top_n` fold |
 | `edges` | Holding edges. `holder` holds `held` |
-| `style` | `ChartStyle`. Default width 38 mm, margin 8 mm |
+| `style` | `ChartStyle`. Default `NodeWidth::Adaptive`, margin 8 mm |
 | `top_n` | `Option<NonZeroUsize>`. `None` does not fold |
 | `max_nodes` | Cap, including nodes a fold adds. `ChartRequest::new` uses `MAX_NODES` (100) |
 
@@ -103,15 +103,36 @@ Ranking for that parent skips the stand-in.
 
 | Field | Default | Legal range |
 | --- | --- | --- |
-| `node_width_mm` | 38 | `[20, 80]` (`MIN_NODE_WIDTH_MM`..=`MAX_NODE_WIDTH_MM`) |
-| `margin_mm` | 8 | `(0, 40]` (`MAX_MARGIN_MM`) |
+| `width` | `NodeWidth::Adaptive` | `Adaptive`, or `Fixed(w)` with `w` in `[20, 80]` (`NodeWidth::MIN_FIXED_MM`..=`MAX_FIXED_MM`) |
+| `margin_mm` | 8 | `(0, 40]` (`ChartStyle::MAX_MARGIN_MM`) |
 
-The page subject (including a promoted annex subject) is wider:
-`min(node_width_mm * 3.0, 120)` mm. That cap is independent of
-`MAX_NODE_WIDTH_MM`.
+`Adaptive` snaps each non-subject box to 32, 48, or 60 mm from its natural
+content width. `Fixed(w)` uses `w` mm for every non-subject box and disables
+the 9 pt name fallback. The page subject (including a promoted annex subject)
+is wider: `Adaptive` uses `min(38 × 3, 120)` mm; `Fixed(w)` uses
+`min(w × 3, 120)` mm. That cap is independent of `NodeWidth::MAX_FIXED_MM`.
 
 `top_n` must be in `1..=max_nodes`. `top_n == max_nodes` is legal.
 `max_nodes` must be in `1..=ChartRequest::MAX_NODES`.
+
+### Migrating from 0.3.x
+
+```rust
+use pdfcraft_orgchart::{ChartStyle, NodeWidth};
+
+// Was: style.node_width_mm = 38.0;
+let style = ChartStyle {
+    width: NodeWidth::Fixed(38.0),
+    margin_mm: 8.0,
+};
+
+// Or keep the new default (adaptive tiers):
+let style = ChartStyle::default();
+```
+
+Bad fixed widths now report `ErrorSubject::Field("style.width")`. Investment
+boxes that set both `location` and `approval_date` need a face that includes
+`U+00B7` (`·`).
 
 ---
 
@@ -187,7 +208,11 @@ headers and footers follow the behavior contract in the workspace spec.
   (outbound cone).
 - **Box lines.** Ratios do **not** appear inside boxes. Shareholder / subject
   boxes show name and optional legal person. Investment boxes show name,
-  paid-in amount, location, and approval date when present.
+  optional paid-in amount, then location and approval date merged as
+  `{location} · {approval_date}` when both are present (either field alone
+  stays a single detail line). Legal-person and detail lines are 9 pt in the
+  same black ink as the name. A subset font must include `U+00B7` when both
+  fields are set.
 - **Ratio labels.** Text is `xx.xx%`. The label sits 1.2 mm to the right of a
   stub that hugs the box. A node with no hugging stub is unlabeled, and so is
   the page subject (including a promoted annex subject). Shareholders sit just
@@ -265,7 +290,7 @@ OFL notes for a common Source Han reference face are in
 | Path | Role |
 | --- | --- |
 | `Chart` | Compile and draw |
-| `ChartRequest`, `ChartStyle`, `Node`, `Edge`, `PaidIn`, `Font` | Values |
+| `ChartRequest`, `ChartStyle`, `NodeWidth`, `Node`, `Edge`, `PaidIn`, `Font` | Values |
 | `Error` / `ErrorCode` | Failures |
 | `examples/` | Runnable demos |
 | `docs/guide.md` | This guide |

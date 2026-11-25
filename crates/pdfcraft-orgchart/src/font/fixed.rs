@@ -13,8 +13,8 @@ impl Measurer for FallbackMeasurer {
         Ok(crate::units::n64(text.chars().count()) * 2.0)
     }
 
-    fn line_height_mm(&mut self, _size_pt: f64) -> f64 {
-        5.0
+    fn line_height_with_gap_mm(&mut self, _size_pt: f64, gap_pt: f64) -> f64 {
+        5.0 - crate::units::pt_to_mm(crate::units::LINE_GAP_PT) + crate::units::pt_to_mm(gap_pt)
     }
 
     fn ensure_glyphs(&mut self, _text: &str) -> Result<(), Error> {

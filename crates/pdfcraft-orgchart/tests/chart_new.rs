@@ -7,7 +7,9 @@
 
 use std::num::NonZeroUsize;
 
-use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Error, ErrorCode, ErrorSubject, Node};
+use pdfcraft_orgchart::{
+    Chart, ChartRequest, Edge, Error, ErrorCode, ErrorSubject, Node, NodeWidth,
+};
 
 fn nz(value: usize) -> NonZeroUsize {
     NonZeroUsize::new(value).expect("nonzero")
@@ -436,9 +438,9 @@ fn accepts_inclusive_ratio_and_size_bounds() {
         }],
     );
     request.style.margin_mm = 40.0;
-    request.style.node_width_mm = 20.0;
+    request.style.width = NodeWidth::Fixed(20.0);
     accept(&request);
-    request.style.node_width_mm = 80.0;
+    request.style.width = NodeWidth::Fixed(80.0);
     accept(&request);
 }
 
@@ -457,13 +459,10 @@ fn rejects_illegal_margin_and_node_width() {
     }
     for width in [19.99, 80.01, f64::NAN] {
         let mut request = chart("root", root.clone(), vec![]);
-        request.style.node_width_mm = width;
+        request.style.width = NodeWidth::Fixed(width);
         let error = err(&request);
         assert_eq!(error.code(), ErrorCode::InvalidProtocol);
-        assert_eq!(
-            error.subject(),
-            Some(&ErrorSubject::Field("style.node_width_mm"))
-        );
+        assert_eq!(error.subject(), Some(&ErrorSubject::Field("style.width")));
     }
 }
 

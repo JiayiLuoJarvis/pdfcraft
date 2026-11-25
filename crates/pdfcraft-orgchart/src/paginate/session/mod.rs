@@ -90,7 +90,7 @@ struct Session<'a, E: LayoutEngine, M: Measurer> {
     has_investments: bool,
     whole_main: String,
     whole_sub: String,
-    node_width: f64,
+    node_width: crate::request::NodeWidth,
     order_index: HashMap<NodeId, usize>,
     shareholder_continue: usize,
     investment_continue: usize,
@@ -183,7 +183,7 @@ impl<'a, E: LayoutEngine, M: Measurer> Session<'a, E, M> {
                 whole_chart_subtitle(&subject_name, has_investments),
             ),
         };
-        let node_width = graph.style.node_width_mm;
+        let node_width = graph.style.width;
         let node_order: Vec<NodeId> = graph.nodes.iter().map(|node| node.id).collect();
         let order_index = node_order
             .iter()

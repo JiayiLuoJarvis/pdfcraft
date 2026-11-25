@@ -19,8 +19,8 @@ impl Measurer for FakeMeasurer {
         Ok(f64::from(count) * 2.0)
     }
 
-    fn line_height_mm(&mut self, _size_pt: f64) -> f64 {
-        5.0
+    fn line_height_with_gap_mm(&mut self, _size_pt: f64, gap_pt: f64) -> f64 {
+        5.0 - crate::units::pt_to_mm(crate::units::LINE_GAP_PT) + crate::units::pt_to_mm(gap_pt)
     }
 
     fn ensure_glyphs(&mut self, _text: &str) -> Result<(), Error> {
@@ -77,8 +77,6 @@ impl LayoutEngine for FakeEngine {
         boxes: &[NodeBox],
         _edges: &[EdgeRef],
         _node_order: &[NodeId],
-        _cols: usize,
-        _node_width_mm: f64,
         _printable_width_mm: f64,
     ) -> Result<FamilyRowMetrics, Error> {
         if boxes.is_empty() {
@@ -114,6 +112,7 @@ pub(super) fn plain_box(index: usize, id: &str, name: &str, subject: bool) -> No
             kind: LineKind::Name,
             text: name.to_owned(),
             font_size_pt: 10.0,
+            logical_line_index: 0,
         }],
         is_subject: subject,
         is_company: true,

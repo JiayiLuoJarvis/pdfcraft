@@ -59,6 +59,7 @@ pub(super) fn center_text(
     face: &Font,
     size_pt: f64,
     line: &TextLine,
+    color: rgb::Color,
 ) -> Result<(), Error> {
     let TextLine {
         left: left_mm,
@@ -75,7 +76,18 @@ pub(super) fn center_text(
         .sum();
     let text_width = pt_to_mm(units / font.units_per_em() * size_pt);
     let x = centered_x(left_mm, width_mm, text_width);
-    paint_run(surface, text, &glyphs, font, face, size_pt, (x, y_mm));
+    paint_run(
+        surface,
+        text,
+        &glyphs,
+        font,
+        face,
+        size_pt,
+        GlyphAt {
+            origin_mm: (x, y_mm),
+            color,
+        },
+    );
     Ok(())
 }
 
@@ -85,15 +97,29 @@ pub(super) fn draw_text(
     font: &mut FontMetrics,
     face: &Font,
     size_pt: f64,
-    x_mm: f64,
-    y_mm: f64,
+    origin_mm: (f64, f64),
+    color: rgb::Color,
 ) -> Result<(), Error> {
     if text.is_empty() {
         return Ok(());
     }
     let glyphs = font.glyph_run(text)?;
-    paint_run(surface, text, &glyphs, font, face, size_pt, (x_mm, y_mm));
+    paint_run(
+        surface,
+        text,
+        &glyphs,
+        font,
+        face,
+        size_pt,
+        GlyphAt { origin_mm, color },
+    );
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct GlyphAt {
+    origin_mm: (f64, f64),
+    color: rgb::Color,
 }
 
 fn paint_run(
@@ -103,14 +129,14 @@ fn paint_run(
     font: &FontMetrics,
     face: &Font,
     size_pt: f64,
-    origin_mm: (f64, f64),
+    at: GlyphAt,
 ) {
     let drawn = krilla_glyphs(glyphs, text, font.units_per_em());
-    let baseline = origin_mm.1 + font.ascent_mm(size_pt);
-    surface.set_fill(Some(solid(rgb::Color::new(0, 0, 0))));
+    let baseline = at.origin_mm.1 + font.ascent_mm(size_pt);
+    surface.set_fill(Some(solid(at.color)));
     surface.set_stroke(None);
     surface.draw_glyphs(
-        Point::from_xy(pt(origin_mm.0), pt(baseline)),
+        Point::from_xy(pt(at.origin_mm.0), pt(baseline)),
         &drawn,
         face.clone(),
         text,
@@ -318,7 +344,7 @@ pub(super) fn solid(color: rgb::Color) -> Fill {
     }
 }
 
-fn ink_color() -> rgb::Color {
+pub(super) fn ink_color() -> rgb::Color {
     rgb::Color::new(INK_BYTE, INK_BYTE, INK_BYTE)
 }
 

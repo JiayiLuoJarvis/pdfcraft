@@ -9,11 +9,44 @@ cross-crate history.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
+### Breaking
+
+- `ChartStyle.node_width_mm: f64` is now `ChartStyle.width: NodeWidth`.
+  `NodeWidth` is `#[non_exhaustive]`: `Adaptive` (default) snaps each
+  non-subject box to 32 / 48 / 60 mm; `Fixed(w)` keeps every non-subject box
+  at `w` mm. Migrate `style.node_width_mm = 38.0` to
+  `style.width = NodeWidth::Fixed(38.0)`.
+- `ChartStyle::MIN_NODE_WIDTH_MM` / `MAX_NODE_WIDTH_MM` move to
+  `NodeWidth::MIN_FIXED_MM` (20) / `MAX_FIXED_MM` (80). `ChartStyle` keeps only
+  `MAX_MARGIN_MM` (40).
+- Protocol errors for a bad fixed width use `ErrorSubject::Field("style.width")`
+  instead of `"style.node_width_mm"`.
+- Investment boxes merge location and approval date into one detail line
+  `{location} · {approval_date}` (`U+00B7`). A subset font that lacks `·` when
+  both fields are present returns `MissingGlyph` with `Character('·')`.
+- Default `ChartStyle` is adaptive width (not a fixed 38 mm). Page-subject
+  width under `Adaptive` is `min(38 × 3, 120)` mm. `Fixed(w)` keeps
+  `min(w × 3, 120)` mm.
+
 ### Changed
 
-- Page-subject boxes (chart root and promoted annex subjects) are wider:
-  `min(node_width_mm * 3.0, 120)` mm. Previously `min(node_width_mm * 2.55, 80)`,
-  reusing `ChartStyle::MAX_NODE_WIDTH_MM`. Ordinary node width range is unchanged.
+- Legal-person and detail lines are 9 pt black (same ink as the name), with a
+  1.2 pt gap. There is no name/detail divider.
+- `wrap_text` uses two-stage balanced wrapping (static `CharClass` penalties
+  plus a global DP). Adaptive names that wrap to three or more lines at 10 pt
+  may fall back to 9 pt. Continuation cues cap at 38 mm.
+- Sibling rows pack to a width budget instead of an equal-column count.
+  Multi-row routing shares a vertical trunk and keeps wires out of boxes.
+- Promoting an investment node to a page subject keeps logical-line
+  boundaries, so paid-in and `location · date` do not glue into one string.
+
+### Fixed
+
+- Overflow stand-in reuse keys on `(subject, first_moved, moved_count)`.
+  A Person cut followed by a LeafCompany cut no longer reuses the wrong
+  overflow box when `moved_count` differs.
 
 ## [0.3.2] - 2026-11-25
 

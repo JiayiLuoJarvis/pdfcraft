@@ -15,7 +15,7 @@ Outbound investments sit below. Measurement uses
 | API | [docs.rs/pdfcraft-orgchart](https://docs.rs/pdfcraft-orgchart) |
 | MSRV | 1.98 |
 | License | MIT OR Apache-2.0 |
-| Status | `0.3.2`. The API can break before `1.0` |
+| Status | `0.4.0`. The API can break before `1.0` |
 
 ---
 
@@ -23,7 +23,7 @@ Outbound investments sit below. Measurement uses
 
 ```toml
 [dependencies]
-pdfcraft-orgchart = "0.3.2"
+pdfcraft-orgchart = "0.4.0"
 ```
 
 ---
@@ -85,7 +85,7 @@ Deep dive: **[docs/guide.md](docs/guide.md)** (style, display rules, errors, tes
 
 | Item | Role |
 | --- | --- |
-| `ChartRequest` / `ChartStyle` | Chart values, `top_n`, size caps |
+| `ChartRequest` / `ChartStyle` / `NodeWidth` | Chart values, `top_n`, and width policy |
 | `Node` / `Edge` / `PaidIn` / `NodeType` | Parties, holding edges, paid-in capital |
 | `Font` | One parsed face. `new` and `from_shared` return `Result` |
 | `Chart` | `new` compiles. `to_pdf` draws. `title` and `subject_name` read the subject |

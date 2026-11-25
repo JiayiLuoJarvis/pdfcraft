@@ -3,7 +3,7 @@
 use krilla::surface::Surface;
 use krilla::text::Font;
 
-use super::paint::{center_text, draw_text};
+use super::paint::{center_text, draw_text, ink_color};
 use super::TextLine;
 use crate::captions::footer;
 use crate::error::Error;
@@ -32,6 +32,7 @@ pub(super) fn draw_titles(
             width: header.width_mm,
             y: header.main_top_mm,
         },
+        ink_color(),
     )?;
     center_text(
         surface,
@@ -44,6 +45,7 @@ pub(super) fn draw_titles(
             width: header.width_mm,
             y: header.sub_top_mm,
         },
+        ink_color(),
     )?;
     Ok(())
 }
@@ -121,7 +123,15 @@ pub(super) fn draw_footer(
     let width = font.string_width_mm(&text, FOOTER_TEXT_PT)?;
     let x = page.geometry.page_width_mm - PAGE_NUMBER_INSET_MM - width;
     let y = page.geometry.page_height_mm - PAGE_NUMBER_INSET_MM - font.ascent_mm(FOOTER_TEXT_PT);
-    draw_text(surface, &text, font, face, FOOTER_TEXT_PT, x, y)?;
+    draw_text(
+        surface,
+        &text,
+        font,
+        face,
+        FOOTER_TEXT_PT,
+        (x, y),
+        ink_color(),
+    )?;
     Ok(())
 }
 
@@ -151,8 +161,9 @@ mod tests {
             Ok(width)
         }
 
-        fn line_height_mm(&mut self, size_pt: f64) -> f64 {
-            size_pt
+        fn line_height_with_gap_mm(&mut self, size_pt: f64, gap_pt: f64) -> f64 {
+            size_pt - crate::units::pt_to_mm(crate::units::LINE_GAP_PT)
+                + crate::units::pt_to_mm(gap_pt)
         }
 
         fn ensure_glyphs(&mut self, _text: &str) -> Result<(), Error> {

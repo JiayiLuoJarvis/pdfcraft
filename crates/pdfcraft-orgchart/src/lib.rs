@@ -44,7 +44,7 @@
 //!
 //! | Item | Role |
 //! | --- | --- |
-//! | [`ChartRequest`] / [`ChartStyle`] | Chart values, fold limit, and size caps |
+//! | [`ChartRequest`] / [`ChartStyle`] / [`NodeWidth`] | Chart values, fold limit, and width policy |
 //! | [`Node`] / [`Edge`] / [`PaidIn`] / [`NodeType`] | Parties, holding edges, and paid-in capital |
 //! | [`Font`] | One parsed TrueType / OpenType face |
 //! | [`Chart`] | Compiled chart. [`Chart::new`], [`Chart::to_pdf`], [`Chart::title`] |
@@ -100,4 +100,4 @@ pub use error::{Error, ErrorCode, ErrorSubject};
 #[doc(inline)]
 pub use font::Font;
 #[doc(inline)]
-pub use request::{ChartRequest, ChartStyle, Edge, Node, NodeType, PaidIn};
+pub use request::{ChartRequest, ChartStyle, Edge, Node, NodeType, NodeWidth, PaidIn};

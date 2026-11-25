@@ -47,8 +47,7 @@ fn cones_keep_their_fields_and_leave_ratio_out_of_the_box() {
         vec![
             (LineKind::Name, "子公司"),
             (LineKind::Detail, "实缴 100万 CNY"),
-            (LineKind::Detail, "深圳"),
-            (LineKind::Detail, "2024-06-01"),
+            (LineKind::Detail, "深圳 · 2024-06-01"),
         ]
     );
     for content in display.nodes() {
@@ -259,8 +258,7 @@ fn cones_keep_their_own_fields_and_leave_ratio_out_of_the_box() {
         vec![
             (LineKind::Name, "子公司"),
             (LineKind::Detail, "实缴 100万 CNY"),
-            (LineKind::Detail, "深圳"),
-            (LineKind::Detail, "2024-06-01"),
+            (LineKind::Detail, "深圳 · 2024-06-01"),
         ]
     );
     for content in display.nodes() {
@@ -342,6 +340,62 @@ fn a_blank_paid_in_amount_adds_no_detail_line() {
         .collect();
     assert_eq!(by_id["c2"], "0.00%");
     assert!(!by_id.contains_key("root"));
+}
+
+#[test]
+fn investment_merges_location_and_approval_date() {
+    let mut both = Node::new("both", "两字段");
+    both.location = Some("  深圳  ".to_owned());
+    both.approval_date = Some(" 2024-06-01 ".to_owned());
+    let mut loc_only = Node::new("loc", "仅地区");
+    loc_only.location = Some("上海".to_owned());
+    let mut date_only = Node::new("date", "仅日期");
+    date_only.approval_date = Some("2020-01-01".to_owned());
+    let mut neither = Node::new("empty", "都空");
+    neither.location = Some("  ".to_owned());
+    neither.approval_date = Some(String::new());
+    let request = ChartRequest::new(
+        "root",
+        vec![
+            Node::new("root", "主体"),
+            both,
+            loc_only,
+            date_only,
+            neither,
+        ],
+        vec![
+            edge("root", "both", 10.0),
+            edge("root", "loc", 10.0),
+            edge("root", "date", 10.0),
+            edge("root", "empty", 10.0),
+        ],
+    );
+    let display = build_display(&request).expect("display");
+    let texts = |protocol: &str| {
+        display
+            .get(nid(&request, protocol))
+            .expect(protocol)
+            .lines
+            .iter()
+            .map(|line| (line.kind, line.text.as_str()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        texts("both"),
+        vec![
+            (LineKind::Name, "两字段"),
+            (LineKind::Detail, "深圳 · 2024-06-01"),
+        ]
+    );
+    assert_eq!(
+        texts("loc"),
+        vec![(LineKind::Name, "仅地区"), (LineKind::Detail, "上海")]
+    );
+    assert_eq!(
+        texts("date"),
+        vec![(LineKind::Name, "仅日期"), (LineKind::Detail, "2020-01-01")]
+    );
+    assert_eq!(texts("empty"), vec![(LineKind::Name, "都空")]);
 }
 
 #[test]

@@ -68,7 +68,7 @@ pub use request::{ChartRequest, ChartStyle, Edge, Node, NodeType, PaidIn};
 | `LaidOutNode`（`id: &'static str`，crate 内无引用） | 删除 |
 | `DisplayRole` / `LineKind` / `LabelHug` 的 `as_str` | 删除。测试改匹配枚举。这三个类型不进公共面 |
 | `paginate`、`paginate_with`、`LayoutEngine`、`Measurer`、`FallbackMeasurer`、`PageGeometry`、`PageSpec`、`NodeBox` | `pub(crate)`。测试在 crate 内部使用 |
-| 仅测试使用的 `default_node_width_mm`、`placed_ids`、`build_display` 等 | 随测试迁入，能 `pub(crate)` 就 `pub(crate)` |
+| 仅测试使用的 `default_node_width`、`placed_ids`、`build_display` 等 | 随测试迁入，能 `pub(crate)` 就 `pub(crate)` |
 
 `NodeType::as_str` 保留，因为行为规格 §14 把 `PERSON` / `COMPANY` 定为对外记号。没有解析入口，也不要新增 `FromStr`。
 
@@ -137,7 +137,7 @@ pub(crate) struct EdgeRec {
 - 是不是 overflow、是不是折叠占位，读 `NodeOrigin`。是不是主体，把 `NodeId` 与 `graph.subject` 比较。绘制虚线、禁止作 ContCue 锚点，看 `NodeOrigin::Overflow`。
 - 请求进入时，用临时的 `HashMap<String, NodeId>` 把调用方 id 对上 arena。这张表不留在 `Graph` 上。布局、走线、分页、绘制按 `NodeId` 索引。
 - `fold` 从旧 arena 构建新 arena，不经过 `ChartRequest`。存活节点按原顺序排列。折叠占位按仍留在图里的父节点顺序追加在末尾。存活边按原顺序排列并保留 `caller_index`，折叠边随后追加，`caller_index` 为 `None`。`Chart::new` 随后在新 arena 上重跑全部协议规则。
-- 分页追加 overflow 时，向 `nodes` 追加 `NodeRec`，身份是 `NodeOrigin::Overflow`。已有合成节点按 `(subject, first_moved)` 这一对 `NodeId` 复用。
+- 分页追加 overflow 时，向 `nodes` 追加 `NodeRec`，身份是 `NodeOrigin::Overflow`。已有合成节点按 `(subject, first_moved, moved_count)` 复用。
 - id 前缀不是校验规则。
 
 展示行、比例事实、节点框挂在 `NodeId` 上，用 `Vec` 按下标索引。
@@ -268,7 +268,7 @@ pub(crate) struct FontMetrics {
 
 `PageGeometry` 留在 `units`，`pub(crate)`。`cache_key` 可以改成「朝向 + 边距的 `to_bits`」，只要同一页几何仍命中同一缓存项。缓存命中与否不改变最终坐标；它只避免重复放置。
 
-`count_units` 对正有限值向零截断，再封顶 64。钉住的结果是：默认竖版、节点宽 38 mm 为 4 列；默认横版为 6 列；原始截断值大于 64 时为 64；节距小于等于 0 时为 1。列数变化会改变装箱，属于业务。禁止放宽上限，禁止改成四舍五入。
+不再用等宽列数 `max_cols` / `count_units` 分行。`layout` 按行宽预算装箱：单行总宽 `<= printable_width_mm + 1e-9` 则不折行；否则按最小行数做宽度平衡 DP，等代价时先比各行节点数序列字典序（前多后少），再比行宽序列字典序（前宽后窄）。单节点本身超预算时独占一行。页宽自然约束单行节点数，不再设 64 列上限。
 
 `n64` 的饱和规则保持。
 

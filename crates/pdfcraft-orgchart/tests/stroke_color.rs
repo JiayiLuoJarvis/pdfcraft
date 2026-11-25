@@ -1,6 +1,6 @@
 //! Node strokes are black. Edge strokes and edge-arrow fills are byte 51.
 
-use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Node};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Node, PaidIn};
 
 mod common;
 
@@ -77,7 +77,12 @@ fn node_strokes_are_black_and_edge_strokes_are_byte_51() {
         vec![
             Node::new("holder", "甲股东"),
             Node::new("root", "主体公司"),
-            Node::new("invest", "乙投资"),
+            Node {
+                paid_in: Some(PaidIn::new("100万")),
+                location: Some("深圳".to_owned()),
+                approval_date: Some("2024-06-01".to_owned()),
+                ..Node::new("invest", "乙投资")
+            },
         ],
         vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
     );
@@ -122,5 +127,13 @@ fn node_strokes_are_black_and_edge_strokes_are_byte_51() {
     assert!(
         fills.contains(&[51, 51, 51]),
         "edge arrow fill missing {fills:?}"
+    );
+    assert!(
+        strokes.iter().all(|(width, _)| !near(*width, 0.35)),
+        "name/detail divider stroke still present {strokes:?}"
+    );
+    assert!(
+        !fills.contains(&[97, 97, 97]),
+        "muted detail text fill still present {fills:?}"
     );
 }

@@ -138,10 +138,13 @@ pub(crate) fn other_investments_name(count: usize) -> String {
     format!("其他投资({count}家)")
 }
 
+/// Prefix of an overflow box's second line, before the page number.
+pub(crate) const OVERFLOW_DETAIL_PREFIX: &str = "详见附件";
+
 /// Second line of an overflow box, written after page numbers are known.
 #[must_use]
 pub(crate) fn overflow_detail_line(target_page: usize) -> String {
-    format!("详见附件{target_page}")
+    format!("{OVERFLOW_DETAIL_PREFIX}{target_page}")
 }
 
 /// First continuation-cue line. The attachment line is separate.

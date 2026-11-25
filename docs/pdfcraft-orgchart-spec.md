@@ -4,7 +4,7 @@
 | --- | --- |
 | 日期 | 2026-10-13 |
 | 状态 | **整包行为合同已写全（reference）**。§3 到 §5 与 §14 产品答复已确认。layout 装箱的逐步算法仍以源包实现为对照，本文件钉可观察合同与常量，不逐函数翻译 |
-| 相关 | [`workspace-crates-spec.md`](workspace-crates-spec.md)；[`pdfcraft-orgchart-structure-spec.md`](pdfcraft-orgchart-structure-spec.md)；源包 `/mnt/data/dev/hcsw-pdfcraft/backend/packages/pdfcraft-equity` |
+| 相关 | [`workspace-crates-spec.md`](workspace-crates-spec.md)；[`pdfcraft-orgchart-structure-spec.md`](pdfcraft-orgchart-structure-spec.md)；[`pdfcraft-orgchart-adaptive-layout-spec.md`](pdfcraft-orgchart-adaptive-layout-spec.md)（`0.4.0` 宽度与投资卡片）；源包 `/mnt/data/dev/hcsw-pdfcraft/backend/packages/pdfcraft-equity` |
 | 意图来源 | `pdfcraft-equity` 行为合同。Rust 惯用重实现，见 §0 |
 | 范围 | 公共 API、协议校验、折叠、展示、测量、分页装箱、绘制、错误码、常量、可测切片 |
 
@@ -148,14 +148,23 @@ impl Edge {
     pub fn new(holder: impl Into<String>, held: impl Into<String>) -> Self;
 }
 
+#[non_exhaustive]
+pub enum NodeWidth {
+    Adaptive,
+    Fixed(f64),
+}
+
+impl NodeWidth {
+    pub const MIN_FIXED_MM: f64 = 20.0;
+    pub const MAX_FIXED_MM: f64 = 80.0;
+}
+
 pub struct ChartStyle {
-    pub node_width_mm: f64,
+    pub width: NodeWidth,
     pub margin_mm: f64,
 }
 
 impl ChartStyle {
-    pub const MIN_NODE_WIDTH_MM: f64 = 20.0;
-    pub const MAX_NODE_WIDTH_MM: f64 = 80.0;
     pub const MAX_MARGIN_MM: f64 = 40.0;
 }
 
@@ -171,7 +180,7 @@ impl Font {
 ```
 
 - `ChartRequest::new` 填 `ChartStyle::default()`、`top_n: None`、`max_nodes: ChartRequest::MAX_NODES`。`ChartRequest` 没有 `Default`。
-- `ChartStyle::default` 是宽 `38` mm、边距 `8` mm。字段是具体数，不是 `Option`。
+- `ChartStyle::default` 是 `NodeWidth::Adaptive`、边距 `8` mm。`Fixed(w)` 的 `w` 是具体数，不是 `Option`。
 - `Node::new`、`Edge::new`、`PaidIn::new` 把其余可选字段设为 `None`。
 - `node_type` 对应 Python `type`。对外字符串用 `PERSON`、`COMPANY`，经 `NodeType::as_str`。
 - 可选字符串空串或纯空白在展示层当缺省。`id`、`name`、`subject_id` 校验仍要求 strip 后非空。
@@ -187,11 +196,11 @@ crate 根不导出常量。
 | 常量 | 值 |
 | --- | --- |
 | `ChartRequest::MAX_NODES` | `100` |
-| `ChartStyle::MIN_NODE_WIDTH_MM` | `20.0` |
-| `ChartStyle::MAX_NODE_WIDTH_MM` | `80.0` |
+| `NodeWidth::MIN_FIXED_MM` | `20.0` |
+| `NodeWidth::MAX_FIXED_MM` | `80.0` |
 | `ChartStyle::MAX_MARGIN_MM` | `40.0` |
 
-`ChartStyle::default` 的普通宽是 `38` mm，边距是 `8` mm。
+`ChartStyle::default` 是 `Adaptive` 宽策略，边距 `8` mm。`Adaptive` 普通框三档 `32 / 48 / 60` mm，主体按 `38` mm 底宽计 `114` mm。
 
 ### 3.4 错误类型
 
@@ -228,7 +237,7 @@ pub enum ErrorSubject {
 - `Display` 打印 `message`。`message()` 给日志。措辞不是合同。有 `source()` 时，`message` 不拼接底层错误的文本。
 - `std::error::Error::source()` 返回字体解析的底层错误。公共签名里不出现 skrifa 类型。
 - `Error` 不可比较。`Font` 不可比较。
-- `ErrorSubject` 标 `#[non_exhaustive]`。`Node.index` 是 `ChartRequest::nodes` 里的位置。`Edge.index` 是 `ChartRequest::edges` 里的位置。二者只指向调用方写下的节点和边。折叠占位与 overflow 合成节点不作 `subject`。`Field` 是请求字段，例如 `"subject_id"`、`"nodes"`、`"max_nodes"`、`"top_n"`、`"style.margin_mm"`、`"style.node_width_mm"`。`Character` 是字体里缺的那个字符，可能来自库自带的文案。
+- `ErrorSubject` 标 `#[non_exhaustive]`。`Node.index` 是 `ChartRequest::nodes` 里的位置。`Edge.index` 是 `ChartRequest::edges` 里的位置。二者只指向调用方写下的节点和边。折叠占位与 overflow 合成节点不作 `subject`。`Field` 是请求字段，例如 `"subject_id"`、`"nodes"`、`"max_nodes"`、`"top_n"`、`"style.margin_mm"`、`"style.width"`。`Character` 是字体里缺的那个字符，可能来自库自带的文案（含投资合并行的 `U+00B7`）。
 - 不提供 `to_dict`。HTTP 状态不属于本库。
 
 ### 3.5 内部 API（`pub(crate)`）
@@ -241,7 +250,7 @@ pub enum ErrorSubject {
 见既有行为。摘要如下。全部发生在 `Chart::new`。
 
 1. 空白 `subject_id` → `INVALID_PROTOCOL`。`subject` 为 `Field("subject_id")`。
-2. 边界。`max_nodes` ∈ `1..=ChartRequest::MAX_NODES`（100）。`top_n` 为 `None` 时不折叠。`Some(n)` 的 `n` ∈ `1..=max_nodes`。`top_n == max_nodes` 合法。`margin_mm` 为有限值且 ∈ `(0, 40]`。`node_width_mm` 为有限值且 ∈ `[20, 80]`。越界 → `INVALID_PROTOCOL`。
+2. 边界。`max_nodes` ∈ `1..=ChartRequest::MAX_NODES`（100）。`top_n` 为 `None` 时不折叠。`Some(n)` 的 `n` ∈ `1..=max_nodes`。`top_n == max_nodes` 合法。`margin_mm` 为有限值且 ∈ `(0, 40]`。`NodeWidth::Adaptive` 恒合法。`NodeWidth::Fixed(w)` 要求 `w` 为有限值且 ∈ `[20, 80]`。越界 → `INVALID_PROTOCOL`，固定宽的 `subject` 为 `Field("style.width")`。
 3. `nodes.len() > max_nodes` → `TOO_MANY_NODES`。折叠前查一次，折叠后再查一次。
 4. 节点 id 或名称为空白、id 重复 → `INVALID_PROTOCOL`。节点 id 不按前缀分类。
 5. 主体不在表 → `SUBJECT_NOT_FOUND`。
@@ -314,7 +323,7 @@ Font::new 或 Font::from_shared
 | 角色 | 行顺序 |
 | --- | --- |
 | `SUBJECT` / `SHAREHOLDER` | 名称。法人姓名（无「法定代表人：」前缀） |
-| `INVESTMENT` | 名称。有实缴金额则 `实缴 {金额}` 或 `实缴 {金额} {币种}`（仅币种不画行）。所在地原文一行。核准日期原文一行。不画法人 |
+| `INVESTMENT` | 名称。有实缴金额则 `实缴 {金额}` 或 `实缴 {金额} {币种}`（仅币种不画行）。地区与核准日期合并：两者均非空为 `{location} · {approval_date}`（`U+00B7`）；只一侧非空则该侧原文一行；都空则省略。不画法人 |
 
 折叠占位按股东配方，通常只有名称一行。实线，不可点击。
 
@@ -371,16 +380,17 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 - 入参 `Font`。内部持有 `Arc<Vec<u8>>`。`Font::new` 包住调用方拥有的字节并当场解析。`Font::from_shared` 保存已有的 `Arc` 并当场解析。解析失败 → `FONT_ERROR`，原因在 `source()`。拒绝 TTC/OTC。
 - `Font::new` 只做打开单字体时已有的检查。空字节、打不开 face、读不到 `head` 或 `hhea`、upem 不是有限正数、ascent 不大于 0、descent 不小于 0，都在这里失败。字形没有 advance 仍在 `to_pdf` 报 `FONT_ERROR`。krilla 拒绝字体或序列化失败也在 `to_pdf` 报 `FONT_ERROR`。
 - `Font` 不可变，可以跨图复用。`Debug` 只输出字节长度和 units per em。`Font` 不可比较。
-- 测宽前对每个字符 ensure glyph。缺字 → `MISSING_GLYPH`。`subject` 为 `Character`。
-- 行高用 ascent+descent 比例尺 + `LINE_GAP_PT`。与绘制共用同一 charmap / advance 管线。禁止 krilla `draw_text` 反推宽度。
+- 测宽前对每个字符 ensure glyph。缺字 → `MISSING_GLYPH`。`subject` 为 `Character`。库内置投资合并行使用 `U+00B7`；调用方字体缺该字且该行会被画出时，`subject` 为 `Character('·')`。
+- 行高用 ascent+descent 比例尺 + 行距。名称行用 `LINE_GAP_PT`（2 pt）；法人/详情用 `DETAIL_LINE_GAP_PT`（1.2 pt）。无行距高度为 `line_height_with_gap_mm(size_pt, 0.0)`。与绘制共用同一 charmap / advance 管线。禁止 krilla `draw_text` 反推宽度。
 
 ### 9.2 节点框
 
-- 普通宽 = `style.node_width_mm`。缺省 `38` mm。主体宽 = `min(width * 3.0, 120)` mm。封顶独立于 `ChartStyle::MAX_NODE_WIDTH_MM`。
-- 内容宽 = 框宽 − `2 * PADDING_X_MM`。名称可折行。名称字号主体 `12` pt，普通 `10` pt。法人/详情 `9` pt。
-- 高度 = 上下 padding + 各折行行高，再与两行名称下限取 max。主体用 `SUBJECT_PADDING_Y_MM`。
+- 普通宽由 `style.width` 决定。`Fixed(w)` 为 `w` mm。`Adaptive` 按自然内容宽上取 `32 / 48 / 60` mm。主体宽：`Fixed(w)` 为 `min(w * 3.0, 120)` mm；`Adaptive` 以 `38` mm 为底宽，即 `114` mm。封顶独立于 `NodeWidth::MAX_FIXED_MM`。
+- 内容宽 = 框宽 − `2 * PADDING_X_MM`。名称可折行。名称字号主体 `12` pt，普通 `10` pt（`Adaptive` 下折满 3 行可降到 `9` pt）。法人/详情 `9` pt。
+- 折行是两阶段：无状态 `CharClass` 边界惩罚 + 全局 DP 平衡行宽；输出须满足 `parts.concat() == text`。开闭括号、中圆点 `·`、机构后缀与末行孤字用具名惩罚。`Fixed(w)` 禁用名称 `9` pt 降档。
+- 高度 = 上下 padding + 各折行行高，再与两行名称下限取 max。主体用 `SUBJECT_PADDING_Y_MM`。升格附页主体按 `logical_line_index` 还原逻辑行，不把同 `LineKind` 粘成一行。
 - `NODE_TOO_TALL` 比较对象是**肖像**可印高导出的 `node_height_limit_mm = (printable_h - LAYER_SPACING_MM) / 2`。升格附页主体时 Python 不再做该检查。
-- overflow 合成框。装箱时第二行按名称字号预留空行。页序定后写入 `详见附件{N}`，不改几何。
+- overflow 合成框。装箱时第二行按名称字号预留空行。页序定后写入 `详见附件{N}`，不改几何。`Adaptive` 下 ContCue 框宽不超过 `CONT_CUE_ANCHOR_MATCH_MAX_MM`（38 mm）。
 
 ## 10. 分页与装箱合同
 
@@ -401,6 +411,7 @@ overflow 框内第二行定稿后为 `详见附件{N}`。合成名 `其他股东
 
 - 页内主体（原始或升格）的直接关系一层允许折行。更深层级默认单行，高度不超过弹性带。
 - 每个直接孩子按「主体 + 该孩子完整子锥」单独量。超弹性高 → 大族。本页留 stub，整锥进附页。否则小族整锥内联。
+- 直接层按**行宽预算**装箱，不再用等宽列数。单行总宽 `<= printable_width_mm` 则不折行；否则按最小行数做宽度平衡 DP（等代价先比各行节点数序列字典序，再比行宽序列字典序）。多行绕线共享竖直支干，走线不得穿框。
 - 可印宽够时，有子族的父按子族宽以 `FAMILY_GAP_MM` 开槽。同高 X 重叠的异目标横 bus 以 `BUS_STAGGER_MM` 错开。
 - 股东竖 stub 至少 `SHAREHOLDER_STUB_MIN_MM`（6.5 mm）。
 
@@ -439,7 +450,7 @@ overflow 链择优（页数、降级、续页利用率 0.35、留下孩子数等
 ### 11.2 节点外观
 
 - 圆角半径 `NODE_CORNER_RADIUS_MM`（2.2 mm）。填充与描边各画一次。虚线只包描边（overflow 与续页框、续页引线）。
-- 节点框与续页框描边是黑色。边线、边箭头填充、续页引线和引线箭头填充是 0.2 灰（字节 51）。框内文字是黑色。公司填充是 `COMPANY_SHADE`（247/255）。个人填充是白色。
+- 节点框与续页框描边是黑色。边线、边箭头填充、续页引线和引线箭头填充是 0.2 灰（字节 51）。框内文字（名称、法人、详情）均为黑色。公司填充是 `COMPANY_SHADE`（247/255）。个人填充是白色。
 - 文字裁切用同一圆角。链接命中区用外接矩形。
 - 框内每一行在框宽内**水平居中**（折行宽仍按 `内容宽 = 框宽 − 2 * PADDING_X_MM` 测量）。续页框文字在槽内水平居中。
 - 主体描边更粗（`SUBJECT_BORDER_PT` 1.5 vs `NORMAL_BORDER_PT` 0.8）。续页框另用 `CONT_CUE_LINE_WIDTH_PT` 1.0 与 `CONT_CUE_CORNER_MM` 1.0，虚线节距 `CONT_CUE_DASH_ON_PT` / `CONT_CUE_DASH_OFF_PT`（4 / 3）。
@@ -458,7 +469,7 @@ Python/reportlab 与 krilla 坐标约定可能不同。Rust 侧在适配层做�
 | --- | --- |
 | `PAGE_WIDTH_MM` | 210 |
 | `PAGE_HEIGHT_MM` | 297 |
-| `NODE_WIDTH_MM` | 38 |
+| `NODE_WIDTH_MM` | 38（内部参照；公共缺省是 `NodeWidth::Adaptive`） |
 | `SUBJECT_WIDTH_FACTOR` | 3.0 |
 | `SUBJECT_MAX_WIDTH_MM` | 120 |
 | `SUBJECT_PADDING_Y_MM` | 3.5 |
@@ -469,7 +480,12 @@ Python/reportlab 与 krilla 坐标约定可能不同。Rust 侧在适配层做�
 | `PADDING_X_MM` | 2 |
 | `PADDING_Y_MM` | 1.5 |
 | `NAME_FONT_PT` | 10 |
+| `NAME_FALLBACK_FONT_PT` | 9 |
 | `DETAIL_FONT_PT` | 9 |
+| `DETAIL_LINE_GAP_PT` | 1.2 |
+| `ADAPTIVE_TIERS_MM` | 32 / 48 / 60 |
+| `ADAPTIVE_SUBJECT_BASE_WIDTH_MM` | 38 |
+| `CONT_CUE_ANCHOR_MATCH_MAX_MM` | 38 |
 | `RATIO_FONT_PT` | 9 |
 | `NODE_CORNER_RADIUS_MM` | 2.2 |
 | `RATIO_LABEL_OFFSET_X_MM` | 1.2 |
@@ -488,7 +504,7 @@ Python/reportlab 与 krilla 坐标约定可能不同。Rust 侧在适配层做�
 | `MAX_NODES` | 100 |
 | `RATIO_MIN` / `RATIO_MAX` | 0 / 100 |
 | `MAX_MARGIN_MM` | 40 |
-| `MIN_NODE_WIDTH_MM` / `MAX_NODE_WIDTH_MM` | 20 / 80 |
+| `MIN_FIXED_MM` / `MAX_FIXED_MM` | 20 / 80 |
 | `EDGE_WIDTH_PT` | 0.7 |
 | `ARROW_SIZE_PT` | 6 |
 | `SUBJECT_BORDER_PT` / `NORMAL_BORDER_PT` | 1.5 / 0.8 |
@@ -547,7 +563,7 @@ cargo doc -p pdfcraft-orgchart --no-deps
 
 | 题 | 答复 | 来源 |
 | --- | --- | --- |
-| Q1 命名 | `Chart`、`ChartRequest`、`ChartStyle`、`Node`、`Edge`、`PaidIn`、`Font`、`Error`、`ErrorCode`、`ErrorSubject` | 提案书 §13 |
+| Q1 命名 | `Chart`、`ChartRequest`、`ChartStyle`、`NodeWidth`、`Node`、`Edge`、`PaidIn`、`Font`、`Error`、`ErrorCode`、`ErrorSubject` | 提案书 §13 |
 | Q2 中间 API | 不进稳定公共面 | 口头 |
 | Q3 `to_dict` | 不提供 | 默认 |
 | Q4 `NodeType` 字符串 | `PERSON`、`COMPANY` | 默认 |
@@ -559,11 +575,11 @@ cargo doc -p pdfcraft-orgchart --no-deps
 | Q10 验收 | 文本可抽取 + 页结构。无几何截图门禁 | 默认 |
 | Q11 `max_nodes` | 在 `Chart::new` 内，折叠之后计数，并重跑全部协议规则 | 提案书 §13 |
 | Q12 `top_n` | 类型是 `Option<NonZeroUsize>`。`None` 不折叠。`Some(n)` 的 `n` 在 `1..=max_nodes`。`top_n == max_nodes` 合法 | 提案书 §13 |
-| Q13 外观缺省 | `ChartStyle::default` 为宽 38 mm、边距 8 mm。字段不是 `Option` | 提案书 §13 |
+| Q13 外观缺省 | `ChartStyle::default` 为 `NodeWidth::Adaptive`、边距 8 mm。字段不是 `Option` | 提案书 §13（2026-11-25 覆写） |
 | Q14 纸张朝向 | 固定 A4，启发式朝向 | 默认 |
 | Q15 编译与出图 | `Chart::new(ChartRequest) -> Result<Chart, Error>` 按值接收请求。`Chart::to_pdf(&self, &Font)` 出 PDF。`Chart` 不持有字体 | 提案书 §13 |
 | Q16 标题 | `Chart::title()` 恒为 `{主体名}股权架构图`。另有 `Chart::subject_name()` | 提案书 §13 |
-| Q17 外观类型 | `ChartStyle { node_width_mm, margin_mm }`。`Default` 为 38 与 8 | 提案书 §13 |
+| Q17 外观类型 | `ChartStyle { width: NodeWidth, margin_mm }`。`Default` 为 `Adaptive` 与 8 | 提案书 §13（2026-11-25 覆写） |
 | Q18 字体类型 | `Font::new` 与 `Font::from_shared` 返回 `Result`。解析失败是 `FONT_ERROR` | 提案书 §13 |
 | Q19 边与实缴 | `Edge { holder, held, ratio }`。`Node.paid_in` 是 `Option<PaidIn>`。`PaidIn { amount, currency }` | 提案书 §13 |
 | Q20 错误访问器 | `Error` 字段私有。访问器是 `code()`、`message()`、`subject()`、`source()`。`ErrorSubject` 标 `#[non_exhaustive]` | 提案书 §13 |

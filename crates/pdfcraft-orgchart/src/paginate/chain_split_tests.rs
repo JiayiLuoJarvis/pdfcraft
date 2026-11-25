@@ -13,6 +13,7 @@ use crate::page::{
     build_node_boxes, overflow_box, promote_to_page_subject, InboxNode, NodeBox, PageSpec,
 };
 use crate::paginate::{paginate_request as paginate, paginate_request_with as paginate_with};
+use crate::request::NodeWidth;
 use crate::units::PageGeometry;
 use crate::Chart;
 use crate::{ChartRequest, Edge, ErrorCode, Node};
@@ -66,7 +67,7 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
     let mut request = chain(&["a1", "a2"], false);
     for node in &mut request.nodes {
         if node.id != "root" {
-            node.name = "甲".repeat(25);
+            node.name = "甲".repeat(40);
         }
     }
     let boxes: Vec<NodeBox> = request
@@ -104,14 +105,15 @@ fn an_annex_subject_is_rewrapped_with_the_supplied_face() {
         false,
     );
     let mut again = FontMetrics::from_font(&bytes);
-    let expected = match promote_to_page_subject(&source, 38.0, &mut again) {
+    let expected = match promote_to_page_subject(&source, NodeWidth::Fixed(38.0), &mut again) {
         Ok(lines) => lines,
         Err(error) if crate::test_font::skip_missing_glyph(&error) => return,
         Err(error) => panic!("promote: {error}"),
     };
     assert_eq!(promoted.lines, expected.lines);
     let mut fake = FallbackMeasurer;
-    let fallback = promote_to_page_subject(&source, 38.0, &mut fake).expect("fallback");
+    let fallback =
+        promote_to_page_subject(&source, NodeWidth::Fixed(38.0), &mut fake).expect("fallback");
     assert_ne!(promoted.lines.len(), fallback.lines.len());
 }
 
@@ -156,7 +158,7 @@ fn unpromoted_boxes(request: &ChartRequest, font: &crate::Font) -> Vec<NodeBox> 
     build_node_boxes(
         &inboxes,
         &mut metrics,
-        graph.style.node_width_mm,
+        graph.style.width,
         graph.subject,
         geometry.printable_height_mm(),
     )
@@ -194,7 +196,7 @@ fn to_pdf_wraps_promoted_and_overflow_boxes_like_the_helpers() {
         Err(error) => panic!("pages: {error}"),
     };
     let subject = chart.subject_id();
-    let node_width = request.style.node_width_mm;
+    let node_width = request.style.width;
     let sources = unpromoted_boxes(&request, &font);
     let mut saw_promoted = false;
     let mut saw_overflow = false;
@@ -316,7 +318,7 @@ fn chain_pages(ids: &[&str], geometry: PageGeometry, height_mm: f64) -> Vec<Page
     let mut boxes = build_node_boxes(
         &inbox,
         &mut measurer,
-        38.0,
+        NodeWidth::Fixed(38.0),
         node_id(&request, &request.subject_id),
         geometry.printable_height_mm(),
     )

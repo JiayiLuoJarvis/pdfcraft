@@ -11,15 +11,21 @@ use crate::units::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "MultiIn/MultiOut/MultiOutEntry are the three bus roles in adaptive-layout spec §5.2"
+)]
 enum BusRole {
     MultiIn,
     MultiOut,
+    MultiOutEntry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BusKey {
     role: BusRole,
     endpoint_id: NodeId,
+    row: FiniteMm,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +100,8 @@ struct RouteCaches {
     multi_in_spine_x: HashMap<NodeId, f64>,
     multi_in_row_bottom: HashMap<NodeId, HashMap<FiniteMm, f64>>,
     multi_in_bottom_row_y: HashMap<NodeId, f64>,
+    multi_out_branch: HashMap<(NodeId, FiniteMm), (f64, f64)>,
+    used_channel_x: Vec<f64>,
 }
 
 pub(crate) fn route_edges(
@@ -117,6 +125,8 @@ pub(crate) fn route_edges(
         multi_in_spine_x: HashMap::new(),
         multi_in_row_bottom: HashMap::new(),
         multi_in_bottom_row_y: HashMap::new(),
+        multi_out_branch: HashMap::new(),
+        used_channel_x: Vec::new(),
     };
     for edge in page_edges {
         let Some(src) = nodes.get(&edge.from_id) else {
@@ -273,6 +283,7 @@ fn route_multi_in(
         BusKey {
             role: BusRole::MultiIn,
             endpoint_id: edge.to_id,
+            row: FiniteMm::ZERO,
         },
         candidate,
         &centers,
@@ -318,9 +329,12 @@ fn route_multi_in(
         "multi-in bottom row was cached for this target",
     );
     let multi_row = row_bottoms.len() > 1;
-    let column_stack = sources
-        .iter()
-        .all(|node| (node.x - sources[0].x).abs() < 0.01);
+    let first_center_x = sources[0].x + sources[0].width / 2.0;
+    let column_stack = sources.len() >= 2
+        && row_bottoms.len() == sources.len()
+        && sources
+            .iter()
+            .all(|node| (node.x + node.width / 2.0 - first_center_x).abs() < 0.01);
     let mut spine_x = None;
     if multi_row || column_stack {
         caches
@@ -418,6 +432,7 @@ fn route_multi_out(
         BusKey {
             role: BusRole::MultiOut,
             endpoint_id: edge.from_id,
+            row: FiniteMm::ZERO,
         },
         candidate,
         &centers,
@@ -426,20 +441,39 @@ fn route_multi_out(
         &exclude,
     )?;
     let bus_y = span.y_mm;
-    let points = if caches.drawn_trunk_from.insert(edge.from_id) {
-        outward_points(src, src_bottom, bus_y, dst_top, &node_list, &exclude)
+    let dst = super::map_get(nodes, &edge.to_id, "multi-out dest is placed");
+    let child_exclude = HashSet::from([edge.from_id, edge.to_id]);
+    let points = if vertical_clear(dst_top.x, bus_y, dst_top.y, &node_list, &child_exclude) {
+        if caches.drawn_trunk_from.insert(edge.from_id) {
+            outward_points(src, src_bottom, bus_y, dst_top, &node_list, &exclude)
+        } else {
+            vec![
+                PointMm {
+                    x: src_bottom.x,
+                    y: bus_y,
+                },
+                PointMm {
+                    x: dst_top.x,
+                    y: bus_y,
+                },
+                dst_top,
+            ]
+        }
     } else {
-        vec![
-            PointMm {
-                x: src_bottom.x,
-                y: bus_y,
+        multi_out_branch_points(
+            edge,
+            &OutBranch {
+                src,
+                src_bottom,
+                dst,
+                dst_top,
+                bus_y,
+                children: &children,
             },
-            PointMm {
-                x: dst_top.x,
-                y: bus_y,
-            },
-            dst_top,
-        ]
+            &node_list,
+            &exclude,
+            caches,
+        )?
     };
     Ok(LaidOutEdge {
         from_id: edge.from_id,
@@ -447,6 +481,150 @@ fn route_multi_out(
         points,
         draw_arrow: true,
     })
+}
+
+#[derive(Clone, Copy)]
+struct OutBranch<'a> {
+    src: &'a PlacedNode,
+    src_bottom: PointMm,
+    dst: &'a PlacedNode,
+    dst_top: PointMm,
+    bus_y: f64,
+    children: &'a [&'a PlacedNode],
+}
+
+fn multi_out_branch_points(
+    edge: &EdgeRef,
+    branch: &OutBranch<'_>,
+    node_list: &[PlacedNode],
+    exclude: &HashSet<NodeId>,
+    caches: &mut RouteCaches,
+) -> Result<Vec<PointMm>, Error> {
+    let row_key = FiniteMm::or_zero(branch.dst.y);
+    let branch_key = (edge.from_id, row_key);
+    cache_multi_out_branch(edge, branch, node_list, exclude, caches)?;
+    let (channel_x, entry_y) = *super::map_get(
+        &caches.multi_out_branch,
+        &branch_key,
+        "multi-out branch was cached for this parent row",
+    );
+    let OutBranch {
+        src,
+        src_bottom,
+        dst_top,
+        bus_y,
+        ..
+    } = *branch;
+    let mut points = if caches.drawn_trunk_from.insert(edge.from_id) {
+        src_to_bus(src, src_bottom, bus_y, node_list, exclude)
+    } else {
+        vec![PointMm {
+            x: src_bottom.x,
+            y: bus_y,
+        }]
+    };
+    points.extend([
+        PointMm {
+            x: channel_x,
+            y: bus_y,
+        },
+        PointMm {
+            x: channel_x,
+            y: entry_y,
+        },
+        PointMm {
+            x: dst_top.x,
+            y: entry_y,
+        },
+        dst_top,
+    ]);
+    Ok(points)
+}
+
+fn cache_multi_out_branch(
+    edge: &EdgeRef,
+    branch: &OutBranch<'_>,
+    node_list: &[PlacedNode],
+    exclude: &HashSet<NodeId>,
+    caches: &mut RouteCaches,
+) -> Result<(), Error> {
+    let row_key = FiniteMm::or_zero(branch.dst.y);
+    let branch_key = (edge.from_id, row_key);
+    if caches.multi_out_branch.contains_key(&branch_key) {
+        return Ok(());
+    }
+    let row_mates: Vec<&PlacedNode> = branch
+        .children
+        .iter()
+        .copied()
+        .filter(|child| FiniteMm::or_zero(child.y) == row_key)
+        .collect();
+    let prev_row_bottom = branch
+        .children
+        .iter()
+        .filter(|child| child.y < branch.dst.y - 0.01)
+        .map(|child| child.y + child.height)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let prev_row_bottom = if prev_row_bottom.is_finite() {
+        prev_row_bottom
+    } else {
+        branch.src.y + branch.src.height
+    };
+    let gap = (branch.dst.y - prev_row_bottom).max(0.0);
+    let raw = prev_row_bottom + (gap * 0.35).clamp(1.5, ROW_GAP_MM * 0.5);
+    let y_limit = branch.dst.y - BUS_ENDPOINT_CLEARANCE_MM;
+    let candidate = raw.clamp(prev_row_bottom + BUS_ENDPOINT_CLEARANCE_MM, y_limit);
+    let mut centers: Vec<f64> = row_mates
+        .iter()
+        .map(|child| child.x + child.width / 2.0)
+        .collect();
+    if centers.is_empty() {
+        centers.push(branch.dst_top.x);
+    }
+    let row_center = centers.iter().copied().sum::<f64>() / crate::units::n64(centers.len());
+    let span = commit_bus_y(
+        &mut caches.occupied,
+        BusKey {
+            role: BusRole::MultiOutEntry,
+            endpoint_id: edge.from_id,
+            row: row_key,
+        },
+        candidate,
+        &centers,
+        y_limit,
+        node_list,
+        exclude,
+    )?;
+    let entry_y = span.y_mm;
+    let min_x = row_mates
+        .iter()
+        .map(|child| child.x)
+        .fold(branch.dst.x, f64::min);
+    let max_x = row_mates
+        .iter()
+        .map(|child| child.x + child.width)
+        .fold(branch.dst.x + branch.dst.width, f64::max);
+    let mut channel_x = nearest_clear_x(&ChannelSearch {
+        y_lo: branch.bus_y.min(entry_y),
+        y_hi: branch.bus_y.max(entry_y),
+        trunk_x: row_center,
+        first_left: min_x - NODE_SPACING_MM * 0.5,
+        first_right: max_x + NODE_SPACING_MM * 0.5,
+        nodes: node_list,
+        exclude_ids: exclude,
+    });
+    if caches
+        .used_channel_x
+        .iter()
+        .any(|used| (used - channel_x).abs() < 0.01)
+    {
+        channel_x += BUS_STAGGER_MM;
+    }
+    caches.used_channel_x.push(channel_x);
+    caches
+        .multi_out_branch
+        .insert(branch_key, (channel_x, entry_y));
+    Ok(())
 }
 
 fn route_single(
@@ -492,16 +670,23 @@ fn route_single(
     }
 }
 
-fn outward_points(
+fn row_max_bottom(src: &PlacedNode, nodes: &[PlacedNode]) -> f64 {
+    nodes
+        .iter()
+        .filter(|node| (node.y - src.y).abs() < 0.01)
+        .map(|node| node.y + node.height)
+        .fold(src.y + src.height, f64::max)
+}
+
+fn src_to_bus(
     src: &PlacedNode,
     src_bottom: PointMm,
     bus_y: f64,
-    dst_top: PointMm,
     nodes: &[PlacedNode],
     exclude_ids: &HashSet<NodeId>,
 ) -> Vec<PointMm> {
     let trunk_x = src_bottom.x;
-    let mut down = if vertical_clear(trunk_x, src_bottom.y, bus_y, nodes, exclude_ids) {
+    if vertical_clear(trunk_x, src_bottom.y, bus_y, nodes, exclude_ids) {
         vec![
             src_bottom,
             PointMm {
@@ -510,8 +695,9 @@ fn outward_points(
             },
         ]
     } else {
-        let exit_y = (src_bottom.y + ROW_GAP_MM * 0.5).min(bus_y - 0.5);
-        let side_x = side_channel_x(src, exit_y, bus_y, dst_top.x, nodes, exclude_ids);
+        let bottom = row_max_bottom(src, nodes);
+        let exit_y = (bottom + ROW_GAP_MM * 0.5).min(bus_y - 0.5);
+        let side_x = side_channel_x(src, exit_y, bus_y, trunk_x, nodes, exclude_ids);
         vec![
             src_bottom,
             PointMm {
@@ -531,7 +717,18 @@ fn outward_points(
                 y: bus_y,
             },
         ]
-    };
+    }
+}
+
+fn outward_points(
+    src: &PlacedNode,
+    src_bottom: PointMm,
+    bus_y: f64,
+    dst_top: PointMm,
+    nodes: &[PlacedNode],
+    exclude_ids: &HashSet<NodeId>,
+) -> Vec<PointMm> {
+    let mut down = src_to_bus(src, src_bottom, bus_y, nodes, exclude_ids);
     down.push(PointMm {
         x: dst_top.x,
         y: bus_y,
@@ -709,21 +906,15 @@ fn group_spine_x(
         .iter()
         .map(|node| node.x + node.width)
         .fold(f64::NEG_INFINITY, f64::max);
-    let left = min_x - NODE_SPACING_MM * 0.5;
-    let right = max_x + NODE_SPACING_MM * 0.5;
-    let left_clear = vertical_clear(left, top_y, bus_y, nodes, exclude_ids);
-    let right_clear = vertical_clear(right, top_y, bus_y, nodes, exclude_ids);
-    if left_clear && right_clear {
-        if (left - trunk_x).abs() < (right - trunk_x).abs() - 0.01 {
-            left
-        } else {
-            right
-        }
-    } else if left_clear {
-        left
-    } else {
-        right
-    }
+    nearest_clear_x(&ChannelSearch {
+        y_lo: top_y.min(bus_y),
+        y_hi: top_y.max(bus_y),
+        trunk_x,
+        first_left: min_x - NODE_SPACING_MM * 0.5,
+        first_right: max_x + NODE_SPACING_MM * 0.5,
+        nodes,
+        exclude_ids,
+    })
 }
 
 fn vertical_clear(
@@ -752,21 +943,114 @@ fn side_channel_x(
     nodes: &[PlacedNode],
     exclude_ids: &HashSet<NodeId>,
 ) -> f64 {
-    let left = src.x - NODE_SPACING_MM * 0.5;
-    let right = src.x + src.width + NODE_SPACING_MM * 0.5;
-    let left_clear = vertical_clear(left, from_y, bus_y, nodes, exclude_ids);
-    let right_clear = vertical_clear(right, from_y, bus_y, nodes, exclude_ids);
-    if left_clear && !right_clear {
-        return left;
+    nearest_clear_x(&ChannelSearch {
+        y_lo: from_y.min(bus_y),
+        y_hi: from_y.max(bus_y),
+        trunk_x,
+        first_left: src.x - NODE_SPACING_MM * 0.5,
+        first_right: src.x + src.width + NODE_SPACING_MM * 0.5,
+        nodes,
+        exclude_ids,
+    })
+}
+
+struct ChannelSearch<'a> {
+    y_lo: f64,
+    y_hi: f64,
+    trunk_x: f64,
+    first_left: f64,
+    first_right: f64,
+    nodes: &'a [PlacedNode],
+    exclude_ids: &'a HashSet<NodeId>,
+}
+
+fn nearest_clear_x(search: &ChannelSearch<'_>) -> f64 {
+    let ChannelSearch {
+        y_lo,
+        y_hi,
+        trunk_x,
+        first_left,
+        first_right,
+        nodes,
+        exclude_ids,
+    } = *search;
+    let left_clear = vertical_clear(first_left, y_lo, y_hi, nodes, exclude_ids);
+    let right_clear = vertical_clear(first_right, y_lo, y_hi, nodes, exclude_ids);
+    if left_clear || right_clear {
+        return closest_x(
+            trunk_x,
+            left_clear.then_some(first_left),
+            right_clear.then_some(first_right),
+        );
     }
-    if right_clear && !left_clear {
-        return right;
+    gap_channel_x(search).unwrap_or(first_right)
+}
+
+fn closest_x(trunk_x: f64, left: Option<f64>, right: Option<f64>) -> f64 {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if (left - trunk_x).abs() <= (right - trunk_x).abs() {
+                left
+            } else {
+                right
+            }
+        }
+        (Some(x), None) | (None, Some(x)) => x,
+        (None, None) => trunk_x,
     }
-    if (left - trunk_x).abs() <= (right - trunk_x).abs() {
-        left
-    } else {
-        right
+}
+
+fn gap_channel_x(search: &ChannelSearch<'_>) -> Option<f64> {
+    let ChannelSearch {
+        y_lo,
+        y_hi,
+        trunk_x,
+        nodes,
+        exclude_ids,
+        ..
+    } = *search;
+    let mut intervals: Vec<(f64, f64)> = nodes
+        .iter()
+        .filter(|node| {
+            !exclude_ids.contains(&node.id)
+                && y_hi > node.y + 0.5
+                && y_lo < node.y + node.height - 0.5
+        })
+        .map(|node| (node.x - 0.5, node.x + node.width + 0.5))
+        .collect();
+    if intervals.is_empty() {
+        return None;
     }
+    intervals.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let mut merged = vec![intervals[0]];
+    for (lo, hi) in intervals.into_iter().skip(1) {
+        let last = merged.last_mut()?;
+        if lo <= last.1 {
+            last.1 = last.1.max(hi);
+        } else {
+            merged.push((lo, hi));
+        }
+    }
+    let min_left = merged.first()?.0;
+    let max_right = merged.last()?.1;
+    let mut candidates = vec![
+        min_left - NODE_SPACING_MM * 0.5,
+        max_right + NODE_SPACING_MM * 0.5,
+    ];
+    for pair in merged.windows(2) {
+        candidates.push(f64::midpoint(pair[0].1, pair[1].0));
+    }
+    let mut best: Option<f64> = None;
+    for x in candidates {
+        if !vertical_clear(x, y_lo, y_hi, nodes, exclude_ids) {
+            continue;
+        }
+        let take = best.is_none_or(|current| (x - trunk_x).abs() < (current - trunk_x).abs());
+        if take {
+            best = Some(x);
+        }
+    }
+    best
 }
 
 #[cfg(test)]

@@ -114,34 +114,45 @@ impl Edge {
     }
 }
 
-/// Reusable box width and page margin.
+/// Non-subject node width policy.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum NodeWidth {
+    /// Snap each non-subject node to a discrete tier (`32`, `48`, or `60` mm)
+    /// based on its natural content width.
+    #[default]
+    Adaptive,
+    /// Fixed width in mm for every non-subject node (`20.0..=80.0`).
+    Fixed(f64),
+}
+
+impl NodeWidth {
+    /// Minimum fixed width accepted by [`NodeWidth::Fixed`], in mm.
+    pub const MIN_FIXED_MM: f64 = 20.0;
+    /// Maximum fixed width accepted by [`NodeWidth::Fixed`], in mm.
+    pub const MAX_FIXED_MM: f64 = 80.0;
+}
+
+/// Reusable box width policy and page margin.
 ///
-/// [`ChartStyle::default`] is 38 mm wide with an 8 mm margin.
+/// [`ChartStyle::default`] uses [`NodeWidth::Adaptive`] with an 8 mm margin.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChartStyle {
-    /// Node box width in mm. Legal range is
-    /// [`MIN_NODE_WIDTH_MM`](Self::MIN_NODE_WIDTH_MM)..=[`MAX_NODE_WIDTH_MM`](Self::MAX_NODE_WIDTH_MM).
-    pub node_width_mm: f64,
-    /// Page margin in mm. Must be finite, greater than zero, and at most
-    /// [`MAX_MARGIN_MM`](Self::MAX_MARGIN_MM).
+    /// Width policy for non-subject nodes.
+    pub width: NodeWidth,
+    /// Page margin in mm. Must be finite, > 0, and <= [`MAX_MARGIN_MM`](Self::MAX_MARGIN_MM).
     pub margin_mm: f64,
 }
 
 impl ChartStyle {
-    /// Smallest accepted [`ChartStyle::node_width_mm`].
-    pub const MIN_NODE_WIDTH_MM: f64 = 20.0;
-
-    /// Largest accepted [`ChartStyle::node_width_mm`].
-    pub const MAX_NODE_WIDTH_MM: f64 = 80.0;
-
-    /// Largest accepted [`ChartStyle::margin_mm`]. The value must be greater than zero.
+    /// Maximum page margin accepted by [`ChartStyle::margin_mm`], in mm.
     pub const MAX_MARGIN_MM: f64 = 40.0;
 }
 
 impl Default for ChartStyle {
     fn default() -> Self {
         Self {
-            node_width_mm: 38.0,
+            width: NodeWidth::Adaptive,
             margin_mm: 8.0,
         }
     }
@@ -159,7 +170,7 @@ pub struct ChartRequest {
     pub nodes: Vec<Node>,
     /// Holding edges. `holder` holds `held`.
     pub edges: Vec<Edge>,
-    /// Box width and page margin.
+    /// Width policy and page margin.
     pub style: ChartStyle,
     /// Shareholder fold limit.
     ///

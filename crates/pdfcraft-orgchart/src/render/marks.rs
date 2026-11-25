@@ -7,14 +7,14 @@ use krilla::surface::Surface;
 use krilla::text::Font;
 
 use super::paint::{
-    center_text, edge_color, fill_round, gray_byte, paint_stroke, path_or_layout_failed, pt,
-    pt_f32, round_path, solid, stroke_cue_box, stroke_round,
+    center_text, edge_color, fill_round, gray_byte, ink_color, paint_stroke, path_or_layout_failed,
+    pt, pt_f32, round_path, solid, stroke_cue_box, stroke_round,
 };
 use super::{RoundBox, TextLine};
 use crate::captions::cont_cue_lines;
 use crate::error::{Error, ErrorCode};
 use crate::font::FontMetrics;
-use crate::page::{CueSlot, NodeBox, PageSpec, PlacedNode, PointMm};
+use crate::page::{layout_box_text, CueSlot, NodeBox, PageSpec, PlacedNode, PointMm};
 use crate::units::{
     mm_to_pt, ARROW_SIZE_PT, COMPANY_SHADE, CONT_CUE_LINE_GAP_MM, CONT_CUE_LINE_WIDTH_PT,
     CONT_CUE_PAD_MM, CONT_CUE_TEXT_PT, LEADER_ARROW_HALF_ANGLE_DEG, LEADER_ARROW_LENGTH_FACTOR,
@@ -83,6 +83,7 @@ pub(super) fn draw_cues(
                 width: slot.width,
                 y: text_y,
             },
+            ink_color(),
         )?;
         center_text(
             surface,
@@ -95,6 +96,7 @@ pub(super) fn draw_cues(
                 width: slot.width,
                 y: next_y,
             },
+            ink_color(),
         )?;
     }
     Ok(())
@@ -162,26 +164,28 @@ fn paint_node_lines(
     surface: &mut Surface<'_>,
     node: &NodeBox,
     x: f64,
-    mut y: f64,
+    y: f64,
     font: &mut FontMetrics,
     face: &Font,
 ) -> Result<(), Error> {
-    for line in &node.lines {
-        if !line.text.is_empty() {
-            center_text(
-                surface,
-                &line.text,
-                font,
-                face,
-                line.font_size_pt,
-                &TextLine {
-                    left: x,
-                    width: node.width_mm,
-                    y,
-                },
-            )?;
+    let layout = layout_box_text(&node.lines, font);
+    for line in &layout.lines {
+        if line.text.is_empty() {
+            continue;
         }
-        y += font.line_height_mm(line.font_size_pt);
+        center_text(
+            surface,
+            &line.text,
+            font,
+            face,
+            line.font_size_pt,
+            &TextLine {
+                left: x,
+                width: node.width_mm,
+                y: y + line.y_mm,
+            },
+            ink_color(),
+        )?;
     }
     Ok(())
 }

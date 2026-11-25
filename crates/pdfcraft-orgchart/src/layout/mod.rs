@@ -9,7 +9,7 @@ use crate::graph::NodeId;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
-use groups::{collect_layer_groups, group_band_rows, use_family_columns};
+use groups::{collect_layer_groups, group_band_rows, split_into_rows, use_family_columns};
 use place::{
     dense_schedules, group_band_width_mm, measured_layer_width_mm, place_layers,
     resolve_row_schedules, LayerPlan, Spacing,
@@ -49,10 +49,6 @@ pub(crate) struct LayoutInput<'a> {
     /// Rank order. Ids absent from `boxes` are ignored. A non-empty order that
     /// omits a box is [`crate::ErrorCode::LayoutFailed`].
     pub(crate) node_order: &'a [NodeId],
-    /// Column budget for the subject's direct row.
-    pub(crate) cols: usize,
-    /// Node width, in millimetres.
-    pub(crate) node_width_mm: f64,
     /// Gap between rows, in millimetres.
     pub(crate) row_gap_mm: f64,
     /// Width the placement must fit, in millimetres.
@@ -78,8 +74,6 @@ pub(crate) trait LayoutEngine {
         boxes: &[NodeBox],
         edges: &[EdgeRef],
         node_order: &[NodeId],
-        cols: usize,
-        node_width_mm: f64,
         printable_width_mm: f64,
     ) -> Result<FamilyRowMetrics, Error>;
 }
@@ -94,8 +88,6 @@ impl LayoutEngine for WrappedEngine {
             boxes,
             edges,
             node_order,
-            cols,
-            node_width_mm,
             row_gap_mm,
             printable_width_mm,
         } = *input;
@@ -104,8 +96,8 @@ impl LayoutEngine for WrappedEngine {
         };
         let box_by_id = boxes_by_id(boxes);
         let mut child_widths = HashMap::new();
-        let spacing = spacing_of(node_width_mm, row_gap_mm, printable_width_mm);
-        let plans = build_plans(&prepared, cols, &box_by_id, &mut child_widths, spacing)?;
+        let spacing = spacing_of(row_gap_mm, printable_width_mm);
+        let plans = build_plans(&prepared, &box_by_id, &mut child_widths, spacing)?;
         let laid_out = place_layers(&plans, &box_by_id, &child_widths, spacing)?;
         let routed = route_edges(&prepared.page_edges, &laid_out)?;
         // HashMap walk order is not the draw order. Callers compare PDF bytes.
@@ -119,8 +111,6 @@ impl LayoutEngine for WrappedEngine {
         boxes: &[NodeBox],
         edges: &[EdgeRef],
         node_order: &[NodeId],
-        cols: usize,
-        node_width_mm: f64,
         printable_width_mm: f64,
     ) -> Result<FamilyRowMetrics, Error> {
         let Some(prepared) = prepare(boxes, edges, node_order)? else {
@@ -131,8 +121,8 @@ impl LayoutEngine for WrappedEngine {
             });
         };
         let box_by_id = boxes_by_id(boxes);
-        let spacing = spacing_of(node_width_mm, ROW_GAP_MM, printable_width_mm);
-        let plans = structure_plans(&prepared, cols, &box_by_id, spacing)?;
+        let spacing = spacing_of(ROW_GAP_MM, printable_width_mm);
+        let plans = structure_plans(&prepared, &box_by_id, spacing)?;
         let mut row_counts = Vec::new();
         let mut nondirect = Vec::new();
         for plan in &plans {
@@ -158,9 +148,8 @@ fn boxes_by_id(boxes: &[NodeBox]) -> BoxById<'_> {
     boxes.iter().map(|box_| (box_.id, box_)).collect()
 }
 
-fn spacing_of(node_width_mm: f64, row_gap_mm: f64, printable_width_mm: f64) -> Spacing {
+fn spacing_of(row_gap_mm: f64, printable_width_mm: f64) -> Spacing {
     Spacing {
-        node_width_mm,
         node_spacing_mm: NODE_SPACING_MM,
         layer_spacing_mm: LAYER_SPACING_MM,
         row_gap_mm,
@@ -188,12 +177,11 @@ fn is_subject_direct_group(
 
 fn build_plans(
     prepared: &ranks::Prepared,
-    cols: usize,
     box_by_id: &BoxById<'_>,
     child_widths: &mut HashMap<NodeId, f64>,
     spacing: Spacing,
 ) -> Result<Vec<LayerPlan>, Error> {
-    let mut plans = structure_plans(prepared, cols, box_by_id, spacing)?;
+    let mut plans = structure_plans(prepared, box_by_id, spacing)?;
     fixup_shallow_gaps(
         &mut plans,
         child_widths,
@@ -206,11 +194,9 @@ fn build_plans(
 
 fn structure_plans(
     prepared: &ranks::Prepared,
-    cols: usize,
     box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<Vec<LayerPlan>, Error> {
-    let safe_cols = cols.max(1);
     let mut by_rank: BTreeMap<i32, Vec<NodeId>> = BTreeMap::new();
     for node_id in &prepared.ordered_ids {
         by_rank
@@ -234,9 +220,9 @@ fn structure_plans(
         let groups = &groups_by_rank[&layer_rank];
         let family = use_family_columns(prepared.subject_rank, layer_rank, groups.len());
         let (bands, layer_width) = if family {
-            family_bands_within_width(groups, prepared, safe_cols, box_by_id, spacing)?
+            family_bands_within_width(groups, prepared, box_by_id, spacing)?
         } else {
-            let bands = bands_for(groups, prepared, safe_cols);
+            let bands = bands_for(groups, prepared, box_by_id, spacing.printable_width_mm);
             let schedules = dense_schedules(&bands);
             let width = measured_layer_width_mm(&bands, &schedules, false, box_by_id, spacing)?;
             (bands, width)
@@ -257,7 +243,8 @@ fn structure_plans(
 fn bands_for(
     groups: &[Vec<NodeId>],
     prepared: &ranks::Prepared,
-    cols: usize,
+    box_by_id: &BoxById<'_>,
+    max_row_width_mm: f64,
 ) -> Vec<Vec<Vec<NodeId>>> {
     groups
         .iter()
@@ -268,7 +255,8 @@ fn bands_for(
                 &prepared.ranks,
                 prepared.subject_rank,
                 &prepared.order_index,
-                cols,
+                box_by_id,
+                max_row_width_mm,
             )
         })
         .collect()
@@ -277,23 +265,51 @@ fn bands_for(
 fn family_bands_within_width(
     groups: &[Vec<NodeId>],
     prepared: &ranks::Prepared,
-    safe_cols: usize,
     box_by_id: &BoxById<'_>,
     spacing: Spacing,
 ) -> Result<(FamilyBands, f64), Error> {
-    let mut best_bands = Vec::new();
-    let mut best_width = 0.0;
-    for cols_try in (1..=safe_cols).rev() {
-        let bands = bands_for(groups, prepared, cols_try);
-        let schedules = dense_schedules(&bands);
-        let layer_width = measured_layer_width_mm(&bands, &schedules, true, box_by_id, spacing)?;
-        best_bands = bands;
-        best_width = layer_width;
-        if within(layer_width, spacing.printable_width_mm) {
-            return Ok((best_bands, best_width));
+    let printable = spacing.printable_width_mm;
+    let mut sequences: Vec<Vec<NodeId>> = Vec::with_capacity(groups.len());
+    let mut bands = bands_for(groups, prepared, box_by_id, printable);
+    for band in &bands {
+        sequences.push(band.iter().flatten().copied().collect());
+    }
+    let layer_width = |planned: &FamilyBands| {
+        let schedules = dense_schedules(planned);
+        measured_layer_width_mm(planned, &schedules, true, box_by_id, spacing)
+    };
+    let mut width = layer_width(&bands)?;
+    if within(width, printable) {
+        return Ok((bands, width));
+    }
+    loop {
+        let mut pick: Option<usize> = None;
+        let mut pick_width = f64::NEG_INFINITY;
+        for (index, (band, sequence)) in bands.iter().zip(sequences.iter()).enumerate() {
+            if band.len() >= sequence.len() || sequence.is_empty() {
+                continue;
+            }
+            let schedules = dense_schedules(std::slice::from_ref(band));
+            let band_width = group_band_width_mm(band, &schedules[0], box_by_id, spacing)?;
+            let wider = band_width > pick_width + 1e-9;
+            let tied_earlier = (band_width - pick_width).abs() <= 1e-9
+                && pick.is_some_and(|chosen| index < chosen);
+            if pick.is_none() || wider || tied_earlier {
+                pick = Some(index);
+                pick_width = band_width;
+            }
+        }
+        let Some(index) = pick else {
+            break;
+        };
+        let next_rows = bands[index].len() + 1;
+        bands[index] = split_into_rows(&sequences[index], next_rows, printable, box_by_id);
+        width = layer_width(&bands)?;
+        if within(width, printable) {
+            return Ok((bands, width));
         }
     }
-    Ok((best_bands, best_width))
+    Ok((bands, width))
 }
 
 fn leaf_to_root_key(plan: &LayerPlan, subject_rank: Option<i32>) -> (i32, i32) {

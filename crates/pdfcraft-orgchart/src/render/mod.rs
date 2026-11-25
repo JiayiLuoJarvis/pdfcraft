@@ -23,7 +23,7 @@ use crate::page::{NodeBox, PageSpec};
 use crate::units::{EDGE_WIDTH_PT, RATIO_FONT_PT};
 use chrome::{draw_footer, draw_titles};
 use marks::{draw_cues, draw_node};
-use paint::{draw_text, pt, rect_pt, stroke_poly};
+use paint::{draw_text, ink_color, pt, rect_pt, stroke_poly};
 use ratio_labels::{place_ratio_labels, RatioMetrics};
 
 /// Paint `pages` into PDF bytes. Does not write document info.
@@ -199,8 +199,11 @@ fn draw_ratios(
             font,
             face,
             RATIO_FONT_PT,
-            label.x_mm + origin_x,
-            label.baseline_y_mm - ascent + origin_y,
+            (
+                label.x_mm + origin_x,
+                label.baseline_y_mm - ascent + origin_y,
+            ),
+            ink_color(),
         )?;
     }
     Ok(())

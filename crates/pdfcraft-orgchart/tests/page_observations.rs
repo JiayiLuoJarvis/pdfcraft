@@ -13,7 +13,7 @@ use std::process::Command;
 
 use std::num::NonZeroUsize;
 
-use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Node, NodeType};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Node, NodeType, PaidIn};
 
 mod common;
 
@@ -292,4 +292,57 @@ fn an_overflow_page_uses_dash_4_3_and_in_range_link_targets() {
     }
     assert!(saw_dash, "missing 4/3 dash");
     assert!(link_count > 0, "split chart has no link annotations");
+}
+
+#[test]
+fn mixed_width_investments_keep_merged_location_date_text() {
+    let request = ChartRequest::new(
+        "root",
+        vec![
+            Node::new("short", "甲"),
+            Node::new("long", "北京某某股份有限公司"),
+            Node::new("root", "主体公司"),
+            Node {
+                paid_in: Some(PaidIn::new("100万")),
+                location: Some("深圳".to_owned()),
+                approval_date: Some("2024-06-01".to_owned()),
+                ..Node::new("c1", "深圳子公司")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("200万")),
+                location: Some("广州".to_owned()),
+                approval_date: Some("2023-01-15".to_owned()),
+                ..Node::new("c2", "广州科技发展有限公司")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("50万")),
+                location: Some("杭州".to_owned()),
+                approval_date: Some("2022-12-31".to_owned()),
+                ..Node::new("c3", "杭州合伙企业")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("10万")),
+                location: Some("上海".to_owned()),
+                approval_date: Some("2021-05-20".to_owned()),
+                ..Node::new("c4", "乙")
+            },
+        ],
+        vec![
+            Edge::new("short", "root"),
+            Edge::new("long", "root"),
+            Edge::new("root", "c1"),
+            Edge::new("root", "c2"),
+            Edge::new("root", "c3"),
+            Edge::new("root", "c4"),
+        ],
+    );
+    let Some(pdf) = pdf_of(&request) else {
+        return;
+    };
+    let body = text_of(&pdf, "pdfcraft-orgchart-obs-mixed.pdf");
+    assert!(pdftotext_has(&body, "甲"), "{body}");
+    assert!(pdftotext_has(&body, "北京某某股份有限公司"), "{body}");
+    assert!(pdftotext_has(&body, "深圳 · 2024-06-01"), "{body}");
+    assert!(pdftotext_has(&body, "广州 · 2023-01-15"), "{body}");
+    assert!(pdftotext_has(&body, "实缴 100万"), "{body}");
 }

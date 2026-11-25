@@ -13,13 +13,15 @@ Per-crate details: [`crates/pdfcraft-pdf/CHANGELOG.md`](crates/pdfcraft-pdf/CHAN
 
 ## [Unreleased]
 
-### Changed
-
-- `pdfcraft-orgchart`: page-subject box width is now `min(node_width × 3.0, 120)` mm
-  (was capped at 80 via the ordinary-node max). Details in
-  [`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md).
-
 ## 2026-11-25
+
+### Breaking
+
+- `pdfcraft-orgchart` `0.4.0`. `ChartStyle.node_width_mm` is now
+  `ChartStyle.width: NodeWidth` (`Adaptive` / `Fixed`). Adaptive tiers,
+  investment `location · approval_date`, and layout packing change with it.
+  Details in
+  [`crates/pdfcraft-orgchart/CHANGELOG.md`](crates/pdfcraft-orgchart/CHANGELOG.md).
 
 ### Fixed
 

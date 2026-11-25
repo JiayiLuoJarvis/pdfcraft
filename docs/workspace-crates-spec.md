@@ -41,7 +41,7 @@ pdfcraft/                           # workspace 根（无业务 package）
 | --- | --- | --- |
 | `pdfcraft-pdf` | `DocumentSpec` → 排版 → Canvas → krilla 出 PDF | 主线实现。版本 `0.8.1`。不加密、不合并第三方 PDF、不提供后处理改 `/Info` |
 | `pdfcraft-forms` | 读第三方 PDF 字节，填写已有 AcroForm，写出已 flatten 的 PDF | 提案书 §10 与 §14 已确认。`Form::open` 列出 widget，`Fill::new` 编译请求，`Fill::to_pdf` 写出。文本、勾选和选项在成功时一律 flatten。`FillStyle`、`FieldStyle`、`FieldRule` 和 `AbsoluteLine` 已实现。单面用 `Font::new`，集合用 `Font::from_collection`。调用方提供带 `glyf` 的字体时可以填写中文。夹具里的中文字体不入库，相关测例要设置 `PDFCRAFT_FORMS_FONT`。OTF 未做。TrueType `glyf` 子集已实现并保留原 glyph id。版本 `0.3.1`。拒绝加密输入；不写加密 |
-| `pdfcraft-orgchart` | 股权与对外投资图。`Font` + skrifa `0.48.0` 测量，krilla `0.8.2` 绘制 | 已实现 `Chart::new`、`to_pdf`、`title`。行为合同是 [`pdfcraft-orgchart-spec.md`](pdfcraft-orgchart-spec.md)。版本 `0.3.2`。不依赖 `pdfcraft-pdf` |
+| `pdfcraft-orgchart` | 股权与对外投资图。`Font` + skrifa `0.48.0` 测量，krilla `0.8.2` 绘制 | 已实现 `Chart::new`、`to_pdf`、`title`。行为合同是 [`pdfcraft-orgchart-spec.md`](pdfcraft-orgchart-spec.md)。版本 `0.4.0`。不依赖 `pdfcraft-pdf` |
 | `pdfcraft-post` | 已有 PDF 字节 → 后处理。`SetMetadata`、`Encrypt`、`StampAndEncrypt`、`merge_pdfs`、`split_pdfs`、`first_page_jpeg`、`Pipeline`。输出是一份或多份 PDF，或缩略图 JPEG | 提案书 §11 已确认。API 已落地。Watermark 与输入限额延后。HTTP / finalize 编排不做。版本 `0.3.2`，可发布 |
 
 ## 依赖硬规则
@@ -74,7 +74,7 @@ pdfcraft-orgchart  ──X──→  pdfcraft-post
 
 ## 版本与发布
 
-- `pdfcraft-pdf` 是 `0.8.1`，`pdfcraft-forms` 是 `0.3.1`，`pdfcraft-orgchart` 是 `0.3.2`，`pdfcraft-post` 是 `0.3.2`。都可以发布。
+- `pdfcraft-pdf` 是 `0.8.1`，`pdfcraft-forms` 是 `0.3.1`，`pdfcraft-orgchart` 是 `0.4.0`，`pdfcraft-post` 是 `0.3.2`。都可以发布。
 - 版本号可同号可不同；不强制 workspace 统一 version。
 - crates.io 发布名保持各 crate 的 `name` 字段；口头仓库名仍可称 pdfcraft。
 

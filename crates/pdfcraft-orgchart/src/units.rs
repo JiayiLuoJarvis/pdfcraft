@@ -5,8 +5,16 @@ pub(crate) const PAGE_HEIGHT_MM: f64 = 297.0;
 #[cfg(test)]
 pub(crate) const NODE_WIDTH_MM: f64 = 38.0;
 pub(crate) const SUBJECT_WIDTH_FACTOR: f64 = 3.0;
-/// Cap for page-subject boxes. Independent of [`crate::request::ChartStyle::MAX_NODE_WIDTH_MM`].
+/// Cap for page-subject boxes. Independent of [`crate::request::NodeWidth::MAX_FIXED_MM`].
 pub(crate) const SUBJECT_MAX_WIDTH_MM: f64 = 120.0;
+/// Adaptive non-subject width tiers, mm. Adaptive-layout spec §4.1.
+pub(crate) const ADAPTIVE_TIERS_MM: [f64; 3] = [32.0, 48.0, 60.0];
+/// Ordinary width used to size an Adaptive page-subject box, mm. Adaptive-layout spec §4.1.
+pub(crate) const ADAPTIVE_SUBJECT_BASE_WIDTH_MM: f64 = 38.0;
+/// Continuation-cue width never exceeds this, mm. Adaptive-layout spec §4.3.
+pub(crate) const CONT_CUE_ANCHOR_MATCH_MAX_MM: f64 = 38.0;
+/// Name size after a three-line wrap at [`NAME_FONT_PT`]. Adaptive-layout spec §4.2.
+pub(crate) const NAME_FALLBACK_FONT_PT: f64 = 9.0;
 pub(crate) const SUBJECT_PADDING_Y_MM: f64 = 3.5;
 pub(crate) const SUBJECT_NAME_FONT_PT: f64 = 12.0;
 pub(crate) const MARGIN_MM: f64 = 8.0;
@@ -18,6 +26,10 @@ pub(crate) const NAME_FONT_PT: f64 = 10.0;
 pub(crate) const DETAIL_FONT_PT: f64 = 9.0;
 pub(crate) const RATIO_FONT_PT: f64 = 9.0;
 pub(crate) const LINE_GAP_PT: f64 = 2.0;
+/// Gap between detail / legal-person lines, pt. Adaptive-layout spec §3.2.
+pub(crate) const DETAIL_LINE_GAP_PT: f64 = 1.2;
+/// Float tolerance for width-budget row spans. Adaptive-layout spec §5.1.
+pub(crate) const ROW_SPAN_EPS_MM: f64 = 1e-9;
 pub(crate) const LAYER_SPACING_MM: f64 = 18.0;
 pub(crate) const NODE_SPACING_MM: f64 = 6.0;
 pub(crate) const ROW_GAP_MM: f64 = 8.0;
@@ -220,31 +232,6 @@ impl PageGeometry {
             margin: FiniteMm::or_zero(self.margin_mm),
         }
     }
-
-    /// How many ordinary boxes fit on one row.
-    #[must_use]
-    pub(crate) fn max_cols(self, node_width_mm: f64) -> usize {
-        let pitch = node_width_mm + NODE_SPACING_MM;
-        if pitch <= 0.0 {
-            return 1;
-        }
-        let raw = (self.printable_width_mm() + NODE_SPACING_MM) / pitch;
-        count_units(raw).max(1)
-    }
-}
-
-fn count_units(value: f64) -> usize {
-    if !value.is_finite() || value <= 0.0 {
-        return 0;
-    }
-    let whole = value.trunc();
-    let mut count = 0_usize;
-    let mut cursor = 0.0;
-    while cursor + 1.0 <= whole && count < 64 {
-        cursor += 1.0;
-        count += 1;
-    }
-    count
 }
 
 impl Default for PageGeometry {
@@ -255,40 +242,7 @@ impl Default for PageGeometry {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        PageGeometry, PageOrientation, HEADER_HEIGHT_MM, MARGIN_MM, NODE_SPACING_MM, NODE_WIDTH_MM,
-    };
-
-    #[test]
-    fn default_portrait_fits_four_columns() {
-        assert_eq!(PageGeometry::default().max_cols(NODE_WIDTH_MM), 4);
-    }
-
-    #[test]
-    fn default_landscape_fits_six_columns() {
-        assert_eq!(
-            PageGeometry::default().landscape().max_cols(NODE_WIDTH_MM),
-            6
-        );
-    }
-
-    #[test]
-    fn a_raw_count_above_64_stays_at_64() {
-        let geometry = PageGeometry {
-            page_width_mm: 20_000.0,
-            page_height_mm: 297.0,
-            margin_mm: 0.0,
-            header_height_mm: 0.0,
-            footer_height_mm: 0.0,
-        };
-        assert_eq!(geometry.max_cols(1.0), 64);
-    }
-
-    #[test]
-    fn a_non_positive_pitch_is_one_column() {
-        assert_eq!(PageGeometry::default().max_cols(-NODE_SPACING_MM), 1);
-        assert_eq!(PageGeometry::default().max_cols(-NODE_SPACING_MM - 1.0), 1);
-    }
+    use super::{PageGeometry, PageOrientation, HEADER_HEIGHT_MM, MARGIN_MM};
 
     #[test]
     fn cache_key_is_orientation_and_margin() {

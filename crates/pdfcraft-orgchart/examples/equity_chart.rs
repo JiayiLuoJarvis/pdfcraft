@@ -9,7 +9,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node};
+use pdfcraft_orgchart::{Chart, ChartRequest, Edge, Font, Node, PaidIn};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let font_path = env::var_os("PDFCRAFT_ORGCHART_FONT")
@@ -23,10 +23,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "root",
         vec![
             Node::new("holder", "甲股东"),
+            Node::new("long", "北京某某股份有限公司"),
             Node::new("root", "主体公司"),
-            Node::new("invest", "乙投资"),
+            Node {
+                paid_in: Some(PaidIn::new("80万")),
+                location: Some("珠海".to_owned()),
+                approval_date: Some("2020-08-08".to_owned()),
+                ..Node::new("invest", "乙投资")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("100万")),
+                location: Some("深圳".to_owned()),
+                approval_date: Some("2024-06-01".to_owned()),
+                ..Node::new("c1", "深圳子公司")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("200万")),
+                location: Some("广州".to_owned()),
+                approval_date: Some("2023-01-15".to_owned()),
+                ..Node::new("c2", "广州科技发展有限公司")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("50万")),
+                location: Some("杭州".to_owned()),
+                approval_date: Some("2022-12-31".to_owned()),
+                ..Node::new("c3", "杭州合伙企业")
+            },
+            Node {
+                paid_in: Some(PaidIn::new("10万")),
+                location: Some("上海".to_owned()),
+                approval_date: Some("2021-05-20".to_owned()),
+                ..Node::new("c4", "乙")
+            },
         ],
-        vec![Edge::new("holder", "root"), Edge::new("root", "invest")],
+        vec![
+            Edge::new("holder", "root"),
+            Edge::new("long", "root"),
+            Edge::new("root", "invest"),
+            Edge::new("root", "c1"),
+            Edge::new("root", "c2"),
+            Edge::new("root", "c3"),
+            Edge::new("root", "c4"),
+        ],
     );
     let pdf = Chart::new(request)?.to_pdf(&font)?;
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../out/equity_chart.pdf");

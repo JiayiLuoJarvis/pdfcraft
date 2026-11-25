@@ -163,33 +163,13 @@ fn role_of(
 }
 
 fn inbox_lines_rec(node: &NodeRec, role: DisplayRole) -> Vec<LogicalLine> {
-    inbox_fields(
-        &node.name,
-        node.legal_person.as_deref(),
-        node.paid_in_amount.as_deref(),
-        node.currency.as_deref(),
-        node.location.as_deref(),
-        node.approval_date.as_deref(),
-        role,
-    )
-}
-
-fn inbox_fields(
-    name: &str,
-    legal_person: Option<&str>,
-    paid_in_amount: Option<&str>,
-    currency: Option<&str>,
-    location: Option<&str>,
-    approval_date: Option<&str>,
-    role: DisplayRole,
-) -> Vec<LogicalLine> {
     let mut lines = vec![LogicalLine {
         kind: LineKind::Name,
-        text: name.to_owned(),
+        text: node.name.clone(),
     }];
     match role {
         DisplayRole::Subject | DisplayRole::Shareholder => {
-            if let Some(text) = shown(legal_person) {
+            if let Some(text) = shown(node.legal_person.as_deref()) {
                 lines.push(LogicalLine {
                     kind: LineKind::LegalPerson,
                     text,
@@ -197,19 +177,17 @@ fn inbox_fields(
             }
         }
         DisplayRole::Investment => {
-            if let Some(text) = paid_in_text(paid_in_amount, currency) {
+            if let Some(text) =
+                paid_in_text(node.paid_in_amount.as_deref(), node.currency.as_deref())
+            {
                 lines.push(LogicalLine {
                     kind: LineKind::Detail,
                     text,
                 });
             }
-            if let Some(text) = shown(location) {
-                lines.push(LogicalLine {
-                    kind: LineKind::Detail,
-                    text,
-                });
-            }
-            if let Some(text) = shown(approval_date) {
+            if let Some(text) =
+                location_date_text(node.location.as_deref(), node.approval_date.as_deref())
+            {
                 lines.push(LogicalLine {
                     kind: LineKind::Detail,
                     text,
@@ -239,6 +217,18 @@ fn company_fill_fields(node_type: Option<NodeType>, legal_person: Option<&str>) 
         Some(NodeType::Company) => true,
         Some(NodeType::Person) => false,
         None => shown(legal_person).is_some(),
+    }
+}
+
+/// Location and approval date joined with a middle dot. Adaptive-layout spec §3.1.
+const LOCATION_DATE_SEP: &str = " · ";
+
+fn location_date_text(location: Option<&str>, approval_date: Option<&str>) -> Option<String> {
+    match (shown(location), shown(approval_date)) {
+        (Some(location), Some(date)) => Some(format!("{location}{LOCATION_DATE_SEP}{date}")),
+        (Some(location), None) => Some(location),
+        (None, Some(date)) => Some(date),
+        (None, None) => None,
     }
 }
 

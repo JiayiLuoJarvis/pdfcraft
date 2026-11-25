@@ -180,7 +180,6 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
             };
             boxes.push(box_.clone());
         }
-        let cols = geometry.max_cols(self.node_width);
         let printable = geometry.printable_width_mm();
         let anchors = sized_cue_anchors(&content.anchors, &boxes, self.measurer)?;
         let anchor_sizes: Vec<CueAnchorSize> = anchors
@@ -195,21 +194,17 @@ impl<E: LayoutEngine, M: Measurer> Session<'_, E, M> {
         let edges = content.edges.clone();
         let order = content.order.clone();
         let engine = self.engine;
-        let node_width = self.node_width;
         let mut relayout = |row_gap: f64| {
             engine.layout(&LayoutInput {
                 boxes: &boxes,
                 edges: &edges,
                 node_order: &order,
-                cols,
-                node_width_mm: node_width,
                 row_gap_mm: row_gap,
                 printable_width_mm: printable,
             })
         };
         let placed = absorb_cue_slots(&anchor_sizes, &mut relayout, geometry)?;
-        let metrics =
-            engine.family_row_metrics(&boxes, &edges, &order, cols, node_width, printable)?;
+        let metrics = engine.family_row_metrics(&boxes, &edges, &order, printable)?;
         let (layout, physical_fits) = if let Some(layout) = placed {
             let fits = layout.fits(geometry);
             (layout, fits)
